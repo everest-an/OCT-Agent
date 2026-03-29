@@ -487,12 +487,7 @@ ipcMain.handle('chat:send', async (_e, message: string) => {
     });
 
     child.stdout?.on('data', (data: Buffer) => {
-      const chunk = data.toString();
-      stdout += chunk;
-      // Stream partial updates to renderer
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('chat:stream', chunk);
-      }
+      stdout += data.toString();
     });
 
     child.stderr?.on('data', (data: Buffer) => {
@@ -500,13 +495,24 @@ ipcMain.handle('chat:send', async (_e, message: string) => {
     });
 
     child.on('exit', (code) => {
-      // Try to parse JSON response
-      try {
-        const json = JSON.parse(stdout);
-        resolve({ success: true, data: json });
-      } catch {
-        // Return raw text if not valid JSON
-        resolve({ success: true, text: stdout.trim(), stderr: stderr.trim() });
+      // Parse JSON from stdout (skip any non-JSON lines like [plugins] logs)
+      const jsonStart = stdout.indexOf('{');
+      if (jsonStart >= 0) {
+        try {
+          const json = JSON.parse(stdout.substring(jsonStart));
+          // Extract the actual reply text
+          const text = json?.payloads?.[0]?.text
+            || json?.result?.payloads?.[0]?.text
+            || '';
+          const model = json?.meta?.agentMeta?.model
+            || json?.result?.meta?.agentMeta?.model
+            || '';
+          resolve({ success: true, text, model, raw: json });
+        } catch {
+          resolve({ success: true, text: stdout.trim() });
+        }
+      } else {
+        resolve({ success: true, text: stdout.trim() || stderr.trim() || 'No response' });
       }
     });
 

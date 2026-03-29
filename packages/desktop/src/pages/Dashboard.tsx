@@ -84,14 +84,15 @@ export default function Dashboard() {
     // Send via IPC
     if (window.electronAPI) {
       const result = await (window.electronAPI as any).chatSend(fullMessage);
-      const responseText = result.data?.reply || result.data?.message || result.text || result.error || 'No response';
+      const responseText = result.text || result.error || 'No response';
+      const responseModel = result.model || config.modelId;
 
       const assistantMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: responseText,
         timestamp: new Date(),
-        model: config.modelId,
+        model: responseModel,
       };
       setMessages(prev => [...prev, assistantMsg]);
     } else {
