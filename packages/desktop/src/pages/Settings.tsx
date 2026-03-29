@@ -268,6 +268,24 @@ export default function Settings() {
           <Row label="开机自启" desc="电脑开机时自动启动">
             <Toggle checked={config.autoStart} onChange={(v) => updateConfig({ autoStart: v })} />
           </Row>
+          <Row label="系统诊断" desc="检测 OpenClaw 环境状态">
+            <button
+              onClick={async () => {
+                if (!window.electronAPI) return;
+                const env = await (window.electronAPI as any).detectEnvironment();
+                const info = [
+                  `平台: ${env.platform} ${env.arch}`,
+                  `Node.js: ${env.systemNodeVersion || '未安装'}`,
+                  `OpenClaw: ${env.openclawVersion || '未安装'}`,
+                  `配置文件: ${env.hasExistingConfig ? '✅ 存在' : '❌ 不存在'}`,
+                ].join('\n');
+                alert(info);
+              }}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors"
+            >
+              检测 <ChevronRight size={12} />
+            </button>
+          </Row>
           <Row label="重置安装向导" desc="重新运行首次安装流程">
             <button
               onClick={() => { localStorage.removeItem('awareness-claw-setup-done'); window.location.reload(); }}

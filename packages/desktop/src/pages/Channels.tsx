@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { ChevronRight, ChevronLeft, Check, ExternalLink, Copy, X } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { ChevronRight, ChevronLeft, Check, ExternalLink, Copy, X, Loader2 } from 'lucide-react';
 
 interface Channel {
   id: string;
@@ -29,6 +29,20 @@ export default function Channels() {
   const [wizardStep, setWizardStep] = useState<WizardStep>('intro');
   const [tokenInput, setTokenInput] = useState('');
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  const [configuredChannels, setConfiguredChannels] = useState<Set<string>>(new Set());
+
+  // Check which channels are configured in openclaw.json
+  useEffect(() => {
+    if (window.electronAPI) {
+      (window.electronAPI as any).readExistingConfig().then((result: any) => {
+        // Mark channels that have config
+        const configured = new Set<string>();
+        configured.add('local'); // Local chat is always available
+        // Future: parse openclaw.json channels section
+        setConfiguredChannels(configured);
+      });
+    }
+  }, []);
 
   const openWizard = (channelId: string) => {
     setActiveWizard(channelId);
