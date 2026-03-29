@@ -51,7 +51,7 @@
 - [x] 模型激活状态 badge（✅已配置 / 🔑需配置）
 - [ ] 未配置厂商点击提示输入 API Key
 - [ ] 测试连接按钮
-- [ ] **已安装 OpenClaw 自动延用配置**：检测到已有 providers/models 时跳过安装向导的模型选择步骤
+- [x] **已安装 OpenClaw 自动延用配置**：检测到已有 providers/models 时跳过模型选择步骤（2026-03-30）
 
 ### 记忆系统
 - [ ] 记忆页接入本地守护进程 MCP API
@@ -61,8 +61,8 @@
 - [ ] **轻量化 + 节省 token**
 
 ### 通道
-- [ ] 通道配置写入 openclaw.json
-- [ ] 测试连接功能
+- [x] 通道配置写入 openclaw.json（Telegram/Discord/Slack/Feishu）（2026-03-30）
+- [x] 测试连接功能（channel:test IPC）（2026-03-30）
 - [ ] 通道状态实时显示
 
 ### 定时任务（Cron）
@@ -77,14 +77,14 @@
 - [ ] 系统诊断（`openclaw doctor`）
 
 ### 升级提醒
-- [ ] **强提醒（弹窗）**：重大更新时弹出（立即升级 / 下次提醒 / 永不提醒）
-- [ ] **弱提醒（tooltip）**：每次打开顶部提示条，手动关闭才消失
-- [ ] 检测 OpenClaw / Awareness 插件 / 桌面端版本
+- [x] **强提醒（弹窗）**：模态框 — 立即升级 / 下次提醒 / 永不提醒（2026-03-30）
+- [x] **弱提醒（tooltip）**：顶部提示条，手动关闭（sessionStorage）（2026-03-30）
+- [ ] 检测 OpenClaw / Awareness 插件 / 桌面端版本（版本号对比逻辑待实现）
 
 ### OpenClaw 初始化
-- [ ] 已安装 OpenClaw 检测 + 配置复用
+- [x] 已安装 OpenClaw 检测 + 配置复用（setup:read-existing-config）（2026-03-30）
 - [ ] 新用户 bootstrap 流程引导
-- [ ] openclaw.json 安全写入（合并不覆盖）
+- [x] openclaw.json 安全写入（深度合并，不覆盖 providers）（2026-03-29）
 
 ---
 
