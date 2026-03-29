@@ -52,8 +52,18 @@ AwarenessClaw/
 - 主仓库 `.gitignore` 已排除本目录
 - 通过 npm 依赖引用主仓库 SDK，不通过文件路径引用
 
+## 任务管理
+- **所有待做事项记录在 `TASKS.md`**，完成一项打 ✅ + 日期
+- 开始新功能前先看 TASKS.md，避免遗漏和重复
+- 每次重大改动后更新 TASKS.md 状态
+- PRD 详细设计在 `Awareness/ops-docs/AWARENESS_AGENT_DESKTOP_PRD.md`
+
 ## 开发规则
 - 中文推理和回复，英文写代码（与主仓库一致）
 - 代码注释用英文
 - UI 文案支持多语言（默认英文 + 中文），不要 hardcode 语言
 - 所有用户可见的错误信息必须友好、非技术性、可操作
+- **聊天 UI 不嵌入 OpenClaw 原生界面**——用我们自己的 Web UI，后端走 CLI 或 WebSocket 获取数据
+- **模型选择器显示激活状态**：已配置 API Key 的显示 ✅，未配置的显示 🔑 提示
+- **升级提醒分两级**：强提醒（弹窗，可选下次/永不）+ 弱提醒（顶部 tooltip 条）
+- **streaming 必须支持**：用户发送消息后，AI 回复逐字显示，不能等完整回复才渲染

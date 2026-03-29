@@ -14,12 +14,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveConfig: (config: Record<string, unknown>) => ipcRenderer.invoke('setup:save-config', config),
   openAuthUrl: (url: string) => ipcRenderer.invoke('setup:open-auth-url', url),
 
-  // PTY (terminal chat)
-  startPty: () => ipcRenderer.invoke('pty:start'),
-  writePty: (data: string) => ipcRenderer.send('pty:write', data),
-  resizePty: (cols: number, rows: number) => ipcRenderer.send('pty:resize', cols, rows),
-  onPtyData: (callback: (data: string) => void) => {
-    ipcRenderer.on('pty:data', (_e: any, data: string) => callback(data));
+  // Chat
+  chatSend: (message: string) => ipcRenderer.invoke('chat:send', message),
+  onChatStream: (callback: (chunk: string) => void) => {
+    ipcRenderer.on('chat:stream', (_e: any, chunk: string) => callback(chunk));
   },
 
   // Cron management

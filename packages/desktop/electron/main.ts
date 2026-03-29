@@ -448,67 +448,55 @@ function downloadFile(url: string, dest: string): Promise<void> {
 
 // --- PTY Management (for embedded openclaw chat) ---
 
-let chatProcess: any = null;
+/**
+ * Chat via `openclaw agent -m "..." --json`
+ * Non-interactive, one message at a time, returns JSON response.
+ * Streaming: read stdout line by line as response comes in.
+ */
+ipcMain.handle('chat:send', async (_e, message: string) => {
+  return new Promise((resolve) => {
+    let stdout = '';
+    let stderr = '';
 
-ipcMain.handle('pty:start', async () => {
-  // Kill existing chat process if any
-  if (chatProcess) {
-    try { chatProcess.kill(); } catch {}
-    chatProcess = null;
-  }
-
-  try {
-    // Spawn openclaw chat as a subprocess (no native PTY needed)
-    const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/bash';
-    const shellArgs = process.platform === 'win32'
-      ? ['/c', 'openclaw chat']
-      : ['-l', '-c', 'openclaw chat'];
-
-    chatProcess = spawn(shell, shellArgs, {
+    const child = spawn('/bin/bash', ['-l', '-c', `openclaw agent -m "${message.replace(/"/g, '\\"')}" --json`], {
       cwd: os.homedir(),
-      env: {
-        ...process.env,
-        PATH: getEnhancedPath(),
-        TERM: 'xterm-256color',
-        COLORTERM: 'truecolor',
-        FORCE_COLOR: '1',
-      },
+      env: { ...process.env, PATH: getEnhancedPath() },
     });
 
-    // Forward stdout + stderr to renderer
-    chatProcess.stdout?.on('data', (data: Buffer) => {
+    child.stdout?.on('data', (data: Buffer) => {
+      const chunk = data.toString();
+      stdout += chunk;
+      // Stream partial updates to renderer
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('pty:data', data.toString());
+        mainWindow.webContents.send('chat:stream', chunk);
       }
     });
 
-    chatProcess.stderr?.on('data', (data: Buffer) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('pty:data', data.toString());
+    child.stderr?.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    child.on('exit', (code) => {
+      // Try to parse JSON response
+      try {
+        const json = JSON.parse(stdout);
+        resolve({ success: true, data: json });
+      } catch {
+        // Return raw text if not valid JSON
+        resolve({ success: true, text: stdout.trim(), stderr: stderr.trim() });
       }
     });
 
-    chatProcess.on('exit', (code: number) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('pty:data', `\r\n\x1b[33m[Session ended. Press Enter to restart.]\x1b[0m\r\n`);
-      }
-      chatProcess = null;
+    child.on('error', (err) => {
+      resolve({ success: false, error: String(err) });
     });
 
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: String(err) };
-  }
-});
-
-ipcMain.on('pty:write', (_e, data: string) => {
-  if (chatProcess && chatProcess.stdin) {
-    chatProcess.stdin.write(data);
-  }
-});
-
-ipcMain.on('pty:resize', (_e, _cols: number, _rows: number) => {
-  // No resize support without PTY, but that's OK for basic chat
+    // Timeout after 120 seconds
+    setTimeout(() => {
+      try { child.kill(); } catch {}
+      resolve({ success: false, error: 'Response timeout (120s)' });
+    }, 120000);
+  });
 });
 
 // --- Cron Management ---
