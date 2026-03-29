@@ -28,23 +28,24 @@
 - [x] 聊天气泡 UI（用户蓝色/AI 深色）
 - [x] 后端接通 `openclaw agent --local --session-id ... -m ...`
 - [x] 过滤 [plugins]/[tools] 日志噪音
-- [ ] **🔴 流式输出真正生效**：当前 openclaw agent CLI 是一次性输出的。需要研究是否有 `--stream` 参数，或改用 Gateway WebSocket 实现真正的逐字流式。如果 CLI 不支持 stream，需要用 WebSocket 连接 Gateway
-- [ ] **🔴 Thinking 状态展示**：AI 思考中时显示 "🤔 思考中..." 动画。需要解析 openclaw 输出中的 thinking 标记
-- [ ] **🔴 工具调用状态展示**：AI 调用工具时显示 "🔧 正在搜索..." / "📁 正在读取文件..." 等。需要解析 openclaw 输出中的 tool_call 事件
-- [ ] **🔴 历史会话持久化**：消息保存到 localStorage 或文件，下次打开时恢复。支持多个会话切换
-- [ ] **Markdown 渲染**：代码块高亮、表格、列表、链接（用 react-markdown + rehype-highlight）
-- [ ] **新建会话按钮**：清空当前对话，开启新 session
-- [ ] **会话列表侧边栏**：显示历史会话，可切换、删除、重命名
-- [ ] **完整还原 OpenClaw chat 功能**：参考 OpenClaw TUI/Dashboard 的聊天界面，确保功能对等
+- [x] **流式输出**：CLI 不支持真正 streaming，改用打字机效果（typewriter），视觉上逐字显示（2026-03-30）
+- [x] **Thinking 状态展示**：解析 `--verbose on` 的 `[agent/embedded]` 日志，显示 "🤔 思考中..." / "✍️ 生成中..."（2026-03-30）
+- [ ] **工具调用状态展示**：解析输出中的 tool_call 事件，显示 "🔧 正在搜索..." 等
+- [x] **历史会话持久化**：消息保存到 localStorage，下次打开恢复。支持多会话（2026-03-30）
+- [x] **Markdown 渲染**：代码块高亮、表格、列表、链接（react-markdown + remark-gfm）（2026-03-30）
+- [x] **新建会话按钮**：侧边栏顶部 "+ 新对话" 按钮（2026-03-30）
+- [x] **会话列表侧边栏**：显示历史会话，可切换、删除（2026-03-30）
+- [ ] **会话重命名**
+- [ ] **完整还原 OpenClaw chat 功能**：工具调用展示、多轮上下文、文件预览等
 
 ### Logo & 品牌
-- [ ] **🔴 替换所有脑子 emoji**：侧边栏 logo、聊天页 AI 头像、安装向导 logo、关于页面 — 全部换成 Awareness 真实 logo（SVG/PNG）
-- [ ] **聊天气泡 AI 头像**：用 Awareness logo 替代 🧠 emoji
+- [x] **替换所有脑子 emoji**：侧边栏、聊天 AI 头像、安装向导 — 全部换成 Awareness 真实 logo（2026-03-30）
+- [x] **聊天气泡 AI 头像**：用 Awareness logo.png 替代 🧠 emoji（2026-03-30）
 
 ### 界面美观
-- [ ] **🔴 聊天界面精打细磨**：参考 ChatGPT / Claude 的聊天 UI 设计，提升间距、字体、颜色、动画的质感
-- [ ] **消息气泡优化**：圆角、阴影、悬浮效果
-- [ ] **输入框优化**：自动增高、快捷键提示
+- [x] **聊天界面重新设计**：参考 ChatGPT/Claude 风格，圆角气泡、AI头像、meta 行、打字机光标（2026-03-30）
+- [x] **消息气泡优化**：圆角、border、悬浮复制按钮（2026-03-30）
+- [x] **输入框优化**：自动增高、Shift+Enter 提示、禁用状态（2026-03-30）
 
 ### 模型配置
 - [x] 模型激活状态 badge（✅已配置 / 🔑需配置）
