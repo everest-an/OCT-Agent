@@ -22,6 +22,27 @@ const CATEGORY_CONFIG: Record<string, { emoji: string; label: string; color: str
   skill: { emoji: '🛠️', label: '技能', color: 'text-indigo-400' },
 };
 
+/** Parse MCP JSON-RPC response into knowledge cards */
+function parseMcpResponse(result: any): { cards: KnowledgeCard[]; error?: string } {
+  if (result?.error) return { cards: [], error: '记忆服务未连接' };
+
+  const text = result?.result?.content?.[0]?.text;
+  if (!text) return { cards: [], error: '响应为空' };
+
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed.error) return { cards: [], error: parsed.error };
+
+    // awareness_lookup returns { knowledge_cards: [...], total, mode }
+    const items = parsed.knowledge_cards || parsed.items || parsed.cards || [];
+    if (Array.isArray(items)) return { cards: items };
+
+    return { cards: [] };
+  } catch {
+    return { cards: [], error: '解析失败' };
+  }
+}
+
 export default function Memory() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -49,28 +70,15 @@ export default function Memory() {
 
     try {
       const result = await (window.electronAPI as any).memoryGetCards();
-      if (result.error) {
-        setError('记忆服务未连接。请确保 Awareness 守护进程正在运行。');
-        setCards(MOCK_CARDS); // Show mock as fallback
+      const parsed = parseMcpResponse(result);
+      if (parsed.error) {
+        setError(parsed.error);
+        setCards(MOCK_CARDS);
+      } else if (parsed.cards.length > 0) {
+        setCards(parsed.cards);
       } else {
-        // Parse MCP response
-        const content = result?.result?.content;
-        if (content && content[0]?.text) {
-          try {
-            const parsed = JSON.parse(content[0].text);
-            if (Array.isArray(parsed)) {
-              setCards(parsed);
-            } else if (parsed.items || parsed.cards || parsed.knowledge_cards) {
-              setCards(parsed.items || parsed.cards || parsed.knowledge_cards || []);
-            } else {
-              setCards(MOCK_CARDS);
-            }
-          } catch {
-            setCards(MOCK_CARDS);
-          }
-        } else {
-          setCards(MOCK_CARDS);
-        }
+        setCards(MOCK_CARDS);
+        setError('暂无记忆数据（显示示例）');
       }
     } catch {
       setError('无法连接到记忆服务');
@@ -90,13 +98,25 @@ export default function Memory() {
     if (window.electronAPI) {
       try {
         const result = await (window.electronAPI as any).memorySearch(searchQuery);
-        if (result?.result?.content?.[0]?.text) {
-          try {
-            const parsed = JSON.parse(result.result.content[0].text);
-            setSearchResults(Array.isArray(parsed) ? parsed : parsed.results || parsed.items || []);
-          } catch {
-            setSearchResults([]);
-          }
+        // Recall returns plain text, not JSON knowledge cards
+        const text = result?.result?.content?.[0]?.text || '';
+        if (text) {
+          // Parse recall text into pseudo-cards for display
+          const lines = text.split('\n').filter((l: string) => l.trim());
+          const searchCards = lines
+            .filter((l: string) => l.match(/^\d+\.\s/))
+            .map((l: string, i: number) => {
+              const match = l.match(/^\d+\.\s\[(\w+)\]\s(.+)/);
+              return {
+                id: `search-${i}`,
+                category: match?.[1] || 'key_point',
+                title: match?.[2]?.split('\n')[0] || l.replace(/^\d+\.\s/, ''),
+                summary: l,
+              };
+            });
+          setSearchResults(searchCards.length > 0 ? searchCards : []);
+        } else {
+          setSearchResults([]);
         }
       } catch {
         setSearchResults([]);

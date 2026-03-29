@@ -706,75 +706,52 @@ ipcMain.handle('logs:recent', async () => {
   return { logs: output || 'No logs available' };
 });
 
-// --- Memory API (local daemon) ---
+// --- Memory API (local daemon + cloud compatible) ---
+
+/** Call local daemon MCP tool via JSON-RPC */
+function callMcp(toolName: string, args: Record<string, any>): Promise<any> {
+  return new Promise((resolve) => {
+    const req = http.request('http://127.0.0.1:37800/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 15000,
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch { resolve({ error: 'Invalid JSON' }); }
+      });
+    });
+    req.on('error', (err) => resolve({ error: String(err) }));
+    req.on('timeout', () => { req.destroy(); resolve({ error: 'Timeout' }); });
+    req.write(JSON.stringify({
+      jsonrpc: '2.0', id: Date.now(),
+      method: 'tools/call',
+      params: { name: toolName, arguments: args },
+    }));
+    req.end();
+  });
+}
 
 ipcMain.handle('memory:search', async (_e, query: string) => {
-  try {
-    const response = await new Promise<string>((resolve, reject) => {
-      const req = http.request('http://127.0.0.1:37800/mcp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 10000,
-      }, (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => resolve(data));
-      });
-      req.on('error', reject);
-      req.write(JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'tools/call',
-        params: {
-          name: 'awareness_recall',
-          arguments: {
-            action: 'search',
-            semantic_query: query,
-            detail: 'summary',
-            limit: 20,
-          },
-        },
-      }));
-      req.end();
-    });
-    return JSON.parse(response);
-  } catch (err) {
-    return { error: String(err) };
-  }
+  return callMcp('awareness_recall', {
+    semantic_query: query,
+    detail: 'summary',
+    limit: 20,
+  });
 });
 
 ipcMain.handle('memory:get-cards', async () => {
-  try {
-    const response = await new Promise<string>((resolve, reject) => {
-      const req = http.request('http://127.0.0.1:37800/mcp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 10000,
-      }, (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => resolve(data));
-      });
-      req.on('error', reject);
-      req.write(JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'tools/call',
-        params: {
-          name: 'awareness_lookup',
-          arguments: {
-            action: 'get_data',
-            data_type: 'knowledge_cards',
-            limit: 50,
-          },
-        },
-      }));
-      req.end();
-    });
-    return JSON.parse(response);
-  } catch (err) {
-    return { error: String(err) };
-  }
+  return callMcp('awareness_lookup', { type: 'knowledge', limit: 50 });
+});
+
+ipcMain.handle('memory:get-tasks', async () => {
+  return callMcp('awareness_lookup', { type: 'tasks', limit: 20, status: 'open' });
+});
+
+ipcMain.handle('memory:get-context', async () => {
+  return callMcp('awareness_lookup', { type: 'context' });
 });
 
 // --- App Lifecycle ---
