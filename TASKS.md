@@ -54,9 +54,9 @@
 - [x] **已安装 OpenClaw 自动延用配置**：检测到已有 providers/models 时跳过模型选择步骤（2026-03-30）
 
 ### 记忆系统
-- [ ] 记忆页接入本地守护进程 MCP API
-- [ ] 语义搜索调用后端
-- [ ] 感知信号面板接入真实数据
+- [x] 记忆页接入本地守护进程 MCP API（awareness_lookup type=knowledge）（2026-03-30）
+- [x] 语义搜索调用后端（awareness_recall semantic_query）（2026-03-30）
+- [ ] 感知信号面板接入真实数据（需要 perception API，local daemon 暂不支持）
 - [ ] **Awareness 记忆 vs OpenClaw 原生 memory 协作策略**
 - [ ] **轻量化 + 节省 token**
 
