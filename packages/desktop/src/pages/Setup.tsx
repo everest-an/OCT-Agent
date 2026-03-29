@@ -17,6 +17,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
   const { updateConfig, syncConfig } = useAppConfig();
   const [step, setStep] = useState<Step>('welcome');
   const [lang, setLang] = useState<'zh' | 'en'>('zh');
+  const [existingConfig, setExistingConfig] = useState<{ hasProviders: boolean; primaryModel: string } | null>(null);
 
   // Install progress
   const [installSteps, setInstallSteps] = useState([
@@ -108,8 +109,17 @@ export default function SetupWizard({ onComplete }: SetupProps) {
     else await api!.startDaemon();
     updateInstallStep('daemon', 'done');
 
-    // Move to model config
+    // Check if user already has OpenClaw configured with models
     await new Promise((r) => setTimeout(r, 500));
+    if (!simulate && api) {
+      const existing = await (api as any).readExistingConfig();
+      if (existing?.hasProviders) {
+        setExistingConfig(existing);
+        // User already has models configured — skip model selection
+        setStep('memory');
+        return;
+      }
+    }
     setStep('model');
   };
 

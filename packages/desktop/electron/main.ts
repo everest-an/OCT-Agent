@@ -410,6 +410,32 @@ ipcMain.handle('setup:open-auth-url', (_e, url: string) => {
 });
 
 /**
+ * Read existing openclaw.json to detect pre-configured providers/models.
+ * Used by setup wizard to skip model selection if user already has OpenClaw configured.
+ */
+ipcMain.handle('setup:read-existing-config', async () => {
+  const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+  try {
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const config = JSON.parse(raw);
+    const providers = config?.models?.providers || {};
+    const primaryModel = config?.agents?.defaults?.model?.primary || '';
+    const providerNames = Object.keys(providers);
+
+    return {
+      exists: true,
+      hasProviders: providerNames.length > 0,
+      providers: providerNames,
+      primaryModel,
+      // Check if the primary model's provider has an apiKey configured
+      hasApiKey: providerNames.some(name => providers[name]?.apiKey),
+    };
+  } catch {
+    return { exists: false, hasProviders: false, providers: [], primaryModel: '', hasApiKey: false };
+  }
+});
+
+/**
  * Get OpenClaw dashboard URL with auth token
  */
 ipcMain.handle('app:get-dashboard-url', async () => {
@@ -527,6 +553,34 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string) => {
       resolve({ success: false, error: '响应超时', sessionId: sid });
     }, 120000);
   });
+});
+
+// --- Channel Configuration ---
+
+ipcMain.handle('channel:save', async (_e, channelId: string, config: Record<string, string>) => {
+  const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+  try {
+    let existing: any = {};
+    try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+
+    if (!existing.channels) existing.channels = {};
+    existing.channels[channelId] = {
+      ...existing.channels[channelId],
+      ...config,
+      enabled: true,
+    };
+
+    fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: String(err) };
+  }
+});
+
+ipcMain.handle('channel:test', async (_e, channelId: string) => {
+  // Test channel connectivity by checking openclaw status
+  const output = safeShellExec(`openclaw channels check ${channelId} 2>&1 || openclaw status`, 10000);
+  return { success: !!output, output };
 });
 
 // --- Cron Management ---

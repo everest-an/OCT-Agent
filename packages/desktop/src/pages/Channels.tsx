@@ -42,11 +42,33 @@ export default function Channels() {
   };
 
   const handleTest = async () => {
+    if (!activeWizard || !tokenInput) return;
     setTestStatus('testing');
-    // TODO: Actually test the connection via OpenClaw Gateway
-    setTimeout(() => {
-      setTestStatus(tokenInput.length > 10 ? 'success' : 'error');
-    }, 1500);
+
+    // Save channel config to openclaw.json
+    if (window.electronAPI) {
+      const configMap: Record<string, Record<string, string>> = {
+        telegram: { token: tokenInput },
+        discord: { token: tokenInput },
+        slack: { token: tokenInput },
+        feishu: { appId: tokenInput.split(':')[0] || tokenInput, appSecret: tokenInput.split(':')[1] || '' },
+      };
+      const config = configMap[activeWizard] || { token: tokenInput };
+      const saveResult = await (window.electronAPI as any).channelSave(activeWizard, config);
+
+      if (saveResult.success) {
+        // Test connection
+        const testResult = await (window.electronAPI as any).channelTest(activeWizard);
+        setTestStatus(testResult.success ? 'success' : 'error');
+      } else {
+        setTestStatus('error');
+      }
+    } else {
+      // Dev mode: simulate
+      setTimeout(() => {
+        setTestStatus(tokenInput.length > 10 ? 'success' : 'error');
+      }, 1500);
+    }
   };
 
   const getTelegramGuide = () => (

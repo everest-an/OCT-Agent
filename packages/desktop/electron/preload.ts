@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startDaemon: () => ipcRenderer.invoke('setup:start-daemon'),
   saveConfig: (config: Record<string, unknown>) => ipcRenderer.invoke('setup:save-config', config),
   openAuthUrl: (url: string) => ipcRenderer.invoke('setup:open-auth-url', url),
+  readExistingConfig: () => ipcRenderer.invoke('setup:read-existing-config'),
 
   // Chat
   chatSend: (message: string, sessionId?: string) => ipcRenderer.invoke('chat:send', message, sessionId),
@@ -22,6 +23,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onChatStatus: (callback: (status: { type: string; tool?: string }) => void) => {
     ipcRenderer.on('chat:status', (_e: any, status: any) => callback(status));
   },
+
+  // Channel management
+  channelSave: (channelId: string, config: Record<string, string>) => ipcRenderer.invoke('channel:save', channelId, config),
+  channelTest: (channelId: string) => ipcRenderer.invoke('channel:test', channelId),
 
   // Cron management
   cronList: () => ipcRenderer.invoke('cron:list'),
