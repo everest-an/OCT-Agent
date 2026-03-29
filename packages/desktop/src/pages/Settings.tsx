@@ -1,14 +1,48 @@
-import { useState } from 'react';
-import { Moon, Sun, Monitor, ChevronRight, X, Check, ChevronDown } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Moon, Sun, Monitor, ChevronRight, X, Check, ChevronDown, Play, Square, RotateCw, Loader2, Plus, Trash2 } from 'lucide-react';
 import { useAppConfig, MODEL_PROVIDERS } from '../lib/store';
 
 export default function Settings() {
   const { config, updateConfig, syncConfig } = useAppConfig();
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [gatewayStatus, setGatewayStatus] = useState<'checking' | 'running' | 'stopped'>('checking');
+  const [gatewayLoading, setGatewayLoading] = useState(false);
+  const [logs, setLogs] = useState('');
+  const [showLogs, setShowLogs] = useState(false);
   const [tempProvider, setTempProvider] = useState('');
   const [tempModel, setTempModel] = useState('');
   const [tempApiKey, setTempApiKey] = useState('');
   const [tempBaseUrl, setTempBaseUrl] = useState('');
+
+  // Check gateway status on mount
+  useEffect(() => {
+    checkGateway();
+    const interval = setInterval(checkGateway, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const checkGateway = async () => {
+    if (!window.electronAPI) { setGatewayStatus('stopped'); return; }
+    const result = await (window.electronAPI as any).gatewayStatus();
+    setGatewayStatus(result.running ? 'running' : 'stopped');
+  };
+
+  const handleGatewayAction = async (action: 'start' | 'stop' | 'restart') => {
+    setGatewayLoading(true);
+    const api = window.electronAPI as any;
+    if (action === 'start') await api.gatewayStart();
+    else if (action === 'stop') await api.gatewayStop();
+    else await api.gatewayRestart();
+    await checkGateway();
+    setGatewayLoading(false);
+  };
+
+  const loadLogs = async () => {
+    if (!window.electronAPI) return;
+    const result = await (window.electronAPI as any).getRecentLogs();
+    setLogs(result.logs || 'No logs');
+    setShowLogs(true);
+  };
 
   const currentProvider = MODEL_PROVIDERS.find((p) => p.key === config.providerKey);
   const currentModel = currentProvider?.models.find((m) => m.id === config.modelId);
@@ -177,6 +211,55 @@ export default function Settings() {
           </Row>
         </Section>
 
+        {/* Gateway Management */}
+        <Section title="🖥️ Gateway 服务管理">
+          <Row
+            label="OpenClaw Gateway"
+            desc={gatewayStatus === 'running' ? '✅ 运行中' : gatewayStatus === 'stopped' ? '⏹️ 已停止' : '检测中...'}
+          >
+            <div className="flex items-center gap-2">
+              {gatewayLoading ? (
+                <Loader2 size={14} className="animate-spin text-brand-400" />
+              ) : (
+                <>
+                  {gatewayStatus === 'stopped' && (
+                    <button
+                      onClick={() => handleGatewayAction('start')}
+                      className="flex items-center gap-1 px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors"
+                    >
+                      <Play size={10} /> 启动
+                    </button>
+                  )}
+                  {gatewayStatus === 'running' && (
+                    <>
+                      <button
+                        onClick={() => handleGatewayAction('restart')}
+                        className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors"
+                      >
+                        <RotateCw size={10} /> 重启
+                      </button>
+                      <button
+                        onClick={() => handleGatewayAction('stop')}
+                        className="flex items-center gap-1 px-3 py-1.5 text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg transition-colors"
+                      >
+                        <Square size={10} /> 停止
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          </Row>
+          <Row label="系统日志" desc="查看最近的运行日志">
+            <button
+              onClick={loadLogs}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors"
+            >
+              查看日志 <ChevronRight size={12} />
+            </button>
+          </Row>
+        </Section>
+
         {/* System */}
         <Section title="🔧 系统">
           <Row label="自动更新" desc="有新版本时自动下载安装">
@@ -194,6 +277,21 @@ export default function Settings() {
             </button>
           </Row>
         </Section>
+
+        {/* Log Viewer Modal */}
+        {showLogs && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-8">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-3xl max-h-[80vh] overflow-hidden flex flex-col">
+              <div className="flex items-center justify-between p-4 border-b border-slate-800">
+                <h3 className="font-semibold">📋 系统日志</h3>
+                <button onClick={() => setShowLogs(false)} className="text-slate-500 hover:text-slate-300"><X size={18} /></button>
+              </div>
+              <pre className="flex-1 overflow-auto p-4 text-xs font-mono text-slate-300 bg-slate-950 whitespace-pre-wrap">
+                {logs}
+              </pre>
+            </div>
+          </div>
+        )}
 
         <div className="text-center text-xs text-slate-600 space-y-1 pb-6">
           <p>AwarenessClaw v0.1.0</p>

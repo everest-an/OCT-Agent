@@ -446,6 +446,211 @@ function downloadFile(url: string, dest: string): Promise<void> {
   });
 }
 
+// --- PTY Management (for embedded openclaw chat) ---
+
+let chatProcess: any = null;
+
+ipcMain.handle('pty:start', async () => {
+  // Kill existing chat process if any
+  if (chatProcess) {
+    try { chatProcess.kill(); } catch {}
+    chatProcess = null;
+  }
+
+  try {
+    // Spawn openclaw chat as a subprocess (no native PTY needed)
+    const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/bash';
+    const shellArgs = process.platform === 'win32'
+      ? ['/c', 'openclaw chat']
+      : ['-l', '-c', 'openclaw chat'];
+
+    chatProcess = spawn(shell, shellArgs, {
+      cwd: os.homedir(),
+      env: {
+        ...process.env,
+        PATH: getEnhancedPath(),
+        TERM: 'xterm-256color',
+        COLORTERM: 'truecolor',
+        FORCE_COLOR: '1',
+      },
+    });
+
+    // Forward stdout + stderr to renderer
+    chatProcess.stdout?.on('data', (data: Buffer) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('pty:data', data.toString());
+      }
+    });
+
+    chatProcess.stderr?.on('data', (data: Buffer) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('pty:data', data.toString());
+      }
+    });
+
+    chatProcess.on('exit', (code: number) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('pty:data', `\r\n\x1b[33m[Session ended. Press Enter to restart.]\x1b[0m\r\n`);
+      }
+      chatProcess = null;
+    });
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: String(err) };
+  }
+});
+
+ipcMain.on('pty:write', (_e, data: string) => {
+  if (chatProcess && chatProcess.stdin) {
+    chatProcess.stdin.write(data);
+  }
+});
+
+ipcMain.on('pty:resize', (_e, _cols: number, _rows: number) => {
+  // No resize support without PTY, but that's OK for basic chat
+});
+
+// --- Cron Management ---
+
+ipcMain.handle('cron:list', async () => {
+  const output = safeShellExec('openclaw cron list --json 2>/dev/null || openclaw cron list', 10000);
+  if (!output) return { jobs: [], error: 'OpenClaw not available' };
+
+  // Try to parse JSON output, fall back to text
+  try {
+    return { jobs: JSON.parse(output) };
+  } catch {
+    // Parse text format
+    const lines = output.split('\n').filter(l => l.trim());
+    return { jobs: lines, raw: true };
+  }
+});
+
+ipcMain.handle('cron:add', async (_e, expression: string, command: string) => {
+  const result = safeShellExec(`openclaw cron add "${expression}" "${command}"`, 10000);
+  return { success: !!result, output: result };
+});
+
+ipcMain.handle('cron:remove', async (_e, id: string) => {
+  const result = safeShellExec(`openclaw cron remove "${id}"`, 10000);
+  return { success: !!result, output: result };
+});
+
+// --- Gateway Management ---
+
+ipcMain.handle('gateway:status', async () => {
+  const output = safeShellExec('openclaw status', 5000);
+  const isRunning = output?.includes('running') || false;
+  return { running: isRunning, output };
+});
+
+ipcMain.handle('gateway:start', async () => {
+  try {
+    // Start gateway in background
+    const child = runSpawn('openclaw', ['up'], { detached: true, stdio: 'ignore' });
+    child.unref();
+    // Wait a bit and check
+    await sleep(3000);
+    const status = safeShellExec('openclaw status', 5000);
+    return { success: true, output: status };
+  } catch (err) {
+    return { success: false, error: String(err) };
+  }
+});
+
+ipcMain.handle('gateway:stop', async () => {
+  const result = safeShellExec('openclaw stop', 10000);
+  return { success: true, output: result };
+});
+
+ipcMain.handle('gateway:restart', async () => {
+  safeShellExec('openclaw stop', 10000);
+  await sleep(1000);
+  const child = runSpawn('openclaw', ['up'], { detached: true, stdio: 'ignore' });
+  child.unref();
+  await sleep(3000);
+  return { success: true };
+});
+
+// --- Log Viewer ---
+
+ipcMain.handle('logs:recent', async () => {
+  const output = safeShellExec('openclaw logs --lines 100 2>/dev/null || echo "No logs available"', 10000);
+  return { logs: output || 'No logs available' };
+});
+
+// --- Memory API (local daemon) ---
+
+ipcMain.handle('memory:search', async (_e, query: string) => {
+  try {
+    const response = await new Promise<string>((resolve, reject) => {
+      const req = http.request('http://127.0.0.1:37800/mcp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 10000,
+      }, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => resolve(data));
+      });
+      req.on('error', reject);
+      req.write(JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'awareness_recall',
+          arguments: {
+            action: 'search',
+            semantic_query: query,
+            detail: 'summary',
+            limit: 20,
+          },
+        },
+      }));
+      req.end();
+    });
+    return JSON.parse(response);
+  } catch (err) {
+    return { error: String(err) };
+  }
+});
+
+ipcMain.handle('memory:get-cards', async () => {
+  try {
+    const response = await new Promise<string>((resolve, reject) => {
+      const req = http.request('http://127.0.0.1:37800/mcp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 10000,
+      }, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => resolve(data));
+      });
+      req.on('error', reject);
+      req.write(JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'awareness_lookup',
+          arguments: {
+            action: 'get_data',
+            data_type: 'knowledge_cards',
+            limit: 50,
+          },
+        },
+      }));
+      req.end();
+    });
+    return JSON.parse(response);
+  } catch (err) {
+    return { error: String(err) };
+  }
+});
+
 // --- App Lifecycle ---
 
 app.whenReady().then(createWindow);

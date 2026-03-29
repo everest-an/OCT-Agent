@@ -1,13 +1,13 @@
-import { useState } from 'react';
-import { Search, Filter, Lightbulb, AlertTriangle, User, Zap, RefreshCw } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Search, RefreshCw, Loader2, AlertCircle } from 'lucide-react';
 
 interface KnowledgeCard {
   id: string;
   category: string;
   title: string;
   summary: string;
-  date: string;
-  tags: string[];
+  created_at?: string;
+  status?: string;
 }
 
 const CATEGORY_CONFIG: Record<string, { emoji: string; label: string; color: string }> = {
@@ -19,42 +19,99 @@ const CATEGORY_CONFIG: Record<string, { emoji: string; label: string; color: str
   key_point: { emoji: '📌', label: '要点', color: 'text-cyan-400' },
   personal_preference: { emoji: '👤', label: '偏好', color: 'text-pink-400' },
   important_detail: { emoji: '📎', label: '细节', color: 'text-orange-400' },
-};
-
-const MOCK_CARDS: KnowledgeCard[] = [
-  { id: '1', category: 'decision', title: '使用 PostgreSQL 作为主数据库', summary: '评估了 MongoDB 和 PostgreSQL，最终选择 PostgreSQL 因为需要 pgvector 支持向量搜索。', date: '2026-03-29', tags: ['数据库', '架构'] },
-  { id: '2', category: 'pitfall', title: 'Docker build 必须用 nohup 后台执行', summary: 'SSH 前台执行 docker build 会超时断开，导致部署中断。', date: '2026-03-29', tags: ['部署', 'Docker'] },
-  { id: '3', category: 'personal_preference', title: '用中文交流，代码用英文', summary: '用户偏好：推理和回复用中文，但代码、注释、变量名用英文。', date: '2026-03-28', tags: ['沟通'] },
-  { id: '4', category: 'problem_solution', title: 'Prisma 不能用 db push', summary: 'prisma db push 会尝试删除 memory_vectors 表（有线上数据），必须手动 SQL 迁移。', date: '2026-03-27', tags: ['数据库', 'Prisma'] },
-  { id: '5', category: 'insight', title: '感知信号不需要 LLM', summary: '矛盾检测和模式发现可以纯用 BM25 + 余弦相似度实现，<50ms，零 LLM 成本。', date: '2026-03-26', tags: ['性能', '算法'] },
-];
-
-interface PerceptionSignal {
-  type: 'contradiction' | 'pattern' | 'resonance' | 'staleness';
-  message: string;
-}
-
-const MOCK_SIGNALS: PerceptionSignal[] = [
-  { type: 'contradiction', message: '你之前说"用 JWT 认证"，但今天说"改用 Session"' },
-  { type: 'pattern', message: '最近 3 天都在处理数据库迁移问题' },
-];
-
-const SIGNAL_CONFIG = {
-  contradiction: { emoji: '⚡', label: '矛盾', color: 'border-red-500/30 bg-red-500/5' },
-  pattern: { emoji: '🔄', label: '重复模式', color: 'border-amber-500/30 bg-amber-500/5' },
-  resonance: { emoji: '💫', label: '共鸣', color: 'border-purple-500/30 bg-purple-500/5' },
-  staleness: { emoji: '⏰', label: '过期', color: 'border-slate-500/30 bg-slate-500/5' },
+  skill: { emoji: '🛠️', label: '技能', color: 'text-indigo-400' },
 };
 
 export default function Memory() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [cards, setCards] = useState<KnowledgeCard[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<any[] | null>(null);
+  const [searching, setSearching] = useState(false);
 
-  const filteredCards = MOCK_CARDS.filter((card) => {
+  // Load cards on mount
+  useEffect(() => {
+    loadCards();
+  }, []);
+
+  const loadCards = async () => {
+    setLoading(true);
+    setError(null);
+
+    if (!window.electronAPI) {
+      // Dev mode: use mock data
+      setCards(MOCK_CARDS);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const result = await (window.electronAPI as any).memoryGetCards();
+      if (result.error) {
+        setError('记忆服务未连接。请确保 Awareness 守护进程正在运行。');
+        setCards(MOCK_CARDS); // Show mock as fallback
+      } else {
+        // Parse MCP response
+        const content = result?.result?.content;
+        if (content && content[0]?.text) {
+          try {
+            const parsed = JSON.parse(content[0].text);
+            if (Array.isArray(parsed)) {
+              setCards(parsed);
+            } else if (parsed.items || parsed.cards || parsed.knowledge_cards) {
+              setCards(parsed.items || parsed.cards || parsed.knowledge_cards || []);
+            } else {
+              setCards(MOCK_CARDS);
+            }
+          } catch {
+            setCards(MOCK_CARDS);
+          }
+        } else {
+          setCards(MOCK_CARDS);
+        }
+      }
+    } catch {
+      setError('无法连接到记忆服务');
+      setCards(MOCK_CARDS);
+    }
+
+    setLoading(false);
+  };
+
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) {
+      setSearchResults(null);
+      return;
+    }
+
+    setSearching(true);
+    if (window.electronAPI) {
+      try {
+        const result = await (window.electronAPI as any).memorySearch(searchQuery);
+        if (result?.result?.content?.[0]?.text) {
+          try {
+            const parsed = JSON.parse(result.result.content[0].text);
+            setSearchResults(Array.isArray(parsed) ? parsed : parsed.results || parsed.items || []);
+          } catch {
+            setSearchResults([]);
+          }
+        }
+      } catch {
+        setSearchResults([]);
+      }
+    }
+    setSearching(false);
+  };
+
+  const filteredCards = cards.filter((card) => {
     if (selectedCategory !== 'all' && card.category !== selectedCategory) return false;
-    if (searchQuery && !card.title.includes(searchQuery) && !card.summary.includes(searchQuery)) return false;
+    if (searchQuery && !searchResults && !card.title?.includes(searchQuery) && !card.summary?.includes(searchQuery)) return false;
     return true;
   });
+
+  const displayCards = searchResults || filteredCards;
 
   return (
     <div className="h-full flex flex-col">
@@ -63,10 +120,16 @@ export default function Memory() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-lg font-semibold">🧠 AI 记忆</h1>
-            <p className="text-xs text-slate-500">AI 从对话中提取的知识和经验</p>
+            <p className="text-xs text-slate-500">
+              {error ? <span className="text-amber-500">{error}</span> : 'AI 从对话中提取的知识和经验'}
+            </p>
           </div>
-          <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 rounded-lg transition-colors">
-            <RefreshCw size={12} />
+          <button
+            onClick={loadCards}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 rounded-lg transition-colors"
+          >
+            {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
             刷新
           </button>
         </div>
@@ -76,91 +139,90 @@ export default function Memory() {
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
           <input
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="搜索记忆..."
+            onChange={(e) => { setSearchQuery(e.target.value); if (!e.target.value) setSearchResults(null); }}
+            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+            placeholder="搜索记忆（按回车语义搜索）..."
             className="w-full pl-10 pr-4 py-2.5 bg-slate-800 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50"
           />
+          {searching && <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-brand-400" />}
         </div>
 
         {/* Category filter */}
         <div className="flex gap-2 flex-wrap">
           <button
-            onClick={() => setSelectedCategory('all')}
+            onClick={() => { setSelectedCategory('all'); setSearchResults(null); }}
             className={`px-3 py-1 text-xs rounded-lg transition-colors ${
               selectedCategory === 'all' ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
             }`}
           >
-            全部
+            全部 ({cards.length})
           </button>
-          {Object.entries(CATEGORY_CONFIG).map(([key, { emoji, label }]) => (
-            <button
-              key={key}
-              onClick={() => setSelectedCategory(key)}
-              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
-                selectedCategory === key ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-              }`}
-            >
-              {emoji} {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {/* Perception Signals */}
-        {MOCK_SIGNALS.length > 0 && (
-          <div className="space-y-2">
-            <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">感知信号</h3>
-            {MOCK_SIGNALS.map((signal, i) => {
-              const config = SIGNAL_CONFIG[signal.type];
-              return (
-                <div key={i} className={`p-3 rounded-xl border ${config.color} flex items-start gap-3`}>
-                  <span className="text-lg">{config.emoji}</span>
-                  <div>
-                    <span className="text-xs font-medium text-slate-400">{config.label}</span>
-                    <p className="text-sm text-slate-200">{signal.message}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Knowledge Cards */}
-        <div className="space-y-3">
-          <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-            知识卡片 ({filteredCards.length})
-          </h3>
-          {filteredCards.map((card) => {
-            const config = CATEGORY_CONFIG[card.category] || CATEGORY_CONFIG.key_point;
+          {Object.entries(CATEGORY_CONFIG).map(([key, { emoji, label }]) => {
+            const count = cards.filter(c => c.category === key).length;
+            if (count === 0) return null;
             return (
-              <div
-                key={card.id}
-                className="p-4 bg-slate-800/50 rounded-xl border border-slate-700/50 hover:border-slate-600 transition-colors cursor-pointer"
+              <button
+                key={key}
+                onClick={() => { setSelectedCategory(key); setSearchResults(null); }}
+                className={`px-3 py-1 text-xs rounded-lg transition-colors ${
+                  selectedCategory === key ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                }`}
               >
-                <div className="flex items-center gap-2 mb-2">
-                  <span>{config.emoji}</span>
-                  <span className={`text-xs font-medium ${config.color}`}>{config.label}</span>
-                  <span className="text-xs text-slate-600">•</span>
-                  <span className="text-xs text-slate-500">{card.date}</span>
-                </div>
-                <h4 className="font-medium text-sm mb-1">{card.title}</h4>
-                <p className="text-sm text-slate-400 leading-relaxed">{card.summary}</p>
-                {card.tags.length > 0 && (
-                  <div className="flex gap-1.5 mt-2">
-                    {card.tags.map((tag) => (
-                      <span key={tag} className="text-xs px-2 py-0.5 bg-slate-700 rounded-full text-slate-400">
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
+                {emoji} {label} ({count})
+              </button>
             );
           })}
         </div>
       </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-6 space-y-3">
+        {loading && (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 size={24} className="animate-spin text-brand-500" />
+          </div>
+        )}
+
+        {!loading && displayCards.length === 0 && (
+          <div className="text-center py-12 text-slate-500">
+            <p>暂无记忆数据</p>
+            <p className="text-xs mt-1">和 AI 对话后，记忆会自动出现在这里</p>
+          </div>
+        )}
+
+        {!loading && displayCards.map((card: any, i: number) => {
+          const config = CATEGORY_CONFIG[card.category] || { emoji: '📎', label: card.category, color: 'text-slate-400' };
+          return (
+            <div
+              key={card.id || i}
+              className="p-4 bg-slate-800/50 rounded-xl border border-slate-700/50 hover:border-slate-600 transition-colors"
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <span>{config.emoji}</span>
+                <span className={`text-xs font-medium ${config.color}`}>{config.label}</span>
+                {card.created_at && (
+                  <>
+                    <span className="text-xs text-slate-600">•</span>
+                    <span className="text-xs text-slate-500">{new Date(card.created_at).toLocaleDateString()}</span>
+                  </>
+                )}
+                {card.status === 'superseded' && (
+                  <span className="text-xs px-1.5 py-0.5 bg-slate-700 rounded text-slate-500">已过时</span>
+                )}
+              </div>
+              <h4 className="font-medium text-sm mb-1">{card.title}</h4>
+              <p className="text-sm text-slate-400 leading-relaxed">{card.summary}</p>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
+
+// Fallback mock data when daemon is not connected
+const MOCK_CARDS: KnowledgeCard[] = [
+  { id: '1', category: 'decision', title: '使用 PostgreSQL 作为主数据库', summary: '评估了 MongoDB 和 PostgreSQL，选择 PostgreSQL 因为需要 pgvector 支持。', created_at: '2026-03-29' },
+  { id: '2', category: 'pitfall', title: 'Docker build 必须用 nohup', summary: 'SSH 前台执行 docker build 会超时断开，导致部署中断。', created_at: '2026-03-29' },
+  { id: '3', category: 'personal_preference', title: '中文交流，代码用英文', summary: '用户偏好推理和回复用中文，代码用英文。', created_at: '2026-03-28' },
+];
