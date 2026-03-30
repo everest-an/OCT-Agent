@@ -1,5 +1,5 @@
 const electron = require('electron');
-const { app, BrowserWindow, ipcMain, shell } = electron;
+const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, dialog } = electron;
 import path from 'path';
 import { execSync, spawn } from 'child_process';
 import fs from 'fs';
@@ -8,6 +8,8 @@ import https from 'https';
 import http from 'http';
 
 let mainWindow: typeof BrowserWindow.prototype | null = null;
+let tray: typeof Tray.prototype | null = null;
+let isQuitting = false;
 
 const isDev = !app.isPackaged;
 const HOME = os.homedir();
@@ -16,19 +18,40 @@ const HOME = os.homedir();
 // Electron bundles Node.js, but we need a system-accessible node/npm for OpenClaw.
 // Strategy: Use system node if available, otherwise auto-install via official installer.
 
-/** Safe shell exec — explicit shell + enhanced PATH + short timeout. Never hangs. */
+/** Safe shell exec (SYNC) — explicit shell + enhanced PATH + short timeout. Never hangs.
+ *  Uses --norc --noprofile to avoid .bashrc errors (e.g. missing cargo/env). */
 function safeShellExec(cmd: string, timeoutMs = 5000): string | null {
   try {
-    return execSync(cmd, {
-      encoding: 'utf8',
-      timeout: timeoutMs,
-      stdio: 'pipe',
-      shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/bash',
-      env: { ...process.env, PATH: getEnhancedPath() },
+    const enhancedPath = getEnhancedPath();
+    if (process.platform === 'win32') {
+      return execSync(cmd, { encoding: 'utf8', timeout: timeoutMs, stdio: 'pipe', shell: 'cmd.exe', env: { ...process.env, PATH: enhancedPath } }).trim();
+    }
+    return execSync(`/bin/bash --norc --noprofile -c 'export PATH="${enhancedPath}"; ${cmd.replace(/'/g, "'\\''")}'`, {
+      encoding: 'utf8', timeout: timeoutMs, stdio: 'pipe', env: { ...process.env, PATH: enhancedPath },
     }).trim();
   } catch {
     return null;
   }
+}
+
+/** Async shell exec — non-blocking, for hot-path IPC handlers.
+ *  Uses --norc --noprofile to avoid .bashrc errors (e.g. missing cargo/env). */
+function safeShellExecAsync(cmd: string, timeoutMs = 5000): Promise<string | null> {
+  return new Promise(resolve => {
+    const enhancedPath = getEnhancedPath();
+    const shellCmd = process.platform === 'win32' ? cmd : `export PATH="${enhancedPath}"; ${cmd}`;
+    const child = process.platform === 'win32'
+      ? spawn(cmd, [], { shell: 'cmd.exe', env: { ...process.env, PATH: enhancedPath }, stdio: 'pipe' })
+      : spawn('/bin/bash', ['--norc', '--noprofile', '-c', shellCmd], { env: { ...process.env, PATH: enhancedPath }, stdio: 'pipe' });
+    let stdout = '';
+    let settled = false;
+    const timer = setTimeout(() => { if (!settled) { settled = true; child.kill(); resolve(null); } }, timeoutMs);
+    child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
+    child.on('close', (code: number | null) => {
+      if (!settled) { settled = true; clearTimeout(timer); resolve(code === 0 ? stdout.trim() : null); }
+    });
+    child.on('error', () => { if (!settled) { settled = true; clearTimeout(timer); resolve(null); } });
+  });
 }
 
 function getNodeVersion(): string | null {
@@ -44,33 +67,54 @@ function getEnhancedPath(): string {
   const extras: string[] = [];
 
   if (process.platform === 'darwin' || process.platform === 'linux') {
+    // User-specific paths FIRST — they override system defaults
+    // (e.g. ~/.npm-global/bin/openclaw@3.28 must beat /usr/local/bin/openclaw@3.13)
     extras.push(
-      '/usr/local/bin',
-      '/opt/homebrew/bin',
-      `${HOME}/.nvm/versions/node/v22.0.0/bin`, // nvm common path
+      `${HOME}/.npm-global/bin`, // custom npm prefix — MUST be before /usr/local/bin
       `${HOME}/.local/bin`,
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
       '/usr/bin',
     );
+    // nvm: detect actual installed version instead of hardcoding
+    try {
+      const nvmDir = path.join(HOME, '.nvm', 'versions', 'node');
+      if (fs.existsSync(nvmDir)) {
+        const versions = fs.readdirSync(nvmDir).filter(v => v.startsWith('v')).sort().reverse();
+        if (versions.length > 0) extras.push(path.join(nvmDir, versions[0], 'bin'));
+      }
+    } catch { /* nvm not installed, ignore */ }
+    // fnm: fast node manager
+    try {
+      const fnmDefault = path.join(HOME, '.fnm', 'aliases', 'default', 'bin');
+      if (fs.existsSync(fnmDefault)) extras.push(fnmDefault);
+    } catch { /* fnm not installed, ignore */ }
+    // snap (Linux only)
+    if (process.platform === 'linux') {
+      extras.push('/snap/bin');
+    }
   } else if (process.platform === 'win32') {
     extras.push(
-      `${process.env.APPDATA}\\npm`,
-      `${process.env.ProgramFiles}\\nodejs`,
-      `${process.env.ProgramFiles} (x86)\\nodejs`,
+      `${process.env.APPDATA}\\npm`,                      // npm default global
+      `${process.env.LOCALAPPDATA}\\pnpm`,                 // pnpm global
+      `${process.env.ProgramFiles}\\nodejs`,                // official installer
+      `${process.env.ProgramFiles} (x86)\\nodejs`,          // 32-bit
+      `${process.env.LOCALAPPDATA}\\fnm_multishells`,       // fnm on Windows
     );
   }
 
   return [...extras, base].join(path.delimiter);
 }
 
-/** Run a command with enhanced PATH and explicit shell (critical for packaged Electron) */
+/** Run a command with enhanced PATH and explicit shell (critical for packaged Electron).
+ *  Uses --norc --noprofile on macOS/Linux to avoid .bashrc errors. */
 function run(cmd: string, opts: Record<string, unknown> = {}): string {
-  return execSync(cmd, {
-    encoding: 'utf8',
-    timeout: 180000,
-    stdio: 'pipe',
-    shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/bash',
-    env: { ...process.env, PATH: getEnhancedPath() },
-    ...opts,
+  const enhancedPath = getEnhancedPath();
+  if (process.platform === 'win32') {
+    return execSync(cmd, { encoding: 'utf8', timeout: 180000, stdio: 'pipe', shell: 'cmd.exe', env: { ...process.env, PATH: enhancedPath }, ...opts } as any);
+  }
+  return execSync(`/bin/bash --norc --noprofile -c 'export PATH="${enhancedPath}"; ${cmd.replace(/'/g, "'\\''")}'`, {
+    encoding: 'utf8', timeout: 180000, stdio: 'pipe', env: { ...process.env, PATH: enhancedPath }, ...opts,
   } as any);
 }
 
@@ -78,6 +122,37 @@ function runSpawn(cmd: string, args: string[], opts: Record<string, unknown> = {
   return spawn(cmd, args, {
     env: { ...process.env, PATH: getEnhancedPath() },
     ...opts,
+  });
+}
+
+/** Async version of run() — for IPC handlers. Never blocks the main thread.
+ *  Uses --norc --noprofile to avoid .bashrc errors (e.g. missing cargo/env). */
+function runAsync(cmd: string, timeoutMs = 180000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const enhancedPath = getEnhancedPath();
+    const shellCmd = process.platform === 'win32' ? cmd : `export PATH="${enhancedPath}"; ${cmd}`;
+    const child = process.platform === 'win32'
+      ? spawn(cmd, [], { shell: 'cmd.exe', env: { ...process.env, PATH: enhancedPath }, stdio: 'pipe' })
+      : spawn('/bin/bash', ['--norc', '--noprofile', '-c', shellCmd], { env: { ...process.env, PATH: enhancedPath }, stdio: 'pipe' });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) { settled = true; child.kill(); reject(new Error('Command timed out')); }
+    }, timeoutMs);
+    child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
+    child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+    child.on('close', (code: number | null) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        if (code === 0) resolve(stdout.trim());
+        else reject(new Error(stderr.trim() || `Exit code ${code}`));
+      }
+    });
+    child.on('error', (err: Error) => {
+      if (!settled) { settled = true; clearTimeout(timer); reject(err); }
+    });
   });
 }
 
@@ -111,6 +186,15 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
+
+  // On macOS, hide to tray instead of quitting when closing window
+  // But allow actual quit when isQuitting is set (from tray Quit or Cmd+Q)
+  mainWindow.on('close', (e: Event) => {
+    if (process.platform === 'darwin' && !isQuitting) {
+      e.preventDefault();
+      mainWindow?.hide();
+    }
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -149,12 +233,12 @@ ipcMain.handle('setup:detect-environment', async () => {
 
   const safeExec = (cmd: string): string | null => {
     try {
-      return execSync(cmd, {
-        encoding: 'utf8',
-        timeout: 5000,
-        stdio: 'pipe',
-        shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/bash',
-        env: { ...process.env, PATH: getEnhancedPath() },
+      const ep = getEnhancedPath();
+      if (process.platform === 'win32') {
+        return execSync(cmd, { encoding: 'utf8', timeout: 5000, stdio: 'pipe', shell: 'cmd.exe', env: { ...process.env, PATH: ep } }).trim();
+      }
+      return execSync(`/bin/bash --norc --noprofile -c 'export PATH="${ep}"; ${cmd.replace(/'/g, "'\\''")}'`, {
+        encoding: 'utf8', timeout: 5000, stdio: 'pipe', env: { ...process.env, PATH: ep },
       }).trim();
     } catch {
       return null;
@@ -184,6 +268,28 @@ ipcMain.handle('setup:detect-environment', async () => {
     result.hasExistingConfig = fs.existsSync(configPath);
   } catch { /* ignore */ }
 
+  // Check Awareness plugin version
+  try {
+    const pluginPkg = path.join(HOME, '.openclaw', 'extensions', 'openclaw-memory', 'package.json');
+    if (fs.existsSync(pluginPkg)) {
+      const pkg = JSON.parse(fs.readFileSync(pluginPkg, 'utf8'));
+      result.awarenessPluginVersion = pkg.version || null;
+    }
+  } catch { /* ignore */ }
+
+  // Check local daemon status
+  try {
+    const resp = execSync('curl -s --max-time 2 http://localhost:37800/healthz 2>/dev/null', {
+      encoding: 'utf8', timeout: 3000, stdio: 'pipe',
+    }).trim();
+    const health = JSON.parse(resp);
+    result.daemonRunning = health.status === 'ok';
+    result.daemonVersion = health.version || null;
+    result.daemonStats = { memories: health.stats?.totalMemories, knowledge: health.stats?.totalKnowledge, sessions: health.stats?.totalSessions };
+  } catch {
+    result.daemonRunning = false;
+  }
+
   return result;
 });
 
@@ -200,47 +306,48 @@ ipcMain.handle('setup:install-nodejs', async () => {
   try {
     if (process.platform === 'win32') {
       try {
-        run('winget install OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements', { timeout: 300000 });
+        await runAsync('winget install OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements', 300000);
         return { success: true, method: 'winget' };
       } catch {
         const msiUrl = 'https://nodejs.org/dist/v22.12.0/node-v22.12.0-x64.msi';
         const msiPath = path.join(os.tmpdir(), 'node-installer.msi');
         await downloadFile(msiUrl, msiPath);
-        run(`msiexec /i "${msiPath}" /qn`, { timeout: 300000 });
+        await runAsync(`msiexec /i "${msiPath}" /qn`, 300000);
         return { success: true, method: 'msi' };
       }
     } else if (process.platform === 'darwin') {
-      // macOS: try brew, then official pkg
-      const hasBrew = safeShellExec('brew --version') !== null;
+      const hasBrew = await safeShellExecAsync('brew --version') !== null;
       if (hasBrew) {
         try {
-          run('brew install node@22', { timeout: 300000 });
+          await runAsync('brew install node@22', 300000);
           return { success: true, method: 'homebrew' };
         } catch { /* fall through to pkg */ }
       }
-      // Official .pkg installer (no sudo needed for user-level install on modern macOS)
       const pkgUrl = 'https://nodejs.org/dist/v22.12.0/node-v22.12.0.pkg';
       const pkgPath = path.join(os.tmpdir(), 'node-installer.pkg');
       await downloadFile(pkgUrl, pkgPath);
-      // Open the .pkg installer GUI — user clicks through, no sudo needed
-      run(`open "${pkgPath}"`, { timeout: 10000 });
-      // Wait for node to become available (user installs via GUI)
+      await runAsync(`open "${pkgPath}"`, 10000);
       for (let i = 0; i < 120; i++) {
         await sleep(2000);
         if (getNodeVersion()) return { success: true, method: 'pkg-gui' };
       }
       return { success: false, error: 'Node.js installation timed out' };
     } else {
-      // Linux
+      // Linux: try pkexec (GUI password prompt) first, fallback to sudo, then manual hint
+      const sudoCmd = fs.existsSync('/usr/bin/pkexec') ? 'pkexec' : 'sudo';
       try {
-        run('curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs', { timeout: 300000 });
+        await runAsync(`curl -fsSL https://deb.nodesource.com/setup_22.x | ${sudoCmd} -E bash - && ${sudoCmd} apt-get install -y nodejs`, 300000);
         return { success: true, method: 'nodesource-deb' };
       } catch {
         try {
-          run('curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash - && sudo dnf install -y nodejs', { timeout: 300000 });
+          await runAsync(`curl -fsSL https://rpm.nodesource.com/setup_22.x | ${sudoCmd} bash - && ${sudoCmd} dnf install -y nodejs`, 300000);
           return { success: true, method: 'nodesource-rpm' };
         } catch (err) {
-          return { success: false, error: String(err) };
+          return {
+            success: false,
+            error: String(err),
+            hint: 'Linux requires admin privileges. Please run in terminal:\n  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -\n  sudo apt-get install -y nodejs',
+          };
         }
       }
     }
@@ -257,35 +364,32 @@ ipcMain.handle('setup:install-nodejs', async () => {
  * Step 2: Install OpenClaw
  */
 ipcMain.handle('setup:install-openclaw', async () => {
-  // Check if already installed
-  const existing = safeShellExec('openclaw --version');
+  const existing = await safeShellExecAsync('openclaw --version');
   if (existing) {
     return { success: true, alreadyInstalled: true, version: existing };
   }
 
-  // Try npm install — use 90s timeout (openclaw is a large package)
-  const registries = [
-    '', // default
-    '--registry=https://registry.npmmirror.com',
-  ];
+  // Detect package manager preference
+  const hasPnpm = await safeShellExecAsync('pnpm --version', 3000);
+  const hasYarn = !hasPnpm ? await safeShellExecAsync('yarn --version', 3000) : null;
+  const pmBase = hasPnpm ? 'pnpm add -g' : hasYarn ? 'yarn global add' : 'npm install -g';
+  const registries = ['', '--registry=https://registry.npmmirror.com'];
 
   for (const reg of registries) {
     try {
-      run(`npm install -g openclaw ${reg}`.trim(), { timeout: 90000 });
+      await runAsync(`${pmBase} openclaw ${reg}`.trim(), 90000);
       return { success: true };
     } catch { continue; }
   }
 
-  // Fallback: official install script
   try {
     if (process.platform === 'win32') {
-      run('powershell -Command "irm https://openclaw.ai/install.ps1 | iex"', { timeout: 120000 });
+      await runAsync('powershell -Command "irm https://openclaw.ai/install.ps1 | iex"', 120000);
     } else {
-      run('curl -fsSL https://openclaw.ai/install.sh | bash', { timeout: 120000 });
+      await runAsync('curl -fsSL https://openclaw.ai/install.sh | bash', 120000);
     }
     return { success: true, method: 'official-script' };
   } catch (err) {
-    // Even if install fails, write a placeholder config so user can continue
     return { success: false, error: String(err), hint: 'Install OpenClaw manually: npm install -g openclaw' };
   }
 });
@@ -295,19 +399,17 @@ ipcMain.handle('setup:install-openclaw', async () => {
  * Must check if openclaw exists first; use short timeouts to avoid UI freeze.
  */
 ipcMain.handle('setup:install-plugin', async () => {
-  // Check if openclaw command exists
-  const hasOpenClaw = safeShellExec('openclaw --version') !== null;
+  const hasOpenClaw = await safeShellExecAsync('openclaw --version') !== null;
 
   if (hasOpenClaw) {
     try {
-      run('openclaw plugins install @awareness-sdk/openclaw-memory', { timeout: 60000 });
+      await runAsync('openclaw plugins install @awareness-sdk/openclaw-memory', 60000);
       return { success: true, method: 'openclaw-plugin' };
     } catch { /* fall through to clawhub */ }
   }
 
-  // Fallback: install via npm + clawhub (shorter timeout, no interactive prompts)
   try {
-    run('npx -y clawhub@latest install awareness-memory --force', { timeout: 60000 });
+    await runAsync('npx -y clawhub@latest install awareness-memory --force', 60000);
     return { success: true, method: 'clawhub' };
   } catch {
     // Last resort: just configure the plugin in config file, skip actual install
@@ -396,6 +498,33 @@ ipcMain.handle('setup:save-config', async (_e, config: Record<string, unknown>) 
         if (!merged.agents.defaults.model) merged.agents.defaults.model = {};
         merged.agents.defaults.model.primary = (value as any).defaults.model.primary;
       }
+    } else if (key === 'plugins' && existing.plugins) {
+      // Deep merge plugins: preserve existing entries, merge new ones
+      merged.plugins = JSON.parse(JSON.stringify(existing.plugins));
+      const incoming = value as any;
+      if (incoming.allow) merged.plugins.allow = incoming.allow;
+      if (incoming.slots) merged.plugins.slots = { ...merged.plugins.slots, ...incoming.slots };
+      if (incoming.entries) {
+        if (!merged.plugins.entries) merged.plugins.entries = {};
+        for (const [eid, ecfg] of Object.entries(incoming.entries)) {
+          const prev = merged.plugins.entries[eid] || {};
+          merged.plugins.entries[eid] = { ...prev, ...(ecfg as any) };
+          // Deep merge config within entry
+          if ((ecfg as any)?.config && prev?.config) {
+            merged.plugins.entries[eid].config = { ...prev.config, ...(ecfg as any).config };
+          }
+        }
+      }
+    } else if (key === 'tools' && existing.tools) {
+      // Deep merge tools: merge alsoAllow arrays (deduplicate)
+      merged.tools = JSON.parse(JSON.stringify(existing.tools));
+      const incoming = value as any;
+      if (incoming.alsoAllow) {
+        const existingAllow = new Set(merged.tools.alsoAllow || []);
+        for (const t of incoming.alsoAllow) existingAllow.add(t);
+        merged.tools.alsoAllow = [...existingAllow];
+      }
+      if (incoming.profile) merged.tools.profile = incoming.profile;
     } else {
       merged[key] = value;
     }
@@ -411,13 +540,15 @@ ipcMain.handle('setup:save-config', async (_e, config: Record<string, unknown>) 
 ipcMain.handle('app:check-updates', async () => {
   const updates: any[] = [];
 
-  // Check OpenClaw version
-  const currentOC = safeShellExec('openclaw --version');
+  // Check OpenClaw version (async — non-blocking)
+  // `openclaw --version` returns "OpenClaw 2026.3.28 (f9b1079)" — extract semver before commit hash
+  const currentOC = await safeShellExecAsync('openclaw --version');
   if (currentOC) {
-    const latestOC = safeShellExec('npm view openclaw version', 10000);
-    if (latestOC && latestOC !== currentOC.replace(/[^\d.]/g, '').trim()) {
-      const current = currentOC.replace(/[^\d.]/g, '').trim();
-      if (current !== latestOC.trim()) {
+    const versionMatch = currentOC.match(/(\d+\.\d+\.\d+)/);
+    const current = versionMatch ? versionMatch[1] : null;
+    if (current) {
+      const latestOC = await safeShellExecAsync('npm view openclaw version', 10000);
+      if (latestOC && latestOC.trim() !== current) {
         updates.push({
           component: 'openclaw',
           label: 'OpenClaw',
@@ -428,27 +559,166 @@ ipcMain.handle('app:check-updates', async () => {
     }
   }
 
-  // Check Awareness plugin version
-  const currentPlugin = safeShellExec('npm ls -g @awareness-sdk/openclaw-memory --json 2>/dev/null', 10000);
-  if (currentPlugin) {
-    try {
-      const parsed = JSON.parse(currentPlugin);
-      const installed = parsed?.dependencies?.['@awareness-sdk/openclaw-memory']?.version;
-      if (installed) {
-        const latestPlugin = safeShellExec('npm view @awareness-sdk/openclaw-memory version', 10000);
-        if (latestPlugin && latestPlugin.trim() !== installed) {
+  // Check Awareness plugin version — check OpenClaw extensions dir (actual installed location)
+  try {
+    let installedVersion: string | null = null;
+
+    // 1. Check OpenClaw extensions dir (the real installed plugin)
+    const extPkgPath = path.join(HOME, '.openclaw', 'extensions', 'openclaw-memory', 'package.json');
+    if (fs.existsSync(extPkgPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(extPkgPath, 'utf8'));
+        installedVersion = pkg?.version || null;
+      } catch { /* corrupted package.json */ }
+    }
+
+    // 2. Fallback to ClawHub lock.json
+    if (!installedVersion) {
+      const lockPath = path.join(HOME, '.openclaw', 'workspace', '.clawhub', 'lock.json');
+      if (fs.existsSync(lockPath)) {
+        const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+        installedVersion = lock?.skills?.['awareness-memory']?.version || null;
+      }
+    }
+
+    if (installedVersion) {
+      const latestPlugin = await safeShellExecAsync('npm view @awareness-sdk/openclaw-memory version', 10000);
+      if (latestPlugin && latestPlugin.trim() !== installedVersion) {
+        updates.push({
+          component: 'plugin',
+          label: 'Awareness Memory Plugin',
+          currentVersion: installedVersion,
+          latestVersion: latestPlugin.trim(),
+        });
+      }
+    }
+  } catch { /* ignore plugin check errors */ }
+
+  // Check local daemon (@awareness-sdk/local) version
+  try {
+    const daemonResp = await safeShellExecAsync('curl -s --max-time 2 http://localhost:37800/healthz', 3000);
+    if (daemonResp) {
+      const health = JSON.parse(daemonResp);
+      const daemonCurrent = health.version;
+      if (daemonCurrent) {
+        const latestDaemon = await safeShellExecAsync('npm view @awareness-sdk/local version', 10000);
+        if (latestDaemon && latestDaemon.trim() !== daemonCurrent) {
           updates.push({
-            component: 'plugin',
-            label: 'Awareness Memory 插件',
-            currentVersion: installed,
-            latestVersion: latestPlugin.trim(),
+            component: 'daemon',
+            label: 'Awareness Local Daemon',
+            currentVersion: daemonCurrent,
+            latestVersion: latestDaemon.trim(),
           });
         }
       }
-    } catch {}
-  }
+    }
+  } catch { /* daemon not running or check failed */ }
 
   return { updates };
+});
+
+ipcMain.handle('app:upgrade-component', async (_e, component: string) => {
+  try {
+    if (component === 'openclaw') {
+      // Record pre-upgrade version for rollback verification
+      const preVer = await safeShellExecAsync('openclaw --version', 5000);
+      const preMatch = preVer?.match(/(\d+\.\d+\.\d+)/);
+      const preSemver = preMatch ? preMatch[1] : null;
+
+      // Detect package manager (pnpm > yarn > npm)
+      const hasPnpm = await safeShellExecAsync('pnpm --version', 3000);
+      const hasYarn = !hasPnpm ? await safeShellExecAsync('yarn --version', 3000) : null;
+      const installCmd = hasPnpm ? 'pnpm add -g openclaw@latest'
+        : hasYarn ? 'yarn global add openclaw@latest'
+        : 'npm install -g openclaw@latest';
+
+      // Pre-check: verify npm/pnpm global prefix is writable
+      const prefixCmd = hasPnpm ? 'pnpm config get global-bin-dir' : 'npm config get prefix';
+      const prefix = await safeShellExecAsync(prefixCmd, 5000);
+      if (prefix && !hasPnpm) {
+        try {
+          fs.accessSync(prefix.trim(), fs.constants.W_OK);
+        } catch {
+          // Fallback: try npx (no global install needed)
+          try {
+            await runAsync('npx openclaw@latest --version', 30000);
+            return {
+              success: true,
+              version: 'latest (via npx)',
+              hint: `npm global dir not writable. Using npx fallback. To fix permanently:\n  npm config set prefix ~/.npm-global`,
+            };
+          } catch { /* npx also failed, report the original permission error */ }
+          return {
+            success: false,
+            error: `npm global directory (${prefix.trim()}) is not writable. Run this in terminal:\n  npm config set prefix ~/.npm-global\n  export PATH=~/.npm-global/bin:$PATH`,
+          };
+        }
+      }
+
+      await runAsync(installCmd, 120000);
+      const newVer = await safeShellExecAsync('openclaw --version');
+      const vMatch = newVer?.match(/(\d+\.\d+\.\d+)/);
+      const newSemver = vMatch ? vMatch[1] : newVer?.trim();
+
+      // Post-upgrade: verify openclaw still works (catch broken upgrades)
+      if (!newSemver) {
+        return {
+          success: false,
+          error: `Upgrade may have failed — openclaw not responding after install. Previous version: ${preSemver || 'unknown'}`,
+        };
+      }
+
+      return { success: true, version: newSemver, previousVersion: preSemver };
+    } else if (component === 'plugin') {
+      // Remove old extension first to avoid "plugin already exists" error
+      const extDir = path.join(HOME, '.openclaw', 'extensions', 'openclaw-memory');
+      if (fs.existsSync(extDir)) {
+        fs.rmSync(extDir, { recursive: true, force: true });
+      }
+      // Use openclaw plugins install as primary method
+      try {
+        await runAsync('openclaw plugins install @awareness-sdk/openclaw-memory', 90000);
+        return { success: true, method: 'openclaw-plugin' };
+      } catch {
+        // Fallback: clawhub install (installs to ClawHub skills dir, not extensions)
+        try {
+          await runAsync('npx -y clawhub@latest install awareness-memory --force', 90000);
+          return { success: true, method: 'clawhub' };
+        } catch (e: any) {
+          throw new Error(`Plugin upgrade failed: ${e.message?.slice(0, 200)}`);
+        }
+      }
+    } else if (component === 'daemon') {
+      // Stop existing daemon, then restart with latest via npx
+      // The daemon runs via npx (not global install), so we just need to restart with @latest
+      await safeShellExecAsync('curl -s -X POST http://localhost:37800/shutdown 2>/dev/null', 3000);
+      await new Promise(r => setTimeout(r, 1000));
+      // Start new version — npx will fetch latest
+      await runAsync('npx -y @awareness-sdk/local@latest start --port 37800 --background', 30000);
+      // Verify new version
+      await new Promise(r => setTimeout(r, 2000));
+      const health = await safeShellExecAsync('curl -s --max-time 3 http://localhost:37800/healthz', 5000);
+      if (health) {
+        try {
+          const h = JSON.parse(health);
+          return { success: true, version: h.version };
+        } catch { /* ignore */ }
+      }
+      return { success: true, version: 'latest' };
+    }
+    return { success: false, error: 'Unknown component' };
+  } catch (err: any) {
+    console.error(`[upgrade] ${component} failed:`, err.message);
+    const msg = err.message || '';
+    // Detect permission errors and provide friendly guidance
+    if (msg.includes('EACCES') || msg.includes('permission denied') || msg.includes('Permission denied')) {
+      return {
+        success: false,
+        error: 'Permission denied. Run this in terminal to fix:\n  npm config set prefix ~/.npm-global\n  export PATH=~/.npm-global/bin:$PATH',
+      };
+    }
+    return { success: false, error: msg.slice(0, 300) };
+  }
 });
 
 ipcMain.handle('setup:open-auth-url', (_e, url: string) => {
@@ -463,7 +733,7 @@ ipcMain.handle('setup:open-auth-url', (_e, url: string) => {
  * Run openclaw onboard/doctor for new users
  */
 ipcMain.handle('setup:bootstrap', async () => {
-  const result = safeShellExec('openclaw doctor --fix 2>&1', 30000);
+  const result = await safeShellExecAsync('openclaw doctor --fix 2>&1', 30000);
   return { success: !!result, output: result };
 });
 
@@ -490,13 +760,192 @@ ipcMain.handle('setup:read-existing-config', async () => {
 });
 
 /**
+ * Read full provider + model list from openclaw.json (for dynamic model selector)
+ */
+ipcMain.handle('models:read-providers', async () => {
+  const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+  try {
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const config = JSON.parse(raw);
+    const providers = config?.models?.providers || {};
+    const primaryModel = config?.agents?.defaults?.model?.primary || '';
+
+    // Convert openclaw.json provider format → UI-friendly format
+    const result: Array<{
+      key: string;
+      baseUrl: string;
+      apiType?: string;
+      hasApiKey: boolean;
+      models: Array<{ id: string; name: string; reasoning?: boolean; contextWindow?: number; maxTokens?: number }>;
+    }> = [];
+
+    for (const [key, prov] of Object.entries(providers) as [string, any][]) {
+      result.push({
+        key,
+        baseUrl: prov.baseUrl || '',
+        apiType: prov.api,
+        hasApiKey: !!prov.apiKey,
+        models: (prov.models || []).map((m: any) => ({
+          id: m.id,
+          name: m.name || m.id,
+          reasoning: m.reasoning,
+          contextWindow: m.contextWindow,
+          maxTokens: m.maxTokens,
+        })),
+      });
+    }
+
+    return { success: true, providers: result, primaryModel };
+  } catch {
+    return { success: false, providers: [], primaryModel: '' };
+  }
+});
+
+/**
+ * Security audit: check openclaw.json file permissions + extension allowlist
+ */
+ipcMain.handle('security:check', async () => {
+  const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+  const issues: Array<{ level: 'warning' | 'info'; message: string; fix?: string }> = [];
+
+  // Check file permissions (Unix only)
+  if (process.platform !== 'win32') {
+    try {
+      const stat = fs.statSync(configPath);
+      const mode = (stat.mode & 0o777).toString(8);
+      if (mode !== '600') {
+        issues.push({
+          level: 'warning',
+          message: `openclaw.json permissions are ${mode} (should be 600)`,
+          fix: `chmod 600 ~/.openclaw/openclaw.json`,
+        });
+      }
+    } catch { /* file doesn't exist yet */ }
+  }
+
+  // Check if tools.alsoAllow is too permissive
+  try {
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const config = JSON.parse(raw);
+    const alsoAllow = config?.tools?.alsoAllow || [];
+    if (alsoAllow.includes('*') || alsoAllow.length > 20) {
+      issues.push({
+        level: 'warning',
+        message: `tools.alsoAllow has ${alsoAllow.length} entries (broad permissions)`,
+      });
+    }
+    // Check extensions directory for unknown plugins
+    const extDir = path.join(HOME, '.openclaw', 'extensions');
+    if (fs.existsSync(extDir)) {
+      const exts = fs.readdirSync(extDir).filter(d => !d.startsWith('.'));
+      const knownExtensions = ['openclaw-memory'];
+      const unknown = exts.filter(e => !knownExtensions.includes(e));
+      if (unknown.length > 0) {
+        issues.push({
+          level: 'info',
+          message: `${unknown.length} third-party extension(s): ${unknown.join(', ')}`,
+        });
+      }
+    }
+  } catch { /* ignore */ }
+
+  return { issues };
+});
+
+// --- Agents Management ---
+
+ipcMain.handle('agents:list', async () => {
+  try {
+    const output = await safeShellExecAsync('openclaw agents list --json --bindings 2>/dev/null', 8000);
+    if (output) {
+      try {
+        const parsed = JSON.parse(output);
+        const list = Array.isArray(parsed) ? parsed : (parsed.agents || [parsed]);
+        const agents = list.map((a: any) => ({
+          id: a.id || a.name || 'main',
+          name: a.identityName || a.name || a.id,
+          emoji: a.identityEmoji || '🤖',
+          model: a.model || null,
+          bindings: a.bindingDetails || (typeof a.bindings === 'number' ? [] : a.bindings) || [],
+          isDefault: a.isDefault === true || a.id === 'main',
+          workspace: a.workspace || null,
+          routes: a.routes || [],
+        }));
+        return { success: true, agents };
+      } catch { /* parse failed, try text mode */ }
+    }
+    // Fallback: default agent
+    return { success: true, agents: [{ id: 'main', name: 'Main Agent', emoji: '🦞', isDefault: true, bindings: [] }] };
+  } catch {
+    return { success: true, agents: [{ id: 'main', name: 'Main Agent', emoji: '🦞', isDefault: true, bindings: [] }] };
+  }
+});
+
+ipcMain.handle('agents:add', async (_e, name: string, model?: string) => {
+  try {
+    // Use independent workspace dir (not inside agents/ state dir)
+    const slug = name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    const wsDir = path.join(HOME, '.openclaw', 'workspaces', slug);
+    fs.mkdirSync(wsDir, { recursive: true });
+    const flags = [`--non-interactive`, `--workspace "${wsDir}"`];
+    if (model) flags.push(`--model "${model.replace(/"/g, '\\"')}"`);
+    await runAsync(`openclaw agents add "${name.replace(/"/g, '\\"')}" ${flags.join(' ')}`, 15000);
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message?.slice(0, 200) };
+  }
+});
+
+ipcMain.handle('agents:delete', async (_e, agentId: string) => {
+  if (agentId === 'main') return { success: false, error: 'Cannot delete default agent' };
+  try {
+    const output = await runAsync(`openclaw agents delete "${agentId.replace(/"/g, '\\"')}" --force --json 2>&1`, 10000);
+    return { success: true, output };
+  } catch (err: any) {
+    return { success: false, error: err.message?.slice(0, 200) };
+  }
+});
+
+ipcMain.handle('agents:set-identity', async (_e, agentId: string, name: string, emoji: string, avatar?: string, theme?: string) => {
+  try {
+    const flags: string[] = [];
+    if (name) flags.push(`--name "${name.replace(/"/g, '\\"')}"`);
+    if (emoji) flags.push(`--emoji "${emoji}"`);
+    if (avatar) flags.push(`--avatar "${avatar.replace(/"/g, '\\"')}"`);
+    if (theme) flags.push(`--theme "${theme}"`);
+    if (flags.length === 0) return { success: false, error: 'No changes' };
+    await runAsync(`openclaw agents set-identity --agent "${agentId}" ${flags.join(' ')}`, 10000);
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message?.slice(0, 200) };
+  }
+});
+
+ipcMain.handle('agents:bind', async (_e, agentId: string, binding: string) => {
+  try {
+    await runAsync(`openclaw agents bind --agent "${agentId}" --bind "${binding.replace(/"/g, '\\"')}"`, 10000);
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message?.slice(0, 200) };
+  }
+});
+
+ipcMain.handle('agents:unbind', async (_e, agentId: string, binding: string) => {
+  try {
+    await runAsync(`openclaw agents unbind --agent "${agentId}" --bind "${binding.replace(/"/g, '\\"')}"`, 10000);
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message?.slice(0, 200) };
+  }
+});
+
+/**
  * Get OpenClaw dashboard URL with auth token
  */
 ipcMain.handle('app:get-dashboard-url', async () => {
-  const output = safeShellExec('openclaw dashboard --no-open', 10000);
+  const output = await safeShellExecAsync('openclaw dashboard --no-open', 10000);
   if (!output) return { url: null };
 
-  // Parse: "Dashboard URL: http://127.0.0.1:18789/#token=xxx"
   const match = output.match(/Dashboard URL:\s*(http[^\s]+)/);
   if (match) return { url: match[1] };
 
@@ -550,13 +999,34 @@ function downloadFile(url: string, dest: string): Promise<void> {
  * Non-interactive, one message at a time, returns JSON response.
  * Streaming: read stdout line by line as response comes in.
  */
-ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string) => {
+ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, options?: { thinkingLevel?: string; model?: string; files?: string[] }) => {
   return new Promise((resolve) => {
     let stdout = '';
     const sid = sessionId || `ac-${Date.now()}`;
     const escapedMsg = message.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`');
     // Use --verbose on to get thinking/tool status events
-    const cmd = `openclaw agent --local --session-id "${sid}" -m "${escapedMsg}" --verbose on`;
+    const thinkingFlag = options?.thinkingLevel && options.thinkingLevel !== 'off'
+      ? ` --thinking ${options.thinkingLevel}` : '';
+    // Note: openclaw agent does NOT support --model flag.
+    // Model is configured in openclaw.json → agents.defaults.model (synced by store.ts syncToOpenClaw).
+    // File attachments: openclaw agent does not have --files flag either.
+    // Files are passed by prepending file context to the message.
+    // Images get a special hint so the agent knows to analyze visually.
+    let fullMsg = escapedMsg;
+    if (options?.files && options.files.length > 0) {
+      const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'];
+      const images: string[] = [];
+      const others: string[] = [];
+      for (const f of options.files) {
+        const ext = path.extname(f).toLowerCase();
+        (imageExts.includes(ext) ? images : others).push(f.replace(/"/g, '\\"'));
+      }
+      const parts: string[] = [];
+      if (images.length > 0) parts.push(`[Images to analyze: ${images.join(', ')}] (use exec tool to read or describe these image files)`);
+      if (others.length > 0) parts.push(`[Attached files: ${others.join(', ')}]`);
+      fullMsg = `${parts.join('\\n')}\\n\\n${escapedMsg}`;
+    }
+    const cmd = `openclaw agent --local --session-id "${sid}" -m "${fullMsg}" --verbose on${thinkingFlag}`;
 
     const child = spawn('/bin/bash', ['--norc', '--noprofile', '-c',
       `export PATH="${getEnhancedPath()}"; ${cmd}`
@@ -569,19 +1039,96 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string) => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, data);
     };
 
+    // Line buffer for handling partial lines across chunks
+    let lineBuffer = '';
+
+    const isNoiseLine = (line: string) => {
+      const t = line.trimStart();
+      return t.startsWith('[plugins]') || t.startsWith('[tools]') ||
+        t.startsWith('[agent/') || t.startsWith('[agents/') ||
+        t.startsWith('[diagnostic]') ||
+        t.startsWith('Registered plugin') || t.startsWith('[context-diag]') ||
+        t.startsWith('[tool]') || t.startsWith('[tool update]') ||
+        t.startsWith('[permission') || t.startsWith('[info]') ||
+        t.startsWith('[warn]') || t.startsWith('[error]') ||
+        t.startsWith('[acp-client]') || t.startsWith('[commands]') ||
+        t.startsWith('[reload]') || t.startsWith('Config warnings');
+    };
+
+    const parseStatusLine = (t: string) => {
+      // Agent lifecycle
+      if (t.includes('run agent start')) {
+        send('chat:status', { type: 'thinking' });
+        return;
+      }
+      if (t.includes('run agent end') && t.includes('isError=false')) {
+        send('chat:status', { type: 'generating' });
+        return;
+      }
+      if (t.includes('run agent end') && t.includes('isError=true')) {
+        send('chat:status', { type: 'error' });
+        return;
+      }
+
+      // Tool call events: [tool] <title> (<status>)
+      const toolMatch = t.match(/^\[tool\]\s+(.+?)\s+\((\w+)\)$/);
+      if (toolMatch) {
+        send('chat:status', { type: 'tool_call', tool: toolMatch[1], toolStatus: toolMatch[2] });
+        return;
+      }
+      // Embedded agent tool events: [agent/embedded] embedded run tool start/end: ... tool=<name> toolCallId=<id>
+      const embeddedToolStart = t.match(/embedded run tool start:.*tool=(\w+)\s+toolCallId=(\S+)/);
+      if (embeddedToolStart) {
+        send('chat:status', { type: 'tool_call', tool: embeddedToolStart[1], toolStatus: 'running', toolId: embeddedToolStart[2] });
+        return;
+      }
+      const embeddedToolEnd = t.match(/embedded run tool end:.*tool=(\w+)\s+toolCallId=(\S+)/);
+      if (embeddedToolEnd) {
+        send('chat:status', { type: 'tool_update', toolId: embeddedToolEnd[2], toolStatus: 'completed' });
+        return;
+      }
+      // Tool update: [tool update] <id>: <status>
+      const toolUpdateMatch = t.match(/^\[tool update\]\s+(.+?):\s+(.+)$/);
+      if (toolUpdateMatch) {
+        send('chat:status', { type: 'tool_update', toolId: toolUpdateMatch[1], toolStatus: toolUpdateMatch[2] });
+        return;
+      }
+      // Permission: [permission auto-approved] <tool> (<kind>)
+      const permMatch = t.match(/^\[permission (?:auto-approved|approved)\]\s+(.+?)(?:\s+\(.+\))?$/);
+      if (permMatch) {
+        send('chat:status', { type: 'tool_call', tool: permMatch[1], toolStatus: 'approved' });
+        return;
+      }
+
+      // Awareness memory events
+      if (t.includes('Awareness auto-recall injected')) {
+        send('chat:status', { type: 'tool_call', tool: 'Awareness Memory', toolStatus: 'recalling' });
+      } else if (t.includes('Awareness auto-capture')) {
+        send('chat:status', { type: 'tool_call', tool: 'Awareness Memory', toolStatus: 'saving' });
+      } else if (t.includes('Awareness perception')) {
+        send('chat:status', { type: 'tool_call', tool: 'Awareness Perception', toolStatus: 'cached' });
+      }
+    };
+
     child.stdout?.on('data', (data: Buffer) => {
       const chunk = data.toString();
       stdout += chunk;
 
-      for (const line of chunk.split('\n')) {
+      // Handle line buffering for proper parsing
+      const combined = lineBuffer + chunk;
+      const parts = combined.split('\n');
+      // Last element might be incomplete — buffer it
+      lineBuffer = parts.pop() || '';
+
+      for (const line of parts) {
         const t = line.trim();
-        // Parse status events from verbose output
-        if (t.includes('run agent start')) {
-          send('chat:status', { type: 'thinking' });
-        } else if (t.includes('run agent end') && t.includes('isError=false')) {
-          send('chat:status', { type: 'generating' });
-        } else if (t.includes('run agent end') && t.includes('isError=true')) {
-          send('chat:status', { type: 'error' });
+        if (!t) continue;
+
+        if (isNoiseLine(line)) {
+          parseStatusLine(t);
+        } else {
+          // Real content — stream it to frontend
+          send('chat:stream', line + '\n');
         }
       }
     });
@@ -589,14 +1136,14 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string) => {
     child.stderr?.on('data', () => { /* ignore stderr */ });
 
     child.on('exit', () => {
-      // Filter out ALL log/diagnostic lines, keep only the actual response
-      const isNoise = (line: string) => {
-        const t = line.trimStart();
-        return t.startsWith('[plugins]') || t.startsWith('[tools]') ||
-          t.startsWith('[agent/') || t.startsWith('[diagnostic]') ||
-          t.startsWith('Registered plugin') || t.startsWith('[context-diag]');
-      };
-      const cleanText = stdout.split('\n').filter(l => !isNoise(l)).join('\n').trim();
+      // Flush remaining buffer
+      if (lineBuffer.trim() && !isNoiseLine(lineBuffer)) {
+        send('chat:stream', lineBuffer);
+      }
+      send('chat:stream-end', {});
+
+      // Also resolve with full clean text as fallback
+      const cleanText = stdout.split('\n').filter(l => !isNoiseLine(l)).join('\n').trim();
       resolve({ success: true, text: cleanText || 'No response', sessionId: sid });
     });
 
@@ -612,73 +1159,227 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string) => {
 // --- Channel Configuration ---
 
 ipcMain.handle('channel:save', async (_e, channelId: string, config: Record<string, string>) => {
-  const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
   try {
-    let existing: any = {};
-    try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+    // Feishu is plugin-based, write directly to openclaw.json
+    if (channelId === 'feishu') {
+      const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+      let existing: any = {};
+      try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+      if (!existing.channels) existing.channels = {};
+      existing.channels.feishu = { ...existing.channels.feishu, ...config, enabled: true };
+      fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
+      return { success: true };
+    }
 
-    if (!existing.channels) existing.channels = {};
-    existing.channels[channelId] = {
-      ...existing.channels[channelId],
-      ...config,
-      enabled: true,
+    // For Google Chat and Matrix: write config directly to openclaw.json (complex config structure)
+    if (channelId === 'google-chat' || channelId === 'googlechat' || channelId === 'matrix') {
+      const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+      let existing: any = {};
+      try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+      if (!existing.channels) existing.channels = {};
+      const key = channelId === 'google-chat' ? 'googlechat' : channelId;
+      existing.channels[key] = { ...existing.channels[key], ...config, enabled: true };
+      fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
+      return { success: true };
+    }
+
+    // All other channels: use `openclaw channels add` CLI
+    const buildArgs = (cfg: Record<string, string>): string[] => {
+      const args = [`--channel ${channelId}`];
+      const esc = (v: string) => v.replace(/"/g, '\\"');
+      if (cfg.token) args.push(`--token "${esc(cfg.token)}"`);
+      if (cfg.botToken) args.push(`--bot-token "${esc(cfg.botToken)}"`);
+      if (cfg.appToken) args.push(`--app-token "${esc(cfg.appToken)}"`);
+      return args;
     };
 
-    fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: String(err) };
+    const addCmd = `openclaw channels add ${buildArgs(config).join(' ')} 2>&1`;
+    try {
+      await runAsync(addCmd, 15000);
+      return { success: true };
+    } catch (firstErr: any) {
+      // If "already exists", remove + re-add
+      const msg = firstErr.message || '';
+      if (msg.includes('already') || msg.includes('exists')) {
+        try {
+          await runAsync(`openclaw channels remove --channel ${channelId} 2>&1`, 10000);
+          await runAsync(addCmd, 15000);
+          return { success: true };
+        } catch (retryErr: any) {
+          return { success: false, error: retryErr.message?.slice(0, 300) };
+        }
+      }
+      return { success: false, error: msg.slice(0, 300) };
+    }
+  } catch (err: any) {
+    return { success: false, error: (err.message || String(err)).slice(0, 300) };
   }
 });
 
 ipcMain.handle('channel:test', async (_e, channelId: string) => {
-  // Test channel connectivity by checking openclaw status
-  const output = safeShellExec(`openclaw channels check ${channelId} 2>&1 || openclaw status`, 10000);
-  return { success: !!output, output };
+  // Step 1: Verify channel config in openclaw.json
+  try {
+    const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+    const existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const channelConfig = existing?.channels?.[channelId];
+    if (!channelConfig || !channelConfig.enabled) {
+      return { success: false, error: 'Channel not configured' };
+    }
+    const hasCredentials = channelConfig.token || channelConfig.appId || channelConfig.webhook
+      || channelConfig.bot_token || channelConfig.signal_number || channelConfig.db_path
+      || channelConfig.homeserver || channelConfig.webhook_url;
+    if (!hasCredentials) {
+      return { success: false, error: 'No credentials found' };
+    }
+
+    // Step 2: Check gateway status (channels need gateway running)
+    const gwStatus = await safeShellExecAsync('openclaw channels status 2>&1', 8000);
+    const gwRunning = gwStatus && (gwStatus.includes('running') || gwStatus.includes('active'));
+
+    // Step 3: Try verify via openclaw channels list
+    const listOutput = await safeShellExecAsync('openclaw channels list 2>&1', 8000);
+    const isListed = listOutput && listOutput.toLowerCase().includes(channelId);
+
+    if (isListed && gwRunning) {
+      return { success: true, output: `${channelId}: configured and gateway active` };
+    } else if (isListed) {
+      return { success: true, output: `${channelId}: configured. Start Gateway to activate.` };
+    }
+    // Config validated but not in openclaw list — still OK (credentials saved)
+    return { success: true, output: `${channelId}: credentials saved. Start Gateway to connect.` };
+  } catch {
+    return { success: false, error: 'Could not read channel configuration' };
+  }
+});
+
+// Read a channel's saved config (for pre-filling edit wizard)
+ipcMain.handle('channel:read-config', async (_e, channelId: string) => {
+  try {
+    const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+    const existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const channelConfig = existing?.channels?.[channelId];
+    if (channelConfig) {
+      return { success: true, config: channelConfig };
+    }
+    return { success: false };
+  } catch {
+    return { success: false };
+  }
+});
+
+// One-click channel setup: backend handles install, config, and login automatically
+ipcMain.handle('channel:setup', async (_e, channelId: string) => {
+  try {
+    // WeChat: plugin-based, install first then login
+    if (channelId === 'wechat') {
+      try { await runAsync('openclaw plugins install "@tencent-weixin/openclaw-weixin" 2>&1', 30000); } catch { /* may already be installed */ }
+      const loginOutput = await runAsync('openclaw channels login --channel openclaw-weixin 2>&1', 60000);
+      return { success: true, output: loginOutput || 'WeChat connected. Scan QR code with WeChat.' };
+    }
+
+    // Signal: auto-install signal-cli if needed, add channel with defaults, then QR link
+    if (channelId === 'signal') {
+      // Try add with defaults — OpenClaw handles signal-cli detection
+      try { await runAsync('openclaw channels add --channel signal 2>&1', 15000); } catch { /* may already exist */ }
+      const loginOutput = await runAsync('openclaw channels login --channel signal 2>&1', 60000);
+      return { success: true, output: loginOutput || 'Signal linked. Scan QR code with Signal app.' };
+    }
+
+    // iMessage: auto-detect paths, just needs add — no login step
+    if (channelId === 'imessage') {
+      await runAsync('openclaw channels add --channel imessage 2>&1', 15000);
+      return { success: true, output: 'iMessage connected. Grant Full Disk Access if prompted.' };
+    }
+
+    // Generic: add + login (WhatsApp etc)
+    try { await safeShellExecAsync(`openclaw channels add --channel ${channelId} 2>&1`, 10000); } catch { /* may already exist */ }
+    const loginOutput = await runAsync(`openclaw channels login --channel ${channelId} 2>&1`, 60000);
+    return { success: true, output: loginOutput || 'Channel setup complete.' };
+  } catch (err: any) {
+    const msg = err.message || '';
+    // Login timeout = QR still waiting, but channel was added successfully
+    if (msg.includes('timeout') || msg.includes('Timeout')) {
+      return { success: true, output: 'Channel added. Scan QR code to finish.' };
+    }
+    return { success: false, error: msg.slice(0, 300) };
+  }
+});
+
+// Read configured channels from openclaw.json
+ipcMain.handle('channel:list-configured', async () => {
+  try {
+    const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+    const existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const channels = existing?.channels || {};
+    const configured: string[] = [];
+    for (const [id, cfg] of Object.entries(channels)) {
+      if ((cfg as any)?.enabled) configured.push(id);
+    }
+    return { success: true, configured };
+  } catch {
+    return { success: true, configured: [] };
+  }
+});
+
+// Dynamically detect supported channels from OpenClaw
+ipcMain.handle('channel:list-supported', async () => {
+  try {
+    const output = await safeShellExecAsync('openclaw channels list 2>/dev/null', 8000);
+    if (output) {
+      // Parse output lines — each line like "telegram default: configured, enabled" or "discord: not configured"
+      const channels: string[] = [];
+      for (const line of output.split('\n')) {
+        const match = line.match(/^\s*(\w[\w-]*)/);
+        if (match && !line.startsWith(' ') && match[1] !== 'Channels' && match[1] !== 'No') {
+          channels.push(match[1].toLowerCase());
+        }
+      }
+      if (channels.length > 0) return { success: true, channels };
+    }
+    return { success: false, channels: [] };
+  } catch {
+    return { success: false, channels: [] };
+  }
 });
 
 // --- Cron Management ---
 
 ipcMain.handle('cron:list', async () => {
-  const output = safeShellExec('openclaw cron list --json 2>/dev/null || openclaw cron list', 10000);
+  const output = await safeShellExecAsync('openclaw cron list --json 2>/dev/null || openclaw cron list', 10000);
   if (!output) return { jobs: [], error: 'OpenClaw not available' };
 
-  // Try to parse JSON output, fall back to text
   try {
     return { jobs: JSON.parse(output) };
   } catch {
-    // Parse text format
     const lines = output.split('\n').filter(l => l.trim());
     return { jobs: lines, raw: true };
   }
 });
 
 ipcMain.handle('cron:add', async (_e, expression: string, command: string) => {
-  const result = safeShellExec(`openclaw cron add "${expression}" "${command}"`, 10000);
+  const result = await safeShellExecAsync(`openclaw cron add "${expression}" "${command}"`, 10000);
   return { success: !!result, output: result };
 });
 
 ipcMain.handle('cron:remove', async (_e, id: string) => {
-  const result = safeShellExec(`openclaw cron remove "${id}"`, 10000);
+  const result = await safeShellExecAsync(`openclaw cron remove "${id}"`, 10000);
   return { success: !!result, output: result };
 });
 
 // --- Gateway Management ---
 
 ipcMain.handle('gateway:status', async () => {
-  const output = safeShellExec('openclaw status', 5000);
+  const output = await safeShellExecAsync('openclaw status', 5000);
   const isRunning = output?.includes('running') || false;
   return { running: isRunning, output };
 });
 
 ipcMain.handle('gateway:start', async () => {
   try {
-    // Start gateway in background
     const child = runSpawn('openclaw', ['up'], { detached: true, stdio: 'ignore' });
     child.unref();
-    // Wait a bit and check
     await sleep(3000);
-    const status = safeShellExec('openclaw status', 5000);
+    const status = await safeShellExecAsync('openclaw status', 5000);
     return { success: true, output: status };
   } catch (err) {
     return { success: false, error: String(err) };
@@ -686,12 +1387,12 @@ ipcMain.handle('gateway:start', async () => {
 });
 
 ipcMain.handle('gateway:stop', async () => {
-  const result = safeShellExec('openclaw stop', 10000);
+  const result = await safeShellExecAsync('openclaw stop', 10000);
   return { success: true, output: result };
 });
 
 ipcMain.handle('gateway:restart', async () => {
-  safeShellExec('openclaw stop', 10000);
+  await safeShellExecAsync('openclaw stop', 10000);
   await sleep(1000);
   const child = runSpawn('openclaw', ['up'], { detached: true, stdio: 'ignore' });
   child.unref();
@@ -702,8 +1403,240 @@ ipcMain.handle('gateway:restart', async () => {
 // --- Log Viewer ---
 
 ipcMain.handle('logs:recent', async () => {
-  const output = safeShellExec('openclaw logs --lines 100 2>/dev/null || echo "No logs available"', 10000);
+  const output = await safeShellExecAsync('openclaw logs --lines 100 2>/dev/null || echo "No logs available"', 10000);
   return { logs: output || 'No logs available' };
+});
+
+// --- Skills / ClawHub ---
+
+const CLAWHUB_API = 'https://clawhub.ai/api/v1';
+const WORKSPACE_DIR = path.join(HOME, '.openclaw', 'workspace');
+const LOCK_FILE = path.join(WORKSPACE_DIR, '.clawhub', 'lock.json');
+
+ipcMain.handle('skill:list-installed', async () => {
+  try {
+    const raw = fs.readFileSync(LOCK_FILE, 'utf8');
+    const lock = JSON.parse(raw);
+    return { success: true, skills: lock.skills || {} };
+  } catch {
+    return { success: true, skills: {} };
+  }
+});
+
+ipcMain.handle('skill:explore', async () => {
+  // ClawHub has no "browse all" — search popular keywords to build a recommendation list
+  const keywords = ['memory', 'coding', 'search', 'automation', 'file', 'git', 'test'];
+  const seen = new Set<string>();
+  const all: any[] = [];
+  for (const kw of keywords) {
+    try {
+      const res = await fetchJson(`${CLAWHUB_API}/search?q=${kw}&limit=8`);
+      const results = res?.results || [];
+      for (const r of results) {
+        if (!seen.has(r.slug)) { seen.add(r.slug); all.push(r); }
+      }
+    } catch { /* skip */ }
+  }
+  return { success: true, skills: all };
+});
+
+ipcMain.handle('skill:search', async (_e, query: string) => {
+  try {
+    const res = await fetchJson(`${CLAWHUB_API}/search?q=${encodeURIComponent(query)}&limit=20`);
+    return { success: true, results: res?.results || [] };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('skill:detail', async (_e, slug: string) => {
+  try {
+    const res = await fetchJson(`${CLAWHUB_API}/skills/${encodeURIComponent(slug)}`);
+    return { success: true, skill: res?.skill || null };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('skill:install', async (_e, slug: string) => {
+  try {
+    await runAsync(`npx -y clawhub@latest install ${slug} --force`, 60000);
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message?.slice(0, 300) };
+  }
+});
+
+ipcMain.handle('skill:uninstall', async (_e, slug: string) => {
+  try {
+    await runAsync(`npx -y clawhub@latest uninstall ${slug}`, 30000);
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message?.slice(0, 300) };
+  }
+});
+
+// --- Skill Config ---
+
+ipcMain.handle('skill:get-config', async (_e, slug: string) => {
+  try {
+    const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const skillConfig = config.skills?.[slug]?.config || {};
+    return { success: true, config: skillConfig };
+  } catch (err: any) {
+    return { success: false, error: err.message, config: {} };
+  }
+});
+
+ipcMain.handle('skill:save-config', async (_e, slug: string, newConfig: Record<string, unknown>) => {
+  try {
+    const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+    let config: any = {};
+    try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+    if (!config.skills) config.skills = {};
+    if (!config.skills[slug]) config.skills[slug] = {};
+    config.skills[slug].config = { ...config.skills[slug].config, ...newConfig };
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+
+// --- Plugins ---
+
+ipcMain.handle('plugins:list', async () => {
+  try {
+    const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const entries = config.plugins?.entries || [];
+    return { success: true, entries };
+  } catch (err: any) {
+    return { success: false, error: err.message, entries: [] };
+  }
+});
+
+ipcMain.handle('plugins:toggle', async (_e, name: string, enabled: boolean) => {
+  try {
+    const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+    let config: any = {};
+    try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+    if (!config.plugins) config.plugins = {};
+    if (!config.plugins.entries) config.plugins.entries = {};
+    if (config.plugins.entries[name]) {
+      config.plugins.entries[name].enabled = enabled;
+    } else {
+      config.plugins.entries[name] = { enabled };
+    }
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+
+// --- Hooks ---
+
+ipcMain.handle('hooks:list', async () => {
+  try {
+    const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const hooks = config.hooks || {};
+    return { success: true, hooks };
+  } catch (err: any) {
+    return { success: false, error: err.message, hooks: {} };
+  }
+});
+
+ipcMain.handle('hooks:toggle', async (_e, hookName: string, enabled: boolean) => {
+  try {
+    const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+    let config: any = {};
+    try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+    if (!config.hooks) config.hooks = {};
+    if (config.hooks[hookName]) {
+      config.hooks[hookName].enabled = enabled;
+    } else {
+      config.hooks[hookName] = { enabled };
+    }
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+
+/** Simple JSON GET fetch using Node.js https */
+function fetchJson(url: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const mod = url.startsWith('https') ? https : http;
+    mod.get(url, { timeout: 10000 }, (res) => {
+      let data = '';
+      res.on('data', (chunk: string) => { data += chunk; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch { reject(new Error('Invalid JSON response')); }
+      });
+    }).on('error', reject).on('timeout', function(this: any) { this.destroy(); reject(new Error('Request timeout')); });
+  });
+}
+
+// --- Permissions & Workspace ---
+
+ipcMain.handle('permissions:get', async () => {
+  try {
+    const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const tools = config.tools || {};
+    return {
+      success: true,
+      profile: tools.profile || 'default',
+      alsoAllow: tools.alsoAllow || [],
+      denied: tools.denied || [],
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('permissions:update', async (_e, changes: { alsoAllow?: string[]; denied?: string[] }) => {
+  try {
+    const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    if (!config.tools) config.tools = {};
+    if (changes.alsoAllow !== undefined) config.tools.alsoAllow = changes.alsoAllow;
+    if (changes.denied !== undefined) config.tools.denied = changes.denied;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('workspace:read-file', async (_e, filename: string) => {
+  // Only allow reading known workspace files
+  const allowed = ['SOUL.md', 'USER.md', 'IDENTITY.md', 'TOOLS.md'];
+  if (!allowed.includes(filename)) return { success: false, error: 'File not allowed' };
+  try {
+    const filePath = path.join(WORKSPACE_DIR, filename);
+    if (!fs.existsSync(filePath)) return { success: true, content: '', exists: false };
+    return { success: true, content: fs.readFileSync(filePath, 'utf8'), exists: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('workspace:write-file', async (_e, filename: string, content: string) => {
+  const allowed = ['SOUL.md', 'USER.md', 'IDENTITY.md', 'TOOLS.md'];
+  if (!allowed.includes(filename)) return { success: false, error: 'File not allowed' };
+  try {
+    const filePath = path.join(WORKSPACE_DIR, filename);
+    fs.writeFileSync(filePath, content);
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
 });
 
 // --- Memory API (local daemon + cloud compatible) ---
@@ -758,9 +1691,199 @@ ipcMain.handle('memory:get-perception', async () => {
   return callMcp('awareness_lookup', { type: 'perception' });
 });
 
+ipcMain.handle('memory:get-daily-summary', async () => {
+  // Get today's knowledge cards and recent activity for a daily digest
+  const cards = await callMcp('awareness_lookup', { type: 'knowledge', limit: 10 });
+  const tasks = await callMcp('awareness_lookup', { type: 'tasks', limit: 5, status: 'open' });
+  return { cards, tasks };
+});
+
+// --- Config Import/Export ---
+
+ipcMain.handle('config:export', async () => {
+  const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+  if (!fs.existsSync(configPath)) return { success: false, error: 'No config found' };
+
+  const result = await dialog.showSaveDialog(mainWindow!, {
+    title: 'Export Configuration',
+    defaultPath: 'awareness-config.json',
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  });
+
+  if (result.canceled || !result.filePath) return { success: false, error: 'Cancelled' };
+
+  try {
+    const config = fs.readFileSync(configPath, 'utf8');
+    // Also bundle localStorage-based settings
+    const exportData = {
+      _exportVersion: 1,
+      _exportDate: new Date().toISOString(),
+      openclawConfig: JSON.parse(config),
+    };
+    fs.writeFileSync(result.filePath, JSON.stringify(exportData, null, 2));
+    return { success: true, path: result.filePath };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('config:import', async () => {
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    title: 'Import Configuration',
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+    properties: ['openFile'],
+  });
+
+  if (result.canceled || !result.filePaths[0]) return { success: false, error: 'Cancelled' };
+
+  try {
+    const raw = fs.readFileSync(result.filePaths[0], 'utf8');
+    const data = JSON.parse(raw);
+
+    // Validate format
+    if (!data.openclawConfig) return { success: false, error: 'Invalid config file format' };
+
+    // Write openclaw.json (deep merge with existing)
+    const configDir = path.join(HOME, '.openclaw');
+    if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+    const configPath = path.join(configDir, 'openclaw.json');
+
+    let existing: Record<string, unknown> = {};
+    try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+
+    const merged = { ...existing, ...data.openclawConfig };
+    // Deep merge providers
+    if (data.openclawConfig.providers && existing.providers) {
+      merged.providers = { ...(existing.providers as Record<string, unknown>), ...data.openclawConfig.providers };
+    }
+
+    fs.writeFileSync(configPath, JSON.stringify(merged, null, 2));
+    return { success: true, config: data.openclawConfig };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+
+// --- File Preview ---
+
+ipcMain.handle('file:preview', async (_e, filePath: string) => {
+  try {
+    const stat = fs.statSync(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    const isImage = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'].includes(ext);
+
+    if (isImage) {
+      // Return base64 data URI for images (limit 5MB)
+      if (stat.size > 5 * 1024 * 1024) return { type: 'image', error: 'Image too large (>5MB)' };
+      const data = fs.readFileSync(filePath);
+      const mime = ext === '.svg' ? 'image/svg+xml' : ext === '.png' ? 'image/png' : ext === '.gif' ? 'image/gif' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+      return { type: 'image', dataUri: `data:${mime};base64,${data.toString('base64')}`, size: stat.size };
+    }
+
+    // Text files: read first 20 lines (limit 1MB)
+    if (stat.size > 1024 * 1024) return { type: 'text', content: '(File too large for preview)', size: stat.size, lines: 0 };
+    const content = fs.readFileSync(filePath, 'utf8');
+    const lines = content.split('\n');
+    const preview = lines.slice(0, 20).join('\n');
+    return { type: 'text', content: preview, size: stat.size, lines: lines.length, truncated: lines.length > 20 };
+  } catch (err: any) {
+    return { type: 'error', error: err.message };
+  }
+});
+
+// File picker dialog (for Google Chat service account key, etc.)
+ipcMain.handle('file:select', async (_e: any, options?: { filters?: Array<{ name: string; extensions: string[] }> }) => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openFile'],
+    filters: options?.filters || [{ name: 'All Files', extensions: ['*'] }],
+  });
+  if (result.canceled || result.filePaths.length === 0) return { filePath: null };
+  return { filePath: result.filePaths[0] };
+});
+
+// --- System Tray ---
+
+function createTray() {
+  const iconPath = path.join(__dirname, isDev ? '../resources/icon.png' : '../../resources/icon.png');
+  let trayIcon;
+  try {
+    trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 18, height: 18 });
+    trayIcon.setTemplateImage(true); // macOS dark/light mode support
+  } catch {
+    return; // Skip tray if icon not found
+  }
+
+  tray = new Tray(trayIcon);
+  tray.setToolTip('AwarenessClaw');
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Show AwarenessClaw',
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+        } else {
+          createWindow();
+        }
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'New Chat',
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+          mainWindow.webContents.send('tray:new-chat');
+        }
+      },
+    },
+    {
+      label: 'Open Dashboard',
+      click: () => {
+        shell.openExternal('http://localhost:18789');
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit',
+      accelerator: 'CmdOrCtrl+Q',
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      },
+    },
+  ]);
+
+  tray.setContextMenu(contextMenu);
+
+  // Click tray icon to show window (macOS convention)
+  tray.on('click', () => {
+    if (mainWindow) {
+      if (mainWindow.isVisible()) {
+        mainWindow.focus();
+      } else {
+        mainWindow.show();
+      }
+    } else {
+      createWindow();
+    }
+  });
+}
+
 // --- App Lifecycle ---
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+  if (process.platform === 'darwin') {
+    createTray();
+  }
+});
+
+app.on('before-quit', () => {
+  isQuitting = true;
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

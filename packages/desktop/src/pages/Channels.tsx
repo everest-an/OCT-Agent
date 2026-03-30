@@ -1,199 +1,366 @@
 import { useState, useEffect } from 'react';
-import { ChevronRight, ChevronLeft, Check, ExternalLink, Copy, X, Loader2 } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Check, ExternalLink, X, Loader2 } from 'lucide-react';
+import { useI18n } from '../lib/i18n';
+import PasswordInput from '../components/PasswordInput';
 
 interface Channel {
   id: string;
-  name: string;
   emoji: string;
   connected: boolean;
-  status?: string;
-  description: string;
+  supported: boolean;
 }
 
 const CHANNELS: Channel[] = [
-  { id: 'local', name: '本地聊天', emoji: '💬', connected: true, status: '内置', description: '内置的本地聊天界面' },
-  { id: 'telegram', name: 'Telegram', emoji: '📱', connected: false, description: '最流行的即时通讯，配置最简单' },
-  { id: 'whatsapp', name: 'WhatsApp', emoji: '💚', connected: false, description: '全球最大的即时通讯应用' },
-  { id: 'slack', name: 'Slack', emoji: '💼', connected: false, description: '团队协作工具' },
-  { id: 'discord', name: 'Discord', emoji: '🎮', connected: false, description: '游戏和社区' },
-  { id: 'feishu', name: '飞书 / Lark', emoji: '🐦', connected: false, description: '字节跳动企业通讯' },
-  { id: 'signal', name: 'Signal', emoji: '🔒', connected: false, description: '端到端加密通讯' },
-  { id: 'imessage', name: 'iMessage', emoji: '🍎', connected: false, description: 'Apple 生态（仅 macOS）' },
-  { id: 'google-chat', name: 'Google Chat', emoji: '💬', connected: false, description: 'Google Workspace' },
+  { id: 'local', emoji: '💬', connected: true, supported: true },
+  { id: 'telegram', emoji: '📱', connected: false, supported: true },
+  { id: 'discord', emoji: '🎮', connected: false, supported: true },
+  { id: 'whatsapp', emoji: '💚', connected: false, supported: true },
+  { id: 'wechat', emoji: '💬', connected: false, supported: true },
+  { id: 'slack', emoji: '💼', connected: false, supported: true },
+  { id: 'signal', emoji: '🔒', connected: false, supported: true },
+  { id: 'imessage', emoji: '🍎', connected: false, supported: true },
+  { id: 'feishu', emoji: '🐦', connected: false, supported: true },
+  { id: 'line', emoji: '🟢', connected: false, supported: true },
+  { id: 'matrix', emoji: '🔷', connected: false, supported: true },
+  { id: 'google-chat', emoji: '💼', connected: false, supported: true },
 ];
 
-type WizardStep = 'intro' | 'token' | 'test' | 'done';
+type WizardStep = 'intro' | 'token' | 'test';
+
+// Channels where user just clicks "Connect" — no credentials needed
+const ONE_CLICK_CHANNELS = ['whatsapp', 'wechat', 'signal', 'imessage'];
 
 export default function Channels() {
+  const { t } = useI18n();
   const [activeWizard, setActiveWizard] = useState<string | null>(null);
   const [wizardStep, setWizardStep] = useState<WizardStep>('intro');
+  // Simple token (Telegram, Discord, LINE)
   const [tokenInput, setTokenInput] = useState('');
+  // Slack
+  const [slackBotToken, setSlackBotToken] = useState('');
+  const [slackAppToken, setSlackAppToken] = useState('');
+  // Feishu
+  const [feishuAppId, setFeishuAppId] = useState('');
+  const [feishuAppSecret, setFeishuAppSecret] = useState('');
+  // Matrix (like a login form)
+  const [matrixServer, setMatrixServer] = useState('');
+  const [matrixUser, setMatrixUser] = useState('');
+  const [matrixPass, setMatrixPass] = useState('');
+  // Google Chat (file path selected via file picker)
+  const [gchatKeyFile, setGchatKeyFile] = useState('');
+
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  const [testError, setTestError] = useState<string | null>(null);
   const [configuredChannels, setConfiguredChannels] = useState<Set<string>>(new Set());
+  const [channels, setChannels] = useState<Channel[]>(CHANNELS);
 
-  // Check which channels are configured in openclaw.json
-  useEffect(() => {
-    if (window.electronAPI) {
-      (window.electronAPI as any).readExistingConfig().then((result: any) => {
-        // Mark channels that have config
-        const configured = new Set<string>();
-        configured.add('local'); // Local chat is always available
-        // Future: parse openclaw.json channels section
-        setConfiguredChannels(configured);
-      });
+  const loadConfiguredChannels = async () => {
+    if (!window.electronAPI) return;
+    try {
+      const result = await (window.electronAPI as any).channelListConfigured();
+      const configured = new Set<string>(result.configured || []);
+      configured.add('local');
+      setConfiguredChannels(configured);
+    } catch {
+      setConfiguredChannels(new Set(['local']));
     }
-  }, []);
+    try {
+      const supported = await (window.electronAPI as any).channelListSupported?.();
+      if (supported?.success && supported.channels?.length > 0) {
+        const knownIds = new Set(CHANNELS.map(c => c.id));
+        const extra: Channel[] = [];
+        for (const ch of supported.channels) {
+          if (!knownIds.has(ch)) extra.push({ id: ch, emoji: '💬', connected: false, supported: true });
+        }
+        if (extra.length > 0) setChannels([...CHANNELS, ...extra]);
+      }
+    } catch { /* fallback */ }
+  };
 
-  const openWizard = (channelId: string) => {
+  useEffect(() => { loadConfiguredChannels(); }, []);
+
+  const openWizard = async (channelId: string) => {
     setActiveWizard(channelId);
     setWizardStep('intro');
-    setTokenInput('');
-    setTestStatus('idle');
-  };
+    setTokenInput(''); setSlackBotToken(''); setSlackAppToken('');
+    setFeishuAppId(''); setFeishuAppSecret('');
+    setMatrixServer(''); setMatrixUser(''); setMatrixPass('');
+    setGchatKeyFile('');
+    setTestStatus('idle'); setTestError(null);
 
-  const closeWizard = () => {
-    setActiveWizard(null);
-  };
-
-  const handleTest = async () => {
-    if (!activeWizard || !tokenInput) return;
-    setTestStatus('testing');
-
-    // Save channel config to openclaw.json
-    if (window.electronAPI) {
-      const configMap: Record<string, Record<string, string>> = {
-        telegram: { token: tokenInput },
-        discord: { token: tokenInput },
-        slack: { token: tokenInput },
-        feishu: { appId: tokenInput.split(':')[0] || tokenInput, appSecret: tokenInput.split(':')[1] || '' },
-      };
-      const config = configMap[activeWizard] || { token: tokenInput };
-      const saveResult = await (window.electronAPI as any).channelSave(activeWizard, config);
-
-      if (saveResult.success) {
-        // Test connection
-        const testResult = await (window.electronAPI as any).channelTest(activeWizard);
-        setTestStatus(testResult.success ? 'success' : 'error');
-      } else {
-        setTestStatus('error');
-      }
-    } else {
-      // Dev mode: simulate
-      setTimeout(() => {
-        setTestStatus(tokenInput.length > 10 ? 'success' : 'error');
-      }, 1500);
+    // Pre-fill if already configured
+    if (window.electronAPI && configuredChannels.has(channelId)) {
+      try {
+        const res = await (window.electronAPI as any).channelReadConfig(channelId);
+        if (res?.success && res.config) {
+          if (channelId === 'feishu') { setFeishuAppId(res.config.appId || ''); setFeishuAppSecret(res.config.appSecret || ''); }
+          else if (channelId === 'slack') { setSlackBotToken(res.config.botToken || res.config.bot_token || ''); setSlackAppToken(res.config.appToken || res.config.app_token || ''); }
+          else if (channelId === 'matrix') { setMatrixServer(res.config.homeserver || ''); setMatrixUser(res.config.userId || res.config.user_id || ''); }
+          else if (channelId === 'google-chat') { setGchatKeyFile(res.config.serviceAccountFile || ''); }
+          else if (res.config.token) { setTokenInput(res.config.token); }
+        }
+      } catch { /* start fresh */ }
     }
   };
 
-  const getTelegramGuide = () => (
-    <div className="space-y-4 text-sm">
-      <div className="flex items-start gap-3 p-3 bg-slate-800/50 rounded-lg">
-        <span className="text-brand-400 font-bold">1</span>
-        <div>
-          <p className="font-medium">打开 Telegram，搜索 <span className="text-brand-400">@BotFather</span></p>
-          <p className="text-slate-400">这是 Telegram 官方的机器人创建工具</p>
-        </div>
-      </div>
-      <div className="flex items-start gap-3 p-3 bg-slate-800/50 rounded-lg">
-        <span className="text-brand-400 font-bold">2</span>
-        <div>
-          <p className="font-medium">发送 <span className="text-brand-400">/newbot</span></p>
-          <p className="text-slate-400">按提示给机器人起一个名字和用户名</p>
-        </div>
-      </div>
-      <div className="flex items-start gap-3 p-3 bg-slate-800/50 rounded-lg">
-        <span className="text-brand-400 font-bold">3</span>
-        <div>
-          <p className="font-medium">复制获得的 <span className="text-brand-400">Token</span></p>
-          <p className="text-slate-400">格式类似：123456789:ABCdefGHI...</p>
-        </div>
-      </div>
-    </div>
-  );
+  const closeWizard = () => { setActiveWizard(null); loadConfiguredChannels(); };
 
-  const getWhatsAppGuide = () => (
-    <div className="space-y-4 text-sm text-center">
-      <div className="w-48 h-48 mx-auto bg-white rounded-2xl flex items-center justify-center">
-        <span className="text-slate-400 text-xs">QR Code 将在此显示</span>
-      </div>
-      <div className="space-y-2 text-left">
-        <div className="flex items-start gap-3 p-3 bg-slate-800/50 rounded-lg">
-          <span className="text-brand-400 font-bold">1</span>
-          <p>打开 WhatsApp → <span className="text-brand-400">设置</span> → <span className="text-brand-400">关联设备</span></p>
-        </div>
-        <div className="flex items-start gap-3 p-3 bg-slate-800/50 rounded-lg">
-          <span className="text-brand-400 font-bold">2</span>
-          <p>扫描上方二维码</p>
-        </div>
-      </div>
-    </div>
-  );
-
-  const getGenericGuide = (channelId: string) => {
-    const guides: Record<string, string> = {
-      slack: '需要创建 Slack App 并获取 Bot Token。',
-      discord: '需要在 Discord Developer Portal 创建 Bot 并获取 Token。',
-      feishu: '需要在飞书开放平台创建自建应用并获取 AppID 和 AppSecret。',
-      signal: '需要安装 signal-cli 并关联你的 Signal 账号。',
-      imessage: '仅支持 macOS，需要 BlueBubbles 服务。',
-      'google-chat': '需要在 Google Cloud 创建 Chat API 应用。',
-    };
-    return (
-      <div className="p-4 bg-slate-800/50 rounded-xl">
-        <p className="text-sm text-slate-300">{guides[channelId] || '按照平台文档配置。'}</p>
-        <button
-          onClick={() => window.electronAPI?.openExternal(`https://docs.openclaw.ai/channels/${channelId}`)}
-          className="mt-3 flex items-center gap-1.5 text-sm text-brand-400 hover:text-brand-300"
-        >
-          <ExternalLink size={14} />
-          查看详细教程
-        </button>
-      </div>
-    );
+  // Build config for save — only the essentials, backend handles defaults
+  const buildConfig = (): Record<string, string> | null => {
+    if (!activeWizard) return null;
+    switch (activeWizard) {
+      case 'feishu': return (feishuAppId && feishuAppSecret) ? { appId: feishuAppId, appSecret: feishuAppSecret } : null;
+      case 'slack': return (slackBotToken && slackAppToken) ? { botToken: slackBotToken, appToken: slackAppToken } : null;
+      case 'matrix': return (matrixServer && matrixUser && matrixPass) ? { homeserver: matrixServer, userId: matrixUser, password: matrixPass } : null;
+      case 'google-chat': return gchatKeyFile ? { serviceAccountFile: gchatKeyFile } : null;
+      default: return tokenInput ? { token: tokenInput } : null;
+    }
   };
+
+  const isFormValid = (): boolean => {
+    if (!activeWizard) return false;
+    if (ONE_CLICK_CHANNELS.includes(activeWizard)) return true;
+    return buildConfig() !== null;
+  };
+
+  const handleConnect = async () => {
+    if (!activeWizard) return;
+    setTestStatus('testing'); setTestError(null);
+
+    if (!window.electronAPI) {
+      setTimeout(() => setTestStatus(isFormValid() ? 'success' : 'error'), 1500);
+      return;
+    }
+
+    if (ONE_CLICK_CHANNELS.includes(activeWizard)) {
+      // One-click: backend handles install + login + config
+      const result = await (window.electronAPI as any).channelSetup(activeWizard);
+      setTestStatus(result.success ? 'success' : 'error');
+      if (!result.success) setTestError(result.error || t('channels.setupFailed', 'Setup failed. Make sure Gateway is running in Settings.'));
+    } else {
+      // Save config via CLI, then test
+      const config = buildConfig()!;
+      const saveResult = await (window.electronAPI as any).channelSave(activeWizard, config);
+      if (!saveResult.success) { setTestStatus('error'); setTestError(saveResult.error || t('channels.saveFailed', 'Could not save. Please try again.')); return; }
+
+      const testResult = await (window.electronAPI as any).channelTest(activeWizard);
+      setTestStatus(testResult.success ? 'success' : 'error');
+      if (!testResult.success) setTestError(testResult.error || testResult.output || null);
+    }
+  };
+
+  // --- Guide content per channel ---
+
+  const oneClickGuide = (steps: string[]) => (
+    <div className="space-y-2 text-sm">
+      {steps.map((step, i) => (
+        <div key={i} className="flex items-start gap-3 p-3 bg-slate-800/50 rounded-lg">
+          <span className="text-brand-400 font-bold">{i + 1}</span>
+          <p>{step}</p>
+        </div>
+      ))}
+    </div>
+  );
+
+  const getGuide = () => {
+    if (!activeWizard) return null;
+
+    switch (activeWizard) {
+      case 'whatsapp':
+        return oneClickGuide([
+          t('channels.guide.oneclick.gateway', 'Make sure Gateway is running (Settings page)'),
+          t('channels.guide.oneclick.click', 'Click "Connect" below — everything is automatic'),
+          t('channels.guide.whatsapp.scan', 'Open WhatsApp on your phone → Settings → Linked Devices → Scan the QR code'),
+        ]);
+      case 'wechat':
+        return oneClickGuide([
+          t('channels.guide.oneclick.gateway', 'Make sure Gateway is running (Settings page)'),
+          t('channels.guide.oneclick.click', 'Click "Connect" below — we\'ll install the plugin automatically'),
+          t('channels.guide.wechat.scan', 'Open WeChat on your phone → Scan the QR code'),
+        ]);
+      case 'signal':
+        return oneClickGuide([
+          t('channels.guide.oneclick.gateway', 'Make sure Gateway is running (Settings page)'),
+          t('channels.guide.oneclick.click', 'Click "Connect" — we\'ll set up Signal automatically'),
+          t('channels.guide.signal.scan', 'Open Signal on your phone → Settings → Linked Devices → Scan QR code'),
+        ]);
+      case 'imessage':
+        return (
+          <div className="space-y-3 text-sm">
+            <div className="p-3 bg-blue-600/10 border border-blue-600/20 rounded-lg text-xs text-blue-300">
+              {t('channels.guide.imessage.macOnly', 'Only works on Mac. You may need to allow "Full Disk Access" in System Settings when prompted.')}
+            </div>
+            {oneClickGuide([
+              t('channels.guide.oneclick.gateway', 'Make sure Gateway is running (Settings page)'),
+              t('channels.guide.oneclick.click', 'Click "Connect" — we\'ll detect your Messages automatically'),
+            ])}
+          </div>
+        );
+      case 'telegram':
+        return (
+          <div className="space-y-3 text-sm">
+            {oneClickGuide([
+              <>{t('channels.guide.telegram.step1')} <span className="text-brand-400 font-medium">@BotFather</span></>,
+              <>{t('channels.guide.telegram.step2')} <span className="text-brand-400 font-medium">/newbot</span> — {t('channels.guide.telegram.step2.desc')}</>,
+              <>{t('channels.guide.telegram.step3')} <span className="text-brand-400 font-medium">Token</span> — {t('channels.guide.telegram.step3.desc')}</>,
+            ] as any)}
+          </div>
+        );
+      default:
+        return (
+          <div className="p-4 bg-slate-800/50 rounded-xl">
+            <p className="text-sm text-slate-300">{t(`channels.guide.${activeWizard}`, t('channels.guide.default'))}</p>
+            <button onClick={() => window.electronAPI?.openExternal(`https://docs.openclaw.ai/channels/${activeWizard}`)}
+              className="mt-3 flex items-center gap-1.5 text-sm text-brand-400 hover:text-brand-300">
+              <ExternalLink size={14} /> {t('channels.viewTutorial')}
+            </button>
+          </div>
+        );
+    }
+  };
+
+  // --- Token/credential form per channel ---
+  const getTokenForm = () => {
+    if (!activeWizard) return null;
+
+    switch (activeWizard) {
+      case 'slack':
+        return (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">Bot Token</label>
+              <PasswordInput value={slackBotToken} onChange={(e) => setSlackBotToken(e.target.value)}
+                placeholder="xoxb-..." className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
+              <p className="mt-1.5 text-xs text-slate-500">{t('channels.slackBotHint', 'Slack App → OAuth & Permissions → Bot User OAuth Token')}</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">App Token</label>
+              <PasswordInput value={slackAppToken} onChange={(e) => setSlackAppToken(e.target.value)}
+                placeholder="xapp-..." className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
+              <p className="mt-1.5 text-xs text-slate-500">{t('channels.slackAppHint', 'Slack App → Basic Information → App-Level Tokens')}</p>
+            </div>
+          </div>
+        );
+      case 'feishu':
+        return (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">App ID</label>
+              <PasswordInput value={feishuAppId} onChange={(e) => setFeishuAppId(e.target.value)}
+                placeholder="cli_xxxxxxxxxx" className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">App Secret</label>
+              <PasswordInput value={feishuAppSecret} onChange={(e) => setFeishuAppSecret(e.target.value)}
+                placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
+            </div>
+          </div>
+        );
+      case 'matrix':
+        return (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.matrix.server', 'Server address')}</label>
+              <input value={matrixServer} onChange={(e) => setMatrixServer(e.target.value)}
+                placeholder="https://matrix.org" className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.matrix.user', 'Username')}</label>
+              <input value={matrixUser} onChange={(e) => setMatrixUser(e.target.value)}
+                placeholder="@mybot:matrix.org" className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.matrix.password', 'Password')}</label>
+              <PasswordInput value={matrixPass} onChange={(e) => setMatrixPass(e.target.value)}
+                placeholder="••••••••" className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
+            </div>
+          </div>
+        );
+      case 'google-chat':
+        return (
+          <div className="space-y-4">
+            <p className="text-xs text-slate-400">{t('channels.gchat.desc', 'You need a Google Cloud service account key file (JSON). Create one in Google Cloud Console → IAM → Service Accounts → Keys.')}</p>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.gchat.keyFile', 'Service Account Key')}</label>
+              <div className="flex gap-2">
+                <input value={gchatKeyFile} readOnly
+                  placeholder={t('channels.gchat.noFile', 'No file selected')}
+                  className="flex-1 px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-400" />
+                <button onClick={async () => {
+                  if (window.electronAPI) {
+                    const result = await (window.electronAPI as any).selectFile?.({ filters: [{ name: 'JSON', extensions: ['json'] }] });
+                    if (result?.filePath) setGchatKeyFile(result.filePath);
+                  }
+                }} className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm text-white whitespace-nowrap">
+                  {t('channels.gchat.browse', 'Browse...')}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      case 'line':
+        return (
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.lineToken', 'Channel Access Token')}</label>
+            <PasswordInput value={tokenInput} onChange={(e) => setTokenInput(e.target.value)}
+              placeholder={t('channels.paste')} className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
+            <p className="mt-1.5 text-xs text-slate-500">{t('channels.lineHint', 'LINE Developers Console → Messaging API → Channel Access Token')}</p>
+          </div>
+        );
+      default:
+        // Telegram, Discord — simple single token
+        return (
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.token')}</label>
+            <PasswordInput value={tokenInput} onChange={(e) => setTokenInput(e.target.value)}
+              placeholder={t('channels.paste')} className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
+          </div>
+        );
+    }
+  };
+
+  const isOneClick = activeWizard ? ONE_CLICK_CHANNELS.includes(activeWizard) : false;
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header */}
       <div className="px-6 py-4 border-b border-slate-800">
-        <h1 className="text-lg font-semibold">📡 消息通道</h1>
-        <p className="text-xs text-slate-500">连接后，你可以通过这些平台和 AI 对话</p>
+        <h1 className="text-lg font-semibold">📡 {t('channels.title')}</h1>
+        <p className="text-xs text-slate-500">{t('channels.subtitleConnected')}</p>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">
         {/* Connected */}
         <div className="mb-6">
-          <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">已连接</h3>
+          <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">{t('channels.connected')}</h3>
           <div className="grid grid-cols-2 gap-3">
-            {CHANNELS.filter((c) => c.connected).map((ch) => (
-              <div key={ch.id} className="p-4 bg-emerald-600/10 border border-emerald-600/30 rounded-xl">
+            {channels.filter((c) => c.connected || configuredChannels.has(c.id)).map((ch) => (
+              <button key={ch.id} onClick={() => ch.id !== 'local' && openWizard(ch.id)} disabled={ch.id === 'local'}
+                className={`p-4 bg-emerald-600/10 border border-emerald-600/30 rounded-xl text-left ${ch.id !== 'local' ? 'hover:border-emerald-500/50 cursor-pointer' : ''} transition-colors`}>
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">{ch.emoji}</span>
-                  <div>
-                    <div className="font-medium text-sm">{ch.name}</div>
-                    <div className="text-xs text-emerald-400">✅ {ch.status || '已连接'}</div>
+                  <div className="flex-1">
+                    <div className="font-medium text-sm">{t(`channels.channel.${ch.id}`, ch.id)}</div>
+                    <div className="text-xs text-emerald-400">✅ {ch.id === 'local' ? t('channels.builtIn') : t('channels.configured')}</div>
                   </div>
+                  {ch.id !== 'local' && <ChevronRight size={14} className="text-slate-600" />}
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         </div>
 
         {/* Available */}
         <div>
-          <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">可添加</h3>
+          <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">{t('channels.available')}</h3>
           <div className="grid grid-cols-2 gap-3">
-            {CHANNELS.filter((c) => !c.connected).map((ch) => (
-              <button
-                key={ch.id}
-                onClick={() => openWizard(ch.id)}
-                className="p-4 bg-slate-800/50 border border-slate-700 rounded-xl hover:border-slate-600 transition-colors text-left group"
-              >
+            {channels.filter((c) => !c.connected && !configuredChannels.has(c.id)).map((ch) => (
+              <button key={ch.id} onClick={() => openWizard(ch.id)}
+                className="p-4 bg-slate-800/50 border border-slate-700 rounded-xl hover:border-slate-600 transition-colors text-left group">
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">{ch.emoji}</span>
                   <div className="flex-1">
-                    <div className="font-medium text-sm">{ch.name}</div>
-                    <div className="text-xs text-slate-500">{ch.description}</div>
+                    <div className="font-medium text-sm">{t(`channels.channel.${ch.id}`)}</div>
+                    <div className="text-xs text-slate-500">{t(`channels.channel.${ch.id}.desc`)}</div>
                   </div>
                   <ChevronRight size={16} className="text-slate-600 group-hover:text-slate-400 transition-colors" />
                 </div>
@@ -207,74 +374,68 @@ export default function Channels() {
       {activeWizard && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-8">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto">
-            {/* Modal header */}
             <div className="flex items-center justify-between p-5 border-b border-slate-800">
               <h2 className="text-lg font-semibold flex items-center gap-2">
-                {CHANNELS.find((c) => c.id === activeWizard)?.emoji}
-                连接 {CHANNELS.find((c) => c.id === activeWizard)?.name}
+                {channels.find((c) => c.id === activeWizard)?.emoji}
+                {t('channels.connectPrefix')} {t(`channels.channel.${activeWizard}`)}
               </h2>
-              <button onClick={closeWizard} className="text-slate-500 hover:text-slate-300">
-                <X size={20} />
-              </button>
+              <button onClick={closeWizard} className="text-slate-500 hover:text-slate-300"><X size={20} /></button>
             </div>
 
             <div className="p-5 space-y-5">
-              {/* Intro / Guide */}
+              {/* Step 1: Guide (one-click channels stay here; token channels proceed) */}
               {wizardStep === 'intro' && (
                 <>
-                  {activeWizard === 'telegram' && getTelegramGuide()}
-                  {activeWizard === 'whatsapp' && getWhatsAppGuide()}
-                  {!['telegram', 'whatsapp'].includes(activeWizard) && getGenericGuide(activeWizard)}
+                  {getGuide()}
+
+                  {configuredChannels.has(activeWizard) && (
+                    <div className="p-3 bg-amber-600/10 border border-amber-600/20 rounded-lg text-xs text-amber-400">
+                      {t('channels.alreadyConfigured', 'Already connected. You can reconnect or update credentials.')}
+                    </div>
+                  )}
 
                   <div className="flex justify-end">
                     <button
-                      onClick={() => setWizardStep(activeWizard === 'whatsapp' ? 'test' : 'token')}
-                      className="px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-1"
+                      onClick={() => {
+                        if (isOneClick) { handleConnect(); setWizardStep('test'); }
+                        else { setWizardStep('token'); }
+                      }}
+                      className="px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-1.5"
                     >
-                      {activeWizard === 'whatsapp' ? '开始扫码' : '下一步'} <ChevronRight size={14} />
+                      {isOneClick
+                        ? <>{t('channels.connectBtn', 'Connect')} <Loader2 size={0} /></>
+                        : <>{t('channels.next')} <ChevronRight size={14} /></>}
                     </button>
                   </div>
                 </>
               )}
 
-              {/* Token input */}
+              {/* Step 2: Credentials (only for non one-click channels) */}
               {wizardStep === 'token' && (
                 <>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      🔑 粘贴你的 Token
-                    </label>
-                    <input
-                      type="password"
-                      value={tokenInput}
-                      onChange={(e) => setTokenInput(e.target.value)}
-                      placeholder="粘贴到这里..."
-                      className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500"
-                    />
-                  </div>
+                  {getTokenForm()}
                   <div className="flex justify-between">
                     <button onClick={() => setWizardStep('intro')} className="px-4 py-2 text-slate-400 hover:text-slate-200 flex items-center gap-1 text-sm">
-                      <ChevronLeft size={14} /> 返回
+                      <ChevronLeft size={14} /> {t('channels.back')}
                     </button>
-                    <button
-                      onClick={() => { handleTest(); setWizardStep('test'); }}
-                      disabled={!tokenInput}
-                      className="px-5 py-2 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 text-white rounded-xl text-sm font-medium transition-colors"
-                    >
-                      🔗 测试连接
+                    <button onClick={() => { handleConnect(); setWizardStep('test'); }}
+                      disabled={!isFormValid()}
+                      className="px-5 py-2.5 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 text-white rounded-xl text-sm font-medium transition-colors">
+                      {t('channels.connectBtn', 'Connect')}
                     </button>
                   </div>
                 </>
               )}
 
-              {/* Test result */}
+              {/* Step 3: Result */}
               {wizardStep === 'test' && (
                 <>
                   <div className="text-center py-6">
                     {testStatus === 'testing' && (
                       <div className="space-y-3">
                         <div className="w-10 h-10 mx-auto border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
-                        <p className="text-slate-300">正在测试连接...</p>
+                        <p className="text-slate-300">{t('channels.testing')}</p>
+                        {isOneClick && <p className="text-xs text-slate-500">{t('channels.oneclick.wait', 'This may take a moment...')}</p>}
                       </div>
                     )}
                     {testStatus === 'success' && (
@@ -282,28 +443,29 @@ export default function Channels() {
                         <div className="w-16 h-16 mx-auto bg-emerald-600/20 rounded-full flex items-center justify-center">
                           <Check size={32} className="text-emerald-400" />
                         </div>
-                        <p className="text-emerald-300 font-medium">连接成功！</p>
+                        <p className="text-emerald-300 font-medium">{t('channels.success')}</p>
                       </div>
                     )}
                     {testStatus === 'error' && (
                       <div className="space-y-3">
-                        <p className="text-red-400">连接失败，请检查 Token 是否正确</p>
-                        <button
-                          onClick={() => setWizardStep('token')}
-                          className="text-sm text-brand-400 hover:text-brand-300"
-                        >
-                          重新输入
+                        <p className="text-red-400">{t('channels.failed')}</p>
+                        {testError && (
+                          <p className="text-xs text-red-400/70 bg-red-900/20 rounded-lg px-3 py-2 text-left break-words max-h-24 overflow-y-auto">
+                            {testError}
+                          </p>
+                        )}
+                        <button onClick={() => { setTestError(null); setWizardStep(isOneClick ? 'intro' : 'token'); }}
+                          className="text-sm text-brand-400 hover:text-brand-300">
+                          {t('channels.tryAgain', 'Try again')}
                         </button>
                       </div>
                     )}
                   </div>
                   {testStatus === 'success' && (
                     <div className="flex justify-end">
-                      <button
-                        onClick={closeWizard}
-                        className="px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-sm font-medium transition-colors"
-                      >
-                        完成 ✓
+                      <button onClick={closeWizard}
+                        className="px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-sm font-medium transition-colors">
+                        {t('channels.done')} ✓
                       </button>
                     </div>
                   )}

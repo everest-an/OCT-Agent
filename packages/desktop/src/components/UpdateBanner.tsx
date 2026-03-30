@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X, Download, ArrowRight } from 'lucide-react';
+import { X, Download, ArrowRight, Loader2, Check, AlertCircle } from 'lucide-react';
+import { useI18n } from '../lib/i18n';
 
 interface UpdateInfo {
   available: boolean;
@@ -13,10 +14,12 @@ const DISMISS_KEY = 'awareness-claw-update-dismissed';
 const NEVER_KEY = 'awareness-claw-update-never';
 
 export default function UpdateBanner() {
+  const { t } = useI18n();
   const [updates, setUpdates] = useState<UpdateInfo[]>([]);
   const [dismissed, setDismissed] = useState(false);
   const [showModal, setShowModal] = useState(false);
-  const [checking, setChecking] = useState(false);
+  const [upgrading, setUpgrading] = useState<string | null>(null);
+  const [upgradeResult, setUpgradeResult] = useState<{ component: string; success: boolean; error?: string } | null>(null);
 
   useEffect(() => {
     // Don't check if "never remind" is set
@@ -32,22 +35,22 @@ export default function UpdateBanner() {
 
   const checkForUpdates = async () => {
     if (!window.electronAPI) return;
-    setChecking(true);
 
     try {
       const result = await (window.electronAPI as any).checkUpdates();
       if (result.updates && result.updates.length > 0) {
-        setUpdates(result.updates.map((u: any) => ({
+        const mapped = result.updates.map((u: any) => ({
           available: true,
           currentVersion: u.currentVersion,
           latestVersion: u.latestVersion,
           component: u.component,
           label: u.label,
-        })));
+        }));
+        setUpdates(mapped);
+        // Auto-show modal for first time (strong reminder)
+        setShowModal(true);
       }
     } catch { /* ignore */ }
-
-    setChecking(false);
   };
 
   const handleDismiss = () => {
@@ -66,36 +69,81 @@ export default function UpdateBanner() {
     handleDismiss();
   };
 
+  const handleUpgrade = async () => {
+    if (!window.electronAPI) return;
+    setUpgradeResult(null);
+
+    let allSuccess = true;
+    for (const update of updates) {
+      setUpgrading(update.component);
+      try {
+        const result = await (window.electronAPI as any).upgradeComponent(update.component);
+        if (result.success) {
+          setUpgradeResult({ component: update.component, success: true });
+        } else {
+          setUpgradeResult({ component: update.component, success: false, error: result.error });
+          allSuccess = false;
+          break; // Stop on first failure
+        }
+      } catch (err: any) {
+        setUpgradeResult({ component: update.component, success: false, error: err.message });
+        allSuccess = false;
+        break;
+      }
+    }
+    setUpgrading(null);
+
+    // Re-verify: check if updates are truly resolved
+    if (allSuccess) {
+      try {
+        const recheck = await (window.electronAPI as any).checkUpdates();
+        if (recheck.updates && recheck.updates.length > 0) {
+          // Still has updates — upgrade may not have taken effect
+          const remaining = recheck.updates.map((u: any) => u.label).join(', ');
+          setUpgradeResult({
+            component: 'verify',
+            success: false,
+            error: `${t('update.verifyFailed')} ${remaining}. ${t('update.verifyRestart')}`,
+          });
+        }
+      } catch { /* ignore recheck errors */ }
+    }
+  };
+
+  const allUpgraded = upgradeResult?.success && !upgrading;
+
   // Don't render if no updates or dismissed
   if (updates.length === 0 || dismissed) return null;
 
   return (
     <>
-      {/* Weak reminder: top banner */}
-      <div className="bg-brand-600/10 border-b border-brand-600/20 px-4 py-1.5 flex items-center justify-between text-xs flex-shrink-0">
-        <div className="flex items-center gap-2 text-brand-300">
-          <Download size={12} />
-          <span>
-            {updates.length === 1
-              ? `${updates[0].label} 有新版本可用 (${updates[0].latestVersion})`
-              : `${updates.length} 个组件有更新可用`
-            }
-          </span>
+      {/* Weak reminder: top banner (visible when modal is closed) */}
+      {!showModal && (
+        <div className="bg-brand-600/10 border-b border-brand-600/20 px-4 py-1.5 flex items-center justify-between text-xs flex-shrink-0">
+          <div className="flex items-center gap-2 text-brand-300">
+            <Download size={12} />
+            <span>
+              {updates.length === 1
+                ? `${updates[0].label} ${t('update.singleUpdate')} (${updates[0].latestVersion})`
+                : `${updates.length} ${t('update.multipleUpdates')}`
+              }
+            </span>
+            <button
+              onClick={() => setShowModal(true)}
+              className="text-brand-400 hover:text-brand-300 underline"
+            >
+              {t('update.viewDetails')}
+            </button>
+          </div>
           <button
-            onClick={() => setShowModal(true)}
-            className="text-brand-400 hover:text-brand-300 underline"
+            onClick={handleDismiss}
+            className="text-slate-500 hover:text-slate-300 p-0.5"
+            title="Dismiss"
           >
-            查看详情
+            <X size={14} />
           </button>
         </div>
-        <button
-          onClick={handleDismiss}
-          className="text-slate-500 hover:text-slate-300 p-0.5"
-          title="关闭提醒"
-        >
-          <X size={14} />
-        </button>
-      </div>
+      )}
 
       {/* Strong reminder: modal */}
       {showModal && (
@@ -104,13 +152,22 @@ export default function UpdateBanner() {
             <div className="p-6 space-y-4">
               <div className="text-center">
                 <div className="text-3xl mb-3">🆕</div>
-                <h2 className="text-lg font-bold">有新版本可用</h2>
+                <h2 className="text-lg font-bold">{t('update.available')}</h2>
               </div>
 
               <div className="space-y-2">
                 {updates.map((u, i) => (
                   <div key={i} className="flex items-center justify-between p-3 bg-slate-800 rounded-xl">
-                    <span className="text-sm">{u.label}</span>
+                    <div className="flex items-center gap-2">
+                      {upgrading === u.component ? (
+                        <Loader2 size={14} className="animate-spin text-brand-400" />
+                      ) : upgradeResult?.component === u.component && upgradeResult.success ? (
+                        <Check size={14} className="text-emerald-400" />
+                      ) : upgradeResult?.component === u.component && !upgradeResult.success ? (
+                        <AlertCircle size={14} className="text-red-400" />
+                      ) : null}
+                      <span className="text-sm">{u.label}</span>
+                    </div>
                     <span className="text-xs text-slate-400">
                       {u.currentVersion} <ArrowRight size={10} className="inline" /> <span className="text-brand-400">{u.latestVersion}</span>
                     </span>
@@ -118,25 +175,59 @@ export default function UpdateBanner() {
                 ))}
               </div>
 
+              {/* Error message */}
+              {upgradeResult && !upgradeResult.success && (
+                <div className="p-3 bg-red-600/10 border border-red-600/20 rounded-xl text-xs text-red-400">
+                  {t('update.failed')}: {upgradeResult.error || 'Unknown error'}
+                </div>
+              )}
+
+              {/* Success message */}
+              {allUpgraded && (
+                <div className="p-3 bg-emerald-600/10 border border-emerald-600/20 rounded-xl text-xs text-emerald-400 text-center">
+                  {t('update.allDone')}
+                </div>
+              )}
+
               <div className="flex flex-col gap-2">
-                <button
-                  onClick={() => { /* TODO: trigger upgrade */ setShowModal(false); }}
-                  className="w-full py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-sm font-medium transition-colors"
-                >
-                  立即升级
-                </button>
-                <button
-                  onClick={handleRemindLater}
-                  className="w-full py-2 text-slate-400 hover:text-slate-200 text-sm transition-colors"
-                >
-                  下次提醒
-                </button>
-                <button
-                  onClick={handleNeverRemind}
-                  className="w-full py-2 text-slate-600 hover:text-slate-400 text-xs transition-colors"
-                >
-                  永不提醒此版本
-                </button>
+                {allUpgraded ? (
+                  <button
+                    onClick={() => { setShowModal(false); handleDismiss(); }}
+                    className="w-full py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-sm font-medium transition-colors"
+                  >
+                    {t('common.done')}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleUpgrade}
+                    disabled={!!upgrading}
+                    className="w-full py-2.5 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 text-white rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                  >
+                    {upgrading ? (
+                      <><Loader2 size={14} className="animate-spin" /> {t('update.upgrading')}</>
+                    ) : (
+                      <><Download size={14} /> {t('update.upgradeNow')}</>
+                    )}
+                  </button>
+                )}
+                {!allUpgraded && (
+                  <>
+                    <button
+                      onClick={handleRemindLater}
+                      disabled={!!upgrading}
+                      className="w-full py-2 text-slate-400 hover:text-slate-200 text-sm transition-colors"
+                    >
+                      {t('update.remindLater')}
+                    </button>
+                    <button
+                      onClick={handleNeverRemind}
+                      disabled={!!upgrading}
+                      className="w-full py-2 text-slate-600 hover:text-slate-400 text-xs transition-colors"
+                    >
+                      {t('update.neverRemind')}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>

@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { Clock, Plus, Trash2, RefreshCw, Loader2, ExternalLink, Play, Pause } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { Clock, Plus, Trash2, RefreshCw, Loader2, ExternalLink, ChevronDown, ChevronRight, Calendar, Timer } from 'lucide-react';
+import { useI18n } from '../lib/i18n';
 
 interface CronJob {
   id?: string;
@@ -9,14 +10,102 @@ interface CronJob {
   raw?: string;
 }
 
+type FrequencyType = 'daily' | 'hourly' | 'weekly' | 'custom';
+
+const WEEKDAYS = [
+  { value: 1, label: 'Mon', labelCn: '一' },
+  { value: 2, label: 'Tue', labelCn: '二' },
+  { value: 3, label: 'Wed', labelCn: '三' },
+  { value: 4, label: 'Thu', labelCn: '四' },
+  { value: 5, label: 'Fri', labelCn: '五' },
+  { value: 6, label: 'Sat', labelCn: '六' },
+  { value: 0, label: 'Sun', labelCn: '日' },
+];
+
+// Convert visual schedule to cron expression
+function buildCronExpression(freq: FrequencyType, hour: number, minute: number, weekdays: number[]): string {
+  const mm = String(minute);
+  const hh = String(hour);
+  switch (freq) {
+    case 'hourly': return `${mm} * * * *`;
+    case 'daily': return `${mm} ${hh} * * *`;
+    case 'weekly': {
+      const days = weekdays.length > 0 ? weekdays.sort().join(',') : '*';
+      return `${mm} ${hh} * * ${days}`;
+    }
+    case 'custom': return '';
+    default: return `${mm} ${hh} * * *`;
+  }
+}
+
+// Translate cron expression to human-readable Chinese
+function cronToHuman(expr: string): string {
+  if (!expr) return '';
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length !== 5) return expr;
+
+  const [min, hour, , , dow] = parts;
+
+  // Every minute
+  if (min === '*' && hour === '*' && dow === '*') return 'Every minute';
+
+  // Hourly
+  if (hour === '*' && dow === '*') {
+    return min === '0' ? 'Every hour' : `Every hour at :${min.padStart(2, '0')}`;
+  }
+
+  // Format time
+  const timeStr = `${hour.padStart(2, '0')}:${min.padStart(2, '0')}`;
+
+  // Daily
+  if (dow === '*') return `Daily ${timeStr}`;
+
+  // Weekly
+  const dayNames: Record<string, string> = {
+    '0': 'Sun', '1': 'Mon', '2': 'Tue', '3': 'Wed', '4': 'Thu', '5': 'Fri', '6': 'Sat',
+    '7': 'Sun',
+  };
+  const days = dow.split(',').map(d => dayNames[d] || d).join(', ');
+  return `${days} ${timeStr}`;
+}
+
+const PRESETS = [
+  { label: 'Daily 9 AM', freq: 'daily' as FrequencyType, hour: 9, minute: 0, weekdays: [] as number[], cmd: 'Check my to-do list and give me a summary' },
+  { label: 'Every hour', freq: 'hourly' as FrequencyType, hour: 0, minute: 0, weekdays: [] as number[], cmd: 'Check if there are new messages to reply' },
+  { label: 'Mon 9 AM', freq: 'weekly' as FrequencyType, hour: 9, minute: 0, weekdays: [1], cmd: 'Review last week and generate a weekly report' },
+  { label: 'Daily 10 PM', freq: 'daily' as FrequencyType, hour: 22, minute: 0, weekdays: [] as number[], cmd: 'Summarize today\'s conversations and learnings' },
+];
+
 export default function Automation() {
+  const { t } = useI18n();
   const [jobs, setJobs] = useState<CronJob[]>([]);
   const [loading, setLoading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newExpression, setNewExpression] = useState('');
+  const [heartbeatEnabled, setHeartbeatEnabled] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('awareness-claw-heartbeat-enabled') || 'false'); } catch { return false; }
+  });
+  const [heartbeatInterval, setHeartbeatInterval] = useState(() => {
+    try { return parseInt(localStorage.getItem('awareness-claw-heartbeat-interval') || '30', 10); } catch { return 30; }
+  });
+
+  // Persist heartbeat settings
+  useEffect(() => {
+    localStorage.setItem('awareness-claw-heartbeat-enabled', JSON.stringify(heartbeatEnabled));
+    localStorage.setItem('awareness-claw-heartbeat-interval', String(heartbeatInterval));
+    // Register/remove heartbeat cron job
+    if (window.electronAPI && heartbeatEnabled) {
+      (window.electronAPI as any).cronAdd(`*/${heartbeatInterval} * * * *`, 'openclaw heartbeat').catch(() => {});
+    }
+  }, [heartbeatEnabled, heartbeatInterval]);
+
+  // Visual schedule state
+  const [frequency, setFrequency] = useState<FrequencyType>('daily');
+  const [hour, setHour] = useState(9);
+  const [minute, setMinute] = useState(0);
+  const [selectedDays, setSelectedDays] = useState<number[]>([1]); // Monday default
   const [newCommand, setNewCommand] = useState('');
-  const [heartbeatEnabled, setHeartbeatEnabled] = useState(true);
-  const [heartbeatInterval, setHeartbeatInterval] = useState(30);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [customCron, setCustomCron] = useState('');
 
   useEffect(() => {
     loadJobs();
@@ -27,7 +116,6 @@ export default function Automation() {
     if (window.electronAPI) {
       const result = await (window.electronAPI as any).cronList();
       if (result.raw) {
-        // Text format
         setJobs(result.jobs.map((line: string, i: number) => ({ id: String(i), raw: line })));
       } else {
         setJobs(result.jobs || []);
@@ -36,30 +124,64 @@ export default function Automation() {
     setLoading(false);
   };
 
+  const cronExpression = useMemo(() => {
+    if (frequency === 'custom') return customCron;
+    return buildCronExpression(frequency, hour, minute, selectedDays);
+  }, [frequency, hour, minute, selectedDays, customCron]);
+
+  const [addError, setAddError] = useState<string | null>(null);
+
   const addJob = async () => {
-    if (!newExpression || !newCommand) return;
+    if (!cronExpression || !newCommand) return;
+    setAddError(null);
     if (window.electronAPI) {
-      await (window.electronAPI as any).cronAdd(newExpression, newCommand);
-      setNewExpression('');
-      setNewCommand('');
-      setShowAddForm(false);
+      const result = await (window.electronAPI as any).cronAdd(cronExpression, newCommand);
+      if (result && result.error) {
+        setAddError(result.error);
+        return;
+      }
+      resetForm();
       loadJobs();
     }
   };
 
+  const resetForm = () => {
+    setFrequency('daily');
+    setHour(9);
+    setMinute(0);
+    setSelectedDays([1]);
+    setNewCommand('');
+    setCustomCron('');
+    setShowAdvanced(false);
+    setShowAddForm(false);
+  };
+
   const removeJob = async (id: string) => {
+    if (!confirm('Delete this task?')) return;
     if (window.electronAPI) {
       await (window.electronAPI as any).cronRemove(id);
       loadJobs();
     }
   };
 
-  const PRESETS = [
-    { label: '每天早上 9 点', expr: '0 9 * * *', cmd: '检查今天的待办事项并给我一个摘要' },
-    { label: '每小时', expr: '0 * * * *', cmd: '检查是否有新消息需要回复' },
-    { label: '每周一早上', expr: '0 9 * * 1', cmd: '回顾上周的工作并生成周报' },
-    { label: '每天晚上 10 点', expr: '0 22 * * *', cmd: '总结今天的对话和学到的东西' },
-  ];
+  const toggleDay = (day: number) => {
+    setSelectedDays(prev =>
+      prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
+    );
+  };
+
+  const applyPreset = (preset: typeof PRESETS[0]) => {
+    setFrequency(preset.freq);
+    setHour(preset.hour);
+    setMinute(preset.minute);
+    setSelectedDays(preset.weekdays);
+    setNewCommand(preset.cmd);
+    setShowAdvanced(false);
+  };
+
+  // Generate hour options
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const minutes = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
 
   return (
     <div className="h-full flex flex-col">
@@ -67,8 +189,10 @@ export default function Automation() {
       <div className="px-6 py-4 border-b border-slate-800">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold">⏰ 自动化</h1>
-            <p className="text-xs text-slate-500">定时任务和心跳检查</p>
+            <h1 className="text-lg font-semibold flex items-center gap-2">
+              <Timer size={20} className="text-brand-400" /> {t('auto.title')}
+            </h1>
+            <p className="text-xs text-slate-500 mt-0.5">{t('auto.subtitle')}</p>
           </div>
           <div className="flex gap-2">
             <button
@@ -77,7 +201,7 @@ export default function Automation() {
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 rounded-lg transition-colors"
             >
               {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-              刷新
+              {t('common.refresh')}
             </button>
             <button
               onClick={() => window.electronAPI?.openExternal('http://localhost:18789')}
@@ -92,12 +216,12 @@ export default function Automation() {
       <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-2xl">
         {/* Heartbeat */}
         <div className="space-y-3">
-          <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">💓 心跳检查</h3>
+          <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">{t('auto.heartbeat')}</h3>
           <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 p-4 space-y-3">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-medium">Heartbeat</div>
-                <div className="text-xs text-slate-500">AI 定期检查状态，有需要时主动通知你</div>
+                <div className="text-sm font-medium">{t('auto.heartbeat.title')}</div>
+                <div className="text-xs text-slate-500">{t('auto.heartbeat.desc')}</div>
               </div>
               <button
                 onClick={() => setHeartbeatEnabled(!heartbeatEnabled)}
@@ -108,14 +232,14 @@ export default function Automation() {
             </div>
             {heartbeatEnabled && (
               <div className="flex items-center gap-3 border-t border-slate-700/50 pt-3">
-                <span className="text-xs text-slate-400">检查间隔</span>
+                <span className="text-xs text-slate-400">{t('auto.heartbeat.interval')}</span>
                 <input
                   type="range"
                   min={5} max={120} value={heartbeatInterval}
                   onChange={e => setHeartbeatInterval(parseInt(e.target.value))}
                   className="flex-1 accent-brand-500"
                 />
-                <span className="text-sm text-slate-300 w-16 text-right">{heartbeatInterval} 分钟</span>
+                <span className="text-sm text-slate-300 w-16 text-right">{heartbeatInterval} min</span>
               </div>
             )}
           </div>
@@ -124,61 +248,190 @@ export default function Automation() {
         {/* Cron Jobs */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">📋 定时任务</h3>
+            <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">{t('auto.tasks')}</h3>
             <button
               onClick={() => setShowAddForm(true)}
               className="flex items-center gap-1 text-xs text-brand-400 hover:text-brand-300"
             >
-              <Plus size={12} /> 添加任务
+              <Plus size={12} /> {t('auto.addTask')}
             </button>
           </div>
 
           {/* Add form */}
           {showAddForm && (
-            <div className="bg-slate-800/50 rounded-xl border border-brand-600/30 p-4 space-y-3 animate-fade-in">
-              <div className="text-sm font-medium">添加定时任务</div>
+            <div className="bg-slate-800/50 rounded-xl border border-brand-600/30 p-4 space-y-4 animate-fade-in">
+              <div className="text-sm font-medium">{t('auto.newTask')}</div>
 
-              {/* Presets */}
+              {/* Quick presets */}
               <div className="flex flex-wrap gap-2">
                 {PRESETS.map((p, i) => (
                   <button
                     key={i}
-                    onClick={() => { setNewExpression(p.expr); setNewCommand(p.cmd); }}
-                    className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors"
+                    onClick={() => applyPreset(p)}
+                    className="px-2.5 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors"
                   >
                     {p.label}
                   </button>
                 ))}
               </div>
 
+              {/* Frequency selector */}
               <div>
-                <label className="text-xs text-slate-400 block mb-1">Cron 表达式</label>
-                <input
-                  value={newExpression}
-                  onChange={e => setNewExpression(e.target.value)}
-                  placeholder="0 9 * * *（每天早上9点）"
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm font-mono focus:outline-none focus:border-brand-500"
-                />
+                <label className="text-xs text-slate-400 block mb-1.5">{t('auto.frequency')}</label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {([
+                    { key: 'daily', label: t('auto.daily') },
+                    { key: 'hourly', label: t('auto.hourly') },
+                    { key: 'weekly', label: t('auto.weekly') },
+                    { key: 'custom', label: t('auto.custom') },
+                  ] as const).map(opt => (
+                    <button
+                      key={opt.key}
+                      onClick={() => setFrequency(opt.key)}
+                      className={`py-1.5 text-xs rounded-lg transition-colors ${
+                        frequency === opt.key
+                          ? 'bg-brand-600 text-white'
+                          : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              {/* Time picker — show for daily/weekly */}
+              {(frequency === 'daily' || frequency === 'weekly') && (
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1.5">Time</label>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={hour}
+                      onChange={e => setHour(parseInt(e.target.value))}
+                      className="px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500 appearance-none cursor-pointer"
+                    >
+                      {hours.map(h => (
+                        <option key={h} value={h}>{String(h).padStart(2, '0')}</option>
+                      ))}
+                    </select>
+                    <span className="text-slate-500 text-lg font-bold">:</span>
+                    <select
+                      value={minute}
+                      onChange={e => setMinute(parseInt(e.target.value))}
+                      className="px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500 appearance-none cursor-pointer"
+                    >
+                      {minutes.map(m => (
+                        <option key={m} value={m}>{String(m).padStart(2, '0')}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* Minute picker — show for hourly */}
+              {frequency === 'hourly' && (
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1.5">At minute</label>
+                  <select
+                    value={minute}
+                    onChange={e => setMinute(parseInt(e.target.value))}
+                    className="px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500 appearance-none cursor-pointer"
+                  >
+                    {minutes.map(m => (
+                      <option key={m} value={m}>:{String(m).padStart(2, '0')}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Weekday selector — show for weekly */}
+              {frequency === 'weekly' && (
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1.5">Days</label>
+                  <div className="flex gap-1.5">
+                    {WEEKDAYS.map(day => (
+                      <button
+                        key={day.value}
+                        onClick={() => toggleDay(day.value)}
+                        className={`w-9 h-9 rounded-lg text-xs font-medium transition-colors ${
+                          selectedDays.includes(day.value)
+                            ? 'bg-brand-600 text-white'
+                            : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                        }`}
+                      >
+                        {day.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Custom cron input */}
+              {frequency === 'custom' && (
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">Cron expression</label>
+                  <input
+                    value={customCron}
+                    onChange={e => setCustomCron(e.target.value)}
+                    placeholder="0 9 * * * (daily at 9 AM)"
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm font-mono focus:outline-none focus:border-brand-500"
+                  />
+                  <p className="text-[10px] text-slate-600 mt-1">Format: minute hour day month weekday</p>
+                </div>
+              )}
+
+              {/* Preview of generated cron */}
+              {frequency !== 'custom' && cronExpression && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowAdvanced(!showAdvanced)}
+                    className="flex items-center gap-1 text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
+                  >
+                    {showAdvanced ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                    Cron expression
+                  </button>
+                  <code className="text-[10px] px-1.5 py-0.5 bg-slate-700/50 rounded text-slate-500 font-mono">{cronExpression}</code>
+                  <span className="text-[10px] text-brand-400">{cronToHuman(cronExpression)}</span>
+                </div>
+              )}
+
+              {/* Advanced: editable cron override */}
+              {showAdvanced && frequency !== 'custom' && (
+                <div>
+                  <input
+                    value={cronExpression}
+                    readOnly
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm font-mono text-slate-500 focus:outline-none"
+                  />
+                </div>
+              )}
+
+              {/* Command input */}
               <div>
-                <label className="text-xs text-slate-400 block mb-1">要执行的指令（AI 会执行这段话）</label>
+                <label className="text-xs text-slate-400 block mb-1">{t('auto.instruction')}</label>
                 <textarea
                   value={newCommand}
                   onChange={e => setNewCommand(e.target.value)}
-                  placeholder="检查今天的待办事项并给我一个摘要"
+                  placeholder={t('auto.instruction.placeholder')}
                   rows={2}
                   className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500 resize-none"
                 />
               </div>
 
+              {addError && (
+                <div className="text-xs text-red-400 bg-red-600/10 border border-red-600/20 rounded-lg px-3 py-2">
+                  {addError}
+                </div>
+              )}
+
               <div className="flex gap-2 justify-end">
-                <button onClick={() => setShowAddForm(false)} className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200">取消</button>
+                <button onClick={() => { resetForm(); setAddError(null); }} className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200">{t('auto.cancel')}</button>
                 <button
                   onClick={addJob}
-                  disabled={!newExpression || !newCommand}
+                  disabled={!cronExpression || !newCommand}
                   className="px-4 py-1.5 text-xs bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 text-white rounded-lg transition-colors"
                 >
-                  创建
+                  {t('auto.create')}
                 </button>
               </div>
             </div>
@@ -188,8 +441,8 @@ export default function Automation() {
           {jobs.length === 0 && !loading && (
             <div className="text-center py-8 text-slate-500">
               <Clock size={32} className="mx-auto mb-3 text-slate-600" />
-              <p className="text-sm">暂无定时任务</p>
-              <p className="text-xs mt-1">点击"添加任务"创建，或在聊天中让 AI 帮你创建</p>
+              <p className="text-sm">{t('auto.noTasks')}</p>
+              <p className="text-xs mt-1">{t('auto.noTasks.hint')}</p>
             </div>
           )}
 
@@ -201,8 +454,8 @@ export default function Automation() {
                 ) : (
                   <>
                     <div className="flex items-center gap-2 mb-1">
-                      <code className="text-xs px-1.5 py-0.5 bg-slate-700 rounded text-brand-300">{job.expression}</code>
-                      {job.description && <span className="text-xs text-slate-500">{job.description}</span>}
+                      <code className="text-xs px-1.5 py-0.5 bg-slate-700 rounded text-brand-300 font-mono">{job.expression}</code>
+                      <span className="text-xs text-slate-500">{cronToHuman(job.expression || '')}</span>
                     </div>
                     <p className="text-sm text-slate-300">{job.command}</p>
                   </>
@@ -219,7 +472,7 @@ export default function Automation() {
         </div>
 
         <p className="text-xs text-slate-600 text-center pb-4">
-          定时任务通过 OpenClaw 的 cron 系统管理。你也可以在聊天中说"每天早上9点提醒我..."来创建。
+          {t('auto.footer')}
         </p>
       </div>
     </div>

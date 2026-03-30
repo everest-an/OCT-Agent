@@ -1,19 +1,46 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Send, Paperclip, ChevronDown, ExternalLink, Loader2, Copy, Check, X, File, Image, Plus, Brain, Key } from 'lucide-react';
+import { Send, Paperclip, ChevronDown, ChevronRight, ExternalLink, Loader2, Copy, Check, X, File, Image, Plus, Brain, Key, Wrench, Search, BookOpen, Save, Zap, CheckCircle2, Terminal } from 'lucide-react';
+import PasswordInput from '../components/PasswordInput';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useAppConfig, MODEL_PROVIDERS } from '../lib/store';
+import { useAppConfig, MODEL_PROVIDERS, useDynamicProviders } from '../lib/store';
+import { trackUsage } from '../lib/usage';
+import { useI18n } from '../lib/i18n';
 import logoUrl from '../assets/logo.png';
 
 // --- Types ---
+
+interface ToolCallInfo {
+  id: string;
+  name: string;
+  status: 'running' | 'completed' | 'approved' | 'recalling' | 'saving' | 'cached';
+  timestamp: number;
+}
+
+interface FilePreview {
+  type: 'text' | 'image' | 'error';
+  content?: string;
+  dataUri?: string;
+  size?: number;
+  lines?: number;
+  truncated?: boolean;
+  error?: string;
+}
+
+interface AttachedFile {
+  name: string;
+  path: string;
+  preview?: FilePreview;
+}
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
-  files?: { name: string; path: string }[];
+  files?: AttachedFile[];
   model?: string;
+  toolCalls?: ToolCallInfo[];
 }
 
 interface ChatSession {
@@ -25,6 +52,58 @@ interface ChatSession {
 }
 
 type AgentStatus = 'idle' | 'thinking' | 'generating' | 'error';
+
+// --- Tool call display helpers ---
+
+function getToolIcon(name: string) {
+  const lower = name.toLowerCase();
+  if (lower.includes('exec') || lower.includes('bash') || lower.includes('shell') || lower.includes('command')) return <Terminal size={12} />;
+  if (lower.includes('recall') || lower.includes('search') || lower.includes('memory')) return <Search size={12} />;
+  if (lower.includes('perception') || lower.includes('signal')) return <Zap size={12} />;
+  if (lower.includes('capture') || lower.includes('save') || lower.includes('record')) return <Save size={12} />;
+  if (lower.includes('read') || lower.includes('file') || lower.includes('doc')) return <BookOpen size={12} />;
+  return <Wrench size={12} />;
+}
+
+function getToolLabel(name: string, status: string) {
+  if (status === 'recalling') return `${name}: Recalling context...`;
+  if (status === 'saving') return `${name}: Saving memory...`;
+  if (status === 'cached') return `${name}: Signals cached`;
+  if (status === 'approved') return `${name}: Approved`;
+  if (status === 'completed') return `${name}: Done`;
+  if (status === 'running' || status === 'in_progress') return `${name}: Running...`;
+  return `${name}: ${status}`;
+}
+
+// --- Tool calls in message (collapsible) ---
+
+function ToolCallsBlock({ toolCalls }: { toolCalls: ToolCallInfo[] }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!toolCalls || toolCalls.length === 0) return null;
+
+  return (
+    <div className="mb-2">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-slate-300 transition-colors"
+      >
+        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <Wrench size={11} />
+        <span>{toolCalls.length} tool{toolCalls.length > 1 ? 's' : ''} used</span>
+      </button>
+      {expanded && (
+        <div className="mt-1.5 ml-4 space-y-1 border-l border-slate-700/50 pl-3">
+          {toolCalls.map(tc => (
+            <div key={tc.id} className="flex items-center gap-1.5 text-[11px] text-slate-500">
+              <CheckCircle2 size={11} className="text-emerald-500/70" />
+              <span>{tc.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // --- Persistence ---
 
@@ -118,7 +197,8 @@ function TypewriterMessage({ content, isNew }: { content: string; isNew: boolean
 // --- Main Component ---
 
 export default function Dashboard() {
-  const { config } = useAppConfig();
+  const { config, updateConfig, syncConfig } = useAppConfig();
+  const { t } = useI18n();
   const [sessions, setSessions] = useState<ChatSession[]>(loadSessions);
   const [activeSessionId, setActiveSessionId] = useState<string>(
     localStorage.getItem(ACTIVE_SESSION_KEY) || ''
@@ -129,15 +209,21 @@ export default function Dashboard() {
   const [showApiKeyInput, setShowApiKeyInput] = useState<string | null>(null); // provider key needing API key
   const [tempApiKey, setTempApiKey] = useState('');
   const [showSidebar, setShowSidebar] = useState(false);
-  const [attachedFiles, setAttachedFiles] = useState<{ name: string; path: string }[]>([]);
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [newestMsgId, setNewestMsgId] = useState<string | null>(null);
+  const [activeToolCalls, setActiveToolCalls] = useState<ToolCallInfo[]>([]);
+  const toolCallsRef = useRef<ToolCallInfo[]>([]);
+  const [streamingContent, setStreamingContent] = useState('');
+  const streamingRef = useRef('');
+  const [isDragOver, setIsDragOver] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const currentProvider = MODEL_PROVIDERS.find(p => p.key === config.providerKey);
+  const { providers: allProviders } = useDynamicProviders();
+  const currentProvider = allProviders.find(p => p.key === config.providerKey);
 
   // Ensure active session exists
   useEffect(() => {
@@ -152,13 +238,45 @@ export default function Dashboard() {
     }
   }, []);
 
-  // Listen for status events
+  // Listen for streaming chunks + status events
   useEffect(() => {
-    if (window.electronAPI) {
-      (window.electronAPI as any).onChatStatus?.((status: { type: string }) => {
+    if (!window.electronAPI) return;
+    const api = window.electronAPI as any;
+
+    // Stream text chunks from agent response
+    api.onChatStream?.((chunk: string) => {
+      streamingRef.current += chunk;
+      setStreamingContent(streamingRef.current);
+      // Switch to generating status when we start receiving text
+      setAgentStatus('generating');
+    });
+
+    // Status events (agent lifecycle + tool calls)
+    api.onChatStatus?.((status: { type: string; tool?: string; toolStatus?: string; toolId?: string }) => {
+      if (status.type === 'thinking' || status.type === 'generating' || status.type === 'error') {
         setAgentStatus(status.type as AgentStatus);
-      });
-    }
+      } else if (status.type === 'tool_call' && status.tool) {
+        const tc: ToolCallInfo = {
+          id: status.toolId || `tc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          name: status.tool,
+          status: (status.toolStatus as ToolCallInfo['status']) || 'running',
+          timestamp: Date.now(),
+        };
+        toolCallsRef.current = [...toolCallsRef.current, tc];
+        setActiveToolCalls([...toolCallsRef.current]);
+      } else if (status.type === 'tool_update' && status.toolId) {
+        toolCallsRef.current = toolCallsRef.current.map(tc =>
+          tc.id === status.toolId ? { ...tc, status: (status.toolStatus as ToolCallInfo['status']) || 'completed' } : tc
+        );
+        setActiveToolCalls([...toolCallsRef.current]);
+      }
+    });
+  }, []);
+
+  // Listen for tray "New Chat" action
+  useEffect(() => {
+    if (!window.electronAPI) return;
+    (window.electronAPI as any).onTrayNewChat?.(() => handleNewSession());
   }, []);
 
   // Persist sessions
@@ -193,10 +311,8 @@ export default function Dashboard() {
     const text = input.trim();
     if (!text || agentStatus !== 'idle') return;
 
-    let fullMessage = text;
-    if (attachedFiles.length > 0) {
-      fullMessage += '\n\n[附件: ' + attachedFiles.map(f => f.path).join(', ') + ']';
-    }
+    const fullMessage = text;
+    const filePaths = attachedFiles.length > 0 ? attachedFiles.map(f => f.path) : undefined;
 
     const userMsg: Message = {
       id: `msg-${Date.now()}`,
@@ -216,10 +332,19 @@ export default function Dashboard() {
     setInput('');
     setAttachedFiles([]);
     setAgentStatus('thinking');
+    toolCallsRef.current = [];
+    setActiveToolCalls([]);
+    streamingRef.current = '';
+    setStreamingContent('');
 
     if (window.electronAPI) {
-      const result = await (window.electronAPI as any).chatSend(fullMessage, activeSessionId);
-      const responseText = result.text || result.error || 'No response';
+      // Model is configured via openclaw.json (synced by store.ts), not passed per-message.
+      const result = await (window.electronAPI as any).chatSend(fullMessage, activeSessionId, {
+        thinkingLevel: config.thinkingLevel || 'low',
+        files: filePaths,
+      });
+      // Prefer streamed content if available, fallback to full response
+      const responseText = streamingRef.current.trim() || result.text || result.error || t('chat.noResponse') || 'No response';
 
       const assistantMsg: Message = {
         id: `msg-${Date.now()}`,
@@ -227,6 +352,7 @@ export default function Dashboard() {
         content: responseText,
         timestamp: Date.now(),
         model: config.modelId,
+        toolCalls: toolCallsRef.current.length > 0 ? [...toolCallsRef.current] : undefined,
       };
 
       setNewestMsgId(assistantMsg.id);
@@ -235,6 +361,11 @@ export default function Dashboard() {
         messages: [...s.messages, assistantMsg],
         updatedAt: Date.now(),
       }));
+      // Track usage for cost estimation
+      trackUsage(config.providerKey, config.modelId, text, responseText);
+      // Clear streaming state
+      streamingRef.current = '';
+      setStreamingContent('');
     } else {
       // Dev mock
       await new Promise(r => setTimeout(r, 1500));
@@ -260,10 +391,23 @@ export default function Dashboard() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
+  const attachFiles = useCallback(async (newFiles: { name: string; path: string }[]) => {
+    const withPreviews: AttachedFile[] = await Promise.all(
+      newFiles.map(async f => {
+        if (window.electronAPI) {
+          const preview = await (window.electronAPI as any).filePreview(f.path);
+          return { ...f, preview };
+        }
+        return f;
+      })
+    );
+    setAttachedFiles(prev => [...prev, ...withPreviews]);
+  }, []);
+
   const handleFileDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const files = Array.from(e.dataTransfer.files);
-    setAttachedFiles(prev => [...prev, ...files.map(f => ({ name: f.name, path: (f as any).path || f.name }))]);
+    const files = Array.from(e.dataTransfer.files).map(f => ({ name: f.name, path: (f as any).path || f.name }));
+    attachFiles(files);
   };
 
   const copyMessage = (msg: Message) => {
@@ -281,18 +425,22 @@ export default function Dashboard() {
     }
   };
 
-  const statusLabel = agentStatus === 'thinking' ? '🤔 思考中...' :
-    agentStatus === 'generating' ? '✍️ 生成中...' :
-    agentStatus === 'error' ? '❌ 出错了' : null;
+  const statusLabel = agentStatus === 'thinking' ? t('chat.status.thinking') :
+    agentStatus === 'generating' ? t('chat.status.generating') :
+    agentStatus === 'error' ? t('chat.status.error') : null;
 
   return (
-    <div className="h-full flex" onDragOver={e => e.preventDefault()} onDrop={handleFileDrop}>
+    <div className="h-full flex relative"
+      onDragOver={e => { e.preventDefault(); setIsDragOver(true); }}
+      onDragLeave={e => { if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node)) setIsDragOver(false); }}
+      onDrop={e => { handleFileDrop(e); setIsDragOver(false); }}
+    >
       {/* Session sidebar */}
       {showSidebar && (
         <div className="w-64 bg-slate-950 border-r border-slate-800 flex flex-col flex-shrink-0">
           <div className="p-3 border-b border-slate-800">
             <button onClick={handleNewSession} className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-brand-600 hover:bg-brand-500 rounded-lg text-sm text-white transition-colors">
-              <Plus size={14} /> 新对话
+              <Plus size={14} /> {t('chat.newSession')}
             </button>
           </div>
           <div className="flex-1 overflow-y-auto">
@@ -325,13 +473,23 @@ export default function Dashboard() {
                   <span className="truncate flex-1">{s.title}</span>
                 )}
                 <button
-                  onClick={(e) => { e.stopPropagation(); deleteSession(s.id); }}
+                  onClick={(e) => { e.stopPropagation(); if (!confirm('Delete this session?')) return; deleteSession(s.id); }}
                   className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 p-0.5 ml-1"
                 >
                   <X size={12} />
                 </button>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Drop zone overlay */}
+      {isDragOver && (
+        <div className="absolute inset-0 z-50 bg-brand-600/10 border-2 border-dashed border-brand-500/50 rounded-xl flex items-center justify-center pointer-events-none">
+          <div className="flex flex-col items-center gap-2 text-brand-400">
+            <Paperclip size={32} />
+            <span className="text-sm font-medium">{t('chat.dropFiles')}</span>
           </div>
         </div>
       )}
@@ -362,7 +520,7 @@ export default function Dashboard() {
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setShowModelSelector(false)} />
                 <div className="absolute top-full left-0 mt-1 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 max-h-[400px] overflow-y-auto">
-                  {MODEL_PROVIDERS.map(provider => {
+                  {allProviders.map(provider => {
                     const isConfigured = config.providerKey === provider.key && config.apiKey;
                     return (
                       <div key={provider.key}>
@@ -381,7 +539,7 @@ export default function Dashboard() {
                               } else {
                                 // Switch model
                                 updateConfig({ providerKey: provider.key, modelId: model.id });
-                                syncConfig(MODEL_PROVIDERS);
+                                syncConfig(allProviders);
                                 setShowModelSelector(false);
                               }
                             }}
@@ -411,7 +569,7 @@ export default function Dashboard() {
 
         {/* API Key Input Modal */}
         {showApiKeyInput && (() => {
-          const provider = MODEL_PROVIDERS.find(p => p.key === showApiKeyInput);
+          const provider = allProviders.find(p => p.key === showApiKeyInput);
           return (
             <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-8">
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-6 space-y-4">
@@ -420,11 +578,10 @@ export default function Dashboard() {
                   <h3 className="text-sm font-bold mt-2">配置 {provider?.name}</h3>
                   <p className="text-xs text-slate-500 mt-1">输入 API Key 后即可使用</p>
                 </div>
-                <input
-                  type="password"
+                <PasswordInput
                   value={tempApiKey}
                   onChange={e => setTempApiKey(e.target.value)}
-                  placeholder="粘贴你的 API Key..."
+                  placeholder="Paste your API Key..."
                   className="w-full px-3 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500"
                   autoFocus
                 />
@@ -439,7 +596,7 @@ export default function Dashboard() {
                           apiKey: tempApiKey,
                           baseUrl: provider.baseUrl,
                         });
-                        syncConfig(MODEL_PROVIDERS);
+                        syncConfig(allProviders);
                         setShowApiKeyInput(null);
                       }
                     }}
@@ -456,49 +613,46 @@ export default function Dashboard() {
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+          <div className="max-w-3xl mx-auto space-y-5 w-full">
           {messages.length === 0 && agentStatus === 'idle' && (
             <div className="flex flex-col items-center justify-center h-full text-slate-500 space-y-6">
               <img src={logoUrl} alt="" className="w-16 h-16 opacity-30" />
-              <div className="text-center">
-                <p className="text-base mb-1">和你的 AI 助手聊点什么</p>
-                <p className="text-xs text-slate-600">AI 拥有持久记忆，会记住每次对话</p>
-              </div>
-              <div className="flex flex-wrap gap-2 max-w-lg justify-center">
-                {['帮我制定一个学习计划', '回顾一下最近的工作', '帮我分析一个技术问题'].map(q => (
-                  <button key={q} onClick={() => setInput(q)}
-                    className="px-3 py-1.5 text-xs bg-slate-800/80 hover:bg-slate-700 rounded-xl text-slate-300 border border-slate-700/50 transition-colors"
+              {!config.modelId ? (
+                <div className="text-center space-y-3">
+                  <p className="text-base mb-1">{t('chat.selectModel') || 'Select a model to start chatting'}</p>
+                  <button
+                    onClick={() => setShowModelSelector(true)}
+                    className="px-4 py-2 text-sm bg-brand-600 hover:bg-brand-500 text-white rounded-lg transition-colors"
                   >
-                    {q}
+                    {t('chat.selectModelBtn') || 'Choose Model'}
                   </button>
-                ))}
-              </div>
+                </div>
+              ) : (
+                <>
+                  <div className="text-center">
+                    <p className="text-base mb-1">{t('chat.empty.title')}</p>
+                    <p className="text-xs text-slate-600">{t('chat.empty.subtitle')}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 max-w-lg justify-center">
+                    {[t('chat.suggest.plan'), t('chat.suggest.review'), t('chat.suggest.analyze')].map(q => (
+                      <button key={q} onClick={() => setInput(q)}
+                        className="px-3 py-1.5 text-xs bg-slate-800/80 hover:bg-slate-700 rounded-xl text-slate-300 border border-slate-700/50 transition-colors"
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
           {messages.map(msg => (
-            <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group`}>
-              <div className={`max-w-[75%] ${msg.role === 'user' ? '' : 'flex gap-3'}`}>
-                {/* AI avatar */}
-                {msg.role === 'assistant' && (
-                  <img src={logoUrl} alt="" className="w-7 h-7 rounded-lg mt-0.5 flex-shrink-0" />
-                )}
-
-                <div>
-                  {/* Meta line */}
-                  {msg.role === 'assistant' && (
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs text-slate-500 font-medium">AwarenessClaw</span>
-                      <span className="text-[10px] text-slate-600">{msg.model || ''}</span>
-                      <span className="text-[10px] text-slate-700">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    </div>
-                  )}
-
-                  {/* Bubble */}
-                  <div className={`px-4 py-3 rounded-2xl text-sm ${
-                    msg.role === 'user'
-                      ? 'bg-brand-600 text-white rounded-br-md'
-                      : 'bg-slate-800/80 text-slate-200 border border-slate-700/30 rounded-bl-md'
-                  }`}>
+            msg.role === 'user' ? (
+              /* User message — right-aligned bubble */
+              <div key={msg.id} className="flex justify-end group">
+                <div className="max-w-[75%]">
+                  <div className="px-4 py-3 rounded-2xl rounded-br-md text-sm bg-brand-600 text-white">
                     {msg.files && msg.files.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 mb-2">
                         {msg.files.map((f, i) => (
@@ -508,61 +662,139 @@ export default function Dashboard() {
                         ))}
                       </div>
                     )}
-
-                    {msg.role === 'assistant' ? (
-                      <TypewriterMessage content={msg.content} isNew={msg.id === newestMsgId} />
-                    ) : (
-                      <span className="whitespace-pre-wrap">{msg.content}</span>
-                    )}
+                    <span className="whitespace-pre-wrap">{msg.content}</span>
                   </div>
-
-                  {/* Copy button */}
-                  {msg.role === 'assistant' && (
-                    <button onClick={() => copyMessage(msg)}
-                      className="mt-1 opacity-0 group-hover:opacity-100 text-slate-600 hover:text-slate-300 transition-all text-[10px] flex items-center gap-1"
-                    >
-                      {copiedId === msg.id ? <><Check size={10} /> 已复制</> : <><Copy size={10} /> 复制</>}
-                    </button>
-                  )}
-
-                  {/* User timestamp */}
-                  {msg.role === 'user' && (
-                    <div className="text-right mt-0.5">
-                      <span className="text-[10px] text-slate-600">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    </div>
-                  )}
+                  <div className="text-right mt-1">
+                    <span className="text-[10px] text-slate-600">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              /* AI message — full-width row layout (Claude/ChatGPT style) */
+              <div key={msg.id} className="group">
+                <div className="flex gap-3">
+                  <img src={logoUrl} alt="" className="w-7 h-7 rounded-lg mt-0.5 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    {/* Meta line */}
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-xs text-slate-400 font-medium">AwarenessClaw</span>
+                      {msg.model && <span className="text-[10px] text-slate-600">{msg.model}</span>}
+                      <span className="text-[10px] text-slate-600">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+
+                    {/* Tool calls */}
+                    {msg.toolCalls && msg.toolCalls.length > 0 && (
+                      <ToolCallsBlock toolCalls={msg.toolCalls} />
+                    )}
+
+                    {/* Content — no bubble, direct text */}
+                    <div className="text-sm text-slate-200 leading-relaxed">
+                      <TypewriterMessage content={msg.content} isNew={msg.id === newestMsgId} />
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-3">
+                      <button onClick={() => copyMessage(msg)}
+                        className="text-slate-600 hover:text-slate-300 text-[10px] flex items-center gap-1 transition-colors"
+                      >
+                        {copiedId === msg.id ? <><Check size={10} /> Copied</> : <><Copy size={10} /> Copy</>}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
           ))}
 
-          {/* Status indicator */}
+          {/* Streaming response or status indicator */}
           {agentStatus !== 'idle' && (
-            <div className="flex justify-start">
+            <div className="group">
               <div className="flex gap-3">
                 <img src={logoUrl} alt="" className="w-7 h-7 rounded-lg mt-0.5 flex-shrink-0 animate-pulse" />
-                <div className="bg-slate-800/80 border border-slate-700/30 px-4 py-3 rounded-2xl rounded-bl-md">
-                  <div className="flex items-center gap-2 text-sm text-slate-400">
-                    <Loader2 size={14} className="animate-spin text-brand-400" />
-                    <span>{statusLabel}</span>
+                <div className="flex-1 min-w-0">
+                  {/* Meta line */}
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-xs text-slate-400 font-medium">AwarenessClaw</span>
+                    {config.modelId && <span className="text-[10px] text-slate-600">{config.modelId}</span>}
                   </div>
+
+                  {/* Tool calls section */}
+                  {activeToolCalls.length > 0 && (
+                    <div className="mb-2 space-y-1 pb-2 border-b border-slate-700/30">
+                      {activeToolCalls.slice(-5).map(tc => (
+                        <div key={tc.id} className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                          {tc.status === 'running' || tc.status === 'recalling' ? (
+                            <Loader2 size={11} className="animate-spin text-brand-400/70" />
+                          ) : (
+                            <span className="text-emerald-500/70">{getToolIcon(tc.name)}</span>
+                          )}
+                          <span className="truncate max-w-[300px]">{getToolLabel(tc.name, tc.status)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Streaming text content — no bubble */}
+                  {streamingContent ? (
+                    <div className="text-sm text-slate-200 leading-relaxed">
+                      <div className="prose prose-invert prose-sm max-w-none">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+                          code({ children, className, ...props }) {
+                            const isInline = !className;
+                            if (isInline) return <code className="px-1.5 py-0.5 bg-slate-700 rounded text-brand-300 text-xs" {...props}>{children}</code>;
+                            return <pre className="bg-slate-950 rounded-lg p-3 overflow-x-auto text-xs"><code className={className} {...props}>{children}</code></pre>;
+                          },
+                          p({ children }) { return <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>; },
+                        }}>
+                          {streamingContent}
+                        </ReactMarkdown>
+                        <span className="animate-pulse text-brand-400">▊</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-sm text-slate-400">
+                      <Loader2 size={14} className="animate-spin text-brand-400" />
+                      <span>{statusLabel}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           )}
 
           <div ref={messagesEndRef} />
+          </div>
         </div>
 
-        {/* Attachments */}
+        {/* Attachments with preview */}
         {attachedFiles.length > 0 && (
-          <div className="px-4 py-1.5 border-t border-slate-800/50 flex gap-1.5 flex-wrap">
-            {attachedFiles.map((f, i) => (
-              <span key={i} className="flex items-center gap-1 px-2 py-1 bg-slate-800 rounded-lg text-[10px] text-slate-300">
-                <File size={10} /> <span className="max-w-[120px] truncate">{f.name}</span>
-                <button onClick={() => setAttachedFiles(prev => prev.filter((_, j) => j !== i))} className="text-slate-500 hover:text-red-400"><X size={10} /></button>
-              </span>
-            ))}
+          <div className="px-4 py-2 border-t border-slate-800/50 space-y-2 max-w-3xl mx-auto">
+            <div className="flex gap-2 flex-wrap">
+              {attachedFiles.map((f, i) => (
+                <div key={i} className="bg-slate-800 rounded-lg border border-slate-700/50 overflow-hidden max-w-[240px]">
+                  {/* Image preview */}
+                  {f.preview?.type === 'image' && f.preview.dataUri && (
+                    <div className="w-full h-24 bg-slate-900 flex items-center justify-center">
+                      <img src={f.preview.dataUri} alt={f.name} className="max-w-full max-h-24 object-contain" />
+                    </div>
+                  )}
+                  {/* Text preview */}
+                  {f.preview?.type === 'text' && f.preview.content && (
+                    <div className="px-2 py-1.5 bg-slate-900 max-h-20 overflow-hidden">
+                      <pre className="text-[9px] text-slate-500 font-mono leading-tight whitespace-pre-wrap">{f.preview.content.slice(0, 200)}</pre>
+                      {f.preview.truncated && <span className="text-[9px] text-slate-600">...</span>}
+                    </div>
+                  )}
+                  {/* File info bar */}
+                  <div className="flex items-center gap-1.5 px-2 py-1">
+                    {f.preview?.type === 'image' ? <Image size={10} className="text-brand-400" /> : <File size={10} className="text-slate-400" />}
+                    <span className="text-[10px] text-slate-300 truncate flex-1">{f.name}</span>
+                    {f.preview?.size && <span className="text-[9px] text-slate-600">{(f.preview.size / 1024).toFixed(0)}KB</span>}
+                    <button onClick={() => setAttachedFiles(prev => prev.filter((_, j) => j !== i))} className="text-slate-500 hover:text-red-400 flex-shrink-0"><X size={10} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -575,7 +807,7 @@ export default function Dashboard() {
               <Paperclip size={16} />
             </button>
             <input ref={fileInputRef} type="file" multiple className="hidden"
-              onChange={e => { const files = Array.from(e.target.files || []); setAttachedFiles(prev => [...prev, ...files.map(f => ({ name: f.name, path: (f as any).path || f.name }))]); }}
+              onChange={e => { const files = Array.from(e.target.files || []).map(f => ({ name: f.name, path: (f as any).path || f.name })); attachFiles(files); }}
             />
 
             <div className="flex-1 relative">
@@ -583,7 +815,7 @@ export default function Dashboard() {
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="输入消息...（Shift+Enter 换行，拖拽文件附加）"
+                placeholder={t('chat.input.placeholder')}
                 rows={1}
                 className="w-full px-4 py-2.5 bg-slate-800 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-brand-500/50 resize-none transition-all placeholder:text-slate-600"
                 style={{ minHeight: '42px', maxHeight: '120px', height: input.includes('\n') ? 'auto' : '42px' }}

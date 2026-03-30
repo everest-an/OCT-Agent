@@ -11,11 +11,11 @@ describe('Settings Connection Test', () => {
 
   it('renders model switch button', async () => {
     await act(async () => { render(<Settings />); });
-    expect(screen.getByText(/切换模型/)).toBeInTheDocument();
+    expect(screen.getByText(/Change Model/)).toBeInTheDocument();
   });
 
   it('renders version info', async () => {
     await act(async () => { render(<Settings />); });
-    expect(screen.getByText(/AwarenessClaw v/)).toBeInTheDocument();
+    expect(screen.getByText('AwarenessClaw')).toBeInTheDocument();
   });
 });

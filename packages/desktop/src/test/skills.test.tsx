@@ -5,25 +5,22 @@ import Skills from '../pages/Skills';
 describe('Skills Page', () => {
   it('renders skills header', () => {
     render(<Skills />);
-    expect(screen.getByText(/技能市场/)).toBeInTheDocument();
+    expect(screen.getByText('Skills')).toBeInTheDocument();
   });
 
   it('renders search input', () => {
     render(<Skills />);
-    expect(screen.getByPlaceholderText(/搜索技能/)).toBeInTheDocument();
-  });
-
-  it('shows awareness memory skill', () => {
-    render(<Skills />);
-    expect(screen.getByText('Awareness Memory')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Search skills/)).toBeInTheDocument();
   });
 
   it('renders filter tabs', () => {
     render(<Skills />);
-    const allBtns = screen.getAllByText(/全部/);
-    expect(allBtns.length).toBeGreaterThan(0);
-    // "已安装" appears in both filter tab and skill badges
-    const installed = screen.getAllByText(/已安装/);
-    expect(installed.length).toBeGreaterThan(0);
+    expect(screen.getByText('Explore')).toBeInTheDocument();
+    expect(screen.getByText('Installed')).toBeInTheDocument();
+  });
+
+  it('shows loading state initially', () => {
+    render(<Skills />);
+    expect(screen.getByText(/Loading skills/)).toBeInTheDocument();
   });
 });

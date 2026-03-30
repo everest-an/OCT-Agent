@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { ChevronRight, ChevronLeft, Loader2, Check, Globe } from 'lucide-react';
 import { useAppConfig, MODEL_PROVIDERS, type ModelProviderDef } from '../lib/store';
+import { useI18n } from '../lib/i18n';
+import PasswordInput from '../components/PasswordInput';
 import logoUrl from '../assets/logo.png';
 
 interface SetupProps {
@@ -15,17 +17,18 @@ const PROVIDERS = MODEL_PROVIDERS;
 
 export default function SetupWizard({ onComplete }: SetupProps) {
   const { updateConfig, syncConfig } = useAppConfig();
+  const { t, locale } = useI18n();
   const [step, setStep] = useState<Step>('welcome');
-  const [lang, setLang] = useState<'zh' | 'en'>('zh');
+  const [lang, setLang] = useState<'zh' | 'en'>(locale === 'zh' ? 'zh' : 'en');
   const [existingConfig, setExistingConfig] = useState<{ hasProviders: boolean; primaryModel: string } | null>(null);
 
   // Install progress
   const [installSteps, setInstallSteps] = useState([
-    { key: 'detect', label: lang === 'zh' ? '检测环境' : 'Detecting environment', status: 'pending' as 'pending' | 'running' | 'done' | 'error', detail: '' },
-    { key: 'nodejs', label: lang === 'zh' ? '准备运行环境' : 'Preparing runtime', status: 'pending' as const, detail: '' },
-    { key: 'openclaw', label: lang === 'zh' ? '安装 AI 引擎' : 'Installing AI engine', status: 'pending' as const, detail: '' },
-    { key: 'plugin', label: lang === 'zh' ? '安装记忆模块' : 'Installing memory module', status: 'pending' as const, detail: '' },
-    { key: 'daemon', label: lang === 'zh' ? '启动本地服务' : 'Starting local service', status: 'pending' as const, detail: '' },
+    { key: 'detect', labelKey: 'setup.install.detect', status: 'pending' as 'pending' | 'running' | 'done' | 'error', detail: '' },
+    { key: 'nodejs', labelKey: 'setup.install.nodejs', status: 'pending' as const, detail: '' },
+    { key: 'openclaw', labelKey: 'setup.install.openclaw', status: 'pending' as const, detail: '' },
+    { key: 'plugin', labelKey: 'setup.install.plugin', status: 'pending' as const, detail: '' },
+    { key: 'daemon', labelKey: 'setup.install.daemon', status: 'pending' as const, detail: '' },
   ]);
 
   // Model config
@@ -38,7 +41,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
   // Memory config
   const [memoryMode, setMemoryMode] = useState<'local' | 'cloud'>('local');
 
-  const t = (zh: string, en: string) => lang === 'zh' ? zh : en;
+  // Language toggle syncs with global i18n via updateConfig
 
   const updateInstallStep = (key: string, status: 'running' | 'done' | 'error', detail?: string) => {
     setInstallSteps((prev) => prev.map((s) => s.key === key ? { ...s, status, ...(detail !== undefined ? { detail } : {}) } : s));
@@ -65,15 +68,15 @@ export default function SetupWizard({ onComplete }: SetupProps) {
     // Step 2: Ensure Node.js is available
     updateInstallStep('nodejs', 'running');
     if (env.systemNodeInstalled) {
-      updateInstallStep('nodejs', 'done', t('已安装', 'Already installed'));
+      updateInstallStep('nodejs', 'done', t('setup.install.alreadyInstalled'));
     } else {
-      updateInstallStep('nodejs', 'running', t('正在安装 Node.js（首次需要，约 1-2 分钟）...', 'Installing Node.js (first time only, ~1-2 min)...'));
+      updateInstallStep('nodejs', 'running', t('setup.install.installingNode'));
       if (simulate) {
         await new Promise((r) => setTimeout(r, 2000));
       } else {
         const res = await api!.installNodeJs();
         if (!res.success) {
-          updateInstallStep('nodejs', 'error', t('安装失败，请手动安装 Node.js', 'Failed, please install Node.js manually'));
+          updateInstallStep('nodejs', 'error', t('setup.install.nodeFailed'));
           return;
         }
       }
@@ -83,14 +86,14 @@ export default function SetupWizard({ onComplete }: SetupProps) {
     // Step 3: Install OpenClaw
     updateInstallStep('openclaw', 'running');
     if (env.openclawInstalled) {
-      updateInstallStep('openclaw', 'done', t('已安装', 'Already installed'));
+      updateInstallStep('openclaw', 'done', t('setup.install.alreadyInstalled'));
     } else {
       if (simulate) {
         await new Promise((r) => setTimeout(r, 2000));
       } else {
         const res = await api!.installOpenClaw();
         if (!res.success) {
-          updateInstallStep('openclaw', 'error', t('安装失败，请检查网络', 'Failed, check network'));
+          updateInstallStep('openclaw', 'error', t('setup.install.networkFailed'));
           return;
         }
       }
@@ -153,7 +156,11 @@ export default function SetupWizard({ onComplete }: SetupProps) {
       {/* Language toggle */}
       <div className="absolute top-10 right-4 titlebar-no-drag">
         <button
-          onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
+          onClick={() => {
+            const next = lang === 'zh' ? 'en' : 'zh';
+            setLang(next);
+            updateConfig({ language: next });
+          }}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
         >
           <Globe size={14} />
@@ -187,10 +194,10 @@ export default function SetupWizard({ onComplete }: SetupProps) {
               <img src={logoUrl} alt="AwarenessClaw" className="w-20 h-20 mx-auto animate-pulse-soft" />
               <div>
                 <h1 className="text-3xl font-bold mb-3">
-                  {t('欢迎使用 AwarenessClaw', 'Welcome to AwarenessClaw')}
+                  {t('setup.welcome.title')}
                 </h1>
                 <p className="text-lg text-slate-400">
-                  {t('你的 AI 助手，记住你说过的每一件事', 'Your AI assistant that remembers everything')}
+                  {t('setup.welcome.subtitle')}
                 </p>
               </div>
               <div className="flex flex-col items-center gap-4">
@@ -198,11 +205,11 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                   onClick={runInstallation}
                   className="px-8 py-3 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-lg font-medium transition-colors flex items-center gap-2"
                 >
-                  {t('开始安装', 'Start Setup')}
+                  {t('setup.welcome.start')}
                   <ChevronRight size={20} />
                 </button>
                 <p className="text-sm text-slate-500">
-                  {t('约需 2 分钟，全程自动', 'Takes ~2 minutes, fully automatic')}
+                  {t('setup.welcome.time')}
                 </p>
               </div>
             </div>
@@ -213,10 +220,10 @@ export default function SetupWizard({ onComplete }: SetupProps) {
             <div className="space-y-8">
               <div className="text-center">
                 <h2 className="text-2xl font-bold mb-2">
-                  {t('正在准备你的 AI 助手...', 'Preparing your AI assistant...')}
+                  {t('setup.installing.title')}
                 </h2>
                 <p className="text-slate-400">
-                  {t('请稍候，全程自动完成', 'Please wait, fully automatic')}
+                  {t('setup.installing.subtitle')}
                 </p>
               </div>
 
@@ -239,11 +246,11 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                     </div>
                     <div className="flex-1">
                       <span className={s.status === 'done' ? 'text-emerald-300' : s.status === 'running' ? 'text-brand-300' : 'text-slate-400'}>
-                        {s.label}
+                        {t(s.labelKey)}
                       </span>
                       {s.detail && <p className="text-xs text-slate-500 mt-0.5">{s.detail}</p>}
                     </div>
-                    {s.status === 'done' && <span className="ml-auto text-sm text-emerald-500">{s.detail || t('完成', 'Done')}</span>}
+                    {s.status === 'done' && <span className="ml-auto text-sm text-emerald-500">{s.detail || t('setup.install.done')}</span>}
                   </div>
                 ))}
               </div>
@@ -255,10 +262,10 @@ export default function SetupWizard({ onComplete }: SetupProps) {
             <div className="space-y-6">
               <div className="text-center">
                 <h2 className="text-2xl font-bold mb-2">
-                  {t('选择你的 AI 大脑', 'Choose your AI brain')}
+                  {t('setup.model.title')}
                 </h2>
                 <p className="text-slate-400">
-                  {t('选择一个 AI 模型提供商', 'Pick an AI model provider')}
+                  {t('setup.model.subtitle')}
                 </p>
               </div>
 
@@ -298,19 +305,18 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                     {provider.needsKey && (
                       <>
                         <label className="block text-sm font-medium text-slate-300">
-                          🔑 {t('请输入访问码', 'Enter your API key')}
+                          🔑 {t('setup.apiKey')}
                         </label>
-                        <input
-                          type="password"
+                        <PasswordInput
                           value={apiKey}
                           onChange={(e) => setApiKey(e.target.value)}
-                          placeholder={t('粘贴你的 API Key...', 'Paste your API key...')}
+                          placeholder={t('setup.apiKey.placeholder')}
                           className="w-full px-4 py-2.5 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500 transition-colors"
                         />
                         <p className="text-xs text-slate-500">
-                          💡 {t('不知道怎么获取？', "Don't know how to get one?")}{' '}
+                          💡 {t('setup.apiKey.hint')}{' '}
                           <button className="text-brand-400 hover:underline">
-                            {t('查看教程', 'View tutorial')}
+                            {t('setup.apiKey.tutorial')}
                           </button>
                         </p>
                       </>
@@ -319,10 +325,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                     {/* No key needed hint */}
                     {!provider.needsKey && (
                       <p className="text-sm text-slate-300">
-                        🏠 {t(
-                          '本地运行，不需要访问码。请确保已安装 Ollama。',
-                          'Runs locally, no API key needed. Make sure Ollama is installed.'
-                        )}
+                        🏠 {t('setup.model.localHint')}
                       </p>
                     )}
 
@@ -330,7 +333,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                     {provider.models.length > 1 && (
                       <div>
                         <label className="block text-sm font-medium text-slate-300 mb-2">
-                          {t('选择模型', 'Select model')}
+                          {t('setup.model.selectModel')}
                         </label>
                         <div className="flex gap-2 flex-wrap">
                           {provider.models.map((m) => (
@@ -356,7 +359,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                         onClick={() => setShowAdvanced(!showAdvanced)}
                         className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
                       >
-                        {showAdvanced ? '▼' : '▶'} {t('高级设置', 'Advanced')}
+                        {showAdvanced ? '▼' : '▶'} {t('setup.model.advanced')}
                       </button>
                       {showAdvanced && (
                         <div className="mt-2 space-y-2 animate-slide-up">
@@ -371,7 +374,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                             className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 transition-colors"
                           />
                           <p className="text-xs text-slate-600">
-                            {t('默认地址已填好，如使用代理或自定义网关可修改', 'Default URL pre-filled. Change if using a proxy or custom gateway.')}
+                            {t('setup.model.baseUrlHint')}
                           </p>
                         </div>
                       )}
@@ -386,14 +389,14 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                   className="px-4 py-2 text-slate-400 hover:text-slate-200 flex items-center gap-1"
                 >
                   <ChevronLeft size={16} />
-                  {t('返回', 'Back')}
+                  {t('setup.back')}
                 </button>
                 <button
                   onClick={handleModelNext}
                   disabled={!selectedProvider || (PROVIDERS.find((p) => p.key === selectedProvider)?.needsKey === true && !apiKey)}
                   className="px-6 py-2.5 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
                 >
-                  {t('下一步', 'Next')}
+                  {t('setup.next')}
                   <ChevronRight size={16} />
                 </button>
               </div>
@@ -405,7 +408,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
             <div className="space-y-8">
               <div className="text-center">
                 <h2 className="text-2xl font-bold mb-2">
-                  {t('要不要让 AI 跨设备记住你？', 'Enable cross-device memory?')}
+                  {t('setup.memory.title')}
                 </h2>
               </div>
 
@@ -421,14 +424,14 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                   <div className="flex items-center gap-3 mb-2">
                     <span className="text-2xl">🏠</span>
                     <div>
-                      <div className="font-medium text-lg">{t('仅本机使用', 'Local only')}</div>
+                      <div className="font-medium text-lg">{t('setup.memory.local')}</div>
                       <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-600/20 text-emerald-400">
-                        {t('推荐新手', 'Recommended')}
+                        {t('setup.memory.local.recommended')}
                       </span>
                     </div>
                   </div>
                   <p className="text-sm text-slate-400 ml-11">
-                    {t('AI 记忆保存在这台电脑，完全离线，隐私安全', 'Memory stays on this computer, fully offline and private')}
+                    {t('setup.memory.local.desc')}
                   </p>
                 </button>
 
@@ -443,11 +446,11 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                   <div className="flex items-center gap-3 mb-2">
                     <span className="text-2xl">☁️</span>
                     <div>
-                      <div className="font-medium text-lg">{t('连接云端', 'Connect to cloud')}</div>
+                      <div className="font-medium text-lg">{t('setup.memory.cloud')}</div>
                     </div>
                   </div>
                   <p className="text-sm text-slate-400 ml-11">
-                    {t('AI 记忆在所有设备间同步，点击后会打开浏览器登录', 'Sync memory across all devices, opens browser to sign in')}
+                    {t('setup.memory.cloud.desc')}
                   </p>
                 </button>
               </div>
@@ -458,13 +461,13 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                   className="px-4 py-2 text-slate-400 hover:text-slate-200 flex items-center gap-1"
                 >
                   <ChevronLeft size={16} />
-                  {t('返回', 'Back')}
+                  {t('setup.back')}
                 </button>
                 <button
                   onClick={() => setStep('done')}
                   className="px-6 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
                 >
-                  {t('下一步', 'Next')}
+                  {t('setup.next')}
                   <ChevronRight size={16} />
                 </button>
               </div>
@@ -477,25 +480,25 @@ export default function SetupWizard({ onComplete }: SetupProps) {
               <div className="text-6xl">🎉</div>
               <div>
                 <h2 className="text-3xl font-bold mb-3">
-                  {t('你的 AI 助手准备好了！', 'Your AI assistant is ready!')}
+                  {t('setup.done.title')}
                 </h2>
                 <p className="text-lg text-slate-400">
-                  {t('AI 会记住你们的每一次对话', 'Your AI will remember every conversation')}
+                  {t('setup.done.subtitle')}
                 </p>
               </div>
 
               <div className="space-y-3 text-sm text-slate-400 max-w-sm mx-auto text-left">
                 <div className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/50">
                   <span>💬</span>
-                  <span>{t('在"聊天"页面开始对话', 'Start chatting in the Chat tab')}</span>
+                  <span>{t('setup.done.tip.chat')}</span>
                 </div>
                 <div className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/50">
                   <span>📱</span>
-                  <span>{t('在"通道"页面连接 Telegram / WhatsApp', 'Connect Telegram / WhatsApp in Channels')}</span>
+                  <span>{t('setup.done.tip.channels')}</span>
                 </div>
                 <div className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/50">
                   <span>🧠</span>
-                  <span>{t('在"记忆"页面查看 AI 记住了什么', 'View what AI remembers in Memory')}</span>
+                  <span>{t('setup.done.tip.memory')}</span>
                 </div>
               </div>
 
@@ -503,7 +506,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                 onClick={handleFinish}
                 className="px-8 py-3 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-lg font-medium transition-colors"
               >
-                🚀 {t('开始使用', 'Get Started')}
+                🚀 {t('setup.done.start')}
               </button>
             </div>
           )}

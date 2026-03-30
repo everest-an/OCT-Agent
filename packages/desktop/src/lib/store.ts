@@ -2,7 +2,7 @@
  * Shared app config store — persists to localStorage + syncs to openclaw.json via IPC
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 const STORAGE_KEY = 'awareness-claw-config';
 
@@ -17,6 +17,8 @@ export interface AppConfig {
   autoCapture: boolean;
   recallLimit: number;
   memoryMode: 'local' | 'cloud';
+  // Token optimization
+  thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high';
   // Appearance
   language: string;
   theme: 'dark' | 'light' | 'system';
@@ -34,6 +36,7 @@ const DEFAULT_CONFIG: AppConfig = {
   autoCapture: true,
   recallLimit: 8,
   memoryMode: 'local',
+  thinkingLevel: 'low',
   language: 'zh',
   theme: 'dark',
   autoUpdate: true,
@@ -50,6 +53,8 @@ function loadConfig(): AppConfig {
 
 function saveConfig(config: AppConfig) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+  // Notify all useAppConfig instances to re-read (fixes language switch not updating Sidebar)
+  window.dispatchEvent(new CustomEvent('awareness-config-changed'));
 }
 
 /** Sync relevant settings to ~/.openclaw/openclaw.json */
@@ -63,6 +68,35 @@ async function syncToOpenClaw(config: AppConfig, providers: ModelProviderDef[]) 
     // Tell OpenClaw to trust our plugin (suppress plugins.allow warning)
     plugins: {
       allow: ['openclaw-memory'],
+    },
+    // Ensure all Awareness tools are whitelisted (agent needs explicit permission)
+    tools: {
+      alsoAllow: [
+        'awareness_init',
+        'awareness_recall',
+        'awareness_lookup',
+        'awareness_record',
+        'awareness_get_agent_prompt',
+      ],
+    },
+  };
+
+  // Sync memory settings to plugin config (autoRecall, recallLimit, memoryMode)
+  openclawConfig.plugins = {
+    ...openclawConfig.plugins,
+    slots: { memory: 'openclaw-memory' },
+    entries: {
+      'openclaw-memory': {
+        enabled: true,
+        config: {
+          autoRecall: config.autoRecall,
+          autoCapture: config.autoCapture,
+          recallLimit: config.recallLimit,
+          ...(config.memoryMode === 'local' ? { localUrl: 'http://localhost:37800' } : {}),
+        },
+      },
+      'memory-core': { enabled: false },
+      'memory-lancedb': { enabled: false },
     },
   };
 
@@ -93,9 +127,16 @@ async function syncToOpenClaw(config: AppConfig, providers: ModelProviderDef[]) 
   await window.electronAPI.saveConfig(openclawConfig);
 }
 
-// React hook
+// React hook — all instances share state via CustomEvent
 export function useAppConfig() {
   const [config, setConfigState] = useState<AppConfig>(loadConfig);
+
+  // Listen for config changes from other components (e.g. Settings → Sidebar language sync)
+  useEffect(() => {
+    const handler = () => setConfigState(loadConfig());
+    window.addEventListener('awareness-config-changed', handler);
+    return () => window.removeEventListener('awareness-config-changed', handler);
+  }, []);
 
   const updateConfig = useCallback((partial: Partial<AppConfig>) => {
     setConfigState((prev) => {
@@ -260,3 +301,88 @@ export const MODEL_PROVIDERS: ModelProviderDef[] = [
     needsKey: false,
   },
 ];
+
+/**
+ * Hook to get merged providers: hardcoded MODEL_PROVIDERS + dynamic from openclaw.json.
+ * Custom providers added via CLI appear under "Custom" section.
+ * Models from openclaw.json override hardcoded model lists for known providers.
+ */
+export function useDynamicProviders(): { providers: ModelProviderDef[]; loading: boolean } {
+  const [merged, setMerged] = useState<ModelProviderDef[]>(MODEL_PROVIDERS);
+  const [loading, setLoading] = useState(true);
+  const fetched = useRef(false);
+
+  useEffect(() => {
+    if (fetched.current || !window.electronAPI) {
+      setLoading(false);
+      return;
+    }
+    fetched.current = true;
+
+    (window.electronAPI as any).modelsReadProviders?.().then((res: any) => {
+      if (!res?.success || !res.providers?.length) {
+        setLoading(false);
+        return;
+      }
+
+      const hardcodedKeys = new Set(MODEL_PROVIDERS.map(p => p.key));
+      const dynamicMap = new Map<string, any>();
+      for (const dp of res.providers) {
+        dynamicMap.set(dp.key, dp);
+      }
+
+      // Merge: for existing providers, update model list if dynamic has more info
+      const result = MODEL_PROVIDERS.map(hp => {
+        const dp = dynamicMap.get(hp.key);
+        if (!dp || !dp.models?.length) return hp;
+
+        // Dynamic provider has models — merge with labels from hardcoded
+        const hardcodedModelMap = new Map(hp.models.map(m => [m.id, m.label]));
+        const mergedModels = dp.models.map((dm: any) => ({
+          id: dm.id,
+          label: hardcodedModelMap.get(dm.id) || dm.name || dm.id,
+        }));
+        // Add any hardcoded models not in dynamic (user may not have added all)
+        for (const hm of hp.models) {
+          if (!mergedModels.some((m: any) => m.id === hm.id)) {
+            mergedModels.push(hm);
+          }
+        }
+
+        return {
+          ...hp,
+          models: mergedModels,
+          // If dynamic has API key, the provider is configured
+          needsKey: dp.hasApiKey ? true : hp.needsKey,
+        };
+      });
+
+      // Add custom providers not in hardcoded list
+      for (const dp of res.providers) {
+        if (!hardcodedKeys.has(dp.key)) {
+          result.push({
+            key: dp.key,
+            name: dp.key,
+            emoji: '🔌',
+            tag: 'Custom',
+            desc: dp.baseUrl || 'Custom provider',
+            baseUrl: dp.baseUrl || '',
+            apiType: dp.apiType,
+            models: (dp.models || []).map((m: any) => ({
+              id: m.id,
+              label: m.name || m.id,
+            })),
+            needsKey: true,
+          });
+        }
+      }
+
+      setMerged(result);
+      setLoading(false);
+    }).catch(() => {
+      setLoading(false);
+    });
+  }, []);
+
+  return { providers: merged, loading };
+}

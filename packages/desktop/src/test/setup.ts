@@ -9,10 +9,28 @@ vi.mock('../assets/logo.svg', () => ({ default: 'logo.svg' }));
 Element.prototype.scrollIntoView = vi.fn();
 HTMLElement.prototype.scrollIntoView = vi.fn();
 
+// Mock matchMedia (not available in jsdom)
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: vi.fn().mockImplementation(query => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })),
+});
+
 // Mock clipboard
 Object.assign(navigator, {
   clipboard: { writeText: vi.fn(() => Promise.resolve()) },
 });
+
+// Set test language to English
+localStorage.setItem('awareness-claw-config', JSON.stringify({ language: 'en' }));
 
 // Mock Electron API for tests
 Object.defineProperty(window, 'electronAPI', {
@@ -50,6 +68,7 @@ Object.defineProperty(window, 'electronAPI', {
       sessionId: 'test-session',
     }),
     onChatStream: () => {},
+    onChatStreamEnd: () => {},
     onChatStatus: () => {},
     checkUpdates: () => Promise.resolve({ updates: [] }),
     channelSave: () => Promise.resolve({ success: true }),
@@ -64,6 +83,41 @@ Object.defineProperty(window, 'electronAPI', {
     getRecentLogs: () => Promise.resolve({ logs: 'Test log output' }),
     memorySearch: () => Promise.resolve({ result: { content: [{ text: '[]' }] } }),
     memoryGetCards: () => Promise.resolve({ error: 'mock: daemon not connected' }),
+    skillListInstalled: () => Promise.resolve({ success: true, skills: {} }),
+    skillExplore: () => Promise.resolve({ success: true, skills: [] }),
+    skillSearch: () => Promise.resolve({ success: true, results: [] }),
+    skillInstall: () => Promise.resolve({ success: true }),
+    skillUninstall: () => Promise.resolve({ success: true }),
+    permissionsGet: () => Promise.resolve({ success: true, profile: 'coding', alsoAllow: [], denied: [] }),
+    permissionsUpdate: () => Promise.resolve({ success: true }),
+    workspaceReadFile: () => Promise.resolve({ success: true, content: '', exists: false }),
+    workspaceWriteFile: () => Promise.resolve({ success: true }),
+    filePreview: () => Promise.resolve({ type: 'text', content: 'mock', size: 4 }),
+    onTrayNewChat: () => {},
+    configExport: () => Promise.resolve({ success: true }),
+    configImport: () => Promise.resolve({ success: true }),
+    upgradeComponent: () => Promise.resolve({ success: true }),
+    channelListConfigured: () => Promise.resolve({ success: true, configured: ['telegram'] }),
+    channelListSupported: () => Promise.resolve({ success: false, channels: [] }),
+    memoryGetPerception: () => Promise.resolve({ result: { content: [{ text: '{"signals":[]}' }] } }),
+    memoryGetTasks: () => Promise.resolve({ result: { content: [{ text: '[]' }] } }),
+    memoryGetContext: () => Promise.resolve({ result: { content: [{ text: '{}' }] } }),
+    skillDetail: () => Promise.resolve({ success: true, skill: { name: 'test', version: '1.0.0', description: 'Test skill' } }),
+    skillGetConfig: () => Promise.resolve({ success: true, config: {} }),
+    skillSaveConfig: () => Promise.resolve({ success: true }),
+    pluginsList: () => Promise.resolve({ success: true, plugins: {} }),
+    pluginsToggle: () => Promise.resolve({ success: true }),
+    hooksList: () => Promise.resolve({ success: true, hooks: {} }),
+    hooksToggle: () => Promise.resolve({ success: true }),
+    bootstrap: () => Promise.resolve({ success: true }),
+    agentsList: () => Promise.resolve({ success: true, agents: [{ id: 'main', name: 'Claw', emoji: '🦞', isDefault: true, bindings: ['telegram'] }] }),
+    agentsAdd: () => Promise.resolve({ success: true }),
+    agentsDelete: () => Promise.resolve({ success: true }),
+    agentsSetIdentity: () => Promise.resolve({ success: true }),
+    agentsBind: () => Promise.resolve({ success: true }),
+    agentsUnbind: () => Promise.resolve({ success: true }),
+    modelsReadProviders: () => Promise.resolve({ success: true, providers: [], primaryModel: '' }),
+    securityCheck: () => Promise.resolve({ issues: [] }),
   },
   writable: true,
 });

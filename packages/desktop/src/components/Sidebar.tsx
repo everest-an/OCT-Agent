@@ -1,23 +1,27 @@
-import { MessageCircle, Brain, Radio, Puzzle, Settings, Clock } from 'lucide-react';
+import { MessageCircle, Brain, Radio, Puzzle, Settings, Clock, Bot } from 'lucide-react';
 import logoUrl from '../assets/logo.png';
+import { useI18n } from '../lib/i18n';
 
-export type Page = 'chat' | 'memory' | 'channels' | 'skills' | 'automation' | 'settings';
+export type Page = 'chat' | 'memory' | 'channels' | 'skills' | 'automation' | 'agents' | 'settings';
 
 interface SidebarProps {
   currentPage: Page;
   onNavigate: (page: Page) => void;
 }
 
-const navItems: { id: Page; icon: typeof MessageCircle; label: string }[] = [
-  { id: 'chat', icon: MessageCircle, label: '聊天' },
-  { id: 'memory', icon: Brain, label: '记忆' },
-  { id: 'channels', icon: Radio, label: '通道' },
-  { id: 'skills', icon: Puzzle, label: '技能' },
-  { id: 'automation', icon: Clock, label: '自动化' },
-  { id: 'settings', icon: Settings, label: '设置' },
+const navItems: { id: Page; icon: typeof MessageCircle; i18nKey: string }[] = [
+  { id: 'chat', icon: MessageCircle, i18nKey: 'nav.chat' },
+  { id: 'memory', icon: Brain, i18nKey: 'nav.memory' },
+  { id: 'channels', icon: Radio, i18nKey: 'nav.channels' },
+  { id: 'skills', icon: Puzzle, i18nKey: 'nav.skills' },
+  { id: 'automation', icon: Clock, i18nKey: 'nav.automation' },
+  { id: 'agents', icon: Bot, i18nKey: 'nav.agents' },
+  { id: 'settings', icon: Settings, i18nKey: 'nav.settings' },
 ];
 
 export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
+  const { t } = useI18n();
+
   return (
     <aside className="w-20 bg-slate-950 border-r border-slate-800 flex flex-col items-center pt-12 pb-4 gap-1">
       {/* Logo */}
@@ -26,7 +30,7 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       </div>
 
       {/* Nav items */}
-      {navItems.map(({ id, icon: Icon, label }) => (
+      {navItems.map(({ id, icon: Icon, i18nKey }) => (
         <button
           key={id}
           onClick={() => onNavigate(id)}
@@ -40,7 +44,7 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
           `}
         >
           <Icon size={22} strokeWidth={currentPage === id ? 2.5 : 1.5} />
-          <span>{label}</span>
+          <span>{t(i18nKey)}</span>
         </button>
       ))}
     </aside>

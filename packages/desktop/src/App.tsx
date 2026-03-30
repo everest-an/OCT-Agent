@@ -6,14 +6,42 @@ import Channels from './pages/Channels';
 import Models from './pages/Models';
 import Skills from './pages/Skills';
 import Automation from './pages/Automation';
+import Agents from './pages/Agents';
 import Settings from './pages/Settings';
 import Sidebar, { type Page } from './components/Sidebar';
 import UpdateBanner from './components/UpdateBanner';
+import { useAppConfig } from './lib/store';
 import logoUrl from './assets/logo.png';
 
+/** Apply theme to document root */
+function useThemeEffect(theme: 'dark' | 'light' | 'system') {
+  useEffect(() => {
+    const root = document.documentElement;
+    const applyTheme = (isDark: boolean) => {
+      root.classList.toggle('dark', isDark);
+      root.classList.toggle('light', !isDark);
+      root.style.colorScheme = isDark ? 'dark' : 'light';
+    };
+
+    if (theme === 'system') {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      applyTheme(mq.matches);
+      const handler = (e: MediaQueryListEvent) => applyTheme(e.matches);
+      mq.addEventListener('change', handler);
+      return () => mq.removeEventListener('change', handler);
+    } else {
+      applyTheme(theme === 'dark');
+    }
+  }, [theme]);
+}
+
 export default function App() {
+  const { config } = useAppConfig();
   const [setupComplete, setSetupComplete] = useState<boolean | null>(null);
   const [currentPage, setCurrentPage] = useState<Page>('chat');
+
+  // Apply theme switching
+  useThemeEffect(config.theme || 'dark');
 
   useEffect(() => {
     const done = localStorage.getItem('awareness-claw-setup-done');
@@ -54,6 +82,7 @@ export default function App() {
           {currentPage === 'channels' && <Channels />}
           {currentPage === 'skills' && <Skills />}
           {currentPage === 'automation' && <Automation />}
+          {currentPage === 'agents' && <Agents />}
           {currentPage === 'settings' && <Settings />}
         </main>
       </div>

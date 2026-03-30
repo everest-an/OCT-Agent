@@ -1,8 +1,13 @@
 import { useState, useEffect } from 'react';
-import { Moon, Sun, Monitor, ChevronRight, X, Check, ChevronDown, Play, Square, RotateCw, Loader2, Plus, Trash2 } from 'lucide-react';
-import { useAppConfig, MODEL_PROVIDERS } from '../lib/store';
+import { Moon, Sun, Monitor, ChevronRight, X, Check, ChevronDown, Play, Square, RotateCw, Loader2, Plus, Trash2, Download, Upload, Shield, AlertTriangle, Puzzle, Webhook, CheckCircle } from 'lucide-react';
+import { useAppConfig, MODEL_PROVIDERS, useDynamicProviders } from '../lib/store';
+import { getUsageStats, clearUsage, type UsageStats } from '../lib/usage';
+import { useI18n } from '../lib/i18n';
+import PasswordInput from '../components/PasswordInput';
+import pkg from '../../package.json';
 
 export default function Settings() {
+  const { t } = useI18n();
   const { config, updateConfig, syncConfig } = useAppConfig();
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [gatewayStatus, setGatewayStatus] = useState<'checking' | 'running' | 'stopped'>('checking');
@@ -15,6 +20,104 @@ export default function Settings() {
   const [tempModel, setTempModel] = useState('');
   const [tempApiKey, setTempApiKey] = useState('');
   const [tempBaseUrl, setTempBaseUrl] = useState('');
+
+  // Permissions state
+  const [permissions, setPermissions] = useState<{ profile: string; alsoAllow: string[]; denied: string[] } | null>(null);
+  const [newAllowTool, setNewAllowTool] = useState('');
+  const [newDenyCmd, setNewDenyCmd] = useState('');
+
+  // Plugins state — entries is Record<name, {enabled}> in openclaw.json
+  const [plugins, setPlugins] = useState<Record<string, { enabled?: boolean }>>({});
+
+  // Hooks state — hooks is Record<name, {enabled, entries?}> in openclaw.json
+  const [hooks, setHooks] = useState<Record<string, { enabled?: boolean; entries?: Record<string, { enabled?: boolean }> }>>({});
+
+  // Dynamic providers
+  const { providers: allProviders } = useDynamicProviders();
+
+  // Security audit
+  const [securityIssues, setSecurityIssues] = useState<Array<{ level: string; message: string; fix?: string }>>([]);
+
+  // Usage stats
+  const [usageStats, setUsageStats] = useState<UsageStats | null>(null);
+
+  // System version info
+  const [versionInfo, setVersionInfo] = useState<{
+    platform?: string; arch?: string; nodeVersion?: string; openclawVersion?: string;
+    awarenessPluginVersion?: string; daemonRunning?: boolean; daemonVersion?: string;
+    daemonStats?: { memories?: number; knowledge?: number; sessions?: number };
+  } | null>(null);
+
+  // Load version info on mount
+  useEffect(() => {
+    const loadVersions = async () => {
+      if (!window.electronAPI) return;
+      const env = await (window.electronAPI as any).detectEnvironment();
+      setVersionInfo({
+        platform: env.platform,
+        arch: env.arch,
+        nodeVersion: env.systemNodeVersion || null,
+        openclawVersion: env.openclawVersion || null,
+        awarenessPluginVersion: env.awarenessPluginVersion || null,
+        daemonRunning: env.daemonRunning || false,
+        daemonVersion: env.daemonVersion || null,
+        daemonStats: env.daemonStats || null,
+      });
+    };
+    loadVersions();
+  }, []);
+
+  // Workspace files state
+  const [editingFile, setEditingFile] = useState<string | null>(null);
+  const [fileContent, setFileContent] = useState('');
+  const [fileSaving, setFileSaving] = useState(false);
+  const [fileSaveSuccess, setFileSaveSuccess] = useState(false);
+
+  // Load permissions, plugins, hooks on mount
+  useEffect(() => {
+    const api = window.electronAPI as any;
+    if (!api) return;
+    api.permissionsGet().then((res: any) => {
+      if (res.success) setPermissions({ profile: res.profile, alsoAllow: res.alsoAllow, denied: res.denied });
+    });
+    api.pluginsList?.().then((res: any) => {
+      if (res.success && res.entries && typeof res.entries === 'object') setPlugins(res.entries);
+    }).catch(() => {});
+    api.hooksList?.().then((res: any) => {
+      if (res.success && res.hooks && typeof res.hooks === 'object') setHooks(res.hooks);
+    }).catch(() => {});
+    api.securityCheck?.().then((res: any) => {
+      if (res?.issues) setSecurityIssues(res.issues);
+    }).catch(() => {});
+    setUsageStats(getUsageStats());
+  }, []);
+
+  const savePermissions = async (changes: { alsoAllow?: string[]; denied?: string[] }) => {
+    if (!window.electronAPI || !permissions) return;
+    const updated = { ...permissions, ...changes };
+    setPermissions(updated);
+    await (window.electronAPI as any).permissionsUpdate(changes);
+  };
+
+  const loadWorkspaceFile = async (filename: string) => {
+    if (!window.electronAPI) return;
+    const res = await (window.electronAPI as any).workspaceReadFile(filename);
+    if (res.success) {
+      setFileContent(res.content || '');
+      setEditingFile(filename);
+    }
+  };
+
+  const saveWorkspaceFile = async () => {
+    if (!window.electronAPI || !editingFile) return;
+    setFileSaving(true);
+    const res = await (window.electronAPI as any).workspaceWriteFile(editingFile, fileContent);
+    setFileSaving(false);
+    if (res?.success !== false) {
+      setFileSaveSuccess(true);
+      setTimeout(() => { setFileSaveSuccess(false); setEditingFile(null); }, 1500);
+    }
+  };
 
   // Check gateway status on mount
   useEffect(() => {
@@ -46,7 +149,7 @@ export default function Settings() {
     setShowLogs(true);
   };
 
-  const currentProvider = MODEL_PROVIDERS.find((p) => p.key === config.providerKey);
+  const currentProvider = allProviders.find((p) => p.key === config.providerKey);
   const currentModel = currentProvider?.models.find((m) => m.id === config.modelId);
 
   const openModelPicker = () => {
@@ -57,6 +160,8 @@ export default function Settings() {
     setShowModelPicker(true);
   };
 
+  const [showRestartHint, setShowRestartHint] = useState(false);
+
   const saveModelChange = () => {
     updateConfig({
       providerKey: tempProvider,
@@ -64,18 +169,20 @@ export default function Settings() {
       apiKey: tempApiKey,
       baseUrl: tempBaseUrl,
     });
-    syncConfig(MODEL_PROVIDERS);
+    syncConfig(allProviders);
     setShowModelPicker(false);
+    setShowRestartHint(true);
+    setTimeout(() => setShowRestartHint(false), 8000);
   };
 
   const handleToggle = (key: keyof typeof config, value: boolean) => {
     updateConfig({ [key]: value } as any);
-    syncConfig(MODEL_PROVIDERS);
+    syncConfig(allProviders);
   };
 
   const handleRecallLimit = (value: number) => {
     updateConfig({ recallLimit: value });
-    syncConfig(MODEL_PROVIDERS);
+    syncConfig(allProviders);
   };
 
   const Toggle = ({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) => (
@@ -109,52 +216,60 @@ export default function Settings() {
     </div>
   );
 
-  const selectedTempProvider = MODEL_PROVIDERS.find((p) => p.key === tempProvider);
+  const selectedTempProvider = allProviders.find((p) => p.key === tempProvider);
 
   return (
     <div className="h-full overflow-y-auto">
       <div className="px-6 py-4 border-b border-slate-800">
-        <h1 className="text-lg font-semibold">⚙️ 设置</h1>
+        <h1 className="text-lg font-semibold">⚙️ {t('settings.title')}</h1>
       </div>
 
       <div className="p-6 space-y-6 max-w-2xl">
         {/* Model */}
-        <Section title="🤖 AI 模型">
+        <Section title={`🤖 ${t('settings.model')}`}>
           <Row
-            label="当前模型"
+            label={t('settings.model.currentModel')}
             desc={currentProvider
               ? `${currentProvider.emoji} ${currentProvider.name} / ${currentModel?.label || config.modelId}`
-              : '未配置'
+              : t('settings.model.notConfigured')
             }
           >
             <button
               onClick={openModelPicker}
               className="flex items-center gap-1 px-3 py-1.5 text-xs bg-brand-600 hover:bg-brand-500 rounded-lg text-white transition-colors"
             >
-              切换模型 <ChevronRight size={12} />
+              {t('settings.model.change')} <ChevronRight size={12} />
             </button>
           </Row>
           {config.baseUrl && config.baseUrl !== currentProvider?.baseUrl && (
-            <Row label="自定义 API 地址" desc={config.baseUrl}>
+            <Row label={t('settings.model.customUrl')} desc={config.baseUrl}>
               <button
-                onClick={() => { updateConfig({ baseUrl: '' }); syncConfig(MODEL_PROVIDERS); }}
+                onClick={() => { updateConfig({ baseUrl: '' }); syncConfig(allProviders); }}
                 className="text-xs text-slate-500 hover:text-red-400"
               >
-                重置为默认
+                {t('settings.model.resetDefault')}
               </button>
             </Row>
           )}
         </Section>
 
+        {/* Model change restart hint */}
+        {showRestartHint && (
+          <div className="flex items-center gap-2 p-3 bg-amber-600/10 border border-amber-600/20 rounded-xl text-xs text-amber-400">
+            <AlertTriangle size={14} />
+            <span>{t('settings.model.restartHint')}</span>
+          </div>
+        )}
+
         {/* Memory */}
-        <Section title="🧠 记忆">
-          <Row label="自动记忆" desc="AI 自动记住每次对话内容">
+        <Section title={`🧠 ${t('settings.memory')}`}>
+          <Row label={t('settings.memory.autoCapture')} desc={t('settings.memory.autoCapture.desc')}>
             <Toggle checked={config.autoCapture} onChange={(v) => handleToggle('autoCapture', v)} />
           </Row>
-          <Row label="自动回忆" desc="对话开始时自动加载相关记忆">
+          <Row label={t('settings.memory.autoRecall')} desc={t('settings.memory.autoRecall.desc')}>
             <Toggle checked={config.autoRecall} onChange={(v) => handleToggle('autoRecall', v)} />
           </Row>
-          <Row label="回忆条数" desc="每次对话加载的记忆数量">
+          <Row label={t('settings.memory.recallCount')} desc={t('settings.memory.recallCount.desc')}>
             <div className="flex items-center gap-3">
               <input
                 type="range" min={1} max={20}
@@ -165,7 +280,7 @@ export default function Settings() {
               <span className="text-sm text-slate-300 w-6 text-right">{config.recallLimit}</span>
             </div>
           </Row>
-          <Row label="存储模式" desc="记忆保存位置">
+          <Row label={t('settings.memory.storage')} desc={t('settings.memory.storage.desc')}>
             <div className="flex bg-slate-700 rounded-lg overflow-hidden">
               {(['local', 'cloud'] as const).map((mode) => (
                 <button
@@ -173,16 +288,54 @@ export default function Settings() {
                   onClick={() => { updateConfig({ memoryMode: mode }); }}
                   className={`px-3 py-1.5 text-xs transition-colors ${config.memoryMode === mode ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
                 >
-                  {mode === 'local' ? '🏠 本地' : '☁️ 云端'}
+                  {t(`settings.memory.${mode}`)}
                 </button>
               ))}
             </div>
           </Row>
         </Section>
 
+        {/* Token Optimization */}
+        <Section title={`💰 ${t('settings.token')}`}>
+          <Row label={t('settings.token.thinkingLevel')} desc={t('settings.token.thinkingLevel.desc')}>
+            <select
+              value={config.thinkingLevel || 'low'}
+              onChange={(e) => { updateConfig({ thinkingLevel: e.target.value as any }); }}
+              className="px-3 py-1.5 bg-slate-700 rounded-lg text-sm border-none focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+            >
+              <option value="off">{t('settings.token.thinkingOff')}</option>
+              <option value="minimal">{t('settings.token.thinkingMinimal')}</option>
+              <option value="low">{t('settings.token.thinkingLow')}</option>
+              <option value="medium">{t('settings.token.thinkingMedium')}</option>
+              <option value="high">{t('settings.token.thinkingHigh')}</option>
+            </select>
+          </Row>
+          <Row label={t('settings.token.recallLimit')} desc={t('settings.token.recallLimit.desc')}>
+            <div className="flex items-center gap-3">
+              <input
+                type="range" min={1} max={20}
+                value={config.recallLimit}
+                onChange={(e) => handleRecallLimit(parseInt(e.target.value))}
+                className="w-24 accent-brand-500"
+              />
+              <span className="text-sm text-slate-300 w-6 text-right">{config.recallLimit}</span>
+            </div>
+          </Row>
+          <Row label={t('settings.token.estimate')} desc={t('settings.token.estimate.desc')}>
+            <span className="text-xs text-slate-400 font-mono">
+              ~{(() => {
+                const recallTokens = config.autoRecall ? config.recallLimit * 200 : 0;
+                const thinkingTokens = { off: 0, minimal: 100, low: 300, medium: 800, high: 2000 }[config.thinkingLevel || 'low'] || 300;
+                return `${((recallTokens + thinkingTokens + 500) / 1000).toFixed(1)}k`;
+              })()}
+              {' '}{t('settings.token.overhead')}
+            </span>
+          </Row>
+        </Section>
+
         {/* Appearance */}
-        <Section title="🎨 外观">
-          <Row label="语言">
+        <Section title={`🎨 ${t('settings.appearance')}`}>
+          <Row label={t('settings.language')}>
             <select
               value={config.language}
               onChange={(e) => updateConfig({ language: e.target.value })}
@@ -194,30 +347,241 @@ export default function Settings() {
               <option value="ko">🇰🇷 한국어</option>
             </select>
           </Row>
-          <Row label="主题">
+          <Row label={t('settings.theme')}>
             <div className="flex bg-slate-700 rounded-lg overflow-hidden">
               {([
-                { key: 'light' as const, icon: Sun, label: '亮色' },
-                { key: 'dark' as const, icon: Moon, label: '暗色' },
-                { key: 'system' as const, icon: Monitor, label: '系统' },
-              ]).map(({ key, icon: Icon, label }) => (
+                { key: 'light' as const, icon: Sun, labelKey: 'settings.theme.light' },
+                { key: 'dark' as const, icon: Moon, labelKey: 'settings.theme.dark' },
+                { key: 'system' as const, icon: Monitor, labelKey: 'settings.theme.system' },
+              ]).map(({ key, icon: Icon, labelKey }) => (
                 <button
                   key={key}
                   onClick={() => updateConfig({ theme: key })}
                   className={`px-3 py-1.5 text-xs flex items-center gap-1 ${config.theme === key ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
                 >
-                  <Icon size={12} /> {label}
+                  <Icon size={12} /> {t(labelKey)}
                 </button>
               ))}
             </div>
           </Row>
         </Section>
 
+        {/* Permissions */}
+        {permissions && (
+          <Section title={`🛡️ ${t('settings.permissions')}`}>
+            <Row label={t('settings.permissions.profile')} desc={`${t('settings.model.current')}: ${permissions.profile}`}>
+              <span className="text-xs text-brand-400 font-mono">{permissions.profile}</span>
+            </Row>
+            <div className="p-4 space-y-3">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-slate-400">{t('settings.permissions.allowed')} ({permissions.alsoAllow.length})</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {permissions.alsoAllow.map(tool => (
+                    <span key={tool} className="flex items-center gap-1 px-2 py-0.5 bg-emerald-600/10 border border-emerald-600/20 rounded text-[10px] text-emerald-400">
+                      {tool}
+                      <button onClick={() => savePermissions({ alsoAllow: permissions.alsoAllow.filter(t => t !== tool) })} className="hover:text-red-400">×</button>
+                    </span>
+                  ))}
+                  {permissions.alsoAllow.length === 0 && <span className="text-[10px] text-slate-600">None</span>}
+                </div>
+                <div className="flex gap-1.5">
+                  <input
+                    value={newAllowTool}
+                    onChange={e => setNewAllowTool(e.target.value)}
+                    placeholder="tool_name"
+                    className="flex-1 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-xs font-mono focus:outline-none focus:border-brand-500"
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && newAllowTool.trim() && !permissions.alsoAllow.includes(newAllowTool.trim())) {
+                        savePermissions({ alsoAllow: [...permissions.alsoAllow, newAllowTool.trim()] });
+                        setNewAllowTool('');
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={() => { if (newAllowTool.trim() && !permissions.alsoAllow.includes(newAllowTool.trim())) { savePermissions({ alsoAllow: [...permissions.alsoAllow, newAllowTool.trim()] }); setNewAllowTool(''); } }}
+                    className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded text-slate-300"
+                  >
+                    <Plus size={12} />
+                  </button>
+                </div>
+              </div>
+              <div className="border-t border-slate-700/50 pt-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-slate-400 flex items-center gap-1">
+                    <Shield size={11} /> {t('settings.permissions.denied')} ({permissions.denied.length})
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {permissions.denied.map(cmd => (
+                    <span key={cmd} className="flex items-center gap-1 px-2 py-0.5 bg-red-600/10 border border-red-600/20 rounded text-[10px] text-red-400">
+                      {cmd}
+                      <button onClick={() => savePermissions({ denied: permissions.denied.filter(c => c !== cmd) })} className="hover:text-white">×</button>
+                    </span>
+                  ))}
+                  {permissions.denied.length === 0 && <span className="text-[10px] text-slate-600">None</span>}
+                </div>
+                <div className="flex gap-1.5">
+                  <input
+                    value={newDenyCmd}
+                    onChange={e => setNewDenyCmd(e.target.value)}
+                    placeholder="command.name"
+                    className="flex-1 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-xs font-mono focus:outline-none focus:border-brand-500"
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && newDenyCmd.trim() && !permissions.denied.includes(newDenyCmd.trim())) {
+                        savePermissions({ denied: [...permissions.denied, newDenyCmd.trim()] });
+                        setNewDenyCmd('');
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={() => { if (newDenyCmd.trim() && !permissions.denied.includes(newDenyCmd.trim())) { savePermissions({ denied: [...permissions.denied, newDenyCmd.trim()] }); setNewDenyCmd(''); } }}
+                    className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded text-slate-300"
+                  >
+                    <Plus size={12} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </Section>
+        )}
+
+        {/* Security Audit */}
+        <Section title={`🔒 ${t('settings.security') || 'Security Audit'}`}>
+          <div className="p-4 space-y-2">
+            {securityIssues.length === 0 ? (
+              <div className="flex items-center gap-2 text-xs p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
+                <CheckCircle size={14} className="shrink-0" />
+                <p>No security issues found</p>
+              </div>
+            ) : (
+              securityIssues.map((issue, i) => (
+                <div key={i} className={`flex items-start gap-2 text-xs p-2 rounded-lg ${
+                  issue.level === 'warning' ? 'bg-amber-500/10 text-amber-400' : 'bg-slate-800 text-slate-400'
+                }`}>
+                  {issue.level === 'warning' ? <AlertTriangle size={14} className="mt-0.5 shrink-0" /> : <Shield size={14} className="mt-0.5 shrink-0" />}
+                  <div>
+                    <p>{issue.message}</p>
+                    {issue.fix && <code className="mt-1 block text-[10px] text-slate-500 bg-slate-900 px-2 py-1 rounded">{issue.fix}</code>}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </Section>
+
+        {/* Plugins */}
+        {Object.keys(plugins).length > 0 && (
+          <Section title={`🧩 Plugins (${Object.keys(plugins).length})`}>
+            {Object.entries(plugins).map(([name, cfg]) => {
+              const enabled = cfg?.enabled !== false;
+              return (
+                <Row key={name} label={name}>
+                  <Toggle checked={enabled} onChange={async (v) => {
+                    setPlugins(prev => ({ ...prev, [name]: { ...prev[name], enabled: v } }));
+                    // Write back to openclaw.json
+                    const api = window.electronAPI as any;
+                    await api.pluginsToggle?.(name, v);
+                  }} />
+                </Row>
+              );
+            })}
+          </Section>
+        )}
+
+        {/* Hooks */}
+        {Object.keys(hooks).length > 0 && (
+          <Section title={`🪝 Hooks (${Object.keys(hooks).length})`}>
+            {Object.entries(hooks).map(([hookName, hookCfg]) => {
+              const enabled = hookCfg?.enabled !== false;
+              const subEntries = hookCfg?.entries ? Object.entries(hookCfg.entries) : [];
+              return (
+                <div key={hookName} className="p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs font-medium text-slate-400 flex items-center gap-1.5">
+                      <Webhook size={12} /> {hookName}
+                    </div>
+                    <Toggle checked={enabled} onChange={async (v) => {
+                      setHooks(prev => ({ ...prev, [hookName]: { ...prev[hookName], enabled: v } }));
+                      const api = window.electronAPI as any;
+                      await api.hooksToggle?.(hookName, v);
+                    }} />
+                  </div>
+                  {subEntries.length > 0 && (
+                    <div className="ml-4 space-y-1 border-l border-slate-700/50 pl-3">
+                      {subEntries.map(([subName, subCfg]) => (
+                        <div key={subName} className="flex items-center justify-between gap-2 py-0.5">
+                          <code className="text-[11px] font-mono text-slate-500 truncate flex-1">{subName}</code>
+                          <span className={`text-[10px] ${(subCfg as any)?.enabled !== false ? 'text-emerald-500' : 'text-slate-600'}`}>
+                            {(subCfg as any)?.enabled !== false ? 'on' : 'off'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </Section>
+        )}
+
+        {/* Workspace */}
+        <Section title={`📋 ${t('settings.workspace')}`}>
+          {['SOUL.md', 'USER.md', 'IDENTITY.md', 'TOOLS.md'].map(file => {
+            const descMap: Record<string, string> = { 'SOUL.md': t('settings.workspace.personality'), 'USER.md': t('settings.workspace.userInfo'), 'IDENTITY.md': t('settings.workspace.identity'), 'TOOLS.md': t('settings.workspace.tools') };
+            return (
+            <Row key={file} label={file} desc={descMap[file] || ''}>
+
+              <button
+                onClick={() => loadWorkspaceFile(file)}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors"
+              >
+                {t('common.edit')} <ChevronRight size={12} />
+              </button>
+            </Row>
+            );
+          })}
+        </Section>
+
+        {/* Workspace file editor modal */}
+        {editingFile && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-8">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+              <div className="flex items-center justify-between p-4 border-b border-slate-800">
+                <h3 className="font-semibold text-sm">{editingFile}</h3>
+                <button onClick={() => setEditingFile(null)} className="text-slate-500 hover:text-slate-300"><X size={18} /></button>
+              </div>
+              <textarea
+                value={fileContent}
+                onChange={e => setFileContent(e.target.value)}
+                className="flex-1 p-4 bg-slate-950 text-sm font-mono text-slate-300 resize-none focus:outline-none min-h-[300px]"
+                spellCheck={false}
+              />
+              <div className="flex items-center justify-end gap-2 p-4 border-t border-slate-800">
+                {fileSaveSuccess && (
+                  <span className="flex items-center gap-1 text-xs text-emerald-400 mr-2">
+                    <CheckCircle size={14} /> Saved
+                  </span>
+                )}
+                <button onClick={() => setEditingFile(null)} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">{t('common.cancel')}</button>
+                <button
+                  onClick={saveWorkspaceFile}
+                  disabled={fileSaving || fileSaveSuccess}
+                  className="px-4 py-2 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 text-white rounded-lg text-sm transition-colors flex items-center gap-1"
+                >
+                  {fileSaving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} {t('common.save')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Gateway Management */}
-        <Section title="🖥️ Gateway 服务管理">
+        <Section title={`🖥️ ${t('settings.gateway')}`}>
           <Row
             label="OpenClaw Gateway"
-            desc={gatewayStatus === 'running' ? '✅ 运行中' : gatewayStatus === 'stopped' ? '⏹️ 已停止' : '检测中...'}
+            desc={t(`settings.gateway.status.${gatewayStatus}`)}
           >
             <div className="flex items-center gap-2">
               {gatewayLoading ? (
@@ -229,7 +593,7 @@ export default function Settings() {
                       onClick={() => handleGatewayAction('start')}
                       className="flex items-center gap-1 px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors"
                     >
-                      <Play size={10} /> 启动
+                      <Play size={10} /> {t('settings.gateway.start')}
                     </button>
                   )}
                   {gatewayStatus === 'running' && (
@@ -238,13 +602,13 @@ export default function Settings() {
                         onClick={() => handleGatewayAction('restart')}
                         className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors"
                       >
-                        <RotateCw size={10} /> 重启
+                        <RotateCw size={10} /> {t('settings.gateway.restart')}
                       </button>
                       <button
                         onClick={() => handleGatewayAction('stop')}
                         className="flex items-center gap-1 px-3 py-1.5 text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg transition-colors"
                       >
-                        <Square size={10} /> 停止
+                        <Square size={10} /> {t('settings.gateway.stop')}
                       </button>
                     </>
                   )}
@@ -252,48 +616,78 @@ export default function Settings() {
               )}
             </div>
           </Row>
-          <Row label="系统日志" desc="查看最近的运行日志">
+          <Row label={t('settings.gateway.logs')} desc={t('settings.gateway.logs.desc')}>
             <button
               onClick={loadLogs}
               className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors"
             >
-              查看日志 <ChevronRight size={12} />
+              {t('settings.gateway.viewLogs')} <ChevronRight size={12} />
             </button>
           </Row>
         </Section>
 
         {/* System */}
-        <Section title="🔧 系统">
-          <Row label="自动更新" desc="有新版本时自动下载安装">
+        <Section title={`🔧 ${t('settings.system')}`}>
+          <Row label={t('settings.autoUpdate')} desc={t('settings.autoUpdate.desc')}>
             <Toggle checked={config.autoUpdate} onChange={(v) => updateConfig({ autoUpdate: v })} />
           </Row>
-          <Row label="开机自启" desc="电脑开机时自动启动">
+          <Row label={t('settings.bootStart')} desc={t('settings.bootStart.desc')}>
             <Toggle checked={config.autoStart} onChange={(v) => updateConfig({ autoStart: v })} />
           </Row>
-          <Row label="系统诊断" desc="检测 OpenClaw 环境状态">
+          <Row label={t('settings.diagnostic')} desc={t('settings.diagnostic.desc')}>
             <button
               onClick={async () => {
                 if (!window.electronAPI) return;
                 const env = await (window.electronAPI as any).detectEnvironment();
                 const info = [
-                  `平台: ${env.platform} ${env.arch}`,
-                  `Node.js: ${env.systemNodeVersion || '未安装'}`,
-                  `OpenClaw: ${env.openclawVersion || '未安装'}`,
-                  `配置文件: ${env.hasExistingConfig ? '✅ 存在' : '❌ 不存在'}`,
+                  `${t('settings.diagnostic.platform')}: ${env.platform} ${env.arch}`,
+                  `${t('settings.diagnostic.nodejs')}: ${env.systemNodeVersion || t('settings.diagnostic.notInstalled')}`,
+                  `${t('settings.diagnostic.openclaw')}: ${env.openclawVersion || t('settings.diagnostic.notInstalled')}`,
+                  `${t('settings.diagnostic.configFile')}: ${env.hasExistingConfig ? t('settings.diagnostic.exists') : t('settings.diagnostic.notExists')}`,
                 ].join('\n');
                 alert(info);
               }}
               className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors"
             >
-              检测 <ChevronRight size={12} />
+              {t('settings.diagnostic.run')} <ChevronRight size={12} />
             </button>
           </Row>
-          <Row label="重置安装向导" desc="重新运行首次安装流程">
+          <Row label={t('settings.export')} desc={t('settings.export.desc')}>
+            <button
+              onClick={async () => {
+                if (!window.electronAPI) return;
+                const result = await (window.electronAPI as any).configExport();
+                if (result.success) alert(`${t('settings.export.success')}\n${result.path}`);
+                else if (result.error !== 'Cancelled') alert(`${t('settings.export.failed')} ${result.error}`);
+              }}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors"
+            >
+              <Download size={12} /> {t('settings.export')}
+            </button>
+          </Row>
+          <Row label={t('settings.import')} desc={t('settings.import.desc')}>
+            <button
+              onClick={async () => {
+                if (!window.electronAPI) return;
+                const result = await (window.electronAPI as any).configImport();
+                if (result.success) {
+                  alert(t('settings.import.success'));
+                  window.location.reload();
+                } else if (result.error !== 'Cancelled') {
+                  alert(`${t('settings.import.failed')} ${result.error}`);
+                }
+              }}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors"
+            >
+              <Upload size={12} /> {t('settings.import')}
+            </button>
+          </Row>
+          <Row label={t('settings.reset')} desc={t('settings.reset.desc')}>
             <button
               onClick={() => { localStorage.removeItem('awareness-claw-setup-done'); window.location.reload(); }}
               className="px-3 py-1.5 text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg transition-colors"
             >
-              重置
+              {t('settings.reset.btn')}
             </button>
           </Row>
         </Section>
@@ -303,7 +697,7 @@ export default function Settings() {
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-8">
             <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-3xl max-h-[80vh] overflow-hidden flex flex-col">
               <div className="flex items-center justify-between p-4 border-b border-slate-800">
-                <h3 className="font-semibold">📋 系统日志</h3>
+                <h3 className="font-semibold">📋 {t('settings.gateway.logs')}</h3>
                 <button onClick={() => setShowLogs(false)} className="text-slate-500 hover:text-slate-300"><X size={18} /></button>
               </div>
               <pre className="flex-1 overflow-auto p-4 text-xs font-mono text-slate-300 bg-slate-950 whitespace-pre-wrap">
@@ -313,15 +707,98 @@ export default function Settings() {
           </div>
         )}
 
-        <div className="text-center text-xs text-slate-600 space-y-1 pb-6">
-          <p>AwarenessClaw v0.1.0</p>
-          <p>Built on OpenClaw + Awareness Memory</p>
-          <button
-            onClick={() => window.electronAPI?.openExternal('https://github.com/edwin-hao-ai/AwarenessClaw')}
-            className="text-brand-500 hover:text-brand-400"
-          >
-            GitHub
-          </button>
+        {/* Usage Stats Panel */}
+        {usageStats && usageStats.totalMessages > 0 && (
+          <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">{t('settings.usage') || 'Usage (estimated)'}</h3>
+              <button
+                onClick={() => { if (confirm('Clear all usage data? This cannot be undone.')) { clearUsage(); setUsageStats(getUsageStats()); } }}
+                className="text-[10px] text-slate-600 hover:text-red-400 transition-colors"
+              >
+                {t('settings.reset.btn')}
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="text-center">
+                <div className="text-lg font-bold text-brand-400">{usageStats.todayMessages}</div>
+                <div className="text-[10px] text-slate-500">{t('settings.usage.today') || 'Today'}</div>
+              </div>
+              <div className="text-center">
+                <div className="text-lg font-bold text-slate-200">{usageStats.totalMessages}</div>
+                <div className="text-[10px] text-slate-500">{t('settings.usage.total') || 'Total (30d)'}</div>
+              </div>
+              <div className="text-center">
+                <div className="text-lg font-bold text-slate-200">{((usageStats.totalInputTokens + usageStats.totalOutputTokens) / 1000).toFixed(1)}k</div>
+                <div className="text-[10px] text-slate-500">{t('settings.usage.tokens') || 'Est. tokens'}</div>
+              </div>
+            </div>
+            {Object.keys(usageStats.byModel).length > 0 && (
+              <div className="border-t border-slate-700/50 pt-2 space-y-1">
+                {Object.entries(usageStats.byModel).slice(0, 5).map(([model, data]) => (
+                  <div key={model} className="flex items-center justify-between text-[10px]">
+                    <span className="text-slate-400 truncate max-w-[60%]">{model}</span>
+                    <span className="text-slate-500">{data.messages} msgs · {((data.inputTokens + data.outputTokens) / 1000).toFixed(1)}k tokens</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Version Info Panel */}
+        <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 p-4 space-y-2">
+          <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">{t('settings.versions')}</h3>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="flex justify-between p-2 bg-slate-900/50 rounded-lg">
+              <span className="text-slate-400">AwarenessClaw</span>
+              <span className="text-slate-200 font-mono">v{pkg.version}</span>
+            </div>
+            <div className="flex justify-between p-2 bg-slate-900/50 rounded-lg">
+              <span className="text-slate-400">OpenClaw</span>
+              <span className={`font-mono ${versionInfo?.openclawVersion ? 'text-slate-200' : 'text-red-400'}`}>
+                {versionInfo?.openclawVersion || t('settings.diagnostic.notInstalled')}
+              </span>
+            </div>
+            <div className="flex justify-between p-2 bg-slate-900/50 rounded-lg">
+              <span className="text-slate-400">Node.js</span>
+              <span className={`font-mono ${versionInfo?.nodeVersion ? 'text-slate-200' : 'text-red-400'}`}>
+                {versionInfo?.nodeVersion || t('settings.diagnostic.notInstalled')}
+              </span>
+            </div>
+            <div className="flex justify-between p-2 bg-slate-900/50 rounded-lg">
+              <span className="text-slate-400">Awareness Plugin</span>
+              <span className={`font-mono ${versionInfo?.awarenessPluginVersion ? 'text-slate-200' : 'text-red-400'}`}>
+                {versionInfo?.awarenessPluginVersion ? `v${versionInfo.awarenessPluginVersion}` : t('settings.diagnostic.notInstalled')}
+              </span>
+            </div>
+            <div className="flex justify-between p-2 bg-slate-900/50 rounded-lg">
+              <span className="text-slate-400">Local Daemon</span>
+              <span className={`font-mono ${versionInfo?.daemonRunning ? 'text-emerald-400' : 'text-red-400'}`}>
+                {versionInfo?.daemonRunning ? `v${versionInfo.daemonVersion || '?'} ✓` : 'Offline'}
+              </span>
+            </div>
+            <div className="flex justify-between p-2 bg-slate-900/50 rounded-lg">
+              <span className="text-slate-400">{t('settings.diagnostic.platform')}</span>
+              <span className="text-slate-200 font-mono">{versionInfo ? `${versionInfo.platform} ${versionInfo.arch}` : '...'}</span>
+            </div>
+          </div>
+          {/* Daemon stats */}
+          {versionInfo?.daemonStats && (
+            <div className="flex gap-4 justify-center text-[10px] text-slate-500 pt-1">
+              <span>{versionInfo.daemonStats.memories || 0} memories</span>
+              <span>{versionInfo.daemonStats.knowledge || 0} knowledge cards</span>
+              <span>{versionInfo.daemonStats.sessions || 0} sessions</span>
+            </div>
+          )}
+          <div className="flex justify-center pt-2">
+            <button
+              onClick={() => window.electronAPI?.openExternal('https://github.com/edwin-hao-ai/AwarenessClaw')}
+              className="text-xs text-brand-500 hover:text-brand-400"
+            >
+              GitHub
+            </button>
+          </div>
         </div>
       </div>
 
@@ -331,7 +808,7 @@ export default function Settings() {
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between p-5 border-b border-slate-800">
-              <h2 className="text-lg font-semibold">🤖 切换模型</h2>
+              <h2 className="text-lg font-semibold">🤖 {t('settings.model.change')}</h2>
               <button onClick={() => setShowModelPicker(false)} className="text-slate-500 hover:text-slate-300">
                 <X size={20} />
               </button>
@@ -341,7 +818,7 @@ export default function Settings() {
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
               {/* Provider grid */}
               <div className="grid grid-cols-3 gap-2">
-                {MODEL_PROVIDERS.map((p) => (
+                {allProviders.map((p) => (
                   <button
                     key={p.key}
                     onClick={() => {
@@ -374,11 +851,10 @@ export default function Settings() {
                   {selectedTempProvider.needsKey && (
                     <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1">🔑 API Key</label>
-                      <input
-                        type="password"
+                      <PasswordInput
                         value={tempApiKey}
                         onChange={(e) => setTempApiKey(e.target.value)}
-                        placeholder="粘贴你的 API Key..."
+                        placeholder="Paste your API Key..."
                         className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500"
                       />
                     </div>
@@ -386,7 +862,7 @@ export default function Settings() {
 
                   {/* Model selector */}
                   <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">选择模型</label>
+                    <label className="block text-xs font-medium text-slate-400 mb-1">{t('settings.model.selectModel')}</label>
                     <div className="flex gap-2 flex-wrap">
                       {selectedTempProvider.models.map((m) => (
                         <button
@@ -411,7 +887,7 @@ export default function Settings() {
                       onChange={(e) => setTempBaseUrl(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500"
                     />
-                    <p className="text-xs text-slate-600 mt-1">默认已填好，使用代理或自定义网关时可修改</p>
+                    <p className="text-xs text-slate-600 mt-1">{t('settings.model.baseUrlHint')}</p>
                   </div>
 
                   {/* Test Connection */}
@@ -436,10 +912,10 @@ export default function Settings() {
                         disabled={testingConnection}
                         className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors"
                       >
-                        {testingConnection ? <Loader2 size={12} className="animate-spin" /> : '🔗'} 测试连接
+                        {testingConnection ? <Loader2 size={12} className="animate-spin" /> : '🔗'} {t('settings.model.testConnection')}
                       </button>
-                      {testResult === 'success' && <span className="text-xs text-emerald-400">✅ 连接成功</span>}
-                      {testResult === 'error' && <span className="text-xs text-red-400">❌ 连接失败，请检查 API Key</span>}
+                      {testResult === 'success' && <span className="text-xs text-emerald-400">{t('settings.model.testSuccess')}</span>}
+                      {testResult === 'error' && <span className="text-xs text-red-400">{t('settings.model.testFailed')}</span>}
                     </div>
                   )}
                 </div>
@@ -452,14 +928,14 @@ export default function Settings() {
                 onClick={() => setShowModelPicker(false)}
                 className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200"
               >
-                取消
+                {t('common.cancel')}
               </button>
               <button
                 onClick={saveModelChange}
                 disabled={!tempProvider || (selectedTempProvider?.needsKey && !tempApiKey)}
                 className="px-5 py-2 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-1"
               >
-                <Check size={14} /> 保存
+                <Check size={14} /> {t('common.save')}
               </button>
             </div>
           </div>

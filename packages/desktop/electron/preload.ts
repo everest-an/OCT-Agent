@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: (url: string) => ipcRenderer.invoke('app:open-external'),
   getDashboardUrl: () => ipcRenderer.invoke('app:get-dashboard-url'),
   checkUpdates: () => ipcRenderer.invoke('app:check-updates'),
+  upgradeComponent: (component: string) => ipcRenderer.invoke('app:upgrade-component', component),
 
   // Setup wizard
   detectEnvironment: () => ipcRenderer.invoke('setup:detect-environment'),
@@ -18,17 +19,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   bootstrap: () => ipcRenderer.invoke('setup:bootstrap'),
 
   // Chat
-  chatSend: (message: string, sessionId?: string) => ipcRenderer.invoke('chat:send', message, sessionId),
+  chatSend: (message: string, sessionId?: string, options?: { thinkingLevel?: string; model?: string; files?: string[] }) => ipcRenderer.invoke('chat:send', message, sessionId, options),
   onChatStream: (callback: (chunk: string) => void) => {
     ipcRenderer.on('chat:stream', (_e: any, chunk: string) => callback(chunk));
   },
-  onChatStatus: (callback: (status: { type: string; tool?: string }) => void) => {
+  onChatStreamEnd: (callback: () => void) => {
+    ipcRenderer.on('chat:stream-end', () => callback());
+  },
+  onChatStatus: (callback: (status: { type: string; tool?: string; toolStatus?: string; toolId?: string }) => void) => {
     ipcRenderer.on('chat:status', (_e: any, status: any) => callback(status));
   },
 
   // Channel management
   channelSave: (channelId: string, config: Record<string, string>) => ipcRenderer.invoke('channel:save', channelId, config),
   channelTest: (channelId: string) => ipcRenderer.invoke('channel:test', channelId),
+  channelReadConfig: (channelId: string) => ipcRenderer.invoke('channel:read-config', channelId),
+  channelSetup: (channelId: string) => ipcRenderer.invoke('channel:setup', channelId),
+  channelListConfigured: () => ipcRenderer.invoke('channel:list-configured'),
+  channelListSupported: () => ipcRenderer.invoke('channel:list-supported'),
 
   // Cron management
   cronList: () => ipcRenderer.invoke('cron:list'),
@@ -44,10 +52,62 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Log viewer
   getRecentLogs: () => ipcRenderer.invoke('logs:recent'),
 
+  // Config import/export
+  configExport: () => ipcRenderer.invoke('config:export'),
+  configImport: () => ipcRenderer.invoke('config:import'),
+
+  // File preview
+  filePreview: (filePath: string) => ipcRenderer.invoke('file:preview', filePath),
+  selectFile: (options?: { filters?: Array<{ name: string; extensions: string[] }> }) => ipcRenderer.invoke('file:select', options),
+
+  // Tray events
+  onTrayNewChat: (callback: () => void) => {
+    ipcRenderer.on('tray:new-chat', () => callback());
+  },
+
+  // Skills / ClawHub
+  skillListInstalled: () => ipcRenderer.invoke('skill:list-installed'),
+  skillExplore: () => ipcRenderer.invoke('skill:explore'),
+  skillSearch: (query: string) => ipcRenderer.invoke('skill:search', query),
+  skillDetail: (slug: string) => ipcRenderer.invoke('skill:detail', slug),
+  skillInstall: (slug: string) => ipcRenderer.invoke('skill:install', slug),
+  skillUninstall: (slug: string) => ipcRenderer.invoke('skill:uninstall', slug),
+  skillGetConfig: (slug: string) => ipcRenderer.invoke('skill:get-config', slug),
+  skillSaveConfig: (slug: string, config: Record<string, unknown>) => ipcRenderer.invoke('skill:save-config', slug, config),
+
+  // Plugins management
+  pluginsList: () => ipcRenderer.invoke('plugins:list'),
+  pluginsToggle: (name: string, enabled: boolean) => ipcRenderer.invoke('plugins:toggle', name, enabled),
+
+  // Hooks management
+  hooksList: () => ipcRenderer.invoke('hooks:list'),
+  hooksToggle: (hookName: string, enabled: boolean) => ipcRenderer.invoke('hooks:toggle', hookName, enabled),
+
+  // Permissions & Workspace
+  permissionsGet: () => ipcRenderer.invoke('permissions:get'),
+  permissionsUpdate: (changes: { alsoAllow?: string[]; denied?: string[] }) => ipcRenderer.invoke('permissions:update', changes),
+  workspaceReadFile: (filename: string) => ipcRenderer.invoke('workspace:read-file', filename),
+  workspaceWriteFile: (filename: string, content: string) => ipcRenderer.invoke('workspace:write-file', filename, content),
+
+  // Agents management
+  agentsList: () => ipcRenderer.invoke('agents:list'),
+  agentsAdd: (name: string, model?: string) => ipcRenderer.invoke('agents:add', name, model),
+  agentsDelete: (id: string) => ipcRenderer.invoke('agents:delete', id),
+  agentsSetIdentity: (id: string, name: string, emoji: string, avatar?: string, theme?: string) => ipcRenderer.invoke('agents:set-identity', id, name, emoji, avatar, theme),
+  agentsBind: (id: string, binding: string) => ipcRenderer.invoke('agents:bind', id, binding),
+  agentsUnbind: (id: string, binding: string) => ipcRenderer.invoke('agents:unbind', id, binding),
+
+  // Models (dynamic)
+  modelsReadProviders: () => ipcRenderer.invoke('models:read-providers'),
+
+  // Security audit
+  securityCheck: () => ipcRenderer.invoke('security:check'),
+
   // Memory API
   memorySearch: (query: string) => ipcRenderer.invoke('memory:search', query),
   memoryGetCards: () => ipcRenderer.invoke('memory:get-cards'),
   memoryGetTasks: () => ipcRenderer.invoke('memory:get-tasks'),
   memoryGetContext: () => ipcRenderer.invoke('memory:get-context'),
   memoryGetPerception: () => ipcRenderer.invoke('memory:get-perception'),
+  memoryGetDailySummary: () => ipcRenderer.invoke('memory:get-daily-summary'),
 });
