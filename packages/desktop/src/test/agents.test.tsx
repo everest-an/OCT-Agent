@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import Agents from '../pages/Agents';
 
 describe('Agents page', () => {
@@ -30,8 +30,11 @@ describe('Agents page', () => {
     });
   });
 
-  it('shows create input placeholder', async () => {
+  it('shows create input placeholder after opening form', async () => {
     await act(async () => { render(<Agents />); });
+    // Form is collapsed by default — click the create button to open it
+    await waitFor(() => expect(screen.getByText(/Create Agent/i)).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText(/Create Agent/i)); });
     await waitFor(() => {
       expect(screen.getByPlaceholderText(/new agent name/i)).toBeInTheDocument();
     });

@@ -115,17 +115,16 @@ describe('Multi-Agent Management (user flows)', () => {
     await waitFor(() => expect(deleteMock).toHaveBeenCalledWith('bot2'));
   });
 
-  it('flow: bind input has format hint text', async () => {
+  it('flow: bind dropdown appears when clicking Add binding', async () => {
     await act(async () => { render(<Agents />); });
     await waitFor(() => expect(screen.getByText('Claw')).toBeInTheDocument());
 
     // Open binding form
-    const allBtns = screen.getAllByRole('button');
-    const bindBtn = allBtns.find(b => b.getAttribute('title') === 'Add binding');
+    const bindBtn = screen.getAllByRole('button').find(b => b.getAttribute('title') === 'Add binding');
     if (bindBtn) {
       await act(async () => { fireEvent.click(bindBtn); });
-      // Format hint should appear
-      await waitFor(() => expect(screen.getByText(/channel:accountId/i)).toBeInTheDocument());
+      // Channel selector dropdown should appear (updated UI uses <select> instead of text input)
+      await waitFor(() => expect(screen.getByRole('combobox')).toBeInTheDocument());
     }
   });
 });
