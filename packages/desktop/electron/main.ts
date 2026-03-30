@@ -1738,6 +1738,12 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, opti
         (t.includes('requested node') && t.includes('host not allowed'));
     };
 
+    const isSearchProviderFallbackNoise = (line: string) => {
+      const t = normalizeStreamLine(line).trimStart().toLowerCase();
+      return t.startsWith('web_search: no provider configured') ||
+        (t.includes('falling back to keyless provider') && t.includes('duckduckgo'));
+    };
+
     const isNoiseLine = (line: string) => {
       const t = normalizeStreamLine(line).trimStart();
       return t.startsWith('[plugins]') || t.startsWith('[tools]') ||
@@ -1755,6 +1761,7 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, opti
         t.startsWith('[acp-client]') || t.startsWith('[commands]') ||
         t.startsWith('[reload]') || t.startsWith('Config warnings') ||
         isToolRoutingNoise(t) ||
+        isSearchProviderFallbackNoise(t) ||
         t.includes('plugin disabled') || t.includes('bootstrap config fallback') ||
         t.includes('Local daemon not running, attempting auto-start');
     };
