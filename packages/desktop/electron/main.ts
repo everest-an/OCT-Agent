@@ -1708,6 +1708,13 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, opti
 
     const normalizeStreamLine = (line: string) => stripAnsi(line).replace(/\r/g, '');
 
+    const isToolRoutingNoise = (line: string) => {
+      const t = normalizeStreamLine(line).trimStart();
+      return t.includes('exec host not allowed') ||
+        t.includes('configure tools.exec.host=sandbox to allow') ||
+        (t.includes('requested node') && t.includes('host not allowed'));
+    };
+
     const isNoiseLine = (line: string) => {
       const t = normalizeStreamLine(line).trimStart();
       return t.startsWith('[plugins]') || t.startsWith('[tools]') ||
@@ -1724,6 +1731,7 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, opti
         t.startsWith('[warn]') || t.startsWith('[error]') ||
         t.startsWith('[acp-client]') || t.startsWith('[commands]') ||
         t.startsWith('[reload]') || t.startsWith('Config warnings') ||
+        isToolRoutingNoise(t) ||
         t.includes('plugin disabled') || t.includes('bootstrap config fallback') ||
         t.includes('Local daemon not running, attempting auto-start');
     };
