@@ -119,20 +119,34 @@ function run(cmd: string, opts: Record<string, unknown> = {}): string {
 }
 
 function runSpawn(cmd: string, args: string[], opts: Record<string, unknown> = {}) {
-  // If system npx is missing, fall back to bundled npm's npx-cli.js (installed via devDependency "npm")
-  const tryBundledNpx = () => {
+  const getBundledNpmBin = (binName: 'npx' | 'npm') => {
     const candidates = [
-      path.join(app.getPath('exe'), '..', '..', 'resources', 'app.asar.unpacked', 'node_modules', 'npm', 'bin', 'npx-cli.js'),
-      path.join(app.getAppPath(), 'node_modules', 'npm', 'bin', 'npx-cli.js'),
-      path.join(__dirname, '..', 'node_modules', 'npm', 'bin', 'npx-cli.js'),
+      path.join(app.getPath('exe'), '..', '..', 'resources', 'app.asar.unpacked', 'node_modules', 'npm', 'bin', `${binName}-cli.js`),
+      path.join(app.getAppPath(), 'node_modules', 'npm', 'bin', `${binName}-cli.js`),
+      path.join(__dirname, '..', 'node_modules', 'npm', 'bin', `${binName}-cli.js`),
     ];
-    const npxCli = candidates.find(p => fs.existsSync(p));
-    if (!npxCli) return null;
-    return spawn(process.execPath, [npxCli, ...args], {
-      env: { ...process.env, PATH: getEnhancedPath() },
-      ...opts,
-    });
+    return candidates.find(p => fs.existsSync(p)) || null;
   };
+
+  const resolveBundledCache = (fileName: string) => {
+    const candidates = [
+      path.join(app.getPath('exe'), '..', '..', 'resources', 'app.asar.unpacked', 'cache', fileName),
+      path.join(app.getAppPath(), 'cache', fileName),
+      path.join(__dirname, '..', 'cache', fileName),
+      path.join(process.resourcesPath || '', 'cache', fileName),
+    ].filter(Boolean);
+    return candidates.find(p => fs.existsSync(p)) || null;
+  };
+
+    // If system npx is missing, fall back to bundled npm's npx-cli.js (installed via devDependency "npm")
+    const tryBundledNpx = () => {
+      const npxCli = getBundledNpmBin('npx');
+      if (!npxCli) return null;
+      return spawn(process.execPath, [npxCli, ...args], {
+        env: { ...process.env, PATH: getEnhancedPath() },
+        ...opts,
+      });
+    };
 
   if (cmd === 'npx') {
     try {
@@ -162,12 +176,7 @@ function runAsync(cmd: string, timeoutMs = 180000): Promise<string> {
     const enhancedPath = getEnhancedPath();
     const rewriteNpx = (c: string) => {
       if (!c.trim().startsWith('npx ')) return c;
-      const candidates = [
-        path.join(app.getPath('exe'), '..', '..', 'resources', 'app.asar.unpacked', 'node_modules', 'npm', 'bin', 'npx-cli.js'),
-        path.join(app.getAppPath(), 'node_modules', 'npm', 'bin', 'npx-cli.js'),
-        path.join(__dirname, '..', 'node_modules', 'npm', 'bin', 'npx-cli.js'),
-      ];
-      const npxCli = candidates.find(p => fs.existsSync(p));
+      const npxCli = getBundledNpmBin('npx');
       if (!npxCli) return c;
       const rest = c.trim().slice(4); // remove leading 'npx '
       return `${process.execPath} "${npxCli}" ${rest}`;
@@ -444,6 +453,8 @@ ipcMain.handle('setup:install-openclaw', async () => {
  */
 ipcMain.handle('setup:install-plugin', async () => {
   const hasOpenClaw = await safeShellExecAsync('openclaw --version') !== null;
+  const npmCli = getBundledNpmBin('npm');
+  const pluginTarball = resolveBundledCache('awareness-memory.tgz');
 
   if (hasOpenClaw) {
     try {
@@ -453,6 +464,11 @@ ipcMain.handle('setup:install-plugin', async () => {
   }
 
   try {
+    if (pluginTarball && npmCli) {
+      await runAsync(`${process.execPath} "${npmCli}" exec --yes ${pluginTarball} install awareness-memory --force`, 60000);
+      return { success: true, method: 'clawhub-offline' };
+    }
+
     await runAsync('npx -y clawhub@latest install awareness-memory --force', 60000);
     return { success: true, method: 'clawhub' };
   } catch {
@@ -496,15 +512,15 @@ ipcMain.handle('setup:start-daemon', async () => {
 
   // Helper: fallback to bundled npm-cli (packs with the app) to avoid missing system npx
   const startDaemonViaBundledNpm = async () => {
-    const candidates = [
-      path.join(app.getPath('exe'), '..', '..', 'resources', 'app.asar.unpacked', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-      path.join(app.getAppPath(), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-      path.join(__dirname, '..', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-    ];
-    const npmCli = candidates.find(p => fs.existsSync(p));
+      const npmCli = getBundledNpmBin('npm');
     if (!npmCli) throw new Error('Bundled npm not found');
 
-    const child = spawn(process.execPath, [npmCli, 'exec', '--yes', '@awareness-sdk/local', 'start'], {
+      const offlineTarball = resolveBundledCache('awareness-sdk-local.tgz');
+      const execArgs = offlineTarball
+        ? ['exec', '--yes', offlineTarball, 'start']
+        : ['exec', '--yes', '@awareness-sdk/local', 'start'];
+
+      const child = spawn(process.execPath, [npmCli, ...execArgs], {
       detached: true,
       stdio: 'ignore',
       env: { ...process.env, PATH: getEnhancedPath() },

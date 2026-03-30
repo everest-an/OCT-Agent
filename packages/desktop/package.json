@@ -52,7 +52,8 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "node_modules/npm/**/*"
+      "node_modules/npm/**/*",
+      "cache/**/*"
     ],
     "mac": {
       "target": [
