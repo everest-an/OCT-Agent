@@ -119,6 +119,36 @@ function run(cmd: string, opts: Record<string, unknown> = {}): string {
 }
 
 function runSpawn(cmd: string, args: string[], opts: Record<string, unknown> = {}) {
+  // If system npx is missing, fall back to bundled npm's npx-cli.js (installed via devDependency "npm")
+  const tryBundledNpx = () => {
+    const candidates = [
+      path.join(app.getPath('exe'), '..', '..', 'resources', 'app.asar.unpacked', 'node_modules', 'npm', 'bin', 'npx-cli.js'),
+      path.join(app.getAppPath(), 'node_modules', 'npm', 'bin', 'npx-cli.js'),
+      path.join(__dirname, '..', 'node_modules', 'npm', 'bin', 'npx-cli.js'),
+    ];
+    const npxCli = candidates.find(p => fs.existsSync(p));
+    if (!npxCli) return null;
+    return spawn(process.execPath, [npxCli, ...args], {
+      env: { ...process.env, PATH: getEnhancedPath() },
+      ...opts,
+    });
+  };
+
+  if (cmd === 'npx') {
+    try {
+      return spawn(cmd, args, {
+        env: { ...process.env, PATH: getEnhancedPath() },
+        ...opts,
+      });
+    } catch (err: any) {
+      if (err?.code === 'ENOENT') {
+        const child = tryBundledNpx();
+        if (child) return child;
+      }
+      throw err;
+    }
+  }
+
   return spawn(cmd, args, {
     env: { ...process.env, PATH: getEnhancedPath() },
     ...opts,
@@ -130,7 +160,21 @@ function runSpawn(cmd: string, args: string[], opts: Record<string, unknown> = {
 function runAsync(cmd: string, timeoutMs = 180000): Promise<string> {
   return new Promise((resolve, reject) => {
     const enhancedPath = getEnhancedPath();
-    const shellCmd = process.platform === 'win32' ? cmd : `export PATH="${enhancedPath}"; ${cmd}`;
+    const rewriteNpx = (c: string) => {
+      if (!c.trim().startsWith('npx ')) return c;
+      const candidates = [
+        path.join(app.getPath('exe'), '..', '..', 'resources', 'app.asar.unpacked', 'node_modules', 'npm', 'bin', 'npx-cli.js'),
+        path.join(app.getAppPath(), 'node_modules', 'npm', 'bin', 'npx-cli.js'),
+        path.join(__dirname, '..', 'node_modules', 'npm', 'bin', 'npx-cli.js'),
+      ];
+      const npxCli = candidates.find(p => fs.existsSync(p));
+      if (!npxCli) return c;
+      const rest = c.trim().slice(4); // remove leading 'npx '
+      return `${process.execPath} "${npxCli}" ${rest}`;
+    };
+
+    const shellCmdRaw = process.platform === 'win32' ? cmd : `export PATH="${enhancedPath}"; ${cmd}`;
+    const shellCmd = rewriteNpx(shellCmdRaw);
     const child = process.platform === 'win32'
       ? spawn(cmd, [], { shell: 'cmd.exe', env: { ...process.env, PATH: enhancedPath }, stdio: 'pipe' })
       : spawn('/bin/bash', ['--norc', '--noprofile', '-c', shellCmd], { env: { ...process.env, PATH: enhancedPath }, stdio: 'pipe' });
@@ -450,12 +494,49 @@ ipcMain.handle('setup:start-daemon', async () => {
   const isReady = await checkDaemonHealth();
   if (isReady) return { success: true, alreadyRunning: true };
 
+  // Helper: fallback to bundled npm-cli (packs with the app) to avoid missing system npx
+  const startDaemonViaBundledNpm = async () => {
+    const candidates = [
+      path.join(app.getPath('exe'), '..', '..', 'resources', 'app.asar.unpacked', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+      path.join(app.getAppPath(), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+      path.join(__dirname, '..', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    ];
+    const npmCli = candidates.find(p => fs.existsSync(p));
+    if (!npmCli) throw new Error('Bundled npm not found');
+
+    const child = spawn(process.execPath, [npmCli, 'exec', '--yes', '@awareness-sdk/local', 'start'], {
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env, PATH: getEnhancedPath() },
+    });
+    child.unref();
+  };
+
   // Start daemon
-  const child = runSpawn('npx', ['@awareness-sdk/local', 'start'], {
-    detached: true,
-    stdio: 'ignore',
+  const startWithNpx = () => new Promise<void>((resolve, reject) => {
+    const child = runSpawn('npx', ['@awareness-sdk/local', 'start'], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.on('error', reject);
+    child.unref();
+    resolve();
   });
-  child.unref();
+
+  try {
+    await startWithNpx();
+  } catch (err: any) {
+    if (err?.code === 'ENOENT') {
+      // System npx missing — fall back to bundled npm exec
+      try {
+        await startDaemonViaBundledNpm();
+      } catch (fallbackErr) {
+        return { success: false, error: 'Node/npm not found. Please install Node.js 22+ and reopen AwarenessClaw.' };
+      }
+    } else {
+      return { success: false, error: String(err) };
+    }
+  }
 
   // Poll for readiness (max 15 seconds)
   for (let i = 0; i < 30; i++) {

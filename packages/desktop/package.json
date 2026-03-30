@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
+    "npm": "^10.9.0",
     "react-markdown": "^10.1.0",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1"
@@ -30,7 +31,7 @@
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.0",
-    "electron": "^33.2.1",
+    "electron": "33.4.11",
     "electron-builder": "^25.1.0",
     "jsdom": "^29.0.1",
     "postcss": "^8.4.49",
@@ -50,7 +51,8 @@
     },
     "files": [
       "dist/**/*",
-      "dist-electron/**/*"
+      "dist-electron/**/*",
+      "node_modules/npm/**/*"
     ],
     "mac": {
       "target": [
