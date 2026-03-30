@@ -287,6 +287,12 @@ AwarenessClaw/
 - **Matrix 不在枚举中**，需要直接写 openclaw.json
 - **WeChat 是插件通道**，不在 `channels add` 枚举中
 
+### Local Daemon 启动失败踩坑
+- **npx 缓存损坏**（ENOTEMPTY）：`~/.npm/_npx/` 下的缓存目录损坏，`npx @awareness-sdk/local start` 报 `ENOTEMPTY: directory not empty, rename`
+- **修复**：删除包含 `@awareness-sdk` 的 npx 缓存目录：`rm -rf ~/.npm/_npx/*/node_modules/@awareness-sdk/..` 对应的父目录
+- **Doctor 已集成**：`fixDaemonStart` 自动清理坏缓存再启动
+- **better-sqlite3 编译**：daemon 首次启动需要编译 C++ 原生模块，可能耗时 30s+，失败时 daemon 直接 crash 无错误信息
+
 ### electron-builder 用独立 tsconfig
 - `npm run build:package` 先跑 `tsc -p tsconfig.electron.json`，这和前端的 `npx tsc --noEmit`（用默认 tsconfig.json）是**两个不同的编译**
 - 前端 `npx tsc --noEmit` 通过不代表 Electron 端也通过！打包前必须确认 `npm run build` 也能通过

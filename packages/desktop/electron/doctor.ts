@@ -265,9 +265,21 @@ async function checkDaemonRunning(ctx: Ctx): Promise<CheckResult> {
 
 async function fixDaemonStart(ctx: Ctx): Promise<FixResult> {
   try {
+    // Clean corrupted npx cache first (common cause of ENOTEMPTY errors)
+    const npxCacheDir = path.join(ctx.deps.homedir, '.npm', '_npx');
+    if (fs.existsSync(npxCacheDir)) {
+      try {
+        const entries = fs.readdirSync(npxCacheDir);
+        for (const entry of entries) {
+          const entryPath = path.join(npxCacheDir, entry, 'node_modules', '@awareness-sdk');
+          if (fs.existsSync(entryPath)) {
+            fs.rmSync(path.join(npxCacheDir, entry), { recursive: true, force: true });
+          }
+        }
+      } catch { /* best effort cleanup */ }
+    }
     await ctx.deps.shellRun('npx -y @awareness-sdk/local start 2>&1 &', 15000);
-    // Wait a moment for startup
-    await new Promise(r => setTimeout(r, 3000));
+    await new Promise(r => setTimeout(r, 5000));
     return { id: 'daemon-running', success: true, message: 'Daemon started' };
   } catch (err: any) {
     return { id: 'daemon-running', success: false, message: err.message?.slice(0, 200) || 'Could not start daemon' };
