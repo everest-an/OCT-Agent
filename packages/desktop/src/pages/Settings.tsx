@@ -105,6 +105,10 @@ export default function Settings() {
     if (res.success) {
       setFileContent(res.content || '');
       setEditingFile(filename);
+    } else {
+      // File doesn't exist yet — open editor with empty content to allow creating it
+      setFileContent('');
+      setEditingFile(filename);
     }
   };
 
@@ -384,7 +388,7 @@ export default function Settings() {
                       <button onClick={() => savePermissions({ alsoAllow: permissions.alsoAllow.filter(t => t !== tool) })} className="hover:text-red-400">×</button>
                     </span>
                   ))}
-                  {permissions.alsoAllow.length === 0 && <span className="text-[10px] text-slate-600">None</span>}
+                  {permissions.alsoAllow.length === 0 && <span className="text-[10px] text-slate-500 italic">{t('settings.permissions.noneAllowed', 'No extra tools added')}</span>}
                 </div>
                 <div className="flex gap-1.5">
                   <input
@@ -400,6 +404,7 @@ export default function Settings() {
                     }}
                   />
                   <button
+                    data-testid="add-allow-tool"
                     onClick={() => { if (newAllowTool.trim() && !permissions.alsoAllow.includes(newAllowTool.trim())) { savePermissions({ alsoAllow: [...permissions.alsoAllow, newAllowTool.trim()] }); setNewAllowTool(''); } }}
                     className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded text-slate-300"
                   >
@@ -420,7 +425,7 @@ export default function Settings() {
                       <button onClick={() => savePermissions({ denied: permissions.denied.filter(c => c !== cmd) })} className="hover:text-white">×</button>
                     </span>
                   ))}
-                  {permissions.denied.length === 0 && <span className="text-[10px] text-slate-600">None</span>}
+                  {permissions.denied.length === 0 && <span className="text-[10px] text-slate-500 italic">{t('settings.permissions.noneDenied', 'No commands blocked')}</span>}
                 </div>
                 <div className="flex gap-1.5">
                   <input
@@ -436,6 +441,7 @@ export default function Settings() {
                     }}
                   />
                   <button
+                    data-testid="add-deny-cmd"
                     onClick={() => { if (newDenyCmd.trim() && !permissions.denied.includes(newDenyCmd.trim())) { savePermissions({ denied: [...permissions.denied, newDenyCmd.trim()] }); setNewDenyCmd(''); } }}
                     className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded text-slate-300"
                   >
@@ -674,7 +680,10 @@ export default function Settings() {
                   alert(t('settings.import.success'));
                   window.location.reload();
                 } else if (result.error !== 'Cancelled') {
-                  alert(`${t('settings.import.failed')} ${result.error}`);
+                  const msg = result.error === 'Invalid config file format'
+                    ? t('settings.import.formatError', 'Invalid config file. Please use a file exported from AwarenessClaw.')
+                    : `${t('settings.import.failed')} ${result.error}`;
+                  alert(msg);
                 }
               }}
               className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors"
@@ -824,7 +833,12 @@ export default function Settings() {
                     onClick={() => {
                       setTempProvider(p.key);
                       setTempModel(p.models[0]?.id || '');
-                      if (p.key !== config.providerKey) {
+                      // Restore saved key when switching back to the current provider;
+                      // clear when switching to a new one (don't leak keys between providers)
+                      if (p.key === config.providerKey) {
+                        setTempApiKey(config.apiKey);
+                        setTempBaseUrl(config.baseUrl);
+                      } else {
                         setTempApiKey('');
                         setTempBaseUrl('');
                       }

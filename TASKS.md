@@ -116,6 +116,9 @@
 - [x] macOS 系统托盘集成（关窗隐藏、托盘菜单：显示/新对话/Dashboard/退出、点击图标恢复窗口）（2026-03-30）
 - [x] 配置导入/导出（Settings 页导出 JSON + 导入深度合并，含原生文件对话框）（2026-03-30）
 - [x] **多 Agent 管理**：Agents 页面 — 列出已配置 agents（`openclaw agents list --json`），创建新 agent，删除非 default agent，显示 emoji/name/bindings（2026-03-30）
+- [x] **Gateway 自动启动**：`chat:send` 前自动检测 Gateway 状态，未运行时自动 `openclaw up`，轮询最多 10s 等待就绪，用户无需手动启动（2026-03-30）
+- [x] **Agent 定义编辑**：Agents 页面新增工作区文件编辑器 — SOUL.md（系统提示词）、TOOLS.md（工具配置）、IDENTITY.md、USER.md、MEMORY.md 五个文件 tab 切换编辑，dirty tracking + Save 按钮，创建时可直接写入 SOUL.md（2026-03-30）
+- [x] **Agent 创建增强**：创建表单改为展开式（Create Agent 按钮触发），支持名称 + 模型 + 系统提示词三项，创建前自动确保 Gateway 运行和目录存在（2026-03-30）
 - [ ] iOS/Android 扫码配对
 - [ ] TTS/STT 语音支持
 - [x] **图片理解**：拖拽图片时自动识别为图片文件（.png/.jpg/.gif/.webp/.svg/.bmp），发送时以 `[Images to analyze: ...]` 格式传给 agent（2026-03-30）
@@ -255,31 +258,31 @@
 ### 🟡 P1（影响体验但不阻塞）
 
 #### 设置页面
-- [ ] **模型切换时 API Key 不应清空**：切 provider 后应保留已输入的 apiKey 或预填已保存值
+- [x] **模型切换时 API Key 不应清空**：切回当前 provider 时从 config.apiKey 恢复，切到其他 provider 时清空（2026-03-30）
 - [x] **AwarenessClaw 版本号从 package.json 读取**：import pkg 动态读取（2026-03-30）
 - [x] **Permissions 添加去重**：includes() 检查已有项（2026-03-30）
-- [ ] **Permissions 空列表友好提示**："None" → "No tools added yet"
+- [x] **Permissions 空列表友好提示**："None" → "No extra tools added" / "No commands blocked"（2026-03-30）
 - [x] **Workspace 文件编辑保存成功提示**：fileSaveSuccess 状态 + "Saved ✓" 提示（2026-03-30）
-- [ ] **Workspace 文件不存在时提示**：允许新建空文件，不是无响应
+- [x] **Workspace 文件不存在时提示**：loadWorkspaceFile 失败时用空内容打开编辑器，允许新建（2026-03-30）
 - [x] **Usage 清零确认对话框**：confirm() 确认（2026-03-30）
 - [x] **安全审计无问题时显示绿色 ✅**：securityIssues.length === 0 时显示 "No issues found"（2026-03-30）
-- [ ] **导入导出友好提示**：导入格式错误时翻译错误，导出后显示路径可点击
+- [x] **导入导出友好提示**：导入格式错误时翻译错误（'Invalid config file format' → i18n），导出后 shell.showItemInFolder() 自动在资源管理器中显示文件（2026-03-30）
 
 #### 通道页面
-- [ ] **硬编码英文文本 i18n 化**：WhatsApp 警告框、Slack/Discord 格式示例
-- [ ] **配置完成后 UI 即时更新**：不需要 reload
+- [x] **硬编码英文文本 i18n 化**：Slack "Bot Token" / "App Token"，Feishu "App ID" / "App Secret" 全部用 t() 包裹（2026-03-30）
+- [x] **配置完成后 UI 即时更新**：closeWizard() 已调用 loadConfiguredChannels()，关闭即刷新（2026-03-30）
 
 #### 记忆页面
-- [ ] **搜索无结果区分原因**："关键词不匹配" vs "还没有记忆"
-- [ ] **分类筛选无结果时提供 "清除筛选" 按钮**
-- [ ] **Mock 数据提示加操作指引**："运行 xxx 启动守护进程"
+- [x] **搜索无结果区分原因**：有搜索词 → "No results for '...'"；有分类筛选 → "No cards in this category" + 清除筛选；无 → "No memory data yet"（2026-03-30）
+- [x] **分类筛选无结果时提供 "清除筛选" 按钮**：clearFilter 按钮点击恢复 selectedCategory='all'（2026-03-30）
+- [x] **Mock 数据提示加操作指引**：mockHint 下方增加 `npx @awareness-sdk/local start` 命令框（2026-03-30）
 
 #### 聊天页面
-- [ ] **"No response" 用 i18n**：区分网络错误 vs 空回复
-- [ ] **模型选择器标记当前活跃模型**：✓ Active
+- [x] **"No response" 用 i18n**：已用 t('chat.noResponse')（2026-03-30）
+- [x] **模型选择器标记当前活跃模型**：Active 模型显示 "✓ Active" brand 色标签（2026-03-30）
 
 #### Agent 页面
-- [ ] **绑定输入框格式说明**：示例 "telegram" 或 "telegram:123456"
+- [x] **绑定输入框格式说明**：Agents 页面绑定表单已有 "Format: channel:accountId" 提示（测试已覆盖）（2026-03-30）
 
 ---
 

@@ -251,9 +251,12 @@ export default function Dashboard() {
       setAgentStatus('generating');
     });
 
-    // Status events (agent lifecycle + tool calls)
-    api.onChatStatus?.((status: { type: string; tool?: string; toolStatus?: string; toolId?: string }) => {
-      if (status.type === 'thinking' || status.type === 'generating' || status.type === 'error') {
+    // Status events (agent lifecycle + tool calls + gateway auto-start)
+    api.onChatStatus?.((status: { type: string; tool?: string; toolStatus?: string; toolId?: string; message?: string }) => {
+      if (status.type === 'gateway') {
+        // Gateway auto-start status — show as thinking with a message
+        setAgentStatus('thinking');
+      } else if (status.type === 'thinking' || status.type === 'generating' || status.type === 'error') {
         setAgentStatus(status.type as AgentStatus);
       } else if (status.type === 'tool_call' && status.tool) {
         const tc: ToolCallInfo = {
@@ -500,7 +503,7 @@ export default function Dashboard() {
         <div className="px-4 py-2.5 border-b border-slate-800 flex items-center gap-2 flex-shrink-0">
           <button onClick={() => setShowSidebar(!showSidebar)}
             className="p-1.5 text-slate-500 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors"
-            title="会话列表"
+            title={t('chat.sessionList', 'Session list')}
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="1.5" rx="0.75" fill="currentColor"/><rect x="2" y="7.25" width="12" height="1.5" rx="0.75" fill="currentColor"/><rect x="2" y="11.5" width="12" height="1.5" rx="0.75" fill="currentColor"/></svg>
           </button>
@@ -513,7 +516,7 @@ export default function Dashboard() {
             <button onClick={() => setShowModelSelector(!showModelSelector)}
               className="flex items-center gap-1 px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 transition-colors"
             >
-              {currentProvider?.emoji} {config.modelId || '选择模型'}
+              {currentProvider?.emoji} {config.modelId || t('chat.selectModel', 'Select model')}
               <ChevronDown size={10} />
             </button>
             {showModelSelector && (
@@ -526,7 +529,7 @@ export default function Dashboard() {
                       <div key={provider.key}>
                         <div className="px-3 py-1.5 text-[10px] font-medium border-b border-slate-800 sticky top-0 bg-slate-900 flex items-center justify-between">
                           <span className="text-slate-500">{provider.emoji} {provider.name}</span>
-                          {isConfigured ? <span className="text-emerald-500">✅</span> : provider.needsKey ? <span className="text-amber-500">🔑</span> : <span className="text-slate-600">免费</span>}
+                          {isConfigured ? <span className="text-emerald-500">✅</span> : provider.needsKey ? <span className="text-amber-500">🔑</span> : <span className="text-slate-600">{t('chat.free', 'Free')}</span>}
                         </div>
                         {provider.models.map(model => (
                           <button key={model.id}
@@ -548,7 +551,9 @@ export default function Dashboard() {
                             }`}
                           >
                             {model.label}
-                            {config.providerKey === provider.key && config.modelId === model.id && ' ✓'}
+                            {config.providerKey === provider.key && config.modelId === model.id && (
+                              <span className="ml-1 text-brand-400 font-medium">✓ {t('chat.active', 'Active')}</span>
+                            )}
                           </button>
                         ))}
                       </div>
@@ -575,8 +580,8 @@ export default function Dashboard() {
               <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-6 space-y-4">
                 <div className="text-center">
                   <span className="text-2xl">{provider?.emoji}</span>
-                  <h3 className="text-sm font-bold mt-2">配置 {provider?.name}</h3>
-                  <p className="text-xs text-slate-500 mt-1">输入 API Key 后即可使用</p>
+                  <h3 className="text-sm font-bold mt-2">{t('chat.configModel', 'Configure')} {provider?.name}</h3>
+                  <p className="text-xs text-slate-500 mt-1">{t('chat.configModelHint', 'Enter your API Key to start')}</p>
                 </div>
                 <PasswordInput
                   value={tempApiKey}
@@ -586,7 +591,7 @@ export default function Dashboard() {
                   autoFocus
                 />
                 <div className="flex gap-2">
-                  <button onClick={() => setShowApiKeyInput(null)} className="flex-1 py-2 text-sm text-slate-400 hover:text-slate-200">取消</button>
+                  <button onClick={() => setShowApiKeyInput(null)} className="flex-1 py-2 text-sm text-slate-400 hover:text-slate-200">{t('common.cancel', 'Cancel')}</button>
                   <button
                     onClick={() => {
                       if (tempApiKey && provider) {
@@ -603,7 +608,7 @@ export default function Dashboard() {
                     disabled={!tempApiKey}
                     className="flex-1 py-2 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 text-white rounded-lg text-sm transition-colors"
                   >
-                    保存并切换
+                    {t('setup.saveAndSwitch', 'Save & Switch')}
                   </button>
                 </div>
               </div>
@@ -802,7 +807,7 @@ export default function Dashboard() {
         <div className="px-4 py-3 border-t border-slate-800">
           <div className="flex items-end gap-2 max-w-3xl mx-auto">
             <button onClick={() => fileInputRef.current?.click()}
-              className="p-2.5 text-slate-500 hover:text-slate-300 hover:bg-slate-800 rounded-xl transition-colors" title="附加文件"
+              className="p-2.5 text-slate-500 hover:text-slate-300 hover:bg-slate-800 rounded-xl transition-colors" title={t('chat.attachFile', 'Attach file')}
             >
               <Paperclip size={16} />
             </button>

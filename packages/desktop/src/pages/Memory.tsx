@@ -304,9 +304,14 @@ export default function Memory() {
       <div className="flex-1 overflow-y-auto p-6 space-y-3">
         {/* Mock data indicator */}
         {isMockData && !loading && (
-          <div className="flex items-center gap-2 p-3 bg-amber-600/10 border border-amber-600/20 rounded-xl text-xs text-amber-400">
-            <AlertCircle size={14} />
-            <span>{t('memory.mockHint')}</span>
+          <div className="p-3 bg-amber-600/10 border border-amber-600/20 rounded-xl text-xs text-amber-400 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <AlertCircle size={14} />
+              <span>{t('memory.mockHint')}</span>
+            </div>
+            <div className="pl-5 text-amber-400/70 font-mono bg-black/20 rounded px-2 py-1 select-all">
+              {t('memory.mockGuide', 'npx @awareness-sdk/local start')}
+            </div>
           </div>
         )}
 
@@ -368,9 +373,31 @@ export default function Memory() {
         )}
 
         {!loading && displayCards.length === 0 && (
-          <div className="text-center py-12 text-slate-500">
-            <p>{t('memory.noData')}</p>
-            <p className="text-xs mt-1">{t('memory.noData.hint')}</p>
+          <div className="text-center py-12 text-slate-500 space-y-2">
+            {searchQuery && searchResults !== null ? (
+              // Active search with no matches
+              <>
+                <p className="text-sm">{t('memory.noResults', 'No results for "{query}"').replace('{query}', searchQuery)}</p>
+                <p className="text-xs text-slate-600">{t('memory.noData.hint')}</p>
+              </>
+            ) : selectedCategory !== 'all' ? (
+              // Category filter with no matching cards
+              <>
+                <p className="text-sm">{t('memory.noCategoryCards', 'No cards in this category')}</p>
+                <button
+                  onClick={() => setSelectedCategory('all')}
+                  className="text-xs text-brand-400 hover:text-brand-300 underline underline-offset-2"
+                >
+                  {t('memory.clearFilter', 'Clear filter')}
+                </button>
+              </>
+            ) : (
+              // No memories at all
+              <>
+                <p>{t('memory.noData')}</p>
+                <p className="text-xs mt-1">{t('memory.noData.hint')}</p>
+              </>
+            )}
           </div>
         )}
 

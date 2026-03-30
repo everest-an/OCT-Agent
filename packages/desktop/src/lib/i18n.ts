@@ -20,6 +20,17 @@ const en: Record<string, string> = {
   'agents.newPlaceholder': 'New agent name...',
   'agents.create': 'Create',
   'agents.empty': 'No agents configured. Create one to get started.',
+  'agents.systemPrompt': 'System Prompt (SOUL.md)',
+  'agents.systemPromptPlaceholder': 'Define the agent\'s personality, role, and behavior...',
+  'agents.toolsConfig': 'Tools Config (TOOLS.md)',
+  'agents.toolsConfigPlaceholder': 'Define which tools this agent can use...',
+  'agents.definition': 'Agent Definition',
+  'agents.save': 'Save',
+  'agents.saved': 'Saved',
+  'agents.createAgent': 'Create Agent',
+  'agents.modelPlaceholder': 'Model (optional, e.g. anthropic/claude-sonnet-4-20250514)',
+  'agents.editDefinition': 'Edit Definition',
+  'agents.files': 'Workspace Files',
   'nav.settings': 'Settings',
 
   // Chat
@@ -363,6 +374,32 @@ const en: Record<string, string> = {
   'setup.done.start': 'Get Started',
   'setup.back': 'Back',
   'setup.next': 'Next',
+
+  // Memory extended
+  'memory.noResults': 'No results for "{query}"',
+  'memory.noCategoryCards': 'No cards in this category',
+  'memory.clearFilter': 'Clear filter',
+  'memory.mockGuide': 'Start daemon: npx @awareness-sdk/local start',
+
+  // Settings extended
+  'settings.permissions.noneAllowed': 'No extra tools added',
+  'settings.permissions.noneDenied': 'No commands blocked',
+  'settings.workspace.fileNotFound': 'File not found — start editing to create it',
+
+  // Chat extended
+  'chat.free': 'Free',
+  'chat.active': 'Active',
+  'chat.configModel': 'Configure',
+  'chat.configModelHint': 'Enter your API Key to start',
+
+  // Channels form labels
+  'channels.slack.botToken': 'Bot Token',
+  'channels.slack.appToken': 'App Token',
+  'channels.feishu.appId': 'App ID',
+  'channels.feishu.appSecret': 'App Secret',
+
+  // Import/export errors
+  'settings.import.formatError': 'Invalid config file. Please use a file exported from AwarenessClaw.',
 };
 
 const zh: Record<string, string> = {
@@ -378,6 +415,17 @@ const zh: Record<string, string> = {
   'agents.newPlaceholder': '新 Agent 名称...',
   'agents.create': '创建',
   'agents.empty': '暂无 Agent。创建一个开始吧。',
+  'agents.systemPrompt': '系统提示词 (SOUL.md)',
+  'agents.systemPromptPlaceholder': '定义 Agent 的性格、角色和行为方式...',
+  'agents.toolsConfig': '工具配置 (TOOLS.md)',
+  'agents.toolsConfigPlaceholder': '定义此 Agent 可以使用的工具...',
+  'agents.definition': 'Agent 定义',
+  'agents.save': '保存',
+  'agents.saved': '已保存',
+  'agents.createAgent': '创建 Agent',
+  'agents.modelPlaceholder': '模型（可选，如 anthropic/claude-sonnet-4-20250514）',
+  'agents.editDefinition': '编辑定义',
+  'agents.files': '工作区文件',
   'nav.settings': '设置',
 
   // Chat
@@ -721,6 +769,32 @@ const zh: Record<string, string> = {
   'setup.done.start': '开始使用',
   'setup.back': '返回',
   'setup.next': '下一步',
+
+  // Memory extended
+  'memory.noResults': '"{query}" 没有找到相关记忆',
+  'memory.noCategoryCards': '这个分类还没有卡片',
+  'memory.clearFilter': '清除筛选',
+  'memory.mockGuide': '运行 npx @awareness-sdk/local start 启动本地守护进程',
+
+  // Settings extended
+  'settings.permissions.noneAllowed': '暂无额外工具',
+  'settings.permissions.noneDenied': '暂无被禁止的命令',
+  'settings.workspace.fileNotFound': '文件不存在 — 开始编辑即可创建',
+
+  // Chat extended
+  'chat.free': '免费',
+  'chat.active': '使用中',
+  'chat.configModel': '配置',
+  'chat.configModelHint': '输入 API Key 后即可使用',
+
+  // Channels form labels
+  'channels.slack.botToken': 'Bot Token',
+  'channels.slack.appToken': 'App Token',
+  'channels.feishu.appId': 'App ID',
+  'channels.feishu.appSecret': 'App Secret',
+
+  // Import/export errors
+  'settings.import.formatError': '配置文件格式无效，请使用从 AwarenessClaw 导出的文件。',
 };
 
 // Japanese and Korean use English as fallback for now

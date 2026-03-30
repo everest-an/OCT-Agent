@@ -1030,15 +1030,30 @@ ipcMain.handle('agents:list', async () => {
   }
 });
 
-ipcMain.handle('agents:add', async (_e, name: string, model?: string) => {
+ipcMain.handle('agents:add', async (_e, name: string, model?: string, systemPrompt?: string) => {
   try {
+    // Ensure Gateway is running (agents need it)
+    await ensureGatewayRunning();
+    // Ensure base directories exist
+    const baseWsDir = path.join(HOME, '.openclaw', 'workspaces');
+    const baseAgentsDir = path.join(HOME, '.openclaw', 'agents');
+    fs.mkdirSync(baseWsDir, { recursive: true });
+    fs.mkdirSync(baseAgentsDir, { recursive: true });
     // Use independent workspace dir (not inside agents/ state dir)
     const slug = name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-    const wsDir = path.join(HOME, '.openclaw', 'workspaces', slug);
+    const wsDir = path.join(baseWsDir, slug);
     fs.mkdirSync(wsDir, { recursive: true });
     const flags = [`--non-interactive`, `--workspace "${wsDir}"`];
     if (model) flags.push(`--model "${model.replace(/"/g, '\\"')}"`);
     await runAsync(`openclaw agents add "${name.replace(/"/g, '\\"')}" ${flags.join(' ')}`, 15000);
+    // Write SOUL.md if system prompt provided
+    if (systemPrompt) {
+      const agentDir = path.join(baseAgentsDir, slug, 'agent');
+      fs.mkdirSync(agentDir, { recursive: true });
+      fs.writeFileSync(path.join(wsDir, 'SOUL.md'), systemPrompt, 'utf-8');
+      // Also write to agent dir as fallback
+      fs.writeFileSync(path.join(agentDir, 'SOUL.md'), systemPrompt, 'utf-8');
+    }
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message?.slice(0, 200) };
@@ -1082,6 +1097,56 @@ ipcMain.handle('agents:bind', async (_e, agentId: string, binding: string) => {
 ipcMain.handle('agents:unbind', async (_e, agentId: string, binding: string) => {
   try {
     await runAsync(`openclaw agents unbind --agent "${agentId}" --bind "${binding.replace(/"/g, '\\"')}"`, 10000);
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message?.slice(0, 200) };
+  }
+});
+
+// --- Agent Workspace File Management ---
+
+ipcMain.handle('agents:read-file', async (_e, agentId: string, fileName: string) => {
+  // Read a workspace file (SOUL.md, TOOLS.md, IDENTITY.md, USER.md, MEMORY.md) for an agent
+  const allowedFiles = ['SOUL.md', 'TOOLS.md', 'IDENTITY.md', 'USER.md', 'MEMORY.md'];
+  if (!allowedFiles.includes(fileName)) return { success: false, error: 'File not allowed' };
+  try {
+    // Try agent workspace dir first, then agent state dir
+    const slug = agentId.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    const candidates = [
+      path.join(HOME, '.openclaw', 'workspaces', slug, fileName),
+      path.join(HOME, '.openclaw', 'agents', slug, 'agent', fileName),
+      // Default agent uses the global workspace
+      path.join(HOME, '.openclaw', 'workspace', fileName),
+    ];
+    for (const fp of candidates) {
+      if (fs.existsSync(fp)) {
+        return { success: true, content: fs.readFileSync(fp, 'utf-8'), path: fp };
+      }
+    }
+    return { success: true, content: '', path: candidates[0] }; // Empty = file doesn't exist yet
+  } catch (err: any) {
+    return { success: false, error: err.message?.slice(0, 200) };
+  }
+});
+
+ipcMain.handle('agents:write-file', async (_e, agentId: string, fileName: string, content: string) => {
+  const allowedFiles = ['SOUL.md', 'TOOLS.md', 'IDENTITY.md', 'USER.md', 'MEMORY.md'];
+  if (!allowedFiles.includes(fileName)) return { success: false, error: 'File not allowed' };
+  try {
+    const slug = agentId.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    // Write to both workspace and agent dir to ensure it's picked up
+    const wsDir = path.join(HOME, '.openclaw', 'workspaces', slug);
+    const agentDir = path.join(HOME, '.openclaw', 'agents', slug, 'agent');
+    const globalWs = path.join(HOME, '.openclaw', 'workspace');
+    // For default agent, use global workspace
+    const isDefault = agentId === 'main' || agentId === 'default';
+    const targets = isDefault
+      ? [globalWs]
+      : [wsDir, agentDir];
+    for (const dir of targets) {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, fileName), content, 'utf-8');
+    }
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message?.slice(0, 200) };
@@ -1240,11 +1305,48 @@ function downloadFile(url: string, dest: string): Promise<void> {
 // --- PTY Management (for embedded openclaw chat) ---
 
 /**
+ * Ensure Gateway is running before sending chat messages.
+ * Auto-starts if stopped. Returns true if gateway is ready.
+ */
+async function ensureGatewayRunning(): Promise<boolean> {
+  try {
+    const status = await safeShellExecAsync('openclaw status 2>/dev/null', 5000);
+    if (status?.includes('running')) return true;
+    // Gateway not running — auto-start it
+    const send = (ch: string, data: any) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(ch, data);
+    };
+    send('chat:status', { type: 'gateway', message: 'Starting Gateway...' });
+    const child = runSpawn('openclaw', ['up'], { detached: true, stdio: 'ignore' });
+    child.unref();
+    // Poll until gateway is ready (max 10s)
+    for (let i = 0; i < 10; i++) {
+      await sleep(1000);
+      const check = await safeShellExecAsync('openclaw status 2>/dev/null', 3000);
+      if (check?.includes('running')) {
+        send('chat:status', { type: 'gateway', message: 'Gateway started' });
+        return true;
+      }
+    }
+    send('chat:status', { type: 'gateway', message: 'Gateway failed to start' });
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Chat via `openclaw agent -m "..." --json`
  * Non-interactive, one message at a time, returns JSON response.
  * Streaming: read stdout line by line as response comes in.
  */
 ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, options?: { thinkingLevel?: string; model?: string; files?: string[] }) => {
+  // Auto-start Gateway if not running (users should never need to manually start it)
+  const gatewayReady = await ensureGatewayRunning();
+  if (!gatewayReady) {
+    return { text: '', error: 'Gateway failed to start. Please check Settings → Gateway and try again.' };
+  }
+
   return new Promise((resolve) => {
     let stdout = '';
     const sid = sessionId || `ac-${Date.now()}`;
@@ -1423,8 +1525,10 @@ ipcMain.handle('channel:save', async (_e, channelId: string, config: Record<stri
       return { success: true };
     }
 
-    // For Google Chat and Matrix: write config directly to openclaw.json (complex config structure)
-    if (channelId === 'google-chat' || channelId === 'googlechat' || channelId === 'matrix') {
+    // Matrix: not in --channel enum, write config directly to openclaw.json
+    // Google Chat: complex config (serviceAccountFile), write directly
+    // WeChat: plugin-based, write directly (same as feishu)
+    if (channelId === 'matrix' || channelId === 'google-chat' || channelId === 'googlechat') {
       const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
       let existing: any = {};
       try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
@@ -1435,22 +1539,27 @@ ipcMain.handle('channel:save', async (_e, channelId: string, config: Record<stri
       return { success: true };
     }
 
-    // All other channels: use `openclaw channels add` CLI
-    const buildArgs = (cfg: Record<string, string>): string[] => {
-      const args = [`--channel ${channelId}`];
-      const esc = (v: string) => v.replace(/"/g, '\\"');
-      if (cfg.token) args.push(`--token "${esc(cfg.token)}"`);
-      if (cfg.botToken) args.push(`--bot-token "${esc(cfg.botToken)}"`);
-      if (cfg.appToken) args.push(`--app-token "${esc(cfg.appToken)}"`);
-      return args;
-    };
+    // Native channels: use `openclaw channels add` with real CLI flags
+    // Verified via `openclaw channels add --help` (2026.3.28):
+    //   --channel (telegram|whatsapp|discord|irc|googlechat|slack|signal|imessage|line)
+    //   --token (Telegram/Discord/LINE)
+    //   --bot-token + --app-token (Slack)
+    //   --signal-number + --cli-path + --http-url (Signal)
+    //   --cli-path + --db-path (iMessage)
+    //   --homeserver + --user-id + --password + --access-token (Matrix — but not in --channel enum)
+    //   --webhook-url + --audience + --audience-type (Google Chat)
+    const esc = (v: string) => v.replace(/"/g, '\\"');
+    const args: string[] = [`--channel ${channelId}`];
+    // Map config keys to real CLI flags
+    if (config.token) args.push(`--token "${esc(config.token)}"`);
+    if (config.botToken) args.push(`--bot-token "${esc(config.botToken)}"`);
+    if (config.appToken) args.push(`--app-token "${esc(config.appToken)}"`);
 
-    const addCmd = `openclaw channels add ${buildArgs(config).join(' ')} 2>&1`;
+    const addCmd = `openclaw channels add ${args.join(' ')} 2>&1`;
     try {
       await runAsync(addCmd, 15000);
       return { success: true };
     } catch (firstErr: any) {
-      // If "already exists", remove + re-add
       const msg = firstErr.message || '';
       if (msg.includes('already') || msg.includes('exists')) {
         try {
@@ -1520,52 +1629,133 @@ ipcMain.handle('channel:read-config', async (_e, channelId: string) => {
 });
 
 // One-click channel setup: backend handles install, config, and login automatically
-ipcMain.handle('channel:setup', async (_e, channelId: string) => {
-  try {
-    // WeChat: plugin-based, install first then login
-    if (channelId === 'wechat') {
-      try { await runAsync('openclaw plugins install "@tencent-weixin/openclaw-weixin" 2>&1', 30000); } catch { /* may already be installed */ }
-      const loginOutput = await runAsync('openclaw channels login --channel openclaw-weixin 2>&1', 60000);
-      return { success: true, output: loginOutput || 'WeChat connected. Scan QR code with WeChat.' };
-    }
+/**
+ * Channel login with real-time QR detection.
+ * Spawns login command, streams stdout, auto-opens QR URLs in browser.
+ * Returns success only if login completes; timeout = failure.
+ */
+function channelLoginWithQR(loginCmd: string, timeoutMs = 120000): Promise<{ success: boolean; output?: string; error?: string }> {
+  const ep = getEnhancedPath();
+  return new Promise((resolve) => {
+    let settled = false;
+    let stdout = '';
+    let qrOpened = false;
 
-    // Signal: auto-install signal-cli if needed, add channel with defaults, then QR link
-    if (channelId === 'signal') {
-      // Try add with defaults — OpenClaw handles signal-cli detection
-      try { await runAsync('openclaw channels add --channel signal 2>&1', 15000); } catch { /* may already exist */ }
-      const loginOutput = await runAsync('openclaw channels login --channel signal 2>&1', 60000);
-      return { success: true, output: loginOutput || 'Signal linked. Scan QR code with Signal app.' };
-    }
+    const child = spawn('/bin/bash', ['--norc', '--noprofile', '-c', `export PATH="${ep}"; ${loginCmd} 2>&1`]);
 
-    // iMessage: auto-detect paths, just needs add — no login step
-    if (channelId === 'imessage') {
-      await runAsync('openclaw channels add --channel imessage 2>&1', 15000);
-      return { success: true, output: 'iMessage connected. Grant Full Disk Access if prompted.' };
-    }
+    child.stdout?.on('data', (data: Buffer) => {
+      const chunk = data.toString();
+      stdout += chunk;
 
-    // Generic: add + login (WhatsApp etc)
-    try { await safeShellExecAsync(`openclaw channels add --channel ${channelId} 2>&1`, 10000); } catch { /* may already exist */ }
-    const loginOutput = await runAsync(`openclaw channels login --channel ${channelId} 2>&1`, 60000);
-    return { success: true, output: loginOutput || 'Channel setup complete.' };
-  } catch (err: any) {
-    const msg = err.message || '';
-    // Login timeout = QR still waiting, but channel was added successfully
-    if (msg.includes('timeout') || msg.includes('Timeout')) {
-      return { success: true, output: 'Channel added. Scan QR code to finish.' };
-    }
-    return { success: false, error: msg.slice(0, 300) };
+      // Look for QR URLs and auto-open in browser
+      // Skip internal URLs (localhost, 127.0.0.1, docs, github)
+      if (!qrOpened) {
+        const urls = stdout.match(/https?:\/\/\S+/g) || [];
+        for (const url of urls) {
+          if (url.includes('localhost') || url.includes('127.0.0.1') ||
+              url.includes('docs.openclaw') || url.includes('github.com')) continue;
+          qrOpened = true;
+          shell.openExternal(url);
+          break;
+        }
+      }
+    });
+
+    child.stderr?.on('data', (data: Buffer) => { stdout += data.toString(); });
+
+    child.on('exit', (code) => {
+      if (settled) return;
+      settled = true;
+      if (code === 0) {
+        resolve({ success: true, output: 'Connected!' });
+      } else {
+        // Non-zero but QR was opened means user didn't scan in time
+        if (qrOpened) {
+          resolve({ success: false, error: 'QR code expired. Click "Try again" to get a new QR code.' });
+        } else {
+          resolve({ success: false, error: stdout.slice(-300) || `Exit code ${code}` });
+        }
+      }
+    });
+
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      resolve({ success: false, error: String(err).slice(0, 300) });
+    });
+
+    setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { child.kill(); } catch {}
+      if (qrOpened) {
+        resolve({ success: false, error: 'QR code expired. Click "Try again" to get a new QR code.' });
+      } else {
+        resolve({ success: false, error: 'Connection timed out. Make sure Gateway is running.' });
+      }
+    }, timeoutMs);
+  });
+}
+
+ipcMain.handle('channel:setup', async (_e: any, channelId: string) => {
+  // WeChat: plugin-based (openclaw-weixin)
+  if (channelId === 'wechat') {
+    try { await runAsync('openclaw plugins install "@tencent-weixin/openclaw-weixin" 2>&1', 30000); } catch { /* already installed */ }
+    return channelLoginWithQR('openclaw channels login --channel openclaw-weixin');
   }
+
+  // Signal: add channel first, then QR link
+  if (channelId === 'signal') {
+    try { await runAsync('openclaw channels add --channel signal 2>&1', 15000); } catch { /* may exist */ }
+    return channelLoginWithQR('openclaw channels login --channel signal');
+  }
+
+  // iMessage: just add — no login needed (macOS auto-detects)
+  if (channelId === 'imessage') {
+    try {
+      await runAsync('openclaw channels add --channel imessage 2>&1', 15000);
+      return { success: true, output: 'iMessage connected.' };
+    } catch (err: any) {
+      return { success: false, error: err.message?.slice(0, 300) };
+    }
+  }
+
+  // WhatsApp + others: add then QR login
+  try { await safeShellExecAsync(`openclaw channels add --channel ${channelId} 2>&1`, 10000); } catch { /* may exist */ }
+  return channelLoginWithQR(`openclaw channels login --channel ${channelId}`);
 });
 
-// Read configured channels from openclaw.json
+// Read ACTUALLY connected channels via `openclaw channels list` (not just enabled in config)
 ipcMain.handle('channel:list-configured', async () => {
+  // Map CLI channel names to frontend card IDs
+  const keyToFrontend: Record<string, string> = {
+    'openclaw-weixin': 'wechat', 'googlechat': 'google-chat',
+  };
+  try {
+    // Use CLI to get real status — "configured" or "linked" means truly connected
+    const output = await safeShellExecAsync('openclaw channels list 2>/dev/null', 10000);
+    if (output) {
+      const configured: string[] = [];
+      for (const line of output.split('\n')) {
+        // Lines like: "- WhatsApp default: not linked, enabled" or "- Feishu default: configured, enabled"
+        const match = line.match(/^-\s+(\S+)\s+.*?:\s*(configured|linked)/i);
+        if (match) {
+          const rawName = match[1].toLowerCase();
+          configured.push(keyToFrontend[rawName] || rawName);
+        }
+      }
+      return { success: true, configured };
+    }
+  } catch { /* fallback to config file */ }
+
+  // Fallback: read config file (less accurate but works offline)
   try {
     const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
     const existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     const channels = existing?.channels || {};
     const configured: string[] = [];
     for (const [id, cfg] of Object.entries(channels)) {
-      if ((cfg as any)?.enabled) configured.push(id);
+      if ((cfg as any)?.enabled) configured.push(keyToFrontend[id] || id);
     }
     return { success: true, configured };
   } catch {
@@ -1989,6 +2179,7 @@ ipcMain.handle('config:export', async () => {
       openclawConfig: redactSecrets ? redactSensitiveValues(config) : config,
     };
     fs.writeFileSync(result.filePath, JSON.stringify(exportData, null, 2));
+    shell.showItemInFolder(result.filePath); // reveal exported file in Finder / Explorer
     return { success: true, path: result.filePath, redacted: redactSecrets };
   } catch (err: any) {
     return { success: false, error: err.message };

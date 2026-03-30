@@ -228,13 +228,13 @@ export default function Channels() {
         return (
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Bot Token</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.slack.botToken', 'Bot Token')}</label>
               <PasswordInput value={slackBotToken} onChange={(e) => setSlackBotToken(e.target.value)}
                 placeholder="xoxb-..." className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
               <p className="mt-1.5 text-xs text-slate-500">{t('channels.slackBotHint', 'Slack App → OAuth & Permissions → Bot User OAuth Token')}</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">App Token</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.slack.appToken', 'App Token')}</label>
               <PasswordInput value={slackAppToken} onChange={(e) => setSlackAppToken(e.target.value)}
                 placeholder="xapp-..." className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
               <p className="mt-1.5 text-xs text-slate-500">{t('channels.slackAppHint', 'Slack App → Basic Information → App-Level Tokens')}</p>
@@ -245,12 +245,12 @@ export default function Channels() {
         return (
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">App ID</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.feishu.appId', 'App ID')}</label>
               <PasswordInput value={feishuAppId} onChange={(e) => setFeishuAppId(e.target.value)}
                 placeholder="cli_xxxxxxxxxx" className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">App Secret</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.feishu.appSecret', 'App Secret')}</label>
               <PasswordInput value={feishuAppSecret} onChange={(e) => setFeishuAppSecret(e.target.value)}
                 placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
             </div>
