@@ -114,11 +114,16 @@ export default function Automation() {
   const loadJobs = async () => {
     setLoading(true);
     if (window.electronAPI) {
-      const result = await (window.electronAPI as any).cronList();
-      if (result.raw) {
-        setJobs(result.jobs.map((line: string, i: number) => ({ id: String(i), raw: line })));
-      } else {
-        setJobs(result.jobs || []);
+      try {
+        const result = await (window.electronAPI as any).cronList();
+        const jobList = Array.isArray(result.jobs) ? result.jobs : [];
+        if (result.raw) {
+          setJobs(jobList.map((line: string, i: number) => ({ id: String(i), raw: line })));
+        } else {
+          setJobs(jobList);
+        }
+      } catch {
+        setJobs([]);
       }
     }
     setLoading(false);

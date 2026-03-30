@@ -1793,14 +1793,21 @@ ipcMain.handle('channel:list-supported', async () => {
 // --- Cron Management ---
 
 ipcMain.handle('cron:list', async () => {
-  const jsonOutput = await safeShellExecAsync('openclaw cron list --json', 10000);
+  const jsonOutput = await safeShellExecAsync('openclaw cron list --json 2>/dev/null', 10000);
   if (jsonOutput) {
     try {
-      return { jobs: JSON.parse(jsonOutput) };
+      // Extract JSON from output (may have non-JSON prefix lines)
+      const jsonStart = jsonOutput.indexOf('{');
+      if (jsonStart >= 0) {
+        const parsed = JSON.parse(jsonOutput.substring(jsonStart));
+        // openclaw returns { jobs: [...], total, ... } — extract the jobs array
+        const jobs = Array.isArray(parsed) ? parsed : (parsed.jobs || []);
+        return { jobs };
+      }
     } catch { /* fall through to plain text mode */ }
   }
 
-  const plainOutput = await safeShellExecAsync('openclaw cron list', 10000);
+  const plainOutput = await safeShellExecAsync('openclaw cron list 2>/dev/null', 10000);
   if (!plainOutput) return { jobs: [], error: 'OpenClaw not available' };
 
   const lines = plainOutput.split('\n').filter(l => l.trim());
@@ -2172,6 +2179,48 @@ ipcMain.handle('memory:get-daily-summary', async () => {
   const cards = await callMcp('awareness_lookup', { type: 'knowledge', limit: 10 });
   const tasks = await callMcp('awareness_lookup', { type: 'tasks', limit: 5, status: 'open' });
   return { cards, tasks };
+});
+
+/** Fetch memory events (timeline) from daemon REST API */
+ipcMain.handle('memory:get-events', async (_e, opts: { limit?: number; offset?: number; search?: string }) => {
+  const limit = opts?.limit || 50;
+  const offset = opts?.offset || 0;
+  const search = opts?.search || '';
+
+  const endpoint = search
+    ? `http://127.0.0.1:37800/api/v1/memories/search?q=${encodeURIComponent(search)}&limit=${limit}`
+    : `http://127.0.0.1:37800/api/v1/memories?limit=${limit}&offset=${offset}`;
+
+  return new Promise((resolve) => {
+    const req = http.request(endpoint, { method: 'GET', timeout: 10000 }, (res) => {
+      let data = '';
+      res.on('data', (chunk: Buffer) => { data += chunk; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch { resolve({ error: 'Invalid JSON' }); }
+      });
+    });
+    req.on('error', (err: Error) => resolve({ error: String(err) }));
+    req.on('timeout', () => { req.destroy(); resolve({ error: 'Timeout' }); });
+    req.end();
+  });
+});
+
+/** Check daemon health status */
+ipcMain.handle('memory:check-health', async () => {
+  return new Promise((resolve) => {
+    const req = http.request('http://127.0.0.1:37800/healthz', { method: 'GET', timeout: 5000 }, (res) => {
+      let data = '';
+      res.on('data', (chunk: Buffer) => { data += chunk; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch { resolve({ error: 'Invalid JSON' }); }
+      });
+    });
+    req.on('error', () => resolve({ error: 'Not running' }));
+    req.on('timeout', () => { req.destroy(); resolve({ error: 'Timeout' }); });
+    req.end();
+  });
 });
 
 // --- Config Import/Export ---
