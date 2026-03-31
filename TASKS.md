@@ -187,6 +187,10 @@
 - [x] ~~升级后版本不变（3.13→3.28）~~ — `~/.npm-global/bin` 必须排在 `/usr/local/bin` 前面，否则找到旧版残留（2026-03-30）
 - [x] ~~Settings 页白屏~~ — plugins.entries 是对象不是数组，P3 代码假设错误导致 .map() crash（2026-03-30）
 - [x] ~~Plugin 版本检测读错位置~~ — 改为读 `~/.openclaw/extensions/openclaw-memory/package.json`（实际安装位置）（2026-03-30）
+- [ ] **通道连接全面修复**：目前只有 WeChat 通道可用，其他通道（Telegram/WhatsApp/Discord/Slack/Signal 等）基本不可用。需要参考 WeChat 的成功逻辑（plugin 安装 + QR login + agent bind 三步），逐个排查修复其他通道的连接流程。`channelLoginWithQR` 已修复 Windows 兼容（加了 cmd.exe 分支），但各通道的 add/login/bind 流程未统一测试
+- [ ] **权限管理 UI 重设计**：Settings 页的 tools.alsoAllow / tools.denied 编辑太技术化，普通用户不知道该填什么。需要改为：预设权限方案（"安全模式"/"标准模式"/"开发者模式"）+ 开关式 UI，而非让用户手写工具名
+- [ ] **新建会话按钮美化**：侧边栏的"+ 新对话"按钮样式粗糙，参考 Claude Desktop 的新建按钮风格（圆角、hover 动画、快捷键提示 ⌘N）
+- [ ] **聊天 UI 细节打磨**：消息气泡间距、代码块样式、工具调用折叠动画、滚动行为、空态页面等细节对齐 Claude Desktop / ChatGPT 水准
 - [ ] Windows / Linux 打包未测试
 - [x] **macOS 无法退出应用**：`close` 事件中 `if (tray)` 永远为 true 导致 `preventDefault()` 阻止所有关窗。修复：`isQuitting` 标志 + `before-quit` 事件设置（2026-03-30）
 - [x] **Daemon 升级失败（Exit code 1）**：daemon 通过 `npx` 运行不是全局安装，`npm install -g` 无效。改为先 shutdown → `npx -y @latest start`（2026-03-30）
