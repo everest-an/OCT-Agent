@@ -221,6 +221,75 @@ function resolveBundledCache(fileName: string) {
   return candidates.find(p => fs.existsSync(p)) || null;
 }
 
+function clearAwarenessLocalNpxCache() {
+  try {
+    const npxCacheDir = path.join(HOME, '.npm', '_npx');
+    if (!fs.existsSync(npxCacheDir)) return;
+
+    const entries = fs.readdirSync(npxCacheDir);
+    for (const entry of entries) {
+      const entryDir = path.join(npxCacheDir, entry);
+      const sdkDir = path.join(entryDir, 'node_modules', '@awareness-sdk');
+      const localPkg = path.join(sdkDir, 'local', 'package.json');
+      if (fs.existsSync(sdkDir) || fs.existsSync(localPkg)) {
+        fs.rmSync(entryDir, { recursive: true, force: true });
+      }
+    }
+  } catch {
+    // Best-effort cache cleanup only.
+  }
+}
+
+async function forceStopLocalDaemon() {
+  await shutdownLocalDaemon(3000);
+  await sleep(1500);
+
+  const health = await getLocalDaemonHealth(2000);
+  if (health?.pid) {
+    try { process.kill(health.pid, 'SIGKILL'); } catch { /* already dead */ }
+    await sleep(1000);
+  }
+}
+
+async function startLocalDaemonDetached() {
+  const projectDir = path.join(HOME, '.openclaw');
+  const offlineTarball = resolveBundledCache('awareness-sdk-local.tgz');
+  const npxArgs = ['-y', offlineTarball || '@awareness-sdk/local@latest', 'start', '--port', '37800', '--project', projectDir, '--background'];
+
+  const startViaBundledNpm = async () => {
+    const npmCli = getBundledNpmBin('npm');
+    if (!npmCli) throw new Error('Bundled npm not found');
+
+    const execArgs = offlineTarball
+      ? ['exec', '--yes', offlineTarball, 'start', '--port', '37800', '--project', projectDir, '--background']
+      : ['exec', '--yes', '@awareness-sdk/local@latest', 'start', '--port', '37800', '--project', projectDir, '--background'];
+
+    const child = spawn(process.execPath, [npmCli, ...execArgs], {
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env, PATH: getEnhancedPath() },
+    });
+    child.unref();
+  };
+
+  const startWithNpx = () => new Promise<void>((resolve, reject) => {
+    const child = runSpawn('npx', npxArgs, {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.on('error', reject);
+    child.unref();
+    resolve();
+  });
+
+  try {
+    await startWithNpx();
+  } catch (err: any) {
+    if (err?.code !== 'ENOENT') throw err;
+    await startViaBundledNpm();
+  }
+}
+
 function requestLocalDaemon(pathname: string, method: 'GET' | 'POST' = 'GET', timeoutMs = 2000): Promise<{ statusCode: number; body: string }> {
   return new Promise((resolve, reject) => {
     const req = http.request({
@@ -690,54 +759,20 @@ ipcMain.handle('setup:start-daemon', async () => {
   const isReady = await checkDaemonHealth();
   if (isReady) return { success: true, alreadyRunning: true };
 
-  // Helper: fallback to bundled npm-cli (packs with the app) to avoid missing system npx
-  const startDaemonViaBundledNpm = async () => {
-      const npmCli = getBundledNpmBin('npm');
-    if (!npmCli) throw new Error('Bundled npm not found');
-
-      const offlineTarball = resolveBundledCache('awareness-sdk-local.tgz');
-      const execArgs = offlineTarball
-        ? ['exec', '--yes', offlineTarball, 'start', '--project', path.join(HOME, '.openclaw')]
-        : ['exec', '--yes', '@awareness-sdk/local', 'start', '--project', path.join(HOME, '.openclaw')];
-
-      const child = spawn(process.execPath, [npmCli, ...execArgs], {
-      detached: true,
-      stdio: 'ignore',
-      env: { ...process.env, PATH: getEnhancedPath() },
-    });
-    child.unref();
-  };
-
-  // Start daemon
-  // IMPORTANT: pass --project to avoid cwd=/ in packaged Electron (ENOENT: mkdir '/.awareness')
-  const startWithNpx = () => new Promise<void>((resolve, reject) => {
-    const child = runSpawn('npx', ['@awareness-sdk/local', 'start', '--project', path.join(HOME, '.openclaw')], {
-      detached: true,
-      stdio: 'ignore',
-    });
-    child.on('error', reject);
-    child.unref();
-    resolve();
-  });
-
   try {
-    await startWithNpx();
+    await forceStopLocalDaemon();
+    clearAwarenessLocalNpxCache();
+    await startLocalDaemonDetached();
   } catch (err: any) {
     if (err?.code === 'ENOENT') {
-      // System npx missing — fall back to bundled npm exec
-      try {
-        await startDaemonViaBundledNpm();
-      } catch (fallbackErr) {
-        return { success: false, error: 'Node/npm not found. Please install Node.js 22+ and reopen AwarenessClaw.' };
-      }
-    } else {
-      return { success: false, error: String(err) };
+      return { success: false, error: 'Node/npm not found. Please install Node.js 22+ and reopen AwarenessClaw.' };
     }
+    return { success: false, error: err?.message?.slice(0, 200) || String(err) };
   }
 
-  // Poll for readiness (max 15 seconds)
-  for (let i = 0; i < 30; i++) {
-    await sleep(500);
+  // Poll for readiness. First launch may need time for npx download + native module setup.
+  for (let i = 0; i < 45; i++) {
+    await sleep(1000);
     if (await checkDaemonHealth()) return { success: true };
   }
 
@@ -970,18 +1005,7 @@ ipcMain.handle('app:upgrade-component', async (_e, component: string) => {
 
       // Clear npx cache for @awareness-sdk/local to force fresh download
       // npx caches packages in ~/.npm/_npx/ — stale cache prevents version upgrade
-      try {
-        const npxCacheDir = path.join(HOME, '.npm', '_npx');
-        if (fs.existsSync(npxCacheDir)) {
-          const entries = fs.readdirSync(npxCacheDir);
-          for (const entry of entries) {
-            const pkgJsonPath = path.join(npxCacheDir, entry, 'node_modules', '@awareness-sdk', 'local', 'package.json');
-            if (fs.existsSync(pkgJsonPath)) {
-              fs.rmSync(path.join(npxCacheDir, entry), { recursive: true, force: true });
-            }
-          }
-        }
-      } catch { /* cache cleanup is best-effort */ }
+      clearAwarenessLocalNpxCache();
 
       // Start new version — npx -y @latest forces fresh fetch after cache clear
       // IMPORTANT: Must pass --project to avoid cwd=/ in packaged Electron (ENOENT: mkdir '/.awareness')

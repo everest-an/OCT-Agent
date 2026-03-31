@@ -408,7 +408,8 @@ async function fixDaemonStart(ctx: Ctx): Promise<FixResult> {
         }
       } catch { /* best effort cleanup */ }
     }
-      await ctx.deps.shellRun('npx -y @awareness-sdk/local start --port 37800 --background 2>&1', 30000);
+    const projectDir = path.join(ctx.deps.homedir, '.openclaw');
+    await ctx.deps.shellRun(`npx -y @awareness-sdk/local@latest start --port 37800 --project "${projectDir}" --background 2>&1`, 60000);
     await new Promise(r => setTimeout(r, 5000));
     return { id: 'daemon-running', success: true, message: 'Daemon started' };
   } catch (err: any) {
