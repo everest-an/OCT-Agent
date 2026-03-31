@@ -15,16 +15,18 @@ describe('Settings Page — Permissions Panel', () => {
     });
   });
 
-  it('displays the tools profile value "coding"', async () => {
+  it('displays preset cards (Safe, Standard, Developer)', async () => {
     await act(async () => { render(<Settings />); });
     await waitFor(() => {
-      expect(screen.getByText('Tools Profile')).toBeInTheDocument();
-      expect(screen.getByText('coding')).toBeInTheDocument();
+      // New UI shows preset cards instead of "Tools Profile" label
+      expect(screen.getByText('Safe')).toBeInTheDocument();
+      expect(screen.getByText('Standard')).toBeInTheDocument();
+      expect(screen.getByText('Developer')).toBeInTheDocument();
     });
   });
 
-  it('calls permissionsUpdate when removing a denied command', async () => {
-    // Override permissionsGet to return a denied command so we can remove it
+  it('calls permissionsUpdate when toggling a denied command via advanced settings', async () => {
+    // Override permissionsGet to return camera.snap as denied
     const api = window.electronAPI as any;
     const origGet = api.permissionsGet;
     const origUpdate = api.permissionsUpdate;
@@ -40,25 +42,29 @@ describe('Settings Page — Permissions Panel', () => {
 
     await act(async () => { render(<Settings />); });
 
-    // Wait for permissions to load and the denied command tag to appear
+    // Wait for permissions to load — preset cards should be visible
     await waitFor(() => {
-      expect(screen.getByText('camera.snap')).toBeInTheDocument();
+      expect(screen.getByText('Safe')).toBeInTheDocument();
     });
 
-    // The "x" remove button is inside the tag next to the command text
-    const tag = screen.getByText('camera.snap');
-    const removeBtn = tag.parentElement?.querySelector('button');
-    expect(removeBtn).toBeTruthy();
+    // Open advanced settings to see the checkbox-based tool/command pickers
+    const advancedBtn = screen.getByText(/Show advanced/i);
+    await act(async () => { fireEvent.click(advancedBtn); });
+
+    // In advanced mode, "Camera" is a known denied command shown as a checkbox button.
+    // Click it to toggle it off (remove from denied).
+    const cameraBtn = screen.getByText('Camera').closest('button');
+    expect(cameraBtn).toBeTruthy();
 
     await act(async () => {
-      fireEvent.click(removeBtn!);
+      fireEvent.click(cameraBtn!);
     });
 
     await waitFor(() => {
       expect(updateSpy).toHaveBeenCalled();
     });
 
-    // Should be called with the denied array minus the removed command
+    // Should be called with camera.snap removed from denied
     expect(updateSpy).toHaveBeenCalledWith({ denied: [] });
 
     // Restore

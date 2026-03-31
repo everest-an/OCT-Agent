@@ -131,6 +131,9 @@ Object.defineProperty(window, 'electronAPI', {
     securityCheck: () => Promise.resolve({ issues: [] }),
     doctorRun: () => Promise.resolve({ timestamp: Date.now(), checks: [], summary: { pass: 0, warn: 0, fail: 0, skipped: 0 } }),
     doctorFix: () => Promise.resolve({ id: 'test', success: true, message: 'Fixed' }),
+    setLoginItem: () => Promise.resolve({ success: true }),
+    getLoginItem: () => Promise.resolve({ openAtLogin: false }),
+    daemonMarkConnected: () => Promise.resolve(),
   },
   writable: true,
 });

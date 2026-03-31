@@ -184,7 +184,7 @@ describe('Dashboard (Chat)', () => {
 
     await act(async () => { render(<Dashboard />); });
 
-    // Tool calls block should show "2 tools used" toggle
-    expect(screen.getByText(/2 tools used/)).toBeInTheDocument();
+    // Tool calls block should show tool count (i18n: "2 个工具调用" in zh, "2 tool(s) used" in en)
+    expect(screen.getByText(/2.*工具调用|2 tool/)).toBeInTheDocument();
   });
 });

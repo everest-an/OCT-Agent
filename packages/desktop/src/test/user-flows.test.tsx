@@ -465,21 +465,17 @@ describe('Memory Page — Timeline & Daemon (E2E)', () => {
 
   it('flow: Load More button fetches next page of events', async () => {
     mockDaemonOnline();
-    getApi().memoryGetEvents = vi.fn()
-      .mockResolvedValueOnce({
-        items: Array.from({ length: 50 }, (_, i) => ({
-          id: `mem${i}`, type: 'turn_brief', title: `Event ${i}`, source: 'manual',
-          created_at: `2026-03-30T${String(10 + Math.floor(i / 6)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}:00Z`,
-        })),
-        total: 75,
-      })
-      .mockResolvedValueOnce({
-        items: Array.from({ length: 25 }, (_, i) => ({
-          id: `mem${50 + i}`, type: 'turn_brief', title: `Event ${50 + i}`, source: 'manual',
-          created_at: '2026-03-30T08:00:00Z',
-        })),
-        total: 75,
-      });
+    // Use mockResolvedValue for the initial load (may be called multiple times on mount due to sourceView effect),
+    // then switch to next-page response after initial render.
+    const page1 = {
+      items: Array.from({ length: 50 }, (_, i) => ({
+        id: `mem${i}`, type: 'turn_brief', title: `Event ${i}`, source: 'manual',
+        created_at: `2026-03-30T${String(10 + Math.floor(i / 6)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}:00Z`,
+      })),
+      total: 75,
+    };
+    const eventsMock = vi.fn().mockResolvedValue(page1);
+    getApi().memoryGetEvents = eventsMock;
 
     await act(async () => { render(<Memory />); });
     await waitFor(() => expect(screen.getAllByText('Event 0').length).toBeGreaterThan(0));
@@ -489,11 +485,21 @@ describe('Memory Page — Timeline & Daemon (E2E)', () => {
     expect(loadMore).toBeInTheDocument();
     expect(loadMore.textContent).toContain('50/75');
 
+    // Now set up the next page response for the Load More click
+    const callCountBefore = eventsMock.mock.calls.length;
+    eventsMock.mockResolvedValueOnce({
+      items: Array.from({ length: 25 }, (_, i) => ({
+        id: `mem${50 + i}`, type: 'turn_brief', title: `Event ${50 + i}`, source: 'manual',
+        created_at: '2026-03-30T08:00:00Z',
+      })),
+      total: 75,
+    });
+
     // Click Load More
     await act(async () => { fireEvent.click(loadMore); });
 
-    // Second call should have been made with offset
-    expect(getApi().memoryGetEvents).toHaveBeenCalledTimes(2);
+    // At least one more call should have been made
+    expect(eventsMock.mock.calls.length).toBeGreaterThan(callCountBefore);
   });
 
   it('flow: daemon stats are displayed in subtitle', async () => {
@@ -505,8 +511,9 @@ describe('Memory Page — Timeline & Daemon (E2E)', () => {
     getApi().memoryGetEvents = vi.fn().mockResolvedValue({ items: [], total: 0 });
 
     await act(async () => { render(<Memory />); });
-    await waitFor(() => expect(screen.getByText(/427 memories/)).toBeInTheDocument());
-    expect(screen.getByText(/26 knowledge cards/i)).toBeInTheDocument();
+    // Stats subtitle shows knowledge cards and sessions from health data.
+    // When sourceView='chat' (default), memory count reflects filtered events, not totalMemories.
+    await waitFor(() => expect(screen.getByText(/26 knowledge cards/i)).toBeInTheDocument());
     expect(screen.getByText(/282 sessions/i)).toBeInTheDocument();
   });
 
@@ -551,26 +558,35 @@ describe('Settings Page (user flows)', () => {
     vi.restoreAllMocks();
   });
 
-  it('flow: permissions page shows friendly empty state (no tools added)', async () => {
+  it('flow: permissions page shows preset cards with description', async () => {
     getApi().permissionsGet = vi.fn().mockResolvedValue({
       success: true, profile: 'coding', alsoAllow: [], denied: [],
     });
     await act(async () => { render(<Settings />); });
-    await waitFor(() => expect(screen.getByText(/No extra tools added/i)).toBeInTheDocument());
-    expect(screen.getByText(/No commands blocked/i)).toBeInTheDocument();
+    // New UI has preset cards (Safe, Standard, Developer) instead of tag chips
+    await waitFor(() => expect(screen.getByText('Safe')).toBeInTheDocument());
+    expect(screen.getByText('Standard')).toBeInTheDocument();
+    expect(screen.getByText('Developer')).toBeInTheDocument();
+    // Preset description is shown below the cards
+    expect(screen.getByText(/Choose a/i)).toBeInTheDocument();
   });
 
-  it('flow: permissions page shows configured tool tags', async () => {
+  it('flow: permissions advanced settings shows tool checkboxes and command checkboxes', async () => {
     getApi().permissionsGet = vi.fn().mockResolvedValue({
       success: true, profile: 'coding',
       alsoAllow: ['awareness_recall'], denied: ['camera.snap'],
     });
     await act(async () => { render(<Settings />); });
-    await waitFor(() => expect(screen.getByText('awareness_recall')).toBeInTheDocument());
-    expect(screen.getByText('camera.snap')).toBeInTheDocument();
+    // Open advanced settings
+    await waitFor(() => expect(screen.getByText(/Show advanced/i)).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText(/Show advanced/i)); });
+    // In advanced mode, known tools are shown as checkbox buttons with labels
+    await waitFor(() => expect(screen.getByText('Memory Recall')).toBeInTheDocument());
+    // Known denied command "Camera" should be shown
+    expect(screen.getByText('Camera')).toBeInTheDocument();
   });
 
-  it('flow: add tool to allowed list via + button', async () => {
+  it('flow: add custom tool to allowed list via advanced settings', async () => {
     const updateMock = vi.fn().mockResolvedValue({ success: true });
     getApi().permissionsGet = vi.fn().mockResolvedValue({
       success: true, profile: 'coding', alsoAllow: [], denied: [],
@@ -578,9 +594,12 @@ describe('Settings Page (user flows)', () => {
     getApi().permissionsUpdate = updateMock;
 
     await act(async () => { render(<Settings />); });
-    await waitFor(() => expect(screen.getByPlaceholderText('tool_name')).toBeInTheDocument());
+    // Open advanced settings
+    await waitFor(() => expect(screen.getByText(/Show advanced/i)).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText(/Show advanced/i)); });
 
-    const toolInput = screen.getByPlaceholderText('tool_name');
+    // The custom tool input placeholder is "Custom Tool" (en i18n) or similar
+    const toolInput = screen.getByPlaceholderText(/Custom tool/i);
     await act(async () => { fireEvent.change(toolInput, { target: { value: 'web_search' } }); });
 
     const addBtn = screen.getByTestId('add-allow-tool');
@@ -591,7 +610,7 @@ describe('Settings Page (user flows)', () => {
     ));
   });
 
-  it('flow: add tool to denied list via + button', async () => {
+  it('flow: add custom command to denied list via advanced settings', async () => {
     const updateMock = vi.fn().mockResolvedValue({ success: true });
     getApi().permissionsGet = vi.fn().mockResolvedValue({
       success: true, profile: 'coding', alsoAllow: [], denied: [],
@@ -599,9 +618,12 @@ describe('Settings Page (user flows)', () => {
     getApi().permissionsUpdate = updateMock;
 
     await act(async () => { render(<Settings />); });
-    await waitFor(() => expect(screen.getByPlaceholderText('command.name')).toBeInTheDocument());
+    // Open advanced settings
+    await waitFor(() => expect(screen.getByText(/Show advanced/i)).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText(/Show advanced/i)); });
 
-    const denyInput = screen.getByPlaceholderText('command.name');
+    // The custom deny input placeholder is "Custom Command" (en i18n) or similar
+    const denyInput = screen.getByPlaceholderText(/Custom command/i);
     await act(async () => { fireEvent.change(denyInput, { target: { value: 'camera.snap' } }); });
 
     const addBtn = screen.getByTestId('add-deny-cmd');
