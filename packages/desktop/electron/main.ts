@@ -2557,8 +2557,9 @@ function callMcp(toolName: string, args: Record<string, any>): Promise<any> {
 ipcMain.handle('memory:search', async (_e, query: string) => {
   return callMcp('awareness_recall', {
     semantic_query: query,
-    detail: 'summary',
-    limit: 20,
+    keyword_query: query,
+    detail: 'full',
+    limit: 15,
   });
 });
 
@@ -2586,14 +2587,25 @@ ipcMain.handle('memory:get-daily-summary', async () => {
 });
 
 /** Fetch memory events (timeline) from daemon REST API */
-ipcMain.handle('memory:get-events', async (_e, opts: { limit?: number; offset?: number; search?: string }) => {
+ipcMain.handle('memory:get-events', async (_e, opts: { limit?: number; offset?: number; search?: string; type?: string; agent_role?: string }) => {
   const limit = opts?.limit || 50;
   const offset = opts?.offset || 0;
   const search = opts?.search || '';
+  const typeFilter = opts?.type || '';
+  const agentRoleFilter = opts?.agent_role || '';
 
-  const endpoint = search
-    ? `http://127.0.0.1:37800/api/v1/memories/search?q=${encodeURIComponent(search)}&limit=${limit}`
-    : `http://127.0.0.1:37800/api/v1/memories?limit=${limit}&offset=${offset}`;
+  let endpoint: string;
+  if (search) {
+    const params = new URLSearchParams({ q: search, limit: String(limit) });
+    if (typeFilter) params.set('type', typeFilter);
+    if (agentRoleFilter) params.set('agent_role', agentRoleFilter);
+    endpoint = `http://127.0.0.1:37800/api/v1/memories/search?${params.toString()}`;
+  } else {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (typeFilter) params.set('type', typeFilter);
+    if (agentRoleFilter) params.set('agent_role', agentRoleFilter);
+    endpoint = `http://127.0.0.1:37800/api/v1/memories?${params.toString()}`;
+  }
 
   return new Promise((resolve) => {
     const req = http.request(endpoint, { method: 'GET', timeout: 10000 }, (res) => {

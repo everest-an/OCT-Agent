@@ -80,6 +80,33 @@ function getSourceDisplay(source: string | undefined): { emoji: string; label: s
   return SOURCE_CONFIG[source] || { emoji: '📝', label: source };
 }
 
+/** Parse code_change fts_content into structured parts */
+function parseCodeChangeContent(content: string): { filepath: string; shortPath: string; diffLines: string[] } {
+  const lines = content.split('\n');
+  let filepath = '';
+  const diffLines: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (i === 0 && line.startsWith('File changed:')) {
+      filepath = line.replace('File changed:', '').trim();
+    } else if (line.trim()) {
+      diffLines.push(line);
+    }
+  }
+
+  // If no "File changed:" prefix, treat the whole content as diff
+  if (!filepath && lines.length > 0) {
+    filepath = lines[0].trim();
+  }
+
+  // shortPath: last 2 path segments
+  const parts = filepath.replace(/\\/g, '/').split('/').filter(Boolean);
+  const shortPath = parts.length >= 2 ? parts.slice(-2).join('/') : filepath;
+
+  return { filepath, shortPath, diffLines };
+}
+
 function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr);
   const now = new Date();
@@ -163,6 +190,7 @@ export default function Memory() {
   const [searching, setSearching] = useState(false);
   const [dailySummary, setDailySummary] = useState<{ recentCards: KnowledgeCard[]; openTasks: number } | null>(null);
   const [expandedEvent, setExpandedEvent] = useState<string | null>(null);
+  const [selectedEventType, setSelectedEventType] = useState<string>('user');
 
   // Daemon connection state
   const [daemonHealth, setDaemonHealth] = useState<DaemonHealth | null>(null);
@@ -355,6 +383,18 @@ export default function Memory() {
     setSearching(false);
   };
 
+  // Compute filtered event list based on selectedEventType
+  const displayedEvents = events.filter((event) => {
+    if (selectedEventType === 'user') {
+      return event.agent_role !== 'builder_agent';
+    }
+    if (selectedEventType === 'all') {
+      return true;
+    }
+    // specific type filter (e.g. 'code_change')
+    return event.type === selectedEventType;
+  });
+
   const filteredCards = cards.filter((card) => {
     if (selectedCategory !== 'all' && card.category !== selectedCategory) return false;
     if (searchQuery && !searchResults && !card.title?.includes(searchQuery) && !card.summary?.includes(searchQuery)) return false;
@@ -401,6 +441,7 @@ export default function Memory() {
               setSearchQuery('');
               setSearchResults(null);
               setEvents(fullEvents);
+              setSelectedEventType('user');
             }}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-colors ${
               activeTab === 'timeline' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'
@@ -416,6 +457,7 @@ export default function Memory() {
               setSearchQuery('');
               setSearchResults(null);
               setEvents(fullEvents);
+              setSelectedEventType('user');
             }}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-colors ${
               activeTab === 'knowledge' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'
@@ -560,7 +602,31 @@ export default function Memory() {
             {/* === TIMELINE TAB === */}
             {activeTab === 'timeline' && (
               <>
-                {events.length === 0 && (
+                {/* Event type filter chips */}
+                <div className="flex gap-2 flex-wrap mb-2">
+                  {(['user', 'all', 'code_change'] as const).map((filterType) => {
+                    const labels: Record<string, string> = {
+                      user: 'User',
+                      all: 'All',
+                      code_change: 'Code',
+                    };
+                    return (
+                      <button
+                        key={filterType}
+                        onClick={() => setSelectedEventType(filterType)}
+                        className={`px-3 py-1 text-xs rounded-lg transition-colors ${
+                          selectedEventType === filterType
+                            ? 'bg-brand-600 text-white'
+                            : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                        }`}
+                      >
+                        {labels[filterType]}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {displayedEvents.length === 0 && (
                   <div className="text-center py-12 text-slate-500 space-y-2">
                     {searchQuery && searchResults !== null ? (
                       <p className="text-sm">{t('memory.noResults', 'No results for "{query}"').replace('{query}', searchQuery)}</p>
@@ -573,11 +639,20 @@ export default function Memory() {
                   </div>
                 )}
 
-                {events.map((event) => {
+                {displayedEvents.map((event) => {
                   const src = getSourceDisplay(event.source);
                   const isExpanded = expandedEvent === event.id;
+                  const isCodeChange = event.type === 'code_change';
+
+                  // For code_change events, parse the content for a cleaner display
+                  const parsedCode = isCodeChange && event.fts_content
+                    ? parseCodeChangeContent(event.fts_content)
+                    : null;
+
                   const contentPreview = event.fts_content || event.title || '';
-                  const hasLongContent = contentPreview.length > 200;
+                  const hasLongContent = isCodeChange
+                    ? (parsedCode ? parsedCode.diffLines.length > 3 : false)
+                    : contentPreview.length > 200;
 
                   return (
                     <div
@@ -610,13 +685,36 @@ export default function Memory() {
                         )}
                       </div>
 
-                      {/* Event title */}
-                      {event.title && (
+                      {/* Event title — for code_change show parsed shortPath */}
+                      {isCodeChange && parsedCode ? (
+                        <h4 className="font-medium text-sm mb-1 text-slate-200">
+                          📄 {parsedCode.shortPath}
+                        </h4>
+                      ) : event.title ? (
                         <h4 className="font-medium text-sm mb-1 text-slate-200">{event.title}</h4>
-                      )}
+                      ) : null}
 
                       {/* Event content */}
-                      {contentPreview && (
+                      {isCodeChange && parsedCode ? (
+                        // code_change: show diff lines in monospace, max 3 lines unless expanded
+                        parsedCode.diffLines.length > 0 && (
+                          <div className="text-slate-400 leading-relaxed">
+                            <div className="space-y-0.5">
+                              {(isExpanded ? parsedCode.diffLines : parsedCode.diffLines.slice(0, 3)).map((line, i) => (
+                                <p key={i} className="text-xs font-mono truncate">{line}</p>
+                              ))}
+                            </div>
+                            {hasLongContent && (
+                              <button
+                                onClick={() => setExpandedEvent(isExpanded ? null : event.id)}
+                                className="text-xs text-brand-400 hover:text-brand-300 mt-1"
+                              >
+                                {isExpanded ? t('memory.collapseContent') : t('memory.expandContent')}
+                              </button>
+                            )}
+                          </div>
+                        )
+                      ) : contentPreview ? (
                         <div className="text-sm text-slate-400 leading-relaxed">
                           <p className={isExpanded ? '' : 'line-clamp-3'}>
                             {contentPreview}
@@ -630,7 +728,7 @@ export default function Memory() {
                             </button>
                           )}
                         </div>
-                      )}
+                      ) : null}
 
                       {/* Tags */}
                       {event.tags && (
