@@ -307,7 +307,7 @@ export default function Settings() {
   const startCloudAuth = async () => {
     const api = window.electronAPI as any;
     if (!api) return;
-    setCloudAuthStep('init');
+    setCloudAuthStep('loading');
     const res = await api.cloudAuthStart();
     if (!res?.success || !res.device_code) {
       setCloudAuthStep('error');
@@ -321,10 +321,19 @@ export default function Settings() {
     // Open browser automatically
     api.openExternal(res.verification_uri + '?code=' + res.user_code);
 
-    // Start polling
+    // Start polling with 10-minute timeout (matches server-side expiry)
     if (cloudPollRef.current) clearInterval(cloudPollRef.current);
     const interval = (res.interval || 5) * 1000;
+    const expiresIn = (res.expires_in || 600) * 1000;
+    const startTime = Date.now();
+
     cloudPollRef.current = setInterval(async () => {
+      // Timeout check
+      if (Date.now() - startTime > expiresIn) {
+        if (cloudPollRef.current) clearInterval(cloudPollRef.current);
+        setCloudAuthStep('error');
+        return;
+      }
       const poll = await api.cloudAuthPoll(res.device_code);
       if (poll?.status === 'approved' && poll.api_key) {
         if (cloudPollRef.current) clearInterval(cloudPollRef.current);
@@ -474,6 +483,8 @@ export default function Settings() {
                     updateConfig({ memoryMode: mode });
                     if (mode === 'cloud' && cloudMode !== 'hybrid' && cloudMode !== 'cloud') {
                       setShowCloudAuth(true);
+                      setCloudAuthStep('init');
+                      setTimeout(() => startCloudAuth(), 100);
                     }
                   }}
                   className={`px-3 py-1.5 text-xs transition-colors ${config.memoryMode === mode ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
@@ -501,7 +512,7 @@ export default function Settings() {
                   </div>
                 ) : (
                   <button
-                    onClick={() => setShowCloudAuth(true)}
+                    onClick={() => { setShowCloudAuth(true); setCloudAuthStep('init'); setTimeout(() => startCloudAuth(), 100); }}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-brand-600 hover:bg-brand-500 text-white rounded-lg transition-colors"
                   >
                     <ExternalLink size={12} /> {t('settings.memory.cloud.connect')}
@@ -1451,15 +1462,10 @@ export default function Settings() {
               </button>
             </div>
 
-            {cloudAuthStep === 'init' && (
-              <div className="space-y-4">
-                <p className="text-sm text-slate-400">{t('settings.memory.cloud.authDesc')}</p>
-                <button
-                  onClick={startCloudAuth}
-                  className="w-full py-2.5 bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium rounded-xl transition-colors"
-                >
-                  {t('settings.memory.cloud.connect')}
-                </button>
+            {(cloudAuthStep === 'init' || cloudAuthStep === 'loading') && (
+              <div className="space-y-4 text-center py-4">
+                <Loader2 size={28} className="animate-spin text-brand-400 mx-auto" />
+                <p className="text-sm text-slate-400">{t('settings.memory.cloud.connecting')}</p>
               </div>
             )}
 
