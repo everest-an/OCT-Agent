@@ -190,7 +190,7 @@ export default function Memory() {
   const [searching, setSearching] = useState(false);
   const [dailySummary, setDailySummary] = useState<{ recentCards: KnowledgeCard[]; openTasks: number } | null>(null);
   const [expandedEvent, setExpandedEvent] = useState<string | null>(null);
-  const [selectedEventType, setSelectedEventType] = useState<string>('user');
+  const [selectedEventType, setSelectedEventType] = useState<string>('all');
 
   // Daemon connection state
   const [daemonHealth, setDaemonHealth] = useState<DaemonHealth | null>(null);
@@ -383,15 +383,9 @@ export default function Memory() {
     setSearching(false);
   };
 
-  // Compute filtered event list based on selectedEventType
+  // Compute filtered event list based on selectedEventType (filter by event type, not agent_role)
   const displayedEvents = events.filter((event) => {
-    if (selectedEventType === 'user') {
-      return event.agent_role !== 'builder_agent';
-    }
-    if (selectedEventType === 'all') {
-      return true;
-    }
-    // specific type filter (e.g. 'code_change')
+    if (selectedEventType === 'all') return true;
     return event.type === selectedEventType;
   });
 
@@ -441,7 +435,7 @@ export default function Memory() {
               setSearchQuery('');
               setSearchResults(null);
               setEvents(fullEvents);
-              setSelectedEventType('user');
+              setSelectedEventType('all');
             }}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-colors ${
               activeTab === 'timeline' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'
@@ -457,7 +451,7 @@ export default function Memory() {
               setSearchQuery('');
               setSearchResults(null);
               setEvents(fullEvents);
-              setSelectedEventType('user');
+              setSelectedEventType('all');
             }}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-colors ${
               activeTab === 'knowledge' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'
@@ -602,25 +596,29 @@ export default function Memory() {
             {/* === TIMELINE TAB === */}
             {activeTab === 'timeline' && (
               <>
-                {/* Event type filter chips */}
+                {/* Event type filter chips — dynamically generated from actual event types */}
                 <div className="flex gap-2 flex-wrap mb-2">
-                  {(['user', 'all', 'code_change'] as const).map((filterType) => {
-                    const labels: Record<string, string> = {
-                      user: 'User',
-                      all: 'All',
+                  {['all', ...[...new Set(events.map(e => e.type).filter(Boolean))].sort()].map((filterType) => {
+                    const typeLabels: Record<string, string> = {
+                      all: `All (${events.length})`,
                       code_change: 'Code',
+                      conversation: 'Chat',
+                      task: 'Task',
+                      note: 'Note',
                     };
+                    const label = typeLabels[filterType!] ?? filterType!;
+                    const count = filterType === 'all' ? null : events.filter(e => e.type === filterType).length;
                     return (
                       <button
                         key={filterType}
-                        onClick={() => setSelectedEventType(filterType)}
+                        onClick={() => setSelectedEventType(filterType!)}
                         className={`px-3 py-1 text-xs rounded-lg transition-colors ${
                           selectedEventType === filterType
                             ? 'bg-brand-600 text-white'
                             : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
                         }`}
                       >
-                        {labels[filterType]}
+                        {label}{count !== null ? ` (${count})` : ''}
                       </button>
                     );
                   })}
