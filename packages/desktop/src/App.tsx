@@ -172,7 +172,7 @@ export default function App() {
         <main className="flex-1 overflow-hidden relative">
           {/* Dashboard is always mounted so in-flight chats survive tab switches */}
           <div className={`absolute inset-0 overflow-y-auto ${currentPage === 'chat' ? '' : 'hidden'}`}>
-            <Dashboard isActive={currentPage === 'chat'} />
+            <Dashboard isActive={currentPage === 'chat'} onNavigate={setCurrentPage} />
           </div>
           {currentPage === 'memory' && <div className="h-full overflow-y-auto"><Memory /></div>}
           {currentPage === 'channels' && <div className="h-full overflow-y-auto"><Channels /></div>}

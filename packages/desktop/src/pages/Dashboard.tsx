@@ -268,7 +268,7 @@ function TypewriterMessage({ content, isNew }: { content: string; isNew: boolean
 
 // --- Main Component ---
 
-export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
+export default function Dashboard({ isActive = true, onNavigate }: { isActive?: boolean; onNavigate?: (page: 'chat' | 'memory' | 'channels' | 'skills' | 'automation' | 'agents' | 'settings') => void }) {
   const { config, updateConfig, syncConfig } = useAppConfig();
   const { t } = useI18n();
   const [sessions, setSessions] = useState<ChatSession[]>(loadSessions);
@@ -1379,6 +1379,15 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
                               {a.id === config.selectedAgentId && <Check size={12} className="text-brand-400" />}
                             </button>
                           ))}
+                          {onNavigate && (
+                            <button
+                              onClick={() => { setShowAgentMenu(false); onNavigate('agents'); }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left text-slate-500 hover:text-slate-300 hover:bg-slate-700 border-t border-slate-700 transition-colors"
+                            >
+                              <Bot size={12} />
+                              <span>{t('chat.agent.manage', 'Manage Agents')}</span>
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>

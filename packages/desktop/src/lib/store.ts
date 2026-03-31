@@ -17,6 +17,8 @@ export interface AppConfig {
   autoCapture: boolean;
   recallLimit: number;
   memoryMode: 'local' | 'cloud';
+  // Privacy — which sources are allowed to save to memory (empty = all allowed)
+  memoryBlockedSources: string[];
   // Token optimization
   thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high';
   // Appearance
@@ -40,6 +42,7 @@ const DEFAULT_CONFIG: AppConfig = {
   autoCapture: true,
   recallLimit: 8,
   memoryMode: 'local',
+  memoryBlockedSources: [],
   thinkingLevel: 'low',
   language: 'zh',
   theme: 'dark',
@@ -100,6 +103,7 @@ async function syncToOpenClaw(config: AppConfig, providers: ModelProviderDef[]) 
           autoCapture: config.autoCapture,
           recallLimit: config.recallLimit,
           ...(config.memoryMode === 'local' ? { localUrl: 'http://localhost:37800' } : {}),
+          ...(config.memoryBlockedSources?.length ? { blockedSources: config.memoryBlockedSources } : {}),
         },
       },
       'memory-awareness': {
@@ -109,6 +113,7 @@ async function syncToOpenClaw(config: AppConfig, providers: ModelProviderDef[]) 
           autoCapture: config.autoCapture,
           recallLimit: config.recallLimit,
           ...(config.memoryMode === 'local' ? { localUrl: 'http://localhost:37800' } : {}),
+          ...(config.memoryBlockedSources?.length ? { blockedSources: config.memoryBlockedSources } : {}),
         },
       },
       'memory-core': { enabled: false },

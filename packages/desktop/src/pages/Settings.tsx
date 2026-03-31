@@ -390,6 +390,65 @@ export default function Settings() {
           </Row>
         </Section>
 
+        {/* Memory Privacy */}
+        <Section title={`🔒 ${t('settings.privacy', 'Memory Privacy')}`}>
+          <div className="p-4 space-y-3">
+            <p className="text-xs text-slate-500">{t('settings.privacy.desc', 'Choose which sources are allowed to save conversations to memory.')}</p>
+            {[
+              { id: 'desktop', label: t('settings.privacy.desktop', 'Desktop Chat'), emoji: '💬' },
+              { id: 'openclaw-telegram', label: 'Telegram', emoji: '✈️' },
+              { id: 'openclaw-whatsapp', label: 'WhatsApp', emoji: '📱' },
+              { id: 'openclaw-discord', label: 'Discord', emoji: '🎮' },
+              { id: 'openclaw-slack', label: 'Slack', emoji: '💼' },
+              { id: 'openclaw-wechat', label: 'WeChat', emoji: '💚' },
+              { id: 'mcp', label: t('settings.privacy.devTools', 'Dev Tools (Claude Code / IDE)'), emoji: '🛠️' },
+            ].map(({ id, label, emoji }) => {
+              const blocked = config.memoryBlockedSources || [];
+              const isAllowed = !blocked.includes(id);
+              return (
+                <div key={id} className="flex items-center justify-between py-1.5">
+                  <div className="flex items-center gap-2 text-sm">
+                    <span>{emoji}</span>
+                    <span className="text-slate-300">{label}</span>
+                  </div>
+                  <Toggle
+                    checked={isAllowed}
+                    onChange={(v) => {
+                      const next = v
+                        ? blocked.filter((s: string) => s !== id)
+                        : [...blocked, id];
+                      updateConfig({ memoryBlockedSources: next });
+                      syncConfig(allProviders);
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          <div className="px-4 pb-4">
+            <button
+              onClick={async () => {
+                if (!confirm(t('settings.privacy.clearConfirm', 'Delete ALL local memories? This cannot be undone.'))) return;
+                try {
+                  const resp = await fetch('http://127.0.0.1:37800/api/v1/knowledge/cleanup', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ patterns: ['.*'] }),
+                  });
+                  if (resp.ok) alert(t('settings.privacy.cleared', 'All knowledge cards deleted.'));
+                  else alert(t('settings.privacy.clearFailed', 'Failed to clear memories.'));
+                } catch {
+                  alert(t('settings.privacy.clearFailed', 'Failed to clear memories. Is the daemon running?'));
+                }
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-600/10 rounded-lg transition-colors"
+            >
+              <Trash2 size={12} />
+              {t('settings.privacy.clearAll', 'Delete All Knowledge Cards')}
+            </button>
+          </div>
+        </Section>
+
         {/* Token Optimization */}
         <Section title={`💰 ${t('settings.token')}`}>
           <Row label={t('settings.token.thinkingLevel')} desc={t('settings.token.thinkingLevel.desc')}>

@@ -157,7 +157,7 @@ OpenClaw 的 chat 质量依赖 `~/.openclaw/workspace/` 下的 MD 文档：
 ### 多 Agent 聊天切换（2026-03-31）
 - [x] **Agent 选择器**：聊天输入框底部工具栏新增 Agent 切换下拉菜单（当存在 2+ agents 时显示），选中的 agent ID 持久化到 localStorage + 传给 `chat:send`（2026-03-31）
 - [x] **chat:send 支持 agentId**：main.ts `chat:send` handler 接受 `agentId` 参数，非 main agent 时传 `--agent "<id>"` flag 给 OpenClaw CLI（2026-03-31）
-- [ ] **Agent 快速创建入口**：聊天页 Agent 选择器底部加"管理 Agent"跳转链接
+- [x] **Agent 快速创建入口**：聊天页 Agent 选择器底部加"管理 Agent"跳转链接，点击导航到 Agents 页面（2026-04-01）
 
 ---
 
@@ -207,7 +207,7 @@ OpenClaw 的 chat 质量依赖 `~/.openclaw/workspace/` 下的 MD 文档：
 - [x] **去掉所有 mock fallback**：daemon 没连接时显示空状态 + "Start Daemon" Fix 按钮（一键拉起）（2026-03-30）
 - [x] **记忆时间线视图**：展示实际记忆事件（不只是知识卡），包含时间、内容摘要、来源通道、会话 ID（2026-03-30）
 - [x] **记忆详情展开**：点击事件展开完整内容，超过 200 字自动折叠（2026-03-30）
-- [ ] **记忆搜索结果高亮**：语义搜索返回的结果在内容中高亮匹配片段
+- [x] **记忆搜索结果高亮**：`HighlightText` 组件已实现，用 amber 色标记匹配文字，应用到 event titles/content 和 knowledge card titles/summaries（2026-03-30）
 
 ### 全通道记忆捕获
 - [x] **微信/WhatsApp/Telegram 消息自动写入 Awareness 记忆**：验证确认 OpenClaw 插件 `agent_end` hook 在 Gateway 模式下已生效（Agent 绑定到通道时触发），添加通道来源检测（2026-03-30）
@@ -228,7 +228,7 @@ OpenClaw 的 chat 质量依赖 `~/.openclaw/workspace/` 下的 MD 文档：
 - [ ] **跨会话知识图谱**：关联不同通道/会话中的相关知识，在记忆页可视化展示关联关系
 - [ ] **感知信号面板**：展示项目上下文变化（文件修改模式、活跃时段、技术栈偏好）— 已有 daemon type=perception 能力
 - [ ] **记忆冲突检测**：新知识与已有知识矛盾时自动标记（后端已实现 5 类分类器，前端需展示）
-- [ ] **隐私控制**：用户可在桌面端选择哪些通道的消息存入记忆、一键删除指定时段/通道的记忆
+- [x] **隐私控制**：Settings Memory Privacy section — 7 个来源的记忆捕获开关（desktop/telegram/whatsapp/discord/slack/wechat/dev-tools），blockedSources 同步到 openclaw.json 插件配置；一键删除所有知识卡片按钮（调 daemon DELETE /knowledge/cleanup）（2026-04-01）
 
 ### Daemon 健壮性
 - [ ] **npx 缓存损坏自动修复**：Doctor 已有 `fixDaemonStart` 清理 `~/.npm/_npx/` 坏缓存
