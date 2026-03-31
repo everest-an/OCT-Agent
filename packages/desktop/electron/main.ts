@@ -1170,6 +1170,9 @@ ipcMain.handle('agents:list', async () => {
 
 ipcMain.handle('agents:add', async (_e, name: string, model?: string, systemPrompt?: string) => {
   try {
+    // Sanitize name — only allow safe characters to prevent shell injection
+    const safeName = name.replace(/[^a-zA-Z0-9 _-]/g, '').trim();
+    if (!safeName) return { success: false, error: 'Invalid agent name' };
     // Ensure Gateway is running (agents need it)
     await ensureGatewayRunning();
     // Ensure base directories exist
@@ -1178,12 +1181,13 @@ ipcMain.handle('agents:add', async (_e, name: string, model?: string, systemProm
     fs.mkdirSync(baseWsDir, { recursive: true });
     fs.mkdirSync(baseAgentsDir, { recursive: true });
     // Use independent workspace dir (not inside agents/ state dir)
-    const slug = name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    const slug = safeName.toLowerCase().replace(/[^a-z0-9-]/g, '-');
     const wsDir = path.join(baseWsDir, slug);
     fs.mkdirSync(wsDir, { recursive: true });
     const flags = [`--non-interactive`, `--workspace "${wsDir}"`];
-    if (model) flags.push(`--model "${model.replace(/"/g, '\\"')}"`);
-    await runAsync(`openclaw agents add "${name.replace(/"/g, '\\"')}" ${flags.join(' ')}`, 15000);
+    const safeModel = model ? model.replace(/[^a-zA-Z0-9/_:.-]/g, '') : '';
+    if (safeModel) flags.push(`--model "${safeModel}"`);
+    await runAsync(`openclaw agents add "${safeName}" ${flags.join(' ')}`, 15000);
     // Write SOUL.md if system prompt provided
     if (systemPrompt) {
       const agentDir = path.join(baseAgentsDir, slug, 'agent');
@@ -2019,7 +2023,12 @@ function channelLoginWithQR(loginCmd: string, timeoutMs = 120000): Promise<{ suc
     let stdout = '';
     let qrOpened = false;
 
-    const child = spawn('/bin/bash', ['--norc', '--noprofile', '-c', `export PATH="${ep}"; ${loginCmd} 2>&1`]);
+    const child = process.platform === 'win32'
+      ? spawn(wrapWindowsCommand(loginCmd + ' 2>&1'), [], {
+          shell: 'cmd.exe',
+          env: { ...process.env, PATH: ep, NO_COLOR: '1', FORCE_COLOR: '0' },
+        })
+      : spawn('/bin/bash', ['--norc', '--noprofile', '-c', `export PATH="${ep}"; ${loginCmd} 2>&1`]);
 
     child.stdout?.on('data', (data: Buffer) => {
       const chunk = data.toString();
@@ -2076,20 +2085,26 @@ function channelLoginWithQR(loginCmd: string, timeoutMs = 120000): Promise<{ suc
 }
 
 ipcMain.handle('channel:setup', async (_e: any, channelId: string) => {
+  // Sanitize channelId to prevent command injection — only allow alphanumeric, hyphens, underscores
+  const safeChannelId = channelId.replace(/[^a-zA-Z0-9_-]/g, '');
+  if (!safeChannelId || safeChannelId !== channelId) {
+    return { success: false, error: `Invalid channel ID: ${channelId}` };
+  }
+
   // WeChat: plugin-based (openclaw-weixin)
-  if (channelId === 'wechat') {
+  if (safeChannelId === 'wechat') {
     try { await runAsync('openclaw plugins install "@tencent-weixin/openclaw-weixin" 2>&1', 30000); } catch { /* already installed */ }
     return channelLoginWithQR('openclaw channels login --channel openclaw-weixin');
   }
 
   // Signal: add channel first, then QR link
-  if (channelId === 'signal') {
+  if (safeChannelId === 'signal') {
     try { await runAsync('openclaw channels add --channel signal 2>&1', 15000); } catch { /* may exist */ }
     return channelLoginWithQR('openclaw channels login --channel signal');
   }
 
   // iMessage: just add — no login needed (macOS auto-detects)
-  if (channelId === 'imessage') {
+  if (safeChannelId === 'imessage') {
     try {
       await runAsync('openclaw channels add --channel imessage 2>&1', 15000);
       return { success: true, output: 'iMessage connected.' };
@@ -2099,8 +2114,8 @@ ipcMain.handle('channel:setup', async (_e: any, channelId: string) => {
   }
 
   // WhatsApp + others: add then QR login
-  try { await safeShellExecAsync(`openclaw channels add --channel ${channelId} 2>&1`, 10000); } catch { /* may exist */ }
-  return channelLoginWithQR(`openclaw channels login --channel ${channelId}`);
+  try { await safeShellExecAsync(`openclaw channels add --channel ${safeChannelId} 2>&1`, 10000); } catch { /* may exist */ }
+  return channelLoginWithQR(`openclaw channels login --channel ${safeChannelId}`);
 });
 
 // Channel status: fast config read first, then CLI check cached for 60s
