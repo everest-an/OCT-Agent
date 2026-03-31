@@ -118,6 +118,21 @@ function parseCommandPaths(output: string | null): string[] {
   return Array.from(new Set(output.split(/\r?\n/).map(line => line.trim()).filter(Boolean)));
 }
 
+function normalizeWindowsCommandCandidates(paths: string[]): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const candidate of paths) {
+    const parsed = path.parse(candidate);
+    const normalizedKey = path.join(parsed.dir.toLowerCase(), parsed.name.toLowerCase());
+    if (seen.has(normalizedKey)) continue;
+    seen.add(normalizedKey);
+    normalized.push(candidate);
+  }
+
+  return normalized;
+}
+
 async function buildContext(deps: DoctorDeps): Promise<Ctx> {
   const configPath = path.join(deps.homedir, '.openclaw', 'openclaw.json');
   let config: any = null;
@@ -128,7 +143,10 @@ async function buildContext(deps: DoctorDeps): Promise<Ctx> {
   const nodePath = pickFirstCommandPath(nodeLookup);
   const nodeVersion = nodePath ? await deps.shellExec('node --version', 3000) : null;
   const openclawLookup = await deps.shellExec(`${findCommand} openclaw`, 3000);
-  const openclawCandidates = parseCommandPaths(openclawLookup);
+  const openclawCandidatesRaw = parseCommandPaths(openclawLookup);
+  const openclawCandidates = deps.platform === 'win32'
+    ? normalizeWindowsCommandCandidates(openclawCandidatesRaw)
+    : openclawCandidatesRaw;
   const managedOpenclawPath = getManagedOpenClawEntrypoint(deps.homedir);
   const openclawPath = openclawCandidates[0] || managedOpenclawPath || null;
   const openclawVersion = openclawPath ? await deps.shellExec('openclaw --version', 8000) : null;
