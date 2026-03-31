@@ -1865,9 +1865,7 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, opti
 
       // Fire-and-forget: write desktop chat to Awareness memory
       if (cleanText && cleanText !== 'No response') {
-        const userSnippet = message.slice(0, 300);
-        const assistantSnippet = cleanText.slice(0, 400);
-        const brief = `Request: ${userSnippet}\nResult: ${assistantSnippet}`;
+        const brief = `Request: ${message}\nResult: ${cleanText}`;
         callMcp('awareness_record', {
           content: brief,
           event_type: 'turn_brief',
