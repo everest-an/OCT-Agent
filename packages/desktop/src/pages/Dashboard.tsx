@@ -559,38 +559,37 @@ export default function Dashboard() {
 
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
-        <div className="px-4 py-2.5 border-b border-slate-800 flex items-center gap-2 flex-shrink-0">
+        {/* Header — compact single-row layout */}
+        <div className="px-3 py-1.5 border-b border-slate-800/80 flex items-center gap-1.5 flex-shrink-0 h-10">
           <button onClick={() => setShowSidebar(!showSidebar)}
-            className="p-1.5 text-slate-500 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors"
+            className="p-1 text-slate-500 hover:text-slate-200 hover:bg-slate-800 rounded-md transition-colors"
             title={t('chat.sessionList', 'Session list')}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="1.5" rx="0.75" fill="currentColor"/><rect x="2" y="7.25" width="12" height="1.5" rx="0.75" fill="currentColor"/><rect x="2" y="11.5" width="12" height="1.5" rx="0.75" fill="currentColor"/></svg>
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="1.5" rx="0.75" fill="currentColor"/><rect x="2" y="7.25" width="12" height="1.5" rx="0.75" fill="currentColor"/><rect x="2" y="11.5" width="12" height="1.5" rx="0.75" fill="currentColor"/></svg>
           </button>
 
-          <img src={logoUrl} alt="AwarenessClaw" className="w-6 h-6 rounded" />
-          <h1 className="text-sm font-semibold">AwarenessClaw</h1>
+          <img src={logoUrl} alt="AwarenessClaw" className="w-5 h-5 rounded" />
 
+          {/* Project folder — single line, compact */}
           <button
             onClick={handleSelectProjectRoot}
             aria-label={projectRoot ? t('chat.workspace.change', 'Change folder') : t('chat.workspace.select', 'Choose folder')}
-            className="ml-2 flex min-w-0 max-w-[280px] items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-900 px-2.5 py-1.5 text-left transition-colors hover:border-slate-500 hover:bg-slate-800"
+            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors hover:bg-slate-800 max-w-[200px]"
             title={projectRoot || t('chat.workspace.select', 'Choose folder')}
           >
-            <FolderOpen size={12} className="shrink-0 text-sky-400" />
-            <div className="min-w-0">
-              <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500">{t('chat.workspace.current', 'Project folder')}</div>
-              <div className="truncate text-xs text-slate-200">{projectRootName || t('chat.workspace.none', 'No project folder selected')}</div>
-            </div>
+            <FolderOpen size={11} className="shrink-0 text-sky-400/70" />
+            <span className="truncate text-xs text-slate-400">{projectRootName || t('chat.workspace.none', 'No folder')}</span>
           </button>
 
-          {/* Model selector */}
-          <div className="relative ml-2">
+          <div className="flex-1" />
+
+          {/* Model selector — compact pill */}
+          <div className="relative">
             <button onClick={() => setShowModelSelector(!showModelSelector)}
-              className="flex items-center gap-1 px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 transition-colors"
+              className="flex items-center gap-1 px-2 py-0.5 text-[11px] hover:bg-slate-800 rounded-md text-slate-500 transition-colors"
             >
-              {currentProvider?.emoji} {config.modelId || t('chat.selectModel', 'Select model')}
-              <ChevronDown size={10} />
+              {currentProvider?.emoji} {config.modelId?.split('/').pop() || t('chat.selectModel', 'Select model')}
+              <ChevronDown size={9} />
             </button>
             {showModelSelector && (
               <>
@@ -640,8 +639,10 @@ export default function Dashboard() {
           <div className="flex-1" />
 
           <button onClick={() => window.electronAPI?.openExternal('http://localhost:18789')}
-            className="flex items-center gap-1 px-2 py-1 text-[10px] text-slate-500 hover:text-slate-300 bg-slate-800/50 rounded-lg transition-colors">
-            <ExternalLink size={10} /> Dashboard
+            className="p-1 text-slate-600 hover:text-slate-300 rounded-md transition-colors"
+            title="OpenClaw Dashboard"
+          >
+            <ExternalLink size={12} />
           </button>
         </div>
 
@@ -766,15 +767,15 @@ export default function Dashboard() {
                 </div>
               </div>
             ) : (
-              /* AI message — full-width row layout (Claude/ChatGPT style) */
-              <div key={msg.id} className="group">
+              /* AI message — full-width with subtle background */
+              <div key={msg.id} className="group -mx-4 px-4 py-3 rounded-xl hover:bg-slate-800/30 transition-colors">
                 <div className="flex gap-3">
-                  <img src={logoUrl} alt="" className="w-7 h-7 rounded-lg mt-0.5 flex-shrink-0" />
+                  <img src={logoUrl} alt="" className="w-6 h-6 rounded-md mt-0.5 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     {/* Meta line */}
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <span className="text-xs text-slate-400 font-medium">AwarenessClaw</span>
-                      {msg.model && <span className="text-[10px] text-slate-600">{msg.model}</span>}
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[11px] text-slate-500 font-medium">AwarenessClaw</span>
+                      {msg.model && <span className="text-[10px] text-slate-600">{msg.model.split('/').pop()}</span>}
                       <span className="text-[10px] text-slate-600">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
 
@@ -804,14 +805,14 @@ export default function Dashboard() {
 
           {/* Streaming response or status indicator */}
           {agentStatus !== 'idle' && (
-            <div className="group">
+            <div className="group -mx-4 px-4 py-3 bg-slate-800/20 rounded-xl">
               <div className="flex gap-3">
-                <img src={logoUrl} alt="" className={`w-7 h-7 rounded-lg mt-0.5 flex-shrink-0 ${agentStatus !== 'error' ? 'animate-pulse' : ''}`} />
+                <img src={logoUrl} alt="" className={`w-6 h-6 rounded-md mt-0.5 flex-shrink-0 ${agentStatus !== 'error' ? 'animate-pulse' : ''}`} />
                 <div className="flex-1 min-w-0">
                   {/* Meta line */}
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="text-xs text-slate-400 font-medium">AwarenessClaw</span>
-                    {config.modelId && <span className="text-[10px] text-slate-600">{config.modelId}</span>}
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[11px] text-slate-500 font-medium">AwarenessClaw</span>
+                    {config.modelId && <span className="text-[10px] text-slate-600">{config.modelId.split('/').pop()}</span>}
                   </div>
 
                   {/* Error / stalled state */}
@@ -921,13 +922,13 @@ export default function Dashboard() {
         )}
 
         {/* Input */}
-        <div className="px-4 py-3 border-t border-slate-800">
-          <div className="flex items-end gap-2 max-w-3xl mx-auto">
+        <div className="px-4 py-2.5 border-t border-slate-800/80">
+          <div className="flex items-end gap-1.5 max-w-3xl mx-auto">
             <button onClick={() => fileInputRef.current?.click()}
               aria-label={t('chat.attachFile', 'Attach file')}
-              className="p-2.5 text-slate-500 hover:text-slate-300 hover:bg-slate-800 rounded-xl transition-colors" title={t('chat.attachFile', 'Attach file')}
+              className="p-2 text-slate-500 hover:text-slate-300 hover:bg-slate-800 rounded-lg transition-colors mb-0.5" title={t('chat.attachFile', 'Attach file')}
             >
-              <Paperclip size={16} />
+              <Paperclip size={15} />
             </button>
             <input ref={fileInputRef} type="file" multiple className="hidden" aria-label={t('chat.attachFile', 'Attach file')}
               onChange={e => { const files = Array.from(e.target.files || []).map(f => ({ name: f.name, path: (f as any).path || f.name })); attachFiles(files); }}
@@ -952,9 +953,9 @@ export default function Dashboard() {
 
             <button onClick={handleSend}
               disabled={(!input.trim() && attachedFiles.length === 0) || agentStatus !== 'idle'}
-              className="p-2.5 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-xl transition-colors"
+              className="p-2 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg transition-colors mb-0.5"
             >
-              {agentStatus !== 'idle' ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+              {agentStatus !== 'idle' ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
             </button>
           </div>
         </div>
