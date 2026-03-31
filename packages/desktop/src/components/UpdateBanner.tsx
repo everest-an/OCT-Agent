@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Download, ArrowRight, Loader2, Check, AlertCircle } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
+import { useAppConfig } from '../lib/store';
 
 interface UpdateInfo {
   available: boolean;
@@ -15,6 +16,7 @@ const NEVER_KEY = 'awareness-claw-update-never';
 
 export default function UpdateBanner() {
   const { t } = useI18n();
+  const { config } = useAppConfig();
   const [updates, setUpdates] = useState<UpdateInfo[]>([]);
   const [dismissed, setDismissed] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -22,6 +24,9 @@ export default function UpdateBanner() {
   const [upgradeResults, setUpgradeResults] = useState<Record<string, { success: boolean; error?: string }>>({});
 
   useEffect(() => {
+    // Don't check if auto-update is disabled in settings
+    if (config.autoUpdate === false) return;
+
     // Don't check if "never remind" is set
     const never = localStorage.getItem(NEVER_KEY);
     if (never) return;
@@ -31,7 +36,7 @@ export default function UpdateBanner() {
     if (sessionDismissed) { setDismissed(true); return; }
 
     checkForUpdates();
-  }, []);
+  }, [config.autoUpdate]);
 
   const checkForUpdates = async () => {
     if (!window.electronAPI) return;

@@ -69,6 +69,20 @@ describe('UpdateBanner', () => {
     (window as any).electronAPI = origApi;
   });
 
+  it('does not check updates when autoUpdate is false', async () => {
+    localStorage.setItem('awareness-claw-config', JSON.stringify({ language: 'en', autoUpdate: false }));
+    const checkFn = vi.fn(() => Promise.resolve({ updates: [] }));
+    const origApi = (window as any).electronAPI;
+    (window as any).electronAPI = { ...origApi, checkUpdates: checkFn };
+
+    await act(async () => { render(<UpdateBanner />); });
+    // Give it time to potentially call checkUpdates
+    await new Promise(r => setTimeout(r, 100));
+    expect(checkFn).not.toHaveBeenCalled();
+
+    (window as any).electronAPI = origApi;
+  });
+
   it('upgrade button triggers upgradeComponent', async () => {
     const upgradeFn = vi.fn(() => Promise.resolve({ success: true }));
     const origApi = (window as any).electronAPI;

@@ -344,16 +344,32 @@ async function checkPluginInstalled(ctx: Ctx): Promise<CheckResult> {
 }
 
 async function fixPluginInstall(ctx: Ctx): Promise<FixResult> {
+  const HOME = ctx.deps.homedir;
+  const extensionsDir = path.join(HOME, '.openclaw', 'extensions');
+  const extDir = path.join(extensionsDir, 'openclaw-memory');
+  const nullDev = ctx.deps.platform === 'win32' ? 'NUL' : '/dev/null';
+
+  // Primary: direct npm pack + extract (avoids openclaw/clawhub cwd=/ path issues in Electron)
   try {
-    await ctx.deps.shellRun('openclaw plugins install awareness-memory 2>&1', 30000);
+    fs.mkdirSync(extensionsDir, { recursive: true });
+    if (fs.existsSync(extDir)) fs.rmSync(extDir, { recursive: true, force: true });
+    const packOut = await ctx.deps.shellRun(`cd "${extensionsDir}" && npm pack @awareness-sdk/openclaw-memory@latest 2>${nullDev}`, 60000);
+    const tgzName = packOut.trim().split('\n').pop()?.trim() || '';
+    if (!tgzName || !tgzName.endsWith('.tgz')) throw new Error('npm pack failed');
+    const tgzPath = path.join(extensionsDir, tgzName);
+    fs.mkdirSync(extDir, { recursive: true });
+    await ctx.deps.shellRun(`tar -xzf "${tgzPath}" -C "${extDir}" --strip-components=1`, 30000);
+    try { fs.unlinkSync(tgzPath); } catch { /* best-effort */ }
+    await ctx.deps.shellRun(`cd "${extDir}" && npm install --omit=dev --no-audit --no-fund`, 60000);
     return { id: 'plugin-installed', success: true, message: 'Plugin installed' };
-  } catch {
-    try {
-      await ctx.deps.shellRun('npx clawhub@latest install awareness-memory --force 2>&1', 30000);
-      return { id: 'plugin-installed', success: true, message: 'Plugin installed via ClawHub' };
-    } catch (err: any) {
-      return { id: 'plugin-installed', success: false, message: err.message?.slice(0, 200) || 'Installation failed' };
-    }
+  } catch { /* fall through */ }
+
+  // Fallback: openclaw plugins install with cd to HOME
+  try {
+    await ctx.deps.shellRun(`cd "${HOME}" && openclaw plugins install awareness-memory 2>&1`, 30000);
+    return { id: 'plugin-installed', success: true, message: 'Plugin installed via OpenClaw' };
+  } catch (err: any) {
+    return { id: 'plugin-installed', success: false, message: err.message?.slice(0, 200) || 'Installation failed' };
   }
 }
 

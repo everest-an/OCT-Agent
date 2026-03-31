@@ -8,10 +8,12 @@ import https from 'https';
 import http from 'http';
 import crypto from 'crypto';
 import { createDoctor } from './doctor';
+import { GatewayClient } from './gateway-ws';
 
 let mainWindow: typeof BrowserWindow.prototype | null = null;
 let tray: typeof Tray.prototype | null = null;
 let isQuitting = false;
+let gatewayWsClient: GatewayClient | null = null;
 
 const isDev = !app.isPackaged;
 const HOME = os.homedir();
@@ -610,20 +612,39 @@ ipcMain.handle('setup:install-plugin', async () => {
   const npmCli = getBundledNpmBin('npm');
   const pluginTarball = resolveBundledCache('awareness-memory.tgz');
 
+  // Primary: direct npm pack + extract (avoids path resolution issues in packaged Electron where cwd=/)
+  const extensionsDir = path.join(HOME, '.openclaw', 'extensions');
+  const extDir = path.join(extensionsDir, 'openclaw-memory');
+  try {
+    fs.mkdirSync(extensionsDir, { recursive: true });
+    const nullDev = process.platform === 'win32' ? 'NUL' : '/dev/null';
+    const packOut = await runAsync(`cd "${extensionsDir}" && npm pack @awareness-sdk/openclaw-memory@latest 2>${nullDev}`, 60000);
+    const tgzName = packOut.trim().split('\n').pop()?.trim() || '';
+    if (!tgzName || !tgzName.endsWith('.tgz')) throw new Error('npm pack failed');
+    const tgzPath = path.join(extensionsDir, tgzName);
+    if (fs.existsSync(extDir)) fs.rmSync(extDir, { recursive: true, force: true });
+    fs.mkdirSync(extDir, { recursive: true });
+    await runAsync(`tar -xzf "${tgzPath}" -C "${extDir}" --strip-components=1`, 30000);
+    try { fs.unlinkSync(tgzPath); } catch { /* best-effort */ }
+    await runAsync(`cd "${extDir}" && npm install --omit=dev --no-audit --no-fund`, 60000);
+    return { success: true, method: 'npm-direct' };
+  } catch { /* fall through */ }
+
+  // Fallback: openclaw plugins install with cd to HOME
   if (hasOpenClaw) {
     try {
-      await runAsync('openclaw plugins install @awareness-sdk/openclaw-memory', 60000);
+      await runAsync(`cd "${HOME}" && openclaw plugins install @awareness-sdk/openclaw-memory`, 60000);
       return { success: true, method: 'openclaw-plugin' };
     } catch { /* fall through to clawhub */ }
   }
 
   try {
     if (pluginTarball && npmCli) {
-      await runAsync(`${process.execPath} "${npmCli}" exec --yes ${pluginTarball} install awareness-memory --force`, 60000);
+      await runAsync(`cd "${HOME}" && ${process.execPath} "${npmCli}" exec --yes ${pluginTarball} install awareness-memory --force`, 60000);
       return { success: true, method: 'clawhub-offline' };
     }
 
-    await runAsync('npx -y clawhub@latest install awareness-memory --force', 60000);
+    await runAsync(`cd "${HOME}" && npx -y clawhub@latest install awareness-memory --force`, 60000);
     return { success: true, method: 'clawhub' };
   } catch {
     // Last resort: just configure the plugin in config file, skip actual install
@@ -881,17 +902,55 @@ ipcMain.handle('app:upgrade-component', async (_e, component: string) => {
       if (fs.existsSync(extDir)) {
         fs.rmSync(extDir, { recursive: true, force: true });
       }
-      // Use openclaw plugins install as primary method
+      const extensionsDir = path.join(HOME, '.openclaw', 'extensions');
+      fs.mkdirSync(extensionsDir, { recursive: true });
+
+      // Primary: direct npm pack + extract (avoids openclaw/clawhub path resolution issues in packaged Electron where cwd=/)
       try {
-        await runAsync('openclaw plugins install @awareness-sdk/openclaw-memory', 90000);
-        return { success: true, method: 'openclaw-plugin' };
-      } catch {
-        // Fallback: clawhub install (installs to ClawHub skills dir, not extensions)
+        const nullDev = process.platform === 'win32' ? 'NUL' : '/dev/null';
+        const packOut = await runAsync(`cd "${extensionsDir}" && npm pack @awareness-sdk/openclaw-memory@latest 2>${nullDev}`, 60000);
+        // npm pack outputs the tarball filename (e.g. "awareness-sdk-openclaw-memory-0.5.16.tgz")
+        const tgzName = packOut.trim().split('\n').pop()?.trim() || '';
+        if (!tgzName || !tgzName.endsWith('.tgz')) {
+          throw new Error('npm pack did not produce a tarball');
+        }
+        const tgzPath = path.join(extensionsDir, tgzName);
+        fs.mkdirSync(extDir, { recursive: true });
+        await runAsync(`tar -xzf "${tgzPath}" -C "${extDir}" --strip-components=1`, 30000);
+        // Clean up tarball
+        try { fs.unlinkSync(tgzPath); } catch { /* best-effort */ }
+        // Install production dependencies
+        await runAsync(`cd "${extDir}" && npm install --omit=dev --no-audit --no-fund`, 90000);
+
+        // Read installed version and update openclaw.json
+        let newVer = 'latest';
         try {
-          await runAsync('npx -y clawhub@latest install awareness-memory --force', 90000);
-          return { success: true, method: 'clawhub' };
+          const pkg = JSON.parse(fs.readFileSync(path.join(extDir, 'package.json'), 'utf8'));
+          newVer = pkg.version || 'latest';
+        } catch { /* best-effort */ }
+        try {
+          const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+          if (fs.existsSync(configPath)) {
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            const installs = config?.plugins?.installs;
+            if (installs?.['openclaw-memory']) {
+              installs['openclaw-memory'].version = newVer;
+              installs['openclaw-memory'].resolvedVersion = newVer;
+              installs['openclaw-memory'].resolvedSpec = `@awareness-sdk/openclaw-memory@${newVer}`;
+              installs['openclaw-memory'].installedAt = new Date().toISOString();
+              fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+            }
+          }
+        } catch { /* best-effort: config update is non-critical */ }
+
+        return { success: true, version: newVer, method: 'npm-direct' };
+      } catch (directErr: any) {
+        // Fallback: openclaw plugins install with cd to HOME (avoid cwd=/ in Electron)
+        try {
+          await runAsync(`cd "${HOME}" && openclaw plugins install @awareness-sdk/openclaw-memory`, 90000);
+          return { success: true, method: 'openclaw-plugin' };
         } catch (e: any) {
-          throw new Error(`Plugin upgrade failed: ${e.message?.slice(0, 200)}`);
+          throw new Error(`Plugin upgrade failed: ${directErr.message?.slice(0, 200) || e.message?.slice(0, 200)}`);
         }
       }
     } else if (component === 'daemon') {
@@ -1698,7 +1757,7 @@ ipcMain.handle('chat:abort', async () => {
   return { success: false, error: 'No active chat' };
 });
 
-ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, options?: { thinkingLevel?: string; model?: string; files?: string[]; workspacePath?: string }) => {
+ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, options?: { thinkingLevel?: string; model?: string; files?: string[]; workspacePath?: string; agentId?: string }) => {
   // Auto-start Gateway if not running (users should never need to manually start it)
   const gatewayReady = await ensureGatewayRunning();
   if (!gatewayReady.ok) {
@@ -1758,7 +1817,9 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, opti
 
     // Use Gateway mode (no --local) for proper session management and context continuity.
     // Gateway is already ensured running above.
-    const cmd = `openclaw agent --session-id "${sid}" -m "${fullMsg}" --verbose on${thinkingFlag}`;
+    // Pass --agent flag to route message to a specific agent (defaults to "main" if omitted).
+    const agentFlag = options?.agentId && options.agentId !== 'main' ? ` --agent "${options.agentId}"` : '';
+    const cmd = `openclaw agent --session-id "${sid}" -m "${fullMsg}" --verbose on${thinkingFlag}${agentFlag}`;
     const enhancedPath = getEnhancedPath();
     // Use home directory as cwd so agent is not restricted to a single directory.
     // The project path is passed via message context above.
@@ -2371,6 +2432,108 @@ ipcMain.handle('channel:list-supported', async () => {
   }
 });
 
+// --- Channel Conversations (Unified Inbox) ---
+
+/**
+ * Get or create a persistent Gateway WS client for channel session queries.
+ * Lazy-connects on first use, auto-reconnects on disconnect.
+ */
+async function getGatewayWs(): Promise<GatewayClient> {
+  if (!gatewayWsClient) {
+    gatewayWsClient = new GatewayClient();
+
+    // Forward real-time channel messages to renderer
+    gatewayWsClient.on('event:session.message', (payload: any) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('channel:message', {
+          sessionKey: payload.sessionKey || payload.key || '',
+          message: payload.message || payload,
+        });
+      }
+    });
+  }
+
+  if (!gatewayWsClient.isConnected) {
+    await gatewayWsClient.connect();
+  }
+  return gatewayWsClient;
+}
+
+/** Channel icon lookup for known channels. */
+const CHANNEL_ICONS: Record<string, string> = {
+  'openclaw-weixin': '💬',
+  'whatsapp': '📱',
+  'imessage': '💬',
+  'telegram': '✈️',
+  'discord': '🎮',
+  'feishu': '🐦',
+  'slack': '💼',
+};
+
+ipcMain.handle('channel:sessions', async () => {
+  try {
+    const gw = await getGatewayWs();
+    const result = await gw.sessionsList();
+    const sessions = result?.sessions || [];
+
+    // Filter to channel sessions only (exclude local CLI sessions)
+    const channelSessions = sessions
+      .filter((s: any) => {
+        // Channel sessions have origin.provider that is NOT 'webchat'
+        const provider = s.origin?.provider || s.lastChannel || '';
+        return provider && provider !== 'webchat' && !s.key?.includes(':subagent:');
+      })
+      .map((s: any) => {
+        const channel = s.lastChannel || s.origin?.provider || 'unknown';
+        const displayName = s.origin?.from || s.displayName || s.key || '';
+        return {
+          sessionKey: s.key,
+          sessionId: s.sessionId,
+          channel,
+          channelIcon: CHANNEL_ICONS[channel] || '📨',
+          displayName,
+          status: s.status || 'idle',
+          updatedAt: s.updatedAt,
+          model: s.model,
+        };
+      });
+
+    return { success: true, sessions: channelSessions };
+  } catch (err: any) {
+    return { success: false, sessions: [], error: err.message };
+  }
+});
+
+ipcMain.handle('channel:history', async (_e, sessionKey: string) => {
+  try {
+    const gw = await getGatewayWs();
+    const result = await gw.chatHistory(sessionKey);
+    // chatHistory() returns any[] (messages array)
+    const messages = (result || []).map((m: any) => ({
+      role: m.role,
+      content: Array.isArray(m.content)
+        ? m.content.map((c: any) => c.text || '').join('')
+        : (m.content || ''),
+      timestamp: m.timestamp || 0,
+      model: m.model,
+      id: m.__openclaw?.id || `ch-${m.timestamp || Date.now()}`,
+    }));
+    return { success: true, messages };
+  } catch (err: any) {
+    return { success: false, messages: [], error: err.message };
+  }
+});
+
+ipcMain.handle('channel:reply', async (_e, sessionKey: string, text: string) => {
+  try {
+    const gw = await getGatewayWs();
+    const result = await gw.chatSend(sessionKey, text);
+    return { success: true, runId: result?.runId };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+
 // --- Cron Management ---
 
 ipcMain.handle('cron:list', async () => {
@@ -2680,7 +2843,7 @@ ipcMain.handle('permissions:update', async (_e, changes: { alsoAllow?: string[];
 
 ipcMain.handle('workspace:read-file', async (_e, filename: string) => {
   // Only allow reading known workspace files
-  const allowed = ['SOUL.md', 'USER.md', 'IDENTITY.md', 'TOOLS.md'];
+  const allowed = ['SOUL.md', 'USER.md', 'IDENTITY.md', 'TOOLS.md', 'MEMORY.md'];
   if (!allowed.includes(filename)) return { success: false, error: 'File not allowed' };
   try {
     const filePath = path.join(WORKSPACE_DIR, filename);
@@ -2692,7 +2855,7 @@ ipcMain.handle('workspace:read-file', async (_e, filename: string) => {
 });
 
 ipcMain.handle('workspace:write-file', async (_e, filename: string, content: string) => {
-  const allowed = ['SOUL.md', 'USER.md', 'IDENTITY.md', 'TOOLS.md'];
+  const allowed = ['SOUL.md', 'USER.md', 'IDENTITY.md', 'TOOLS.md', 'MEMORY.md'];
   if (!allowed.includes(filename)) return { success: false, error: 'File not allowed' };
   try {
     const filePath = path.join(WORKSPACE_DIR, filename);

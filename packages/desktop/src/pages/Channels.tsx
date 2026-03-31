@@ -335,7 +335,7 @@ export default function Channels() {
                     const result = await (window.electronAPI as any).selectFile?.({ filters: [{ name: 'JSON', extensions: ['json'] }] });
                     if (result?.filePath) setGchatKeyFile(result.filePath);
                   }
-                }} className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm text-white whitespace-nowrap">
+                }} className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm text-slate-100 whitespace-nowrap">
                   {t('channels.gchat.browse', 'Browse...')}
                 </button>
               </div>

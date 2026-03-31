@@ -25,6 +25,10 @@ export interface AppConfig {
   // System
   autoUpdate: boolean;
   autoStart: boolean;
+  // Onboarding
+  bootstrapCompleted: boolean;
+  // Agent selection
+  selectedAgentId: string;
 }
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -41,6 +45,8 @@ const DEFAULT_CONFIG: AppConfig = {
   theme: 'dark',
   autoUpdate: true,
   autoStart: false,
+  bootstrapCompleted: false,
+  selectedAgentId: 'main',
 };
 
 function loadConfig(): AppConfig {

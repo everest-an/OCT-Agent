@@ -1,12 +1,25 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AwarenessClaw</title>
+    <script>
+      // Blocking: apply theme before first paint to prevent flash
+      (function() {
+        try {
+          var c = JSON.parse(localStorage.getItem('awareness-claw-config') || '{}');
+          var t = c.theme || 'dark';
+          if (t === 'system') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          document.documentElement.classList.add(t === 'dark' ? 'dark' : 'light');
+          document.documentElement.style.colorScheme = t;
+        } catch(e) { document.documentElement.classList.add('dark'); }
+      })();
+    </script>
     <style>
-      /* Prevent flash of white background */
-      html, body { background: #0f172a; margin: 0; padding: 0; }
+      /* Prevent flash — matches theme applied by blocking script above */
+      html.dark, html.dark body { background: #0f172a; margin: 0; padding: 0; }
+      html:not(.dark), html:not(.dark) body { background: #ffffff; margin: 0; padding: 0; }
       /* macOS title bar drag region */
       .titlebar-drag { -webkit-app-region: drag; }
       .titlebar-no-drag { -webkit-app-region: no-drag; }

@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Send, Paperclip, ChevronDown, ChevronRight, ExternalLink, Loader2, Copy, Check, X, File, Image, Plus, Brain, Key, Wrench, Search, BookOpen, Save, Zap, CheckCircle2, Terminal, AlertTriangle, FolderOpen } from 'lucide-react';
+import { Send, Paperclip, ChevronDown, ChevronRight, ExternalLink, Loader2, Copy, Check, X, File, Image, Plus, Brain, Key, Wrench, Search, BookOpen, Save, Zap, CheckCircle2, Terminal, AlertTriangle, FolderOpen, Bot } from 'lucide-react';
 import PasswordInput from '../components/PasswordInput';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAppConfig, MODEL_PROVIDERS, useDynamicProviders } from '../lib/store';
 import { trackUsage } from '../lib/usage';
 import { useI18n } from '../lib/i18n';
+import BootstrapWizard from '../components/BootstrapWizard';
 import logoUrl from '../assets/logo.png';
 
 // --- Types ---
@@ -49,6 +50,25 @@ interface ChatSession {
   messages: Message[];
   createdAt: number;
   updatedAt: number;
+}
+
+interface ChannelSession {
+  sessionKey: string;
+  sessionId: string;
+  channel: string;
+  channelIcon: string;
+  displayName: string;
+  status: string;
+  updatedAt: number;
+  model?: string;
+}
+
+interface ChannelMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+  model?: string;
 }
 
 type AgentStatus = 'idle' | 'thinking' | 'generating' | 'error';
@@ -275,11 +295,24 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Channel conversations (unified inbox)
+  const [channelSessions, setChannelSessions] = useState<ChannelSession[]>([]);
+  const [activeChannelKey, setActiveChannelKey] = useState<string | null>(null);
+  const [channelMessages, setChannelMessages] = useState<ChannelMessage[]>([]);
+  const [channelLoading, setChannelLoading] = useState(false);
+  const [channelReplyText, setChannelReplyText] = useState('');
+  const [channelReplying, setChannelReplying] = useState(false);
   // Confirm dialog state (replaces native window.confirm)
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null);
   // Stream timeout tracking
   const streamTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const STREAM_TIMEOUT_MS = 60000; // 60s without any chunk = timeout
+  // Agent selector state
+  const [agents, setAgents] = useState<Array<{ id: string; name: string; emoji: string; isDefault?: boolean }>>([]);
+  const [showAgentMenu, setShowAgentMenu] = useState(false);
+  const agentMenuRef = useRef<HTMLDivElement>(null);
+  // Bootstrap onboarding
+  const [showBootstrap, setShowBootstrap] = useState(false);
 
   const { providers: allProviders } = useDynamicProviders();
   const currentProvider = allProviders.find(p => p.key === config.providerKey);
@@ -348,6 +381,57 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
     (window.electronAPI as any).onTrayNewChat?.(() => handleNewSession());
   }, []);
 
+  // Load channel sessions from Gateway + listen for real-time channel messages
+  useEffect(() => {
+    if (!window.electronAPI) return;
+    const api = window.electronAPI as any;
+
+    // Load channel sessions on mount
+    api.channelSessions?.().then((res: any) => {
+      if (res?.success && res.sessions?.length > 0) {
+        setChannelSessions(res.sessions);
+      }
+    }).catch(() => {});
+
+    // Real-time channel message listener
+    api.onChannelMessage?.((msg: { sessionKey: string; message: any }) => {
+      if (!msg.sessionKey) return;
+      // Update channel sessions list (bump updatedAt)
+      setChannelSessions(prev => prev.map(s =>
+        s.sessionKey === msg.sessionKey ? { ...s, updatedAt: Date.now() } : s
+      ));
+      // If this channel is currently viewed, append the message
+      setActiveChannelKey(currentKey => {
+        if (currentKey === msg.sessionKey && msg.message) {
+          const content = Array.isArray(msg.message.content)
+            ? msg.message.content.map((c: any) => c.text || '').join('')
+            : (msg.message.content || '');
+          const newMsg: ChannelMessage = {
+            id: `ch-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+            role: msg.message.role || 'assistant',
+            content,
+            timestamp: msg.message.timestamp || Date.now(),
+            model: msg.message.model,
+          };
+          setChannelMessages(prev => [...prev, newMsg]);
+        }
+        return currentKey;
+      });
+    });
+  }, []);
+
+  // Load channel history when a channel session is selected
+  useEffect(() => {
+    if (!activeChannelKey || !window.electronAPI) return;
+    setChannelLoading(true);
+    const api = window.electronAPI as any;
+    api.channelHistory?.(activeChannelKey).then((res: any) => {
+      if (res?.success) {
+        setChannelMessages(res.messages || []);
+      }
+    }).catch(() => {}).finally(() => setChannelLoading(false));
+  }, [activeChannelKey]);
+
   // ⌘N / Ctrl+N — new session from anywhere in the chat view
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -359,6 +443,43 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  // Load agents list + detect bootstrap needed
+  useEffect(() => {
+    const api = window.electronAPI as any;
+    if (!api) return;
+    // Load agents
+    api.agentsList?.().then((res: any) => {
+      if (res?.success && res.agents?.length > 0) {
+        setAgents(res.agents.map((a: any) => ({
+          id: a.id, name: a.name || a.id, emoji: a.emoji || '🤖', isDefault: a.isDefault,
+        })));
+      }
+    }).catch(() => {});
+    // Check if bootstrap has been completed
+    if (!config.bootstrapCompleted) {
+      // Check if USER.md exists — if so, bootstrap was already done externally
+      api.workspaceReadFile?.('USER.md').then((res: any) => {
+        if (res?.exists && res.content?.trim()) {
+          updateConfig({ bootstrapCompleted: true });
+        } else {
+          setShowBootstrap(true);
+        }
+      }).catch(() => setShowBootstrap(true));
+    }
+  }, []);
+
+  // Close agent menu on outside click
+  useEffect(() => {
+    if (!showAgentMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (agentMenuRef.current && !agentMenuRef.current.contains(e.target as Node)) {
+        setShowAgentMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showAgentMenu]);
 
   // Persist sessions
   useEffect(() => {
@@ -442,6 +563,7 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
         thinkingLevel: config.thinkingLevel || 'low',
         files: filePaths,
         workspacePath: projectRoot || undefined,
+        agentId: config.selectedAgentId || 'main',
       });
       const responseText = streamingRef.current.trim() || result.text || result.error || t('chat.noResponse') || 'No response';
 
@@ -562,6 +684,38 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const handleChannelReply = async () => {
+    const text = channelReplyText.trim();
+    if (!text || !activeChannelKey || channelReplying) return;
+    setChannelReplying(true);
+    // Optimistically add the user message
+    const userMsg: ChannelMessage = {
+      id: `ch-reply-${Date.now()}`,
+      role: 'user',
+      content: text,
+      timestamp: Date.now(),
+    };
+    setChannelMessages(prev => [...prev, userMsg]);
+    setChannelReplyText('');
+    try {
+      const api = window.electronAPI as any;
+      await api.channelReply?.(activeChannelKey, text);
+    } catch { /* Gateway will handle delivery */ }
+    setChannelReplying(false);
+  };
+
+  const handleBackToLocal = () => {
+    setActiveChannelKey(null);
+    setChannelMessages([]);
+  };
+
+  const refreshChannelSessions = () => {
+    const api = window.electronAPI as any;
+    api.channelSessions?.().then((res: any) => {
+      if (res?.success) setChannelSessions(res.sessions || []);
+    }).catch(() => {});
+  };
+
   const deleteSession = (id: string) => {
     setSessions(prev => prev.filter(s => s.id !== id));
     if (activeSessionId === id) {
@@ -624,13 +778,41 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
             </button>
           </div>
           <div className="flex-1 overflow-y-auto">
+            {/* Channel sessions group */}
+            {channelSessions.length > 0 && (
+              <>
+                <div className="px-3 pt-2.5 pb-1 flex items-center justify-between">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-600 font-medium">Channels</span>
+                  <button onClick={refreshChannelSessions} className="text-slate-600 hover:text-slate-400 p-0.5" title="Refresh">
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M13.65 2.35A8 8 0 1 0 16 8h-2a6 6 0 1 1-1.76-4.24L10 6h6V0l-2.35 2.35z" fill="currentColor"/></svg>
+                  </button>
+                </div>
+                {channelSessions.map(cs => (
+                  <div
+                    key={cs.sessionKey}
+                    onClick={() => { setActiveChannelKey(cs.sessionKey); setActiveSessionId(''); }}
+                    className={`w-full text-left px-3 py-2 text-sm border-b border-slate-800/50 transition-colors cursor-pointer flex items-center gap-2 ${
+                      activeChannelKey === cs.sessionKey ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                    }`}
+                  >
+                    <span className="text-xs">{cs.channelIcon}</span>
+                    <span className="truncate flex-1 text-xs">{cs.displayName || cs.channel}</span>
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cs.status === 'running' ? 'bg-green-400 animate-pulse' : 'bg-slate-600'}`} />
+                  </div>
+                ))}
+                <div className="px-3 pt-2.5 pb-1">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-600 font-medium">Local</span>
+                </div>
+              </>
+            )}
+            {/* Local sessions */}
             {sessions.map(s => (
               <div
                 key={s.id}
-                onClick={() => { setActiveSessionId(s.id); setNewestMsgId(null); }}
+                onClick={() => { setActiveSessionId(s.id); setActiveChannelKey(null); setNewestMsgId(null); }}
                 onDoubleClick={() => { setRenamingId(s.id); setRenameValue(s.title); }}
                 className={`w-full text-left px-3 py-2.5 text-sm border-b border-slate-800/50 transition-colors group flex items-center justify-between cursor-pointer ${
-                  s.id === activeSessionId ? 'bg-slate-800 text-white' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                  s.id === activeSessionId && !activeChannelKey ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                 }`}
               >
                 {renamingId === s.id ? (
@@ -814,6 +996,83 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
           );
         })()}
 
+        {/* Channel conversation view (when a channel session is selected) */}
+        {activeChannelKey ? (
+          <div className="flex-1 flex flex-col min-h-0">
+            {/* Channel header */}
+            <div className="px-4 py-2 border-b border-slate-800/50 flex items-center gap-2">
+              <button onClick={handleBackToLocal} className="p-1 text-slate-500 hover:text-slate-200 hover:bg-slate-800 rounded-md transition-colors" title="Back">
+                <ChevronRight size={14} className="rotate-180" />
+              </button>
+              {(() => {
+                const cs = channelSessions.find(s => s.sessionKey === activeChannelKey);
+                return cs ? (
+                  <>
+                    <span>{cs.channelIcon}</span>
+                    <span className="text-sm text-slate-200 font-medium">{cs.displayName || cs.channel}</span>
+                    <span className="text-xs text-slate-500">{cs.channel}</span>
+                  </>
+                ) : <span className="text-sm text-slate-400">{activeChannelKey}</span>;
+              })()}
+            </div>
+
+            {/* Channel messages */}
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+              <div className="max-w-3xl mx-auto space-y-4 w-full">
+                {channelLoading ? (
+                  <div className="flex items-center justify-center py-12 text-slate-500">
+                    <Loader2 size={20} className="animate-spin mr-2" />
+                    <span className="text-sm">Loading history...</span>
+                  </div>
+                ) : channelMessages.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+                    <span className="text-sm">No messages yet</span>
+                  </div>
+                ) : (
+                  channelMessages.map(m => (
+                    m.role === 'user' ? (
+                      <div key={m.id} className="flex justify-end">
+                        <div className="max-w-[75%] px-4 py-3 rounded-2xl rounded-br-md text-sm bg-brand-600 text-white">
+                          {m.content}
+                        </div>
+                      </div>
+                    ) : (
+                      <div key={m.id} className="flex justify-start">
+                        <div className="max-w-[85%] text-sm text-slate-200">
+                          <TypewriterMessage content={m.content} isNew={false} />
+                        </div>
+                      </div>
+                    )
+                  ))
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+            </div>
+
+            {/* Channel reply input */}
+            <div className="px-4 py-3 border-t border-slate-800/50">
+              <div className="max-w-3xl mx-auto relative">
+                <textarea
+                  value={channelReplyText}
+                  onChange={e => setChannelReplyText(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleChannelReply(); } }}
+                  placeholder="Reply to this channel..."
+                  className="w-full pl-4 pr-12 py-3 bg-slate-900 border border-slate-700/50 rounded-2xl text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none placeholder:text-slate-600"
+                  style={{ minHeight: '44px', maxHeight: '120px' }}
+                  disabled={channelReplying}
+                />
+                <button
+                  onClick={handleChannelReply}
+                  disabled={!channelReplyText.trim() || channelReplying}
+                  className="absolute right-2 bottom-2 p-1.5 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg transition-colors"
+                >
+                  {channelReplying ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+        <>
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
           <div className="max-w-3xl mx-auto space-y-5 w-full">
@@ -1086,12 +1345,45 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
               />
               {/* Bottom toolbar inside the input box */}
               <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between">
-                <button onClick={() => fileInputRef.current?.click()}
-                  aria-label={t('chat.attachFile', 'Attach file')}
-                  className="p-1.5 text-slate-500 hover:text-slate-300 hover:bg-slate-700 rounded-lg transition-colors" title={t('chat.attachFile', 'Attach file')}
-                >
-                  <Paperclip size={14} />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => fileInputRef.current?.click()}
+                    aria-label={t('chat.attachFile', 'Attach file')}
+                    className="p-1.5 text-slate-500 hover:text-slate-300 hover:bg-slate-700 rounded-lg transition-colors" title={t('chat.attachFile', 'Attach file')}
+                  >
+                    <Paperclip size={14} />
+                  </button>
+                  {/* Agent selector */}
+                  {agents.length > 1 && (
+                    <div className="relative" ref={agentMenuRef}>
+                      <button
+                        onClick={() => setShowAgentMenu(!showAgentMenu)}
+                        className="flex items-center gap-1 px-2 py-1 text-[11px] text-slate-500 hover:text-slate-300 hover:bg-slate-700 rounded-lg transition-colors"
+                        title={t('chat.agent.switch')}
+                      >
+                        <span>{agents.find(a => a.id === config.selectedAgentId)?.emoji || '🤖'}</span>
+                        <span className="max-w-[80px] truncate">{agents.find(a => a.id === config.selectedAgentId)?.name || t('chat.agent.default')}</span>
+                        <ChevronDown size={10} />
+                      </button>
+                      {showAgentMenu && (
+                        <div className="absolute bottom-full left-0 mb-1 min-w-[180px] bg-slate-800 border border-slate-700 rounded-xl shadow-lg overflow-hidden z-50">
+                          {agents.map(a => (
+                            <button
+                              key={a.id}
+                              onClick={() => { updateConfig({ selectedAgentId: a.id }); setShowAgentMenu(false); }}
+                              className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors ${
+                                a.id === config.selectedAgentId ? 'bg-brand-600/20 text-brand-300' : 'text-slate-300 hover:bg-slate-700'
+                              }`}
+                            >
+                              <span>{a.emoji}</span>
+                              <span className="flex-1 truncate">{a.name}</span>
+                              {a.id === config.selectedAgentId && <Check size={12} className="text-brand-400" />}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <button onClick={handleSend}
                   disabled={(!input.trim() && attachedFiles.length === 0) || agentStatus !== 'idle'}
                   className="p-1.5 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg transition-colors"
@@ -1102,7 +1394,17 @@ export default function Dashboard({ isActive = true }: { isActive?: boolean }) {
             </div>
           </div>
         </div>
+        </>
+        )}
       </div>
+
+      {/* Bootstrap onboarding wizard (first-time users) */}
+      {showBootstrap && (
+        <BootstrapWizard
+          onComplete={() => { setShowBootstrap(false); updateConfig({ bootstrapCompleted: true }); }}
+          onSkip={() => { setShowBootstrap(false); updateConfig({ bootstrapCompleted: true }); }}
+        />
+      )}
     </div>
   );
 }

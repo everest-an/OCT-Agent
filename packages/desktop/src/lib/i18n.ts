@@ -589,6 +589,38 @@ const en: Record<string, string> = {
   'channels.guide.whatsapp.scan': 'Scan QR with WhatsApp to link',
   'channels.guide.signal.scan': 'Open Signal app to link device',
   'channels.guide.imessage.macOnly': 'macOS only — connects automatically',
+
+  // Bootstrap onboarding
+  'bootstrap.title': 'Welcome to AwarenessClaw',
+  'bootstrap.subtitle': 'Let\'s set up your AI assistant in a few quick steps',
+  'bootstrap.step1.title': 'What\'s your name?',
+  'bootstrap.step1.placeholder': 'Enter your name...',
+  'bootstrap.step1.hint': 'Your AI assistant will use this to address you',
+  'bootstrap.step2.title': 'Choose a style for your AI',
+  'bootstrap.step2.friendly': 'Friendly & Casual',
+  'bootstrap.step2.friendly.desc': 'Warm, uses emojis, conversational tone',
+  'bootstrap.step2.professional': 'Professional',
+  'bootstrap.step2.professional.desc': 'Concise, clear, business-like',
+  'bootstrap.step2.minimal': 'Minimal',
+  'bootstrap.step2.minimal.desc': 'Brief answers, no fluff, straight to the point',
+  'bootstrap.step2.creative': 'Creative',
+  'bootstrap.step2.creative.desc': 'Expressive, metaphorical, playful language',
+  'bootstrap.step3.title': 'Name your AI assistant',
+  'bootstrap.step3.placeholder': 'e.g. Ava, Atlas, Sage...',
+  'bootstrap.step3.hint': 'Give your assistant a unique identity',
+  'bootstrap.step3.default': 'Claw',
+  'bootstrap.next': 'Next',
+  'bootstrap.back': 'Back',
+  'bootstrap.finish': 'Start Chatting',
+  'bootstrap.skip': 'Skip setup',
+  'bootstrap.generating': 'Setting up your agent...',
+
+  // Agent selector (chat)
+  'chat.agent': 'Agent',
+  'chat.agent.switch': 'Switch Agent',
+  'chat.agent.default': 'Main Agent',
+  'chat.agent.noAgents': 'No agents configured',
+  'chat.agent.manage': 'Manage Agents',
 };
 
 const zh: Record<string, string> = {
@@ -1173,6 +1205,38 @@ const zh: Record<string, string> = {
   'channels.guide.whatsapp.scan': '用 WhatsApp 扫描二维码',
   'channels.guide.signal.scan': '打开 Signal 应用关联设备',
   'channels.guide.imessage.macOnly': '仅支持 macOS — 自动连接',
+
+  // Bootstrap onboarding
+  'bootstrap.title': '欢迎使用 AwarenessClaw',
+  'bootstrap.subtitle': '几步快速设置你的 AI 助手',
+  'bootstrap.step1.title': '你叫什么名字？',
+  'bootstrap.step1.placeholder': '输入你的名字...',
+  'bootstrap.step1.hint': 'AI 助手会用这个名字称呼你',
+  'bootstrap.step2.title': '选择 AI 的风格',
+  'bootstrap.step2.friendly': '友好随和',
+  'bootstrap.step2.friendly.desc': '亲切、使用 emoji、聊天式语气',
+  'bootstrap.step2.professional': '专业严谨',
+  'bootstrap.step2.professional.desc': '简洁、清晰、商务化',
+  'bootstrap.step2.minimal': '极简高效',
+  'bootstrap.step2.minimal.desc': '简短回答、不废话、直奔主题',
+  'bootstrap.step2.creative': '创意有趣',
+  'bootstrap.step2.creative.desc': '富有表现力、善用比喻、活泼有趣',
+  'bootstrap.step3.title': '给 AI 助手取个名字',
+  'bootstrap.step3.placeholder': '例如：小爪、Ava、Atlas...',
+  'bootstrap.step3.hint': '赋予你的助手独特身份',
+  'bootstrap.step3.default': '小爪',
+  'bootstrap.next': '下一步',
+  'bootstrap.back': '上一步',
+  'bootstrap.finish': '开始聊天',
+  'bootstrap.skip': '跳过设置',
+  'bootstrap.generating': '正在配置你的 Agent...',
+
+  // Agent selector (chat)
+  'chat.agent': 'Agent',
+  'chat.agent.switch': '切换 Agent',
+  'chat.agent.default': '默认 Agent',
+  'chat.agent.noAgents': '暂无 Agent',
+  'chat.agent.manage': '管理 Agent',
 };
 
 // Japanese and Korean use English as fallback for now

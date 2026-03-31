@@ -25,3 +25,97 @@
     @apply bg-slate-500;
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   Light mode overrides — inverts the slate palette.
+   Dark mode uses original Tailwind slate values (unchanged).
+   Selector :root:not(.dark) has higher specificity than bare
+   Tailwind utilities, so no !important needed.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── Body base ─────────────────────────────────────────────────── */
+:root:not(.dark) body {
+  background-color: #ffffff;
+  color: #1e293b;
+}
+
+/* ── Backgrounds ───────────────────────────────────────────────── */
+:root:not(.dark) .bg-slate-950  { background-color: #f8fafc; }
+:root:not(.dark) .bg-slate-900  { background-color: #ffffff; }
+:root:not(.dark) .bg-slate-800  { background-color: #f8fafc; }
+:root:not(.dark) .bg-slate-700  { background-color: #f1f5f9; }
+:root:not(.dark) .bg-slate-600  { background-color: #e2e8f0; }
+
+/* Backgrounds with opacity */
+:root:not(.dark) .bg-slate-900\/50  { background-color: rgb(255 255 255 / 0.5); }
+:root:not(.dark) .bg-slate-900\/80  { background-color: rgb(255 255 255 / 0.8); }
+:root:not(.dark) .bg-slate-800\/50  { background-color: rgb(248 250 252 / 0.5); }
+:root:not(.dark) .bg-slate-800\/30  { background-color: rgb(248 250 252 / 0.3); }
+:root:not(.dark) .bg-slate-700\/50  { background-color: rgb(241 245 249 / 0.5); }
+:root:not(.dark) .bg-slate-700\/80  { background-color: rgb(241 245 249 / 0.8); }
+:root:not(.dark) .bg-slate-600\/50  { background-color: rgb(226 232 240 / 0.5); }
+:root:not(.dark) .bg-slate-500\/5   { background-color: rgb(100 116 139 / 0.05); }
+:root:not(.dark) .bg-slate-500\/10  { background-color: rgb(100 116 139 / 0.1); }
+
+/* Hover backgrounds */
+:root:not(.dark) .hover\:bg-slate-900:hover { background-color: #f8fafc; }
+:root:not(.dark) .hover\:bg-slate-800:hover { background-color: #f1f5f9; }
+:root:not(.dark) .hover\:bg-slate-700:hover { background-color: #e2e8f0; }
+:root:not(.dark) .hover\:bg-slate-600:hover { background-color: #cbd5e1; }
+
+/* ── Text ──────────────────────────────────────────────────────── */
+:root:not(.dark) .text-slate-100 { color: #1e293b; }
+:root:not(.dark) .text-slate-200 { color: #334155; }
+:root:not(.dark) .text-slate-300 { color: #475569; }
+:root:not(.dark) .text-slate-400 { color: #64748b; }
+:root:not(.dark) .text-slate-500 { color: #94a3b8; }
+:root:not(.dark) .text-slate-600 { color: #94a3b8; }
+
+/* Hover text */
+:root:not(.dark) .hover\:text-slate-100:hover { color: #1e293b; }
+:root:not(.dark) .hover\:text-slate-200:hover { color: #334155; }
+:root:not(.dark) .hover\:text-slate-300:hover { color: #475569; }
+:root:not(.dark) .hover\:text-slate-400:hover { color: #64748b; }
+
+/* ── Borders ───────────────────────────────────────────────────── */
+:root:not(.dark) .border-slate-800 { border-color: #f1f5f9; }
+:root:not(.dark) .border-slate-700 { border-color: #e2e8f0; }
+:root:not(.dark) .border-slate-600 { border-color: #cbd5e1; }
+:root:not(.dark) .border-slate-500 { border-color: #94a3b8; }
+
+:root:not(.dark) .border-slate-800\/50 { border-color: rgb(241 245 249 / 0.5); }
+
+/* Borders with opacity */
+:root:not(.dark) .border-slate-700\/50 { border-color: rgb(226 232 240 / 0.5); }
+:root:not(.dark) .border-slate-700\/30 { border-color: rgb(226 232 240 / 0.3); }
+:root:not(.dark) .border-slate-600\/50 { border-color: rgb(203 213 225 / 0.5); }
+:root:not(.dark) .border-slate-600\/30 { border-color: rgb(203 213 225 / 0.3); }
+:root:not(.dark) .border-slate-500\/20 { border-color: rgb(148 163 184 / 0.2); }
+:root:not(.dark) .border-slate-500\/30 { border-color: rgb(148 163 184 / 0.3); }
+
+/* Hover borders */
+:root:not(.dark) .hover\:border-slate-700:hover { border-color: #e2e8f0; }
+:root:not(.dark) .hover\:border-slate-600:hover { border-color: #cbd5e1; }
+:root:not(.dark) .hover\:border-slate-500:hover { border-color: #94a3b8; }
+
+/* ── Divide ────────────────────────────────────────────────────── */
+:root:not(.dark) .divide-slate-700 > :not([hidden]) ~ :not([hidden])     { border-color: #e2e8f0; }
+:root:not(.dark) .divide-slate-700\/50 > :not([hidden]) ~ :not([hidden]) { border-color: rgb(226 232 240 / 0.5); }
+
+/* ── Ring ──────────────────────────────────────────────────────── */
+:root:not(.dark) .ring-slate-700     { --tw-ring-color: #e2e8f0; }
+:root:not(.dark) .ring-slate-700\/80 { --tw-ring-color: rgb(226 232 240 / 0.8); }
+:root:not(.dark) .ring-slate-600     { --tw-ring-color: #cbd5e1; }
+
+/* ── Placeholder ───────────────────────────────────────────────── */
+:root:not(.dark) .placeholder\:text-slate-600::placeholder { color: #94a3b8; }
+:root:not(.dark) .placeholder\:text-slate-500::placeholder { color: #64748b; }
+
+/* ── Scrollbar (light mode) ────────────────────────────────────── */
+:root:not(.dark) ::-webkit-scrollbar-thumb       { background-color: #cbd5e1; }
+:root:not(.dark) ::-webkit-scrollbar-thumb:hover  { background-color: #94a3b8; }
+
+/* ── Shadow adjustments ────────────────────────────────────────── */
+:root:not(.dark) .shadow-lg  { --tw-shadow-color: rgb(0 0 0 / 0.08); }
+:root:not(.dark) .shadow-xl  { --tw-shadow-color: rgb(0 0 0 / 0.1); }
+:root:not(.dark) .shadow-2xl { --tw-shadow-color: rgb(0 0 0 / 0.12); }

@@ -139,7 +139,7 @@
 - [ ] **chat.abort RPC**：通过 Gateway RPC 优雅中止（当前用 kill 进程，功能可用但不优雅）
 - [ ] **chat.history 同步**：从 Gateway 加载历史替代 localStorage（增强可靠性）
 
-### OpenClaw MD 文档管理（待做）
+### OpenClaw MD 文档管理
 OpenClaw 的 chat 质量依赖 `~/.openclaw/workspace/` 下的 MD 文档：
 | 文件 | 功能 | 重要性 |
 |------|------|--------|
@@ -151,8 +151,13 @@ OpenClaw 的 chat 质量依赖 `~/.openclaw/workspace/` 下的 MD 文档：
 | **HEARTBEAT.md** | 定时检查任务 | 低 |
 | **AGENTS.md** | 工作区设置 | 低 |
 - [ ] **Settings 页集成 MD 编辑器**：用户可在 UI 中直接编辑 SOUL.md、USER.md、IDENTITY.md
-- [ ] **首次使用引导**：新用户第一次打开时引导填写 USER.md（名字等基本信息）
+- [x] **首次使用 Bootstrap 引导**：新用户首次打开 Chat 时显示 3 步向导（名字→AI 风格→AI 名字），自动生成 SOUL.md/USER.md/IDENTITY.md，支持跳过。检测 USER.md 存在则跳过引导。中英双语。（2026-03-31）
 - [ ] **Agent 人格设定 UI**：SOUL.md 可视化编辑（不需要用户懂 Markdown）
+
+### 多 Agent 聊天切换（2026-03-31）
+- [x] **Agent 选择器**：聊天输入框底部工具栏新增 Agent 切换下拉菜单（当存在 2+ agents 时显示），选中的 agent ID 持久化到 localStorage + 传给 `chat:send`（2026-03-31）
+- [x] **chat:send 支持 agentId**：main.ts `chat:send` handler 接受 `agentId` 参数，非 main agent 时传 `--agent "<id>"` flag 给 OpenClaw CLI（2026-03-31）
+- [ ] **Agent 快速创建入口**：聊天页 Agent 选择器底部加"管理 Agent"跳转链接
 
 ---
 
@@ -205,7 +210,7 @@ OpenClaw 的 chat 质量依赖 `~/.openclaw/workspace/` 下的 MD 文档：
   - 方案 C 确认：`agent_end` hook 在 Gateway 模式下自动触发（Agent 处理通道消息后），source 从 context 动态提取通道名
 - [x] **桌面聊天消息也写入记忆**：`chat:send` 完成后 fire-and-forget 调 `awareness_record`，source 标记为 `desktop`（2026-03-30）
 - [x] **通道来源标记**：`agent_end` hook 中从 context 提取 channel/channelId/source，生成 `openclaw-{channel}` 格式的 source 标记（2026-03-30）
-- [ ] **桌面端可查看所有通道的对话历史**：读 OpenClaw session 数据，在桌面聊天 UI 或记忆页中展示
+- [x] **桌面端可查看所有通道的对话历史**：通过 Gateway WebSocket `sessions.list` + `chat.history` RPC 实现统一收件箱。device identity Ed25519 签名认证 Gateway 连接，侧边栏分组显示通道/本地会话，点击加载历史，支持实时消息推送和桌面端回复（2026-03-31）
 
 ### 本地向量搜索
 - [x] **本地 embedding 模型自动下载**：已实现，使用 `@huggingface/transformers` (ONNX WASM) + `Xenova/all-MiniLM-L6-v2` (23MB)，daemon 启动时后台预热+下载，改进了诊断日志和 healthz 返回 embedding 状态（2026-03-30）
@@ -257,6 +262,8 @@ OpenClaw 的 chat 质量依赖 `~/.openclaw/workspace/` 下的 MD 文档：
 - [ ] **权限管理 UI 重设计**：Settings 页的 tools.alsoAllow / tools.denied 编辑太技术化，普通用户不知道该填什么。需要改为：预设权限方案（"安全模式"/"标准模式"/"开发者模式"）+ 开关式 UI，而非让用户手写工具名
 - [ ] **新建会话按钮美化**：侧边栏的"+ 新对话"按钮样式粗糙，参考 Claude Desktop 的新建按钮风格（圆角、hover 动画、快捷键提示 ⌘N）
 - [ ] **聊天 UI 细节打磨**：消息气泡间距、代码块样式、工具调用折叠动画、滚动行为、空态页面等细节对齐 Claude Desktop / ChatGPT 水准
+- [x] **主题切换（Light/Dark/System）真正生效**：Settings 页的 Theme toggle 之前只切换了 HTML class 但没有任何 light mode CSS。修复：在 `index.css` 中通过 `:root:not(.dark)` 选择器覆盖整个 slate 调色板（bg/text/border/divide/ring/scrollbar），`index.html` 加 blocking script 防止白闪。零组件文件修改，纯 CSS 方案（2026-03-31）
+- [x] **Auto Update 开关真正生效**：Settings 页的 autoUpdate toggle 之前只存 localStorage 不起作用。修复：`UpdateBanner.tsx` 读取 `config.autoUpdate`，为 `false` 时跳过 `checkForUpdates()`。新增测试验证（2026-03-31）
 - [ ] Windows / Linux 打包未测试
 - [x] **macOS 无法退出应用**：`close` 事件中 `if (tray)` 永远为 true 导致 `preventDefault()` 阻止所有关窗。修复：`isQuitting` 标志 + `before-quit` 事件设置（2026-03-30）
 - [x] **Daemon 升级失败（Exit code 1）**：daemon 通过 `npx` 运行不是全局安装，`npm install -g` 无效。改为先 shutdown → `npx -y @latest start`（2026-03-30）

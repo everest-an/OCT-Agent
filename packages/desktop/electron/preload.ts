@@ -23,7 +23,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   bootstrap: () => ipcRenderer.invoke('setup:bootstrap'),
 
   // Chat
-  chatSend: (message: string, sessionId?: string, options?: { thinkingLevel?: string; model?: string; files?: string[]; workspacePath?: string }) => ipcRenderer.invoke('chat:send', message, sessionId, options),
+  chatSend: (message: string, sessionId?: string, options?: { thinkingLevel?: string; model?: string; files?: string[]; workspacePath?: string; agentId?: string }) => ipcRenderer.invoke('chat:send', message, sessionId, options),
   chatAbort: () => ipcRenderer.invoke('chat:abort'),
   onChatStream: (callback: (chunk: string) => void) => {
     ipcRenderer.on('chat:stream', (_e: any, chunk: string) => callback(chunk));
@@ -47,6 +47,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   onChannelStatus: (callback: (status: string) => void) => {
     ipcRenderer.on('channel:status', (_e: any, status: string) => callback(status));
+  },
+
+  // Channel conversations (unified inbox — view all channel chat history)
+  channelSessions: () => ipcRenderer.invoke('channel:sessions'),
+  channelHistory: (sessionKey: string) => ipcRenderer.invoke('channel:history', sessionKey),
+  channelReply: (sessionKey: string, text: string) => ipcRenderer.invoke('channel:reply', sessionKey, text),
+  onChannelMessage: (callback: (msg: { sessionKey: string; message: any }) => void) => {
+    ipcRenderer.on('channel:message', (_e: any, msg: any) => callback(msg));
   },
 
   // Cron management
@@ -103,7 +111,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Agents management
   agentsList: () => ipcRenderer.invoke('agents:list'),
-  agentsAdd: (name: string, model?: string) => ipcRenderer.invoke('agents:add', name, model),
+  agentsAdd: (name: string, model?: string, systemPrompt?: string) => ipcRenderer.invoke('agents:add', name, model, systemPrompt),
   agentsDelete: (id: string) => ipcRenderer.invoke('agents:delete', id),
   agentsSetIdentity: (id: string, name: string, emoji: string, avatar?: string, theme?: string) => ipcRenderer.invoke('agents:set-identity', id, name, emoji, avatar, theme),
   agentsBind: (id: string, binding: string) => ipcRenderer.invoke('agents:bind', id, binding),
