@@ -1774,12 +1774,21 @@ function downloadFile(url: string, dest: string): Promise<void> {
 // --- PTY Management (for embedded openclaw chat) ---
 
 function isGatewayRunningOutput(output: string | null) {
-  return !!output && (
-    output.includes('running') ||
-    output.includes('active') ||
-    output.includes('RPC probe: ok') ||
-    output.includes('Listening:')
-  );
+  if (!output) return false;
+
+  const normalized = output.toLowerCase();
+  if (
+    normalized.includes('runtime: stopped') ||
+    normalized.includes('not running') ||
+    normalized.includes('no listener detected') ||
+    normalized.includes('rpc probe: failed')
+  ) {
+    return false;
+  }
+
+  return normalized.includes('runtime: running') ||
+    normalized.includes('rpc probe: ok') ||
+    normalized.includes('listening:');
 }
 
 function isWindowsGatewayServiceMissing(output: string | null) {
@@ -2092,6 +2101,12 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, opti
         (t.includes('falling back to keyless provider') && t.includes('duckduckgo'));
     };
 
+    const isGatewayClientNoise = (line: string) => {
+      const t = normalizeStreamLine(line).trimStart().toLowerCase();
+      return t.startsWith('gateway client error:') ||
+        (t.includes('connect econnrefused') && t.includes('127.0.0.1:18789'));
+    };
+
     const isNoiseLine = (line: string) => {
       const t = normalizeStreamLine(line).trimStart();
       return t.startsWith('[plugins]') || t.startsWith('[tools]') ||
@@ -2110,6 +2125,7 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, opti
         t.startsWith('[reload]') || t.startsWith('Config warnings') ||
         isToolRoutingNoise(t) ||
         isSearchProviderFallbackNoise(t) ||
+        isGatewayClientNoise(t) ||
         t.includes('plugin disabled') || t.includes('bootstrap config fallback') ||
         t.includes('Local daemon not running, attempting auto-start');
     };
