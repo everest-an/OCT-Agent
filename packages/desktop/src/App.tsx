@@ -13,6 +13,9 @@ import UpdateBanner from './components/UpdateBanner';
 import { useAppConfig } from './lib/store';
 import logoUrl from './assets/logo.png';
 
+const SETUP_COMPLETED_AT_KEY = 'awareness-claw-setup-completed-at';
+const POST_SETUP_RUNTIME_GRACE_MS = 3 * 60 * 1000;
+
 function estimateStartupProgress(message: string) {
   const text = message.toLowerCase();
   if (text.includes('checking')) return 10;
@@ -80,6 +83,15 @@ export default function App() {
     setStartupMessage('Checking your installation...');
     setStartupProgress(10);
 
+    const recentSetupCompletedAt = Number(localStorage.getItem(SETUP_COMPLETED_AT_KEY) || '0');
+    if (recentSetupCompletedAt > 0 && Date.now() - recentSetupCompletedAt < POST_SETUP_RUNTIME_GRACE_MS) {
+      localStorage.removeItem(SETUP_COMPLETED_AT_KEY);
+      setStartupMessage('Finishing setup...');
+      setStartupProgress(100);
+      setRuntimeReady(true);
+      return;
+    }
+
     const ensureRuntime = async () => {
       if (!window.electronAPI?.startupEnsureRuntime) {
         if (!cancelled) {
@@ -110,6 +122,7 @@ export default function App() {
   }, [setupComplete]);
 
   const handleSetupComplete = () => {
+    localStorage.setItem(SETUP_COMPLETED_AT_KEY, String(Date.now()));
     localStorage.setItem('awareness-claw-setup-done', 'true');
     setSetupComplete(true);
   };

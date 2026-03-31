@@ -3209,6 +3209,7 @@ ipcMain.handle('app:startup-ensure-runtime', async () => {
       mainWindow.webContents.send('app:startup-status', { message, progress });
     }
   };
+  const recentDaemonStartup = () => !!daemonStartupPromise || (Date.now() - daemonStartupLastKickoff < 180000);
   const autoFixChecks = new Set([
     'openclaw-command-health',
     'openclaw-installed',
@@ -3229,12 +3230,18 @@ ipcMain.handle('app:startup-ensure-runtime', async () => {
     ...(process.platform === 'darwin' ? ['launchagent-path'] : []),
   ];
 
+  if (recentDaemonStartup() && !(await checkDaemonHealth())) {
+    sendStartupStatus('Waiting for the local service to finish starting...', 22);
+    await waitForLocalDaemonReady(90000, 'setup.install.daemonStatus.waiting');
+  }
+
   sendStartupStatus('Checking your installation...', 10);
   const initialReport = await doctor.runChecks(startupChecks);
   const checksToRepair = initialReport.checks.filter((check) =>
     autoFixChecks.has(check.id)
     && check.fixable === 'auto'
     && (check.status === 'fail' || check.status === 'warn')
+    && !(check.id === 'daemon-running' && recentDaemonStartup())
   );
 
   if (checksToRepair.length === 0) {
@@ -3250,7 +3257,15 @@ ipcMain.handle('app:startup-ensure-runtime', async () => {
   }
 
   sendStartupStatus('Finalizing startup...', 92);
-  const finalReport = await doctor.runChecks(startupChecks);
+  let finalReport = await doctor.runChecks(startupChecks);
+  if (recentDaemonStartup()) {
+    const daemonBlocking = finalReport.checks.find((check) => check.id === 'daemon-running' && check.status === 'fail');
+    if (daemonBlocking) {
+      sendStartupStatus('Local service is still warming up...', 94);
+      await waitForLocalDaemonReady(60000, 'setup.install.daemonStatus.waiting');
+      finalReport = await doctor.runChecks(startupChecks);
+    }
+  }
   const blocking = finalReport.checks.find((check) =>
     ['node-installed', 'openclaw-installed', 'plugin-installed', 'daemon-running'].includes(check.id)
     && check.status === 'fail'
