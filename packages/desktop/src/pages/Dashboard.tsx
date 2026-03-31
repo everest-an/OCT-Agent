@@ -537,18 +537,9 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
 
   /** Core send logic — processes one message at a time, then drains queue. */
   const processMessage = async (text: string, filePaths?: string[]) => {
-    // Build conversation context: include last N turns so OpenClaw agent has history
-    const session = sessions.find(s => s.id === activeSessionId);
-    const prevMessages = session?.messages ?? [];
-    const MAX_CONTEXT_TURNS = 10;
-    const contextMsgs = prevMessages.slice(-MAX_CONTEXT_TURNS);
+    // Gateway mode: OpenClaw maintains session history via --session-id,
+    // so we do NOT prepend conversation history (causes "Message ordering conflict").
     let fullMessage = text;
-    if (contextMsgs.length > 0) {
-      const history = contextMsgs
-        .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content.slice(0, 800)}`)
-        .join('\n');
-      fullMessage = `[Conversation history (for context continuity):\n${history}\n]\n\nUser: ${text}`;
-    }
 
     setAgentStatus('thinking');
     toolCallsRef.current = [];

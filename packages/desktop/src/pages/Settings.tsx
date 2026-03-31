@@ -1478,13 +1478,19 @@ export default function Settings() {
                 </div>
                 <button
                   onClick={() => (window.electronAPI as any)?.openExternal?.(cloudVerifyUrl)}
-                  className="flex items-center justify-center gap-2 w-full py-2 bg-slate-800 hover:bg-slate-700 text-sm text-slate-300 rounded-xl transition-colors"
+                  className="flex items-center justify-center gap-2 w-full py-2 bg-brand-600 hover:bg-brand-500 text-sm text-white rounded-xl transition-colors"
                 >
                   <ExternalLink size={14} /> {t('settings.memory.cloud.openBrowser')}
                 </button>
                 <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
                   <Loader2 size={12} className="animate-spin" /> {t('settings.memory.cloud.waiting')}
                 </div>
+                <button
+                  onClick={() => { if (cloudPollRef.current) clearInterval(cloudPollRef.current); startCloudAuth(); }}
+                  className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                >
+                  {t('settings.memory.cloud.refreshCode', 'Code expired? Get a new one')}
+                </button>
               </div>
             )}
 
