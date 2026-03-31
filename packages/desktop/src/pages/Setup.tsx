@@ -216,6 +216,9 @@ export default function SetupWizard({ onComplete }: SetupProps) {
   };
 
   const handleFinish = () => {
+    // Persist the memory mode selection before completing setup
+    updateConfig({ memoryMode });
+    syncConfig(PROVIDERS);
     onComplete();
   };
 

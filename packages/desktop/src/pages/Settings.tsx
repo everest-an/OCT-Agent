@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Moon, Sun, Monitor, ChevronRight, X, Check, ChevronDown, Play, Square, RotateCw, RefreshCw, Loader2, Plus, Trash2, Download, Upload, Shield, AlertTriangle, Puzzle, Webhook, CheckCircle, Lock, Code2, Zap } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Moon, Sun, Monitor, ChevronRight, X, Check, ChevronDown, Play, Square, RotateCw, RefreshCw, Loader2, Plus, Trash2, Download, Upload, Shield, AlertTriangle, Puzzle, Webhook, CheckCircle, Lock, Code2, Zap, ExternalLink, Cloud, CloudOff } from 'lucide-react';
 import { useAppConfig, MODEL_PROVIDERS, useDynamicProviders } from '../lib/store';
 import { getUsageStats, clearUsage, type UsageStats } from '../lib/usage';
 import { useI18n } from '../lib/i18n';
@@ -26,6 +26,17 @@ export default function Settings() {
   const [newAllowTool, setNewAllowTool] = useState('');
   const [newDenyCmd, setNewDenyCmd] = useState('');
   const [showAdvancedPerms, setShowAdvancedPerms] = useState(false);
+
+  // Cloud auth state
+  const [showCloudAuth, setShowCloudAuth] = useState(false);
+  const [cloudAuthStep, setCloudAuthStep] = useState<'init' | 'waiting' | 'select' | 'done' | 'error'>('init');
+  const [cloudDeviceCode, setCloudDeviceCode] = useState('');
+  const [cloudUserCode, setCloudUserCode] = useState('');
+  const [cloudVerifyUrl, setCloudVerifyUrl] = useState('');
+  const [cloudApiKey, setCloudApiKey] = useState('');
+  const [cloudMemories, setCloudMemories] = useState<Array<{ id: string; name: string }>>([]);
+  const [cloudMode, setCloudMode] = useState<string>('local');
+  const cloudPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Permission presets
   const PERMISSION_PRESETS = {
@@ -280,6 +291,85 @@ export default function Settings() {
     syncConfig(allProviders);
   };
 
+  // Check cloud status on mount
+  useEffect(() => {
+    const api = window.electronAPI as any;
+    api?.cloudStatus?.().then((res: any) => {
+      if (res?.success) setCloudMode(res.mode || 'local');
+    }).catch(() => {});
+  }, []);
+
+  // Cleanup cloud auth polling on unmount
+  useEffect(() => {
+    return () => { if (cloudPollRef.current) clearInterval(cloudPollRef.current); };
+  }, []);
+
+  const startCloudAuth = async () => {
+    const api = window.electronAPI as any;
+    if (!api) return;
+    setCloudAuthStep('init');
+    const res = await api.cloudAuthStart();
+    if (!res?.success || !res.device_code) {
+      setCloudAuthStep('error');
+      return;
+    }
+    setCloudDeviceCode(res.device_code);
+    setCloudUserCode(res.user_code);
+    setCloudVerifyUrl(`${res.verification_uri}?code=${res.user_code}`);
+    setCloudAuthStep('waiting');
+
+    // Open browser automatically
+    api.openExternal(res.verification_uri + '?code=' + res.user_code);
+
+    // Start polling
+    if (cloudPollRef.current) clearInterval(cloudPollRef.current);
+    const interval = (res.interval || 5) * 1000;
+    cloudPollRef.current = setInterval(async () => {
+      const poll = await api.cloudAuthPoll(res.device_code);
+      if (poll?.status === 'approved' && poll.api_key) {
+        if (cloudPollRef.current) clearInterval(cloudPollRef.current);
+        setCloudApiKey(poll.api_key);
+        // Fetch memories list
+        const memRes = await api.cloudListMemories(poll.api_key);
+        const mems = memRes?.memories || [];
+        if (mems.length <= 1) {
+          // Auto-connect if 0 or 1 memory
+          const memId = mems[0]?.id || '';
+          await api.cloudConnect(poll.api_key, memId);
+          setCloudMode('hybrid');
+          updateConfig({ memoryMode: 'cloud' });
+          syncConfig(allProviders);
+          setCloudAuthStep('done');
+        } else {
+          setCloudMemories(mems);
+          setCloudAuthStep('select');
+        }
+      } else if (poll?.status === 'expired' || poll?.status === 'denied') {
+        if (cloudPollRef.current) clearInterval(cloudPollRef.current);
+        setCloudAuthStep('error');
+      }
+    }, interval);
+  };
+
+  const selectCloudMemory = async (memoryId: string) => {
+    const api = window.electronAPI as any;
+    if (!api) return;
+    await api.cloudConnect(cloudApiKey, memoryId);
+    setCloudMode('hybrid');
+    updateConfig({ memoryMode: 'cloud' });
+    syncConfig(allProviders);
+    setCloudAuthStep('done');
+  };
+
+  const handleCloudDisconnect = async () => {
+    const api = window.electronAPI as any;
+    if (!api) return;
+    await api.cloudDisconnect();
+    setCloudMode('local');
+    updateConfig({ memoryMode: 'local' });
+    syncConfig(allProviders);
+  };
+
   const Toggle = ({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) => (
     <button
       onClick={() => onChange(!checked)}
@@ -380,7 +470,12 @@ export default function Settings() {
               {(['local', 'cloud'] as const).map((mode) => (
                 <button
                   key={mode}
-                  onClick={() => { updateConfig({ memoryMode: mode }); }}
+                  onClick={() => {
+                    updateConfig({ memoryMode: mode });
+                    if (mode === 'cloud' && cloudMode !== 'hybrid' && cloudMode !== 'cloud') {
+                      setShowCloudAuth(true);
+                    }
+                  }}
                   className={`px-3 py-1.5 text-xs transition-colors ${config.memoryMode === mode ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
                 >
                   {t(`settings.memory.${mode}`)}
@@ -388,6 +483,33 @@ export default function Settings() {
               ))}
             </div>
           </Row>
+          {/* Cloud connection status */}
+          {config.memoryMode === 'cloud' && (
+            <Row label="" desc="">
+              <div className="w-full">
+                {cloudMode === 'hybrid' || cloudMode === 'cloud' ? (
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-xs text-emerald-400">
+                      <Cloud size={14} /> {t('settings.memory.cloud.connected')}
+                    </span>
+                    <button
+                      onClick={handleCloudDisconnect}
+                      className="text-xs text-red-400/70 hover:text-red-400 px-2 py-1 rounded hover:bg-red-600/10 transition-colors"
+                    >
+                      {t('settings.memory.cloud.disconnect')}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setShowCloudAuth(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-brand-600 hover:bg-brand-500 text-white rounded-lg transition-colors"
+                  >
+                    <ExternalLink size={12} /> {t('settings.memory.cloud.connect')}
+                  </button>
+                )}
+              </div>
+            </Row>
+          )}
         </Section>
 
         {/* Memory Privacy */}
@@ -1312,6 +1434,98 @@ export default function Settings() {
                 <Check size={14} /> {t('common.save')}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* Cloud Auth Modal */}
+      {showCloudAuth && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-8">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Cloud size={20} className="text-brand-400" />
+                {t('settings.memory.cloud.authTitle')}
+              </h2>
+              <button onClick={() => { setShowCloudAuth(false); if (cloudPollRef.current) clearInterval(cloudPollRef.current); }} className="text-slate-500 hover:text-slate-300">
+                <X size={20} />
+              </button>
+            </div>
+
+            {cloudAuthStep === 'init' && (
+              <div className="space-y-4">
+                <p className="text-sm text-slate-400">{t('settings.memory.cloud.authDesc')}</p>
+                <button
+                  onClick={startCloudAuth}
+                  className="w-full py-2.5 bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium rounded-xl transition-colors"
+                >
+                  {t('settings.memory.cloud.connect')}
+                </button>
+              </div>
+            )}
+
+            {cloudAuthStep === 'waiting' && (
+              <div className="space-y-4 text-center">
+                <p className="text-sm text-slate-400">{t('settings.memory.cloud.authDesc')}</p>
+                <div className="bg-slate-800 rounded-xl p-4">
+                  <p className="text-xs text-slate-500 mb-1">{t('settings.memory.cloud.code')}</p>
+                  <p className="text-2xl font-mono font-bold text-brand-400 tracking-widest">{cloudUserCode}</p>
+                </div>
+                <button
+                  onClick={() => (window.electronAPI as any)?.openExternal?.(cloudVerifyUrl)}
+                  className="flex items-center justify-center gap-2 w-full py-2 bg-slate-800 hover:bg-slate-700 text-sm text-slate-300 rounded-xl transition-colors"
+                >
+                  <ExternalLink size={14} /> {t('settings.memory.cloud.openBrowser')}
+                </button>
+                <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
+                  <Loader2 size={12} className="animate-spin" /> {t('settings.memory.cloud.waiting')}
+                </div>
+              </div>
+            )}
+
+            {cloudAuthStep === 'select' && (
+              <div className="space-y-3">
+                <p className="text-sm text-slate-400">{t('settings.memory.cloud.selectMemory')}</p>
+                {cloudMemories.map(mem => (
+                  <button
+                    key={mem.id}
+                    onClick={() => selectCloudMemory(mem.id)}
+                    className="w-full flex items-center gap-3 p-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-left transition-colors"
+                  >
+                    <span className="text-brand-400">🧠</span>
+                    <div>
+                      <p className="text-sm text-slate-200">{mem.name || mem.id}</p>
+                      <p className="text-[10px] text-slate-500 font-mono">{mem.id.slice(0, 8)}...</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {cloudAuthStep === 'done' && (
+              <div className="text-center space-y-3 py-4">
+                <CheckCircle size={40} className="mx-auto text-emerald-400" />
+                <p className="text-sm text-emerald-400">{t('settings.memory.cloud.success')}</p>
+                <button
+                  onClick={() => setShowCloudAuth(false)}
+                  className="px-6 py-2 bg-brand-600 hover:bg-brand-500 text-white text-sm rounded-xl transition-colors"
+                >
+                  OK
+                </button>
+              </div>
+            )}
+
+            {cloudAuthStep === 'error' && (
+              <div className="text-center space-y-3 py-4">
+                <CloudOff size={40} className="mx-auto text-red-400" />
+                <p className="text-sm text-red-400">{t('settings.memory.cloud.failed')}</p>
+                <button
+                  onClick={() => { setCloudAuthStep('init'); }}
+                  className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded-xl transition-colors"
+                >
+                  {t('common.retry', 'Retry')}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

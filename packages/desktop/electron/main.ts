@@ -2928,6 +2928,106 @@ ipcMain.handle('permissions:update', async (_e, changes: { alsoAllow?: string[];
   }
 });
 
+// --- Cloud Memory Auth (via local daemon proxy) ---
+
+const DAEMON_BASE = 'http://127.0.0.1:37800/api/v1';
+
+/** POST JSON to daemon */
+function daemonPost(route: string, body: Record<string, any> = {}): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    const req = http.request(`${DAEMON_BASE}${route}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
+      timeout: 15000,
+    }, (res) => {
+      let raw = '';
+      res.on('data', (chunk: string) => { raw += chunk; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(raw)); } catch { reject(new Error('Invalid JSON from daemon')); }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Daemon request timeout')); });
+    req.write(data);
+    req.end();
+  });
+}
+
+/** GET JSON from daemon */
+function daemonGet(route: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    http.get(`${DAEMON_BASE}${route}`, { timeout: 10000 }, (res) => {
+      let raw = '';
+      res.on('data', (chunk: string) => { raw += chunk; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(raw)); } catch { reject(new Error('Invalid JSON from daemon')); }
+      });
+    }).on('error', reject).on('timeout', function(this: any) { this.destroy(); reject(new Error('Timeout')); });
+  });
+}
+
+// Start device auth flow → returns verification URL + user code
+ipcMain.handle('cloud:auth-start', async () => {
+  try {
+    const result = await daemonPost('/cloud/auth/start', {});
+    return { success: true, ...result };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Poll for auth completion
+ipcMain.handle('cloud:auth-poll', async (_e, deviceCode: string) => {
+  try {
+    const result = await daemonPost('/cloud/auth/poll', { device_code: deviceCode });
+    return { success: true, ...result };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+
+// List user's memories after auth
+ipcMain.handle('cloud:list-memories', async (_e, apiKey: string) => {
+  try {
+    const result = await daemonGet(`/cloud/memories?api_key=${encodeURIComponent(apiKey)}`);
+    return { success: true, ...(Array.isArray(result) ? { memories: result } : result) };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Connect to cloud (save config)
+ipcMain.handle('cloud:connect', async (_e, apiKey: string, memoryId: string) => {
+  try {
+    const result = await daemonPost('/cloud/connect', { api_key: apiKey, memory_id: memoryId });
+    return { success: true, ...result };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Disconnect from cloud
+ipcMain.handle('cloud:disconnect', async () => {
+  try {
+    const result = await daemonPost('/cloud/disconnect', {});
+    return { success: true, ...result };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Check cloud connection status
+ipcMain.handle('cloud:status', async () => {
+  try {
+    const health = await daemonGet('/../healthz');
+    // healthz returns mode: "local" | "hybrid" | "cloud"
+    return { success: true, mode: health?.mode || 'local', cloud: health?.cloud || null };
+  } catch (err: any) {
+    return { success: false, error: err.message, mode: 'local' };
+  }
+});
+
 ipcMain.handle('workspace:read-file', async (_e, filename: string) => {
   // Only allow reading known workspace files
   const allowed = ['SOUL.md', 'USER.md', 'IDENTITY.md', 'TOOLS.md', 'MEMORY.md'];

@@ -138,6 +138,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   memoryGetEvents: (opts?: { limit?: number; offset?: number; search?: string }) => ipcRenderer.invoke('memory:get-events', opts || {}),
   memoryCheckHealth: () => ipcRenderer.invoke('memory:check-health'),
 
+  // Cloud Memory Auth
+  cloudAuthStart: () => ipcRenderer.invoke('cloud:auth-start'),
+  cloudAuthPoll: (deviceCode: string) => ipcRenderer.invoke('cloud:auth-poll', deviceCode),
+  cloudListMemories: (apiKey: string) => ipcRenderer.invoke('cloud:list-memories', apiKey),
+  cloudConnect: (apiKey: string, memoryId: string) => ipcRenderer.invoke('cloud:connect', apiKey, memoryId),
+  cloudDisconnect: () => ipcRenderer.invoke('cloud:disconnect'),
+  cloudStatus: () => ipcRenderer.invoke('cloud:status'),
+
   // App Doctor (System Health)
   doctorRun: () => ipcRenderer.invoke('doctor:run'),
   doctorFix: (checkId: string) => ipcRenderer.invoke('doctor:fix', checkId),
