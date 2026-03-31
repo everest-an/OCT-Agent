@@ -498,10 +498,11 @@ const CHECK_ORDER = [
 // --- Public API ---
 
 export function createDoctor(deps: DoctorDeps) {
-  async function runAllChecks(): Promise<DoctorReport> {
+  async function runChecks(subset?: string[]): Promise<DoctorReport> {
     const ctx = await buildContext(deps);
     const checks: CheckResult[] = [];
-    for (const id of CHECK_ORDER) {
+    const order = subset || CHECK_ORDER;
+    for (const id of order) {
       const entry = CHECK_REGISTRY[id];
       if (!entry) continue;
       try {
@@ -516,6 +517,10 @@ export function createDoctor(deps: DoctorDeps) {
     return { timestamp: Date.now(), checks, summary };
   }
 
+  async function runAllChecks(): Promise<DoctorReport> {
+    return runChecks();
+  }
+
   async function runFix(checkId: string): Promise<FixResult> {
     const entry = CHECK_REGISTRY[checkId];
     if (!entry?.fix) return { id: checkId, success: false, message: 'No auto-fix available' };
@@ -527,5 +532,5 @@ export function createDoctor(deps: DoctorDeps) {
     }
   }
 
-  return { runAllChecks, runFix };
+  return { runAllChecks, runChecks, runFix };
 }

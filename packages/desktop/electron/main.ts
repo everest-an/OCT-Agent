@@ -2808,8 +2808,16 @@ ipcMain.handle('app:startup-ensure-runtime', async () => {
     autoFixChecks.add('launchagent-path');
   }
 
+  // Only run fast critical checks at startup (skip slow network checks like
+  // openclaw-version, openclaw-conflicts, npm-prefix-writable, config-permissions)
+  const startupChecks = [
+    'node-installed', 'openclaw-installed', 'openclaw-command-health',
+    'gateway-running', 'plugin-installed', 'daemon-running',
+    ...(process.platform === 'darwin' ? ['launchagent-path'] : []),
+  ];
+
   sendStartupStatus('Checking your installation...', 10);
-  const initialReport = await doctor.runAllChecks();
+  const initialReport = await doctor.runChecks(startupChecks);
   const checksToRepair = initialReport.checks.filter((check) =>
     autoFixChecks.has(check.id)
     && check.fixable === 'auto'
@@ -2829,7 +2837,7 @@ ipcMain.handle('app:startup-ensure-runtime', async () => {
   }
 
   sendStartupStatus('Finalizing startup...', 92);
-  const finalReport = await doctor.runAllChecks();
+  const finalReport = await doctor.runChecks(startupChecks);
   const blocking = finalReport.checks.find((check) =>
     ['node-installed', 'openclaw-installed', 'plugin-installed', 'daemon-running'].includes(check.id)
     && check.status === 'fail'
