@@ -2249,6 +2249,10 @@ ipcMain.handle('channel:save', async (_e, channelId: string, config: Record<stri
       if (!existing.channels) existing.channels = {};
       existing.channels.feishu = { ...existing.channels.feishu, ...config, enabled: true };
       fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
+      // Install feishu plugin, restart gateway, bind agent
+      try { await runAsync('openclaw plugins install @openclaw/feishu 2>&1', 60000); } catch { /* already installed */ }
+      try { await runAsync('openclaw gateway restart 2>&1', 20000); } catch { /* non-fatal */ }
+      try { await runAsync('openclaw agents bind --agent main --bind feishu 2>&1', 10000); } catch { /* non-fatal */ }
       return { success: true };
     }
 
@@ -2263,6 +2267,11 @@ ipcMain.handle('channel:save', async (_e, channelId: string, config: Record<stri
       const key = channelId === 'google-chat' ? 'googlechat' : channelId;
       existing.channels[key] = { ...existing.channels[key], ...config, enabled: true };
       fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
+      // Install plugin, restart gateway, bind agent
+      const pluginId = key === 'googlechat' ? 'googlechat' : key;
+      try { await runAsync(`openclaw plugins install @openclaw/${pluginId} 2>&1`, 60000); } catch { /* already installed */ }
+      try { await runAsync('openclaw gateway restart 2>&1', 20000); } catch { /* non-fatal */ }
+      try { await runAsync(`openclaw agents bind --agent main --bind ${key} 2>&1`, 10000); } catch { /* non-fatal */ }
       return { success: true };
     }
 
@@ -2323,9 +2332,9 @@ ipcMain.handle('channel:test', async (_e, channelId: string) => {
     if (!channelConfig || !channelConfig.enabled) {
       return { success: false, error: 'Channel not configured' };
     }
-    const hasCredentials = channelConfig.token || channelConfig.botToken || channelConfig.appId || channelConfig.webhook
-      || channelConfig.bot_token || channelConfig.signal_number || channelConfig.db_path
-      || channelConfig.homeserver || channelConfig.webhook_url;
+    const hasCredentials = channelConfig.token || channelConfig.botToken || channelConfig.appId || channelConfig.appSecret
+      || channelConfig.webhook || channelConfig.bot_token || channelConfig.signal_number || channelConfig.db_path
+      || channelConfig.homeserver || channelConfig.webhook_url || channelConfig.serviceAccountFile;
     if (!hasCredentials) {
       return { success: false, error: 'No credentials found' };
     }
