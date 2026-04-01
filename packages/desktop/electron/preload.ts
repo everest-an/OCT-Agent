@@ -154,6 +154,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setLoginItem: (enabled: boolean) => ipcRenderer.invoke('app:set-login-item', enabled),
   getLoginItem: () => ipcRenderer.invoke('app:get-login-item'),
 
+  // Memory warning (fire-and-forget from main process)
+  onMemoryWarning: (callback: (payload: { type: string; message: string }) => void) => {
+    ipcRenderer.on('chat:memory-warning', (_e: any, payload: { type: string; message: string }) => callback(payload));
+  },
+
   // Daemon watchdog
   daemonMarkConnected: () => ipcRenderer.invoke('daemon:mark-connected'),
 });

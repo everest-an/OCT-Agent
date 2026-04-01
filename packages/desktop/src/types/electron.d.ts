@@ -22,6 +22,7 @@ export interface ElectronAPI {
   onChatStream?: (callback: (chunk: string) => void) => void;
   onChatStreamEnd?: (callback: () => void) => void;
   onChatStatus?: (callback: (status: { type: string; tool?: string; toolStatus?: string; toolId?: string; message?: string }) => void) => void;
+  onMemoryWarning?: (callback: (payload: { type: string; message: string }) => void) => void;
   filePreview?: (filePath: string) => Promise<unknown>;
   selectFile?: (options?: { filters?: Array<{ name: string; extensions: string[] }> }) => Promise<{ filePath: string | null }>;
   selectDirectory?: () => Promise<{ directoryPath: string | null }>;

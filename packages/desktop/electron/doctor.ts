@@ -285,7 +285,7 @@ async function checkOpenclawVersion(ctx: Ctx): Promise<CheckResult> {
 
 async function fixOpenclawUpdate(ctx: Ctx): Promise<FixResult> {
   try {
-    await ctx.deps.shellRun(`${getManagedOpenClawInstallCommand(ctx.deps.homedir)} 2>&1`, 60000);
+    await ctx.deps.shellRun(`${getManagedOpenClawInstallCommand(ctx.deps.homedir, 'openclaw@latest')} 2>&1`, 60000);
     return { id: 'openclaw-version', success: true, message: 'Updated successfully' };
   } catch (err: any) {
     return { id: 'openclaw-version', success: false, message: err.message?.slice(0, 200) || 'Update failed' };

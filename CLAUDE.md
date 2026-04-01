@@ -370,3 +370,4 @@ AwarenessClaw/
 - **产品规则**：桌面端检测到 Gateway 缺失时，必须先自动执行 `openclaw gateway install` 再 `openclaw gateway start`，不能直接报泛化错误
 - **降级规则**：如果 Windows 拒绝创建计划任务，桌面端必须 fallback 到 `openclaw gateway run --force` 的当前用户会话模式，保证用户先能聊天，再提示后续可选的管理员修复
 - **用户文案规则**：提示里必须明确“这是本地服务安装权限问题，不是 Qwen/OpenAI API Key 配置问题”
+![alt text](<截屏2026-04-01 09.13.13.png>)

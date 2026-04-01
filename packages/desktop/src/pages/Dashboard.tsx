@@ -313,6 +313,9 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
   const agentMenuRef = useRef<HTMLDivElement>(null);
   // Bootstrap onboarding
   const [showBootstrap, setShowBootstrap] = useState(false);
+  // Memory warning toast
+  const [memoryWarning, setMemoryWarning] = useState<string | null>(null);
+  const memoryWarningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { providers: allProviders } = useDynamicProviders();
   const currentProvider = allProviders.find(p => p.key === config.providerKey);
@@ -379,6 +382,20 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
   useEffect(() => {
     if (!window.electronAPI) return;
     (window.electronAPI as any).onTrayNewChat?.(() => handleNewSession());
+  }, []);
+
+  // Listen for memory-warning events from main process
+  useEffect(() => {
+    if (!window.electronAPI) return;
+    const api = window.electronAPI as any;
+    api.onMemoryWarning?.((payload: { type: string; message: string }) => {
+      setMemoryWarning(payload.message || 'Memory save failed');
+      if (memoryWarningTimerRef.current) clearTimeout(memoryWarningTimerRef.current);
+      memoryWarningTimerRef.current = setTimeout(() => setMemoryWarning(null), 3000);
+    });
+    return () => {
+      if (memoryWarningTimerRef.current) clearTimeout(memoryWarningTimerRef.current);
+    };
   }, []);
 
   // Load channel sessions from Gateway + listen for real-time channel messages
@@ -1222,6 +1239,21 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
           <div ref={messagesEndRef} />
           </div>
         </div>
+
+        {/* Memory warning toast */}
+        {memoryWarning && (
+          <div className="px-4 pb-1">
+            <div className="max-w-3xl mx-auto">
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-900/30 border border-amber-700/40 text-amber-300 text-xs animate-in fade-in slide-in-from-bottom-2">
+                <AlertTriangle size={14} className="flex-shrink-0" />
+                <span className="truncate">Memory save failed: {memoryWarning}</span>
+                <button onClick={() => setMemoryWarning(null)} className="ml-auto flex-shrink-0 text-amber-400 hover:text-amber-200">
+                  <X size={12} />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Attachments with preview */}
         {attachedFiles.length > 0 && (
