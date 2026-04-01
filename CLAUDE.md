@@ -71,6 +71,13 @@ AwarenessClaw/
 └── CLAUDE.md              # 本文件
 ```
 
+## 主进程结构文档（必须遵守）
+- 修改 `packages/desktop/electron/main.ts` 或其拆分文件前，必须先阅读 `docs/structures.md`
+- `docs/structures.md` 是 Electron 主进程拆分的唯一施工规则，优先级高于临时想法
+- 对 `main.ts` 的重构必须遵守“先 copy/paste 提取、后整理”的原则，不允许借重构顺手改行为
+- `chat`、`channel`、`app lifecycle` 属于高风险区，没有明确验证时不要先动
+- 新增主进程文件时，优先按 `docs/structures.md` 约定的目录和分层方式放置
+
 ## 与主仓库的关系
 - 本项目位于 `Awareness/AwarenessClaw/`，使用独立 Git 仓库管理
 - 主仓库 `.gitignore` 已排除本目录

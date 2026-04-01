@@ -188,4 +188,95 @@ describe('Dashboard (Chat)', () => {
     // Tool calls block should show tool count (i18n: "2 个工具调用" in zh, "2 tool(s) used" in en)
     expect(screen.getByText(/2.*工具调用|2 tool/)).toBeInTheDocument();
   });
+
+  it('shows approval and failure detail in active tool status', async () => {
+    let statusCallback: ((status: any) => void) | null = null;
+    const api = window.electronAPI as any;
+    api.onChatStatus = (cb: any) => { statusCallback = cb; };
+    api.chatSend = async () => {
+      statusCallback?.({
+        type: 'tool_approval',
+        tool: 'exec',
+        toolStatus: 'awaiting_approval',
+        toolId: 'approval-1',
+        detail: 'pwd | cwd: /tmp/demo',
+      });
+      statusCallback?.({
+        type: 'tool_call',
+        tool: 'awareness_record',
+        toolStatus: 'saving',
+        toolId: 'memory-1',
+        detail: 'Save this turn to Awareness memory',
+      });
+      statusCallback?.({
+        type: 'tool_update',
+        toolId: 'memory-1',
+        toolStatus: 'failed',
+        detail: 'daemon offline',
+      });
+      return { success: true, text: 'done', sessionId: 'test-session' };
+    };
+
+    await act(async () => { render(<Dashboard />); });
+
+    const textarea = screen.getByPlaceholderText(/输入消息/) as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'run pwd' } });
+    });
+
+    const buttons = screen.getAllByRole('button');
+    const sendBtn = buttons[buttons.length - 1];
+    await act(async () => { fireEvent.click(sendBtn); });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Awaiting approval|等待/)).toBeInTheDocument();
+      expect(screen.getByText(/pwd \| cwd: \/tmp\/demo/)).toBeInTheDocument();
+      expect(screen.getByText(/daemon offline/)).toBeInTheDocument();
+    });
+  });
+
+  it('keeps approval requests actionable instead of showing no response', async () => {
+    let statusCallback: ((status: any) => void) | null = null;
+    const api = window.electronAPI as any;
+    api.onChatStatus = (cb: any) => { statusCallback = cb; };
+    api.chatSend = vi.fn()
+      .mockImplementationOnce(async () => {
+        statusCallback?.({
+          type: 'tool_approval',
+          tool: 'exec',
+          toolStatus: 'awaiting_approval',
+          toolId: 'approval-1',
+          approvalRequestId: 'approval-1',
+          approvalCommand: '/approve approval-1 allow-once',
+          detail: 'pwd | cwd: /tmp/demo',
+        });
+        return { success: true, sessionId: 'test-session', awaitingApproval: true, approvalCommand: '/approve approval-1 allow-once' };
+      })
+      .mockResolvedValueOnce({ success: true, text: 'working directory is /tmp/demo', sessionId: 'test-session' });
+
+    await act(async () => { render(<Dashboard />); });
+
+    const textarea = screen.getByPlaceholderText(/输入消息/) as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'run pwd' } });
+    });
+
+    const buttons = screen.getAllByRole('button');
+    const sendBtn = buttons[buttons.length - 1];
+    await act(async () => { fireEvent.click(sendBtn); });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Waiting for tool approval|等待你批准工具/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Approve once|批准一次/ })).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Approve once|批准一次/ }));
+    });
+
+    await waitFor(() => {
+      expect(api.chatSend).toHaveBeenNthCalledWith(2, '/approve approval-1 allow-once', expect.any(String), expect.any(Object));
+      expect(screen.getByText(/working directory is \/tmp\/demo/)).toBeInTheDocument();
+    });
+  });
 });

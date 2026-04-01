@@ -30,17 +30,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Chat
   chatSend: (message: string, sessionId?: string, options?: { thinkingLevel?: string; model?: string; files?: string[]; workspacePath?: string; agentId?: string }) => ipcRenderer.invoke('chat:send', message, sessionId, options),
   chatAbort: () => ipcRenderer.invoke('chat:abort'),
+  chatApprove: (sessionId: string, approvalRequestId: string) => ipcRenderer.invoke('chat:approve', sessionId, approvalRequestId, 'allow-once'),
   onChatStream: (callback: (chunk: string) => void) => {
     ipcRenderer.on('chat:stream', (_e: any, chunk: string) => callback(chunk));
   },
   onChatStreamEnd: (callback: () => void) => {
     ipcRenderer.on('chat:stream-end', () => callback());
   },
-  onChatStatus: (callback: (status: { type: string; tool?: string; toolStatus?: string; toolId?: string }) => void) => {
+  onChatStatus: (callback: (status: { type: string; tool?: string; toolStatus?: string; toolId?: string; detail?: string; approvalRequestId?: string; approvalCommand?: string }) => void) => {
     ipcRenderer.on('chat:status', (_e: any, status: any) => callback(status));
   },
   onChatThinking: (callback: (text: string) => void) => {
     ipcRenderer.on('chat:thinking', (_e: any, text: string) => callback(text));
+  },
+  onChatDebug: (callback: (msg: string) => void) => {
+    ipcRenderer.on('chat:debug', (_e: any, msg: string) => callback(msg));
   },
 
   // Channel management
@@ -136,7 +140,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   memorySearch: (query: string) => ipcRenderer.invoke('memory:search', query),
   memoryGetCards: () => ipcRenderer.invoke('memory:get-cards'),
   memoryGetTasks: () => ipcRenderer.invoke('memory:get-tasks'),
-  memoryGetContext: () => ipcRenderer.invoke('memory:get-context'),
+  memoryGetContext: (query?: string) => ipcRenderer.invoke('memory:get-context', query),
   memoryGetPerception: () => ipcRenderer.invoke('memory:get-perception'),
   memoryGetDailySummary: () => ipcRenderer.invoke('memory:get-daily-summary'),
   memoryGetEvents: (opts?: { limit?: number; offset?: number; search?: string }) => ipcRenderer.invoke('memory:get-events', opts || {}),

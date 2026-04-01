@@ -15,8 +15,11 @@ import logoUrl from '../assets/logo.png';
 interface ToolCallInfo {
   id: string;
   name: string;
-  status: 'running' | 'completed' | 'approved' | 'recalling' | 'saving' | 'cached';
+  status: 'running' | 'completed' | 'approved' | 'recalling' | 'saving' | 'cached' | 'awaiting_approval' | 'failed';
   timestamp: number;
+  detail?: string;
+  approvalRequestId?: string;
+  approvalCommand?: string;
 }
 
 interface FilePreview {
@@ -87,11 +90,13 @@ function getToolIcon(name: string) {
 }
 
 function getToolLabel(name: string, status: string, t: (key: string, fallback?: string) => string) {
+  if (status === 'awaiting_approval') return `${name}: ${t('tool.status.awaitingApproval', 'Awaiting approval')}`;
   if (status === 'recalling') return `${name}: ${t('tool.status.recalling', 'Recalling context...')}`;
   if (status === 'saving') return `${name}: ${t('tool.status.saving', 'Saving memory...')}`;
   if (status === 'cached') return `${name}: ${t('tool.status.cached', 'Signals cached')}`;
   if (status === 'approved') return `${name}: ${t('tool.status.approved', 'Approved')}`;
   if (status === 'completed') return `${name}: ${t('tool.status.completed', 'Done')}`;
+  if (status === 'failed') return `${name}: ${t('tool.status.failed', 'Failed')}`;
   if (status === 'running' || status === 'in_progress') return `${name}: ${t('tool.status.running', 'Running...')}`;
   return `${name}: ${status}`;
 }
@@ -127,7 +132,17 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
 
 // --- Tool calls in message (collapsible with animation) ---
 
-function ToolCallsBlock({ toolCalls }: { toolCalls: ToolCallInfo[] }) {
+function ToolCallsBlock({
+  toolCalls,
+  onApprove,
+  onCopyApproval,
+  onStopRequest,
+}: {
+  toolCalls: ToolCallInfo[];
+  onApprove?: (toolCall: ToolCallInfo) => void;
+  onCopyApproval?: (toolCall: ToolCallInfo) => void;
+  onStopRequest?: () => void;
+}) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   if (!toolCalls || toolCalls.length === 0) return null;
@@ -147,15 +162,80 @@ function ToolCallsBlock({ toolCalls }: { toolCalls: ToolCallInfo[] }) {
       </button>
       <div
         className="overflow-hidden transition-all duration-200"
-        style={{ maxHeight: expanded ? `${toolCalls.length * 28}px` : '0px' }}
+        style={{ maxHeight: expanded ? '420px' : '0px' }}
       >
         <div className="mt-1.5 ml-4 space-y-1 border-l border-slate-700/50 pl-3">
           {toolCalls.map(tc => (
-            <div key={tc.id} className="flex items-center gap-1.5 text-[11px] text-slate-500">
-              <CheckCircle2 size={11} className="text-emerald-500/70" />
-              <span>{tc.name}</span>
+            <div key={tc.id} className="text-[11px] text-slate-500">
+              <div className="flex items-center gap-1.5">
+                {tc.status === 'failed' ? (
+                  <AlertTriangle size={11} className="text-amber-400/80" />
+                ) : tc.status === 'awaiting_approval' ? (
+                  <Loader2 size={11} className="animate-spin text-brand-400/70" />
+                ) : (
+                  <CheckCircle2 size={11} className="text-emerald-500/70" />
+                )}
+                <span>{getToolLabel(tc.name, tc.status, t)}</span>
+              </div>
+              {tc.detail && (
+                <div className="ml-[17px] mt-0.5 text-[10px] text-slate-500/80 break-all">{tc.detail}</div>
+              )}
+              {tc.status === 'awaiting_approval' && (
+                <div className="ml-[17px] mt-1 flex flex-wrap gap-2">
+                  <button
+                    onClick={() => onApprove?.(tc)}
+                    className="px-2 py-0.5 rounded-md bg-brand-600/20 hover:bg-brand-600/30 border border-brand-500/30 text-brand-200 text-[10px] transition-colors"
+                  >
+                    {t('chat.approveOnce', 'Approve once')}
+                  </button>
+                  <button
+                    onClick={() => onCopyApproval?.(tc)}
+                    className="px-2 py-0.5 rounded-md bg-slate-800/80 hover:bg-slate-700 border border-slate-700/60 text-slate-300 text-[10px] transition-colors"
+                  >
+                    {t('chat.copyApprovalCommand', 'Copy approval command')}
+                  </button>
+                  <button
+                    onClick={() => onStopRequest?.()}
+                    className="px-2 py-0.5 rounded-md bg-slate-800/80 hover:bg-red-500/10 border border-slate-700/60 hover:border-red-500/30 text-slate-300 hover:text-red-300 text-[10px] transition-colors"
+                  >
+                    {t('chat.stopRequest', 'Stop request')}
+                  </button>
+                </div>
+              )}
             </div>
           ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Thinking block in message (collapsible) ---
+
+function ThinkingBlock({ thinking }: { thinking: string }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  if (!thinking) return null;
+
+  return (
+    <div className="mb-2">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-slate-300 transition-colors"
+      >
+        <ChevronRight
+          size={12}
+          className={`transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
+        />
+        <Brain size={11} />
+        <span>{t('thinking.label', 'Thinking process')}</span>
+      </button>
+      <div
+        className="overflow-hidden transition-all duration-200"
+        style={{ maxHeight: expanded ? '400px' : '0px' }}
+      >
+        <div className="mt-1.5 ml-4 pl-3 border-l border-purple-500/30 max-h-[380px] overflow-y-auto">
+          <p className="text-[11px] text-slate-400 leading-relaxed whitespace-pre-wrap">{thinking}</p>
         </div>
       </div>
     </div>
@@ -292,6 +372,8 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
   const toolCallsRef = useRef<ToolCallInfo[]>([]);
   const [streamingContent, setStreamingContent] = useState('');
   const streamingRef = useRef('');
+  const [thinkingContent, setThinkingContent] = useState('');
+  const thinkingRef = useRef('');
   const [isDragOver, setIsDragOver] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -340,6 +422,17 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
     if (!window.electronAPI) return;
     const api = window.electronAPI as any;
 
+    // Debug: forward main-process gateway events to DevTools console
+    api.onChatDebug?.((msg: string) => {
+      console.log(msg);
+    });
+
+    // Thinking content from agent reasoning
+    api.onChatThinking?.((text: string) => {
+      thinkingRef.current = text;
+      setThinkingContent(text);
+    });
+
     // Stream text chunks from agent response
     api.onChatStream?.((chunk: string) => {
       streamingRef.current += chunk;
@@ -355,24 +448,38 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
     });
 
     // Status events (agent lifecycle + tool calls + gateway auto-start)
-    api.onChatStatus?.((status: { type: string; tool?: string; toolStatus?: string; toolId?: string; message?: string }) => {
+    api.onChatStatus?.((status: { type: string; tool?: string; toolStatus?: string; toolId?: string; message?: string; detail?: string; approvalRequestId?: string; approvalCommand?: string }) => {
       if (status.type === 'gateway') {
         // Gateway auto-start status — show as thinking with a message
         setAgentStatus('thinking');
       } else if (status.type === 'thinking' || status.type === 'generating' || status.type === 'error') {
         setAgentStatus(status.type as AgentStatus);
-      } else if (status.type === 'tool_call' && status.tool) {
+      } else if ((status.type === 'tool_call' || status.type === 'tool_approval') && status.tool) {
         const tc: ToolCallInfo = {
           id: status.toolId || `tc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           name: status.tool,
           status: (status.toolStatus as ToolCallInfo['status']) || 'running',
           timestamp: Date.now(),
+          detail: status.detail,
+          approvalRequestId: status.approvalRequestId,
+          approvalCommand: status.approvalCommand,
         };
-        toolCallsRef.current = [...toolCallsRef.current, tc];
+        const existingIdx = toolCallsRef.current.findIndex(existing => existing.id === tc.id);
+        if (existingIdx >= 0) {
+          toolCallsRef.current = toolCallsRef.current.map(existing =>
+            existing.id === tc.id ? { ...existing, ...tc } : existing
+          );
+        } else {
+          toolCallsRef.current = [...toolCallsRef.current, tc];
+        }
         setActiveToolCalls([...toolCallsRef.current]);
       } else if (status.type === 'tool_update' && status.toolId) {
         toolCallsRef.current = toolCallsRef.current.map(tc =>
-          tc.id === status.toolId ? { ...tc, status: (status.toolStatus as ToolCallInfo['status']) || 'completed' } : tc
+          tc.id === status.toolId ? {
+            ...tc,
+            status: (status.toolStatus as ToolCallInfo['status']) || 'completed',
+            detail: status.detail || tc.detail,
+          } : tc
         );
         setActiveToolCalls([...toolCallsRef.current]);
       }
@@ -550,28 +657,39 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
 
   // --- Send message — Gateway handles queuing via its Command Queue (collect mode) ---
 
-  const handleSend = async () => {
-    const text = input.trim();
-    if (!text) return;
+  const sendingRef = useRef(false);
+  const runChatRequest = useCallback(async (
+    text: string,
+    options?: { userText?: string; files?: AttachedFile[]; clearComposer?: boolean }
+  ) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    // Guard against double-send (IME Enter confirmation + keydown)
+    if (sendingRef.current) return;
+    sendingRef.current = true;
 
-    const filePaths = attachedFiles.length > 0 ? attachedFiles.map(f => f.path) : undefined;
+    const pendingFiles = options?.files ?? attachedFiles;
+    const userText = options?.userText ?? trimmed;
+    const filePaths = pendingFiles.length > 0 ? pendingFiles.map(f => f.path) : undefined;
 
     // Add user message to session immediately (visible in chat)
     const userMsg: Message = {
       id: `msg-${Date.now()}`,
       role: 'user',
-      content: text,
+      content: userText,
       timestamp: Date.now(),
-      files: attachedFiles.length > 0 ? [...attachedFiles] : undefined,
+      files: pendingFiles.length > 0 ? [...pendingFiles] : undefined,
     };
     updateSession(activeSessionId, s => ({
       ...s,
       messages: [...s.messages, userMsg],
-      title: s.messages.length === 0 ? text.slice(0, 30) : s.title,
+      title: s.messages.length === 0 ? userText.slice(0, 30) : s.title,
       updatedAt: Date.now(),
     }));
-    setInput('');
-    setAttachedFiles([]);
+    if (options?.clearComposer !== false) {
+      setInput('');
+      setAttachedFiles([]);
+    }
 
     // Reset streaming state
     setAgentStatus('thinking');
@@ -579,19 +697,23 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
     setActiveToolCalls([]);
     streamingRef.current = '';
     setStreamingContent('');
+    thinkingRef.current = '';
+    setThinkingContent('');
     if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
     streamTimeoutRef.current = setTimeout(() => { setAgentStatus('error'); }, STREAM_TIMEOUT_MS);
 
     if (window.electronAPI) {
-      // Send to Gateway — it queues if agent is busy (collect mode by default).
-      // No client-side queue needed.
-      const result = await (window.electronAPI as any).chatSend(text, activeSessionId, {
+      try {
+      const result = await (window.electronAPI as any).chatSend(trimmed, activeSessionId, {
         thinkingLevel: config.thinkingLevel || 'low',
         files: filePaths,
         workspacePath: projectRoot || undefined,
         agentId: config.selectedAgentId || 'main',
       });
-      const responseText = streamingRef.current.trim() || result.text || result.error || t('chat.noResponse') || 'No response';
+      const responseText = streamingRef.current.trim()
+        || result.text
+        || result.error
+        || (result.awaitingApproval ? t('chat.awaitingApprovalResponse', 'Waiting for tool approval before the agent can continue') : t('chat.noResponse') || 'No response');
 
       const assistantMsg: Message = {
         id: `msg-${Date.now()}`,
@@ -600,6 +722,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
         timestamp: Date.now(),
         model: config.modelId,
         toolCalls: toolCallsRef.current.length > 0 ? [...toolCallsRef.current] : undefined,
+        thinking: thinkingRef.current || undefined,
       };
 
       setNewestMsgId(assistantMsg.id);
@@ -608,13 +731,42 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
         messages: [...s.messages, assistantMsg],
         updatedAt: Date.now(),
       }));
-      trackUsage(config.providerKey, config.modelId, text, responseText);
+      trackUsage(config.providerKey, config.modelId, trimmed, responseText);
       if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
       streamingRef.current = '';
       setStreamingContent('');
+      thinkingRef.current = '';
+      setThinkingContent('');
       setAgentStatus('idle');
+      } finally {
+        sendingRef.current = false;
+      }
     }
+  }, [activeSessionId, attachedFiles, config.modelId, config.providerKey, config.selectedAgentId, config.thinkingLevel, projectRoot, t, updateSession]);
+
+  const handleSend = async () => {
+    await runChatRequest(input);
   };
+
+  const handleApproveTool = useCallback(async (toolCall: ToolCallInfo) => {
+    if (!toolCall.approvalCommand) return;
+    await runChatRequest(toolCall.approvalCommand, {
+      userText: toolCall.approvalCommand,
+      files: [],
+      clearComposer: false,
+    });
+  }, [runChatRequest]);
+
+  const handleCopyApproval = useCallback((toolCall: ToolCallInfo) => {
+    if (!toolCall.approvalCommand) return;
+    navigator.clipboard.writeText(toolCall.approvalCommand);
+  }, []);
+
+  const handleStopActiveRequest = useCallback(async () => {
+    await (window.electronAPI as any)?.chatAbort?.(activeSessionId);
+    if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
+    setAgentStatus('idle');
+  }, [activeSessionId]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -1123,9 +1275,19 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
                       <span className="text-[10px] text-slate-600">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
 
+                    {/* Thinking process */}
+                    {msg.thinking && (
+                      <ThinkingBlock thinking={msg.thinking} />
+                    )}
+
                     {/* Tool calls */}
                     {msg.toolCalls && msg.toolCalls.length > 0 && (
-                      <ToolCallsBlock toolCalls={msg.toolCalls} />
+                      <ToolCallsBlock
+                        toolCalls={msg.toolCalls}
+                        onApprove={handleApproveTool}
+                        onCopyApproval={handleCopyApproval}
+                        onStopRequest={handleStopActiveRequest}
+                      />
                     )}
 
                     {/* Content — no bubble, direct text */}
@@ -1169,6 +1331,8 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
                           if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
                           streamingRef.current = '';
                           setStreamingContent('');
+                          thinkingRef.current = '';
+                          setThinkingContent('');
                           setAgentStatus('idle');
                         }}
                         className="ml-2 px-2 py-0.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors"
@@ -1178,17 +1342,51 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
                     </div>
                   )}
 
+                  {/* Live thinking content */}
+                  {agentStatus !== 'error' && thinkingContent && (
+                    <div className="mb-2 pb-2 border-b border-slate-700/30">
+                      <div className="flex items-center gap-1.5 text-[11px] text-purple-400/70 mb-1">
+                        <Brain size={11} />
+                        <span>{t('thinking.label', 'Thinking process')}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 leading-relaxed ml-4 pl-3 border-l border-purple-500/20 max-h-[150px] overflow-y-auto whitespace-pre-wrap">{thinkingContent}</p>
+                    </div>
+                  )}
+
                   {/* Tool calls section */}
                   {agentStatus !== 'error' && activeToolCalls.length > 0 && (
                     <div className="mb-2 space-y-1 pb-2 border-b border-slate-700/30">
                       {activeToolCalls.slice(-5).map(tc => (
-                        <div key={tc.id} className="flex items-center gap-1.5 text-[11px] text-slate-500">
-                          {tc.status === 'running' || tc.status === 'recalling' ? (
+                        <div key={tc.id} className="text-[11px] text-slate-500">
+                          <div className="flex items-center gap-1.5">
+                          {tc.status === 'running' || tc.status === 'recalling' || tc.status === 'saving' || tc.status === 'awaiting_approval' ? (
                             <Loader2 size={11} className="animate-spin text-brand-400/70" />
+                          ) : tc.status === 'failed' ? (
+                            <AlertTriangle size={11} className="text-amber-400/80" />
                           ) : (
                             <span className="text-emerald-500/70">{getToolIcon(tc.name)}</span>
                           )}
                           <span className="truncate max-w-[300px]">{getToolLabel(tc.name, tc.status, t)}</span>
+                          </div>
+                          {tc.detail && (
+                            <div className="ml-[17px] mt-0.5 truncate max-w-[320px] text-[10px] text-slate-500/80">{tc.detail}</div>
+                          )}
+                          {tc.status === 'awaiting_approval' && (
+                            <div className="ml-[17px] mt-1 flex flex-wrap gap-2">
+                              <button
+                                onClick={() => handleApproveTool(tc)}
+                                className="px-2 py-0.5 rounded-md bg-brand-600/20 hover:bg-brand-600/30 border border-brand-500/30 text-brand-200 text-[10px] transition-colors"
+                              >
+                                {t('chat.approveOnce', 'Approve once')}
+                              </button>
+                              <button
+                                onClick={() => handleCopyApproval(tc)}
+                                className="px-2 py-0.5 rounded-md bg-slate-800/80 hover:bg-slate-700 border border-slate-700/60 text-slate-300 text-[10px] transition-colors"
+                              >
+                                {t('chat.copyApprovalCommand', 'Copy approval command')}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1222,9 +1420,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
                   {agentStatus !== 'error' && (
                     <button
                       onClick={async () => {
-                        await (window.electronAPI as any)?.chatAbort?.(activeSessionId);
-                        if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
-                        setAgentStatus('idle');
+                          await handleStopActiveRequest();
                       }}
                       className="mt-2 flex items-center gap-1.5 px-3 py-1 text-xs text-slate-400 hover:text-red-400 bg-slate-800/60 hover:bg-red-500/10 border border-slate-700/50 hover:border-red-500/30 rounded-lg transition-colors"
                     >

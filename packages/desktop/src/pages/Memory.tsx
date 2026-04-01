@@ -1,20 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Search, RefreshCw, Loader2, AlertCircle, Zap, HardDrive, Cloud, ChevronDown, ChevronRight, Calendar, Play, Clock, MessageSquare, FileText } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
+import { parseMemoryContextResponse, type MemoryKnowledgeCard } from '../lib/memory-context';
 
 interface PerceptionSignal {
   type: string;
   message: string;
 }
 
-interface KnowledgeCard {
-  id: string;
-  category: string;
-  title: string;
-  summary: string;
-  created_at?: string;
-  status?: string;
-}
+type KnowledgeCard = MemoryKnowledgeCard;
 
 /** A raw memory event from the daemon REST API */
 interface MemoryEvent {
@@ -255,6 +249,27 @@ export default function Memory() {
     }
   }, [api, t]);
 
+  const loadContext = useCallback(async () => {
+    if (!api) return false;
+    try {
+      const result = await api.memoryGetContext();
+      const parsed = parseMemoryContextResponse(result);
+      if (!parsed.hasStructuredContext) {
+        return false;
+      }
+      setCards(parsed.cards);
+      setDailySummary(
+        parsed.cards.length > 0 || parsed.openTasks > 0
+          ? { recentCards: parsed.cards.slice(0, 5), openTasks: parsed.openTasks }
+          : null,
+      );
+      setError(null);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [api]);
+
   const loadEvents = useCallback(async (offset = 0, append = false, currentSourceView?: 'chat' | 'dev' | 'all') => {
     if (!api) return;
     try {
@@ -313,6 +328,8 @@ export default function Memory() {
       }
       if (recentCards.length > 0 || openTasks > 0) {
         setDailySummary({ recentCards, openTasks });
+      } else {
+        setDailySummary(null);
       }
     } catch { /* daemon not running */ }
   }, [api]);
@@ -324,14 +341,20 @@ export default function Memory() {
       try {
         const connected = await checkHealth();
         if (connected) {
-          await Promise.all([loadCards(), loadEvents(), loadPerception(), loadDailySummary()]);
+          const contextLoaded = await loadContext();
+          await Promise.all([
+            contextLoaded ? Promise.resolve() : loadCards(),
+            loadEvents(),
+            loadPerception(),
+            contextLoaded ? Promise.resolve() : loadDailySummary(),
+          ]);
         }
       } finally {
         setLoading(false);
       }
     };
     init();
-  }, [checkHealth, loadCards, loadEvents, loadPerception, loadDailySummary]);
+  }, [checkHealth, loadCards, loadContext, loadEvents, loadPerception, loadDailySummary]);
 
   // Reload events when source view changes
   useEffect(() => {
@@ -347,7 +370,13 @@ export default function Memory() {
     setError(null);
     const connected = await checkHealth();
     if (connected) {
-      await Promise.all([loadCards(), loadEvents(0), loadPerception(), loadDailySummary()]);
+      const contextLoaded = await loadContext();
+      await Promise.all([
+        contextLoaded ? Promise.resolve() : loadCards(),
+        loadEvents(0),
+        loadPerception(),
+        contextLoaded ? Promise.resolve() : loadDailySummary(),
+      ]);
     }
     setLoading(false);
   };
@@ -362,7 +391,14 @@ export default function Memory() {
         setDaemonConnected(true);
         if (window.electronAPI) (window.electronAPI as any).daemonMarkConnected?.();
         // Reload everything
-        await Promise.all([checkHealth(), loadCards(), loadEvents(0), loadPerception(), loadDailySummary()]);
+        await checkHealth();
+        const contextLoaded = await loadContext();
+        await Promise.all([
+          contextLoaded ? Promise.resolve() : loadCards(),
+          loadEvents(0),
+          loadPerception(),
+          contextLoaded ? Promise.resolve() : loadDailySummary(),
+        ]);
         setError(null);
       } else {
         setError(result?.error || t('memory.daemonStartFailed'));

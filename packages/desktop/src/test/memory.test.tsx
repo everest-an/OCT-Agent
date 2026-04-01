@@ -10,6 +10,14 @@ function mockDaemonConnected() {
       status: 'ok', version: '0.4.1', search_mode: 'hybrid',
       stats: { totalMemories: 10, totalKnowledge: 3, totalTasks: 0, totalSessions: 5 },
     }),
+    memoryGetContext: () => Promise.resolve({
+      result: { content: [{ text: JSON.stringify({
+        knowledge_cards: [
+          { id: '1', category: 'decision', title: 'Use PostgreSQL', summary: 'Chose PostgreSQL for pgvector.' },
+        ],
+        open_tasks: [],
+      }) }] },
+    }),
     memoryGetCards: () => Promise.resolve({
       result: { content: [{ text: JSON.stringify({ knowledge_cards: [
         { id: '1', category: 'decision', title: 'Use PostgreSQL', summary: 'Chose PostgreSQL for pgvector.' },

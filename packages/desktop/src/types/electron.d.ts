@@ -18,10 +18,11 @@ export interface ElectronAPI {
   onSetupDaemonStatus?: (callback: (status: { key: string; detail?: string }) => void) => (() => void);
   saveConfig: (config: Record<string, unknown>) => Promise<{ success: boolean }>;
   openAuthUrl: (url: string) => Promise<void>;
-  chatSend?: (message: string, sessionId?: string, options?: { thinkingLevel?: string; model?: string; files?: string[]; workspacePath?: string }) => Promise<{ success: boolean; text?: string; error?: string; sessionId?: string }>;
+  chatSend?: (message: string, sessionId?: string, options?: { thinkingLevel?: string; model?: string; files?: string[]; workspacePath?: string }) => Promise<{ success: boolean; text?: string; error?: string; sessionId?: string; awaitingApproval?: boolean; approvalRequestId?: string; approvalCommand?: string; approvalDetail?: string }>;
+  chatApprove?: (sessionId: string, approvalRequestId: string) => Promise<{ success: boolean; command?: string; error?: string }>;
   onChatStream?: (callback: (chunk: string) => void) => void;
   onChatStreamEnd?: (callback: () => void) => void;
-  onChatStatus?: (callback: (status: { type: string; tool?: string; toolStatus?: string; toolId?: string; message?: string }) => void) => void;
+  onChatStatus?: (callback: (status: { type: string; tool?: string; toolStatus?: string; toolId?: string; message?: string; detail?: string; approvalRequestId?: string; approvalCommand?: string }) => void) => void;
   onMemoryWarning?: (callback: (payload: { type: string; message: string }) => void) => void;
   filePreview?: (filePath: string) => Promise<unknown>;
   selectFile?: (options?: { filters?: Array<{ name: string; extensions: string[] }> }) => Promise<{ filePath: string | null }>;

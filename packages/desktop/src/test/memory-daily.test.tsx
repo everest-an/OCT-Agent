@@ -31,6 +31,14 @@ describe('Memory Page — Daily Summary', () => {
 
   it('shows Daily Summary when memoryGetDailySummary returns data', async () => {
     (window as any).electronAPI = connectedDaemonApi({
+      memoryGetContext: () => Promise.resolve({
+        result: { content: [{ text: JSON.stringify({
+          knowledge_cards: [
+            { id: 'k1', category: 'decision', title: 'Test decision', summary: 'Test' },
+          ],
+          open_tasks: [{ id: 't1', title: 'Task 1' }],
+        }) }] },
+      }),
       memoryGetCards: () => Promise.resolve({
         result: { content: [{ text: JSON.stringify({ knowledge_cards: [
           { id: 'k1', category: 'decision', title: 'Use PostgreSQL', summary: 'Chose PG for pgvector' },
@@ -52,12 +60,42 @@ describe('Memory Page — Daily Summary', () => {
     await waitFor(() => {
       expect(screen.getByText('Daily Summary')).toBeInTheDocument();
     });
-    expect(screen.getByText('Test decision')).toBeInTheDocument();
+    expect(screen.getAllByText('Test decision').length).toBeGreaterThan(0);
     expect(screen.getByText(/open tasks/)).toBeInTheDocument();
+  });
+
+  it('uses memoryGetContext as the primary source for cards and summary', async () => {
+    (window as any).electronAPI = connectedDaemonApi({
+      memoryGetContext: () => Promise.resolve({
+        result: { content: [{ text: JSON.stringify({
+          knowledge_cards: [
+            { id: 'ctx-1', category: 'workflow', title: 'Context-first card', summary: 'Loaded from awareness_init.' },
+          ],
+          open_tasks: [{ id: 'ctx-task-1', title: 'Context task' }],
+        }) }] },
+      }),
+      memoryGetCards: () => Promise.resolve({ error: 'should not be needed' }),
+      memoryGetDailySummary: () => Promise.resolve({
+        cards: { result: { content: [{ text: JSON.stringify({ knowledge_cards: [] }) }] } },
+        tasks: { result: { content: [{ text: JSON.stringify({ action_items: [] }) }] } },
+      }),
+    });
+
+    await act(async () => { render(<Memory />); });
+    await waitFor(() => expect(screen.getByText(/Knowledge Cards/)).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText(/Knowledge Cards/)); });
+
+    await waitFor(() => {
+      expect(screen.getByText('Daily Summary')).toBeInTheDocument();
+    });
+    expect(screen.getAllByText('Context-first card').length).toBeGreaterThan(0);
   });
 
   it('does not show Daily Summary when memoryGetDailySummary returns empty data', async () => {
     (window as any).electronAPI = connectedDaemonApi({
+      memoryGetContext: () => Promise.resolve({
+        result: { content: [{ text: JSON.stringify({ knowledge_cards: [], open_tasks: [] }) }] },
+      }),
       memoryGetCards: () => Promise.resolve({
         result: { content: [{ text: JSON.stringify({ knowledge_cards: [
           { id: 'k1', category: 'insight', title: 'Some insight', summary: 'Detail' },

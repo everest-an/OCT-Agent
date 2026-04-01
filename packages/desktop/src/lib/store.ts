@@ -6,6 +6,15 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 
 const STORAGE_KEY = 'awareness-claw-config';
 
+const DEFAULT_ALLOWED_TOOLS = [
+  'exec',
+  'awareness_init',
+  'awareness_recall',
+  'awareness_lookup',
+  'awareness_record',
+  'awareness_get_agent_prompt',
+];
+
 export interface AppConfig {
   // Model
   providerKey: string;
@@ -85,13 +94,7 @@ async function syncToOpenClaw(config: AppConfig, providers: ModelProviderDef[]) 
     // Ensure coding profile (includes browser, file ops, exec, web tools) and Awareness tools
     tools: {
       profile: 'coding',
-      alsoAllow: [
-        'awareness_init',
-        'awareness_recall',
-        'awareness_lookup',
-        'awareness_record',
-        'awareness_get_agent_prompt',
-      ],
+      alsoAllow: DEFAULT_ALLOWED_TOOLS,
     },
   };
 
