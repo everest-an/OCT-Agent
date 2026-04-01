@@ -115,7 +115,10 @@ function persistAwarenessPluginConfig(homedir: string) {
 }
 
 function repairWindowsGatewayServiceScript(homedir: string) {
-  const nodeCommand = process.platform === 'win32' ? '"C:\\Program Files\\nodejs\\node.exe"' : 'node';
+  // Detect Node.exe path dynamically on Windows; fallback to common location
+  const nodeCommand = process.platform === 'win32'
+    ? (process.execPath.endsWith('node.exe') ? `"${process.execPath}"` : '"C:\\Program Files\\nodejs\\node.exe"')
+    : 'node';
   repairWindowsGatewayServiceScriptShared(homedir, {
     nodeCommand,
     tmpdir: path.join(homedir, 'AppData', 'Local', 'Temp'),
@@ -431,8 +434,10 @@ async function fixPluginInstall(ctx: Ctx): Promise<FixResult> {
     fs.mkdirSync(extensionsDir, { recursive: true });
     if (fs.existsSync(extDir)) fs.rmSync(extDir, { recursive: true, force: true });
     const packOut = await ctx.deps.shellRun(`cd "${extensionsDir}" && npm pack @awareness-sdk/openclaw-memory@latest 2>${nullDev}`, 60000);
-    const tgzName = packOut.trim().split('\n').pop()?.trim() || '';
-    if (!tgzName || !tgzName.endsWith('.tgz')) throw new Error('npm pack failed');
+    // Find the .tgz filename in npm pack output (last line is usually the filename,
+    // but npm may also emit warnings — use .find() for robustness)
+    const tgzName = packOut.trim().split('\n').map(l => l.trim()).reverse().find(l => l.endsWith('.tgz')) || '';
+    if (!tgzName) throw new Error('npm pack failed');
     const tgzPath = path.join(extensionsDir, tgzName);
     fs.mkdirSync(extDir, { recursive: true });
     await ctx.deps.shellRun(`tar -xzf "${tgzPath}" -C "${extDir}" --strip-components=1`, 30000);

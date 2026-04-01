@@ -101,20 +101,27 @@ export default function App() {
         return;
       }
 
-      const result = await window.electronAPI.startupEnsureRuntime();
-      if (cancelled) return;
+      try {
+        const result = await window.electronAPI.startupEnsureRuntime();
+        if (cancelled) return;
 
-      if (!result.ok && result.needsSetup) {
-        localStorage.setItem('awareness-claw-setup-done', 'false');
-        setSetupComplete(false);
-        setStartupProgress(100);
-        setRuntimeReady(true);
-        return;
+        if (!result.ok && result.needsSetup) {
+          localStorage.setItem('awareness-claw-setup-done', 'false');
+          setSetupComplete(false);
+          setStartupProgress(100);
+          setRuntimeReady(true);
+          return;
+        }
+      } catch (err) {
+        console.warn('[startup] Runtime check failed:', err);
+        // Don't block app launch — user can still use the app and fix via Settings
       }
 
-      setStartupMessage('Startup complete');
-      setStartupProgress(100);
-      setRuntimeReady(true);
+      if (!cancelled) {
+        setStartupMessage('Startup complete');
+        setStartupProgress(100);
+        setRuntimeReady(true);
+      }
     };
 
     ensureRuntime();

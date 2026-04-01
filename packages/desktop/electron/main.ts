@@ -342,7 +342,8 @@ async function forceStopLocalDaemon() {
   await sleep(1500);
 
   const health = await getLocalDaemonHealth(2000);
-  if (health?.pid) {
+  if (health?.pid && health?.version) {
+    // Only kill if healthz confirms it's an Awareness daemon (has version field)
     try { process.kill(health.pid, 'SIGKILL'); } catch { /* already dead */ }
     await sleep(1000);
   }
@@ -1145,8 +1146,8 @@ ipcMain.handle('app:upgrade-component', async (_e, component: string) => {
       for (let w = 0; w < 6; w++) {
         const health = await getLocalDaemonHealth(1000);
         if (!health?.pid) break;
-        if (w === 3) {
-          // Force-kill after ~3 attempts
+        if (w === 3 && health?.version) {
+          // Force-kill after ~3 attempts (only if confirmed Awareness daemon)
           try { process.kill(health.pid, 'SIGKILL'); } catch { /* already dead */ }
         }
         await new Promise(r => setTimeout(r, 500));
@@ -3727,7 +3728,9 @@ app.whenReady().then(() => {
   }
 
   // Best-effort: start Gateway early so it's ready when user sends first message
-  startGatewayWithRepair().catch(() => {});
+  startGatewayWithRepair().catch((err) => {
+    console.warn('[startup] Gateway pre-start failed (will retry on first chat):', err?.message || err);
+  });
 
   // Start watchdog after a delay (give startup flow time to connect daemon first)
   setTimeout(() => {
