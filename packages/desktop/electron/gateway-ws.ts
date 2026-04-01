@@ -312,6 +312,8 @@ export class GatewayClient extends EventEmitter {
   /** Send a chat message (non-blocking — Gateway queues if agent is busy). */
   async chatSend(sessionKey: string, text: string, options?: {
     thinking?: string;
+    verbose?: string;
+    reasoning?: string;
     attachments?: any[];
     agentId?: string;
   }): Promise<any> {
@@ -321,6 +323,8 @@ export class GatewayClient extends EventEmitter {
       idempotencyKey: `ac-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     };
     if (options?.thinking) params.thinking = options.thinking;
+    if (options?.verbose) params.verbose = options.verbose;
+    if (options?.reasoning) params.reasoning = options.reasoning;
     if (options?.attachments?.length) params.attachments = options.attachments;
     // chat.send uses 120s timeout (agent may take a while with tool calls)
     return this.rpc('chat.send', params, 120000);

@@ -1,10 +1,13 @@
 /**
- * Real brand icons for messaging channels.
+ * Channel icons — brand SVGs for known channels, letter-based fallback for dynamic ones.
  * Uses inline SVG for zero-dependency, pixel-perfect rendering at any size.
+ * Reads channel-registry for color + label when falling back to letter icons.
  */
 
 import React from 'react';
+import { getChannel } from '../lib/channel-registry';
 
+/** Brand SVG renderers for known channels (zero runtime overhead). */
 const icons: Record<string, (size: number) => React.ReactElement> = {
   telegram: (s) => (
     <svg width={s} height={s} viewBox="0 0 24 24" fill="none">
@@ -90,11 +93,20 @@ const icons: Record<string, (size: number) => React.ReactElement> = {
 export default function ChannelIcon({ channelId, size = 28 }: { channelId: string; size?: number }) {
   const render = icons[channelId];
   if (render) return render(size);
-  // Fallback: generic chat icon
+
+  // Dynamic fallback: colored rounded rect + first letter of label
+  const ch = getChannel(channelId);
+  const color = ch?.color || '#64748B';
+  const letter = (ch?.label || channelId).charAt(0).toUpperCase();
+  const fontSize = Math.round(size * 0.5);
+
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <rect width="24" height="24" rx="5" fill="#64748B"/>
-      <path d="M6 8a2 2 0 012-2h8a2 2 0 012 2v5a2 2 0 01-2 2h-3l-3 3v-3H8a2 2 0 01-2-2V8z" fill="#fff"/>
+      <rect width="24" height="24" rx="5" fill={color}/>
+      <text x="12" y="12" textAnchor="middle" dominantBaseline="central"
+        fill="#fff" fontSize={fontSize} fontWeight="600" fontFamily="system-ui, sans-serif">
+        {letter}
+      </text>
     </svg>
   );
 }

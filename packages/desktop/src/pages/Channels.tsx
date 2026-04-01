@@ -3,60 +3,79 @@ import { ChevronRight, ChevronLeft, Check, ExternalLink, X, Loader2 } from 'luci
 import { useI18n } from '../lib/i18n';
 import PasswordInput from '../components/PasswordInput';
 import ChannelIcon from '../components/ChannelIcon';
-
-interface Channel {
-  id: string;
-  connected: boolean;
-  supported: boolean;
-}
-
-const CHANNELS: Channel[] = [
-  { id: 'local', connected: true, supported: true },
-  { id: 'telegram', connected: false, supported: true },
-  { id: 'discord', connected: false, supported: true },
-  { id: 'whatsapp', connected: false, supported: true },
-  { id: 'wechat', connected: false, supported: true },
-  { id: 'slack', connected: false, supported: true },
-  { id: 'signal', connected: false, supported: true },
-  { id: 'imessage', connected: false, supported: true },
-  { id: 'feishu', connected: false, supported: true },
-  { id: 'line', connected: false, supported: true },
-  { id: 'matrix', connected: false, supported: true },
-  { id: 'google-chat', connected: false, supported: true },
-];
+import {
+  getAllChannels, getChannel, isOneClick as isOneClickChannel,
+  type ChannelDef, type ConfigField, loadFromSerialized,
+} from '../lib/channel-registry';
 
 type WizardStep = 'intro' | 'token' | 'test';
 
-// Channels where user just clicks "Connect" — no credentials needed
-const ONE_CLICK_CHANNELS = ['whatsapp', 'wechat', 'signal', 'imessage'];
+// ---------------------------------------------------------------------------
+// DynamicConfigForm — renders config fields from registry definition
+// ---------------------------------------------------------------------------
+
+function DynamicConfigForm({ fields, values, onChange, t }: {
+  fields: ConfigField[];
+  values: Record<string, string>;
+  onChange: (key: string, val: string) => void;
+  t: (key: string, fallback?: string) => string;
+}) {
+  const inputClass = 'w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500';
+  return (
+    <div className="space-y-4">
+      {fields.map(field => (
+        <div key={field.key}>
+          <label className="block text-sm font-medium text-slate-300 mb-2">
+            {t(field.label, field.label)}
+          </label>
+          {field.type === 'file' ? (
+            <div className="flex gap-2">
+              <input value={values[field.key] || ''} readOnly
+                placeholder={t('channels.gchat.noFile', 'No file selected')}
+                className="flex-1 px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-400" />
+              <button onClick={async () => {
+                if (window.electronAPI) {
+                  const result = await (window.electronAPI as any).selectFile?.({ filters: [{ name: 'JSON', extensions: ['json'] }] });
+                  if (result?.filePath) onChange(field.key, result.filePath);
+                }
+              }} className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm text-slate-100 whitespace-nowrap">
+                {t('channels.gchat.browse', 'Browse...')}
+              </button>
+            </div>
+          ) : field.type === 'password' ? (
+            <PasswordInput value={values[field.key] || ''} onChange={(e) => onChange(field.key, e.target.value)}
+              placeholder={field.placeholder || ''} className={inputClass} />
+          ) : (
+            <input value={values[field.key] || ''} onChange={(e) => onChange(field.key, e.target.value)}
+              placeholder={field.placeholder || ''} className={inputClass} />
+          )}
+          {field.hint && (
+            <p className="mt-1.5 text-xs text-slate-500">{t(field.hint, field.hint)}</p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main Channels page
+// ---------------------------------------------------------------------------
 
 export default function Channels() {
   const { t } = useI18n();
 
-  // Translate channel:status i18n keys from main process
-  // Format: "channels.status.key" or "channels.status.key::param" for dynamic values
   const translateStatus = (statusKey: string): string => {
     const [key, param] = statusKey.split('::');
     const translated = t(key, '');
-    if (!translated) return statusKey; // fallback to raw string if key not found
+    if (!translated) return statusKey;
     return param ? translated.replace('{0}', param) : translated;
   };
+
   const [activeWizard, setActiveWizard] = useState<string | null>(null);
   const [wizardStep, setWizardStep] = useState<WizardStep>('intro');
-  // Simple token (Telegram, Discord, LINE)
-  const [tokenInput, setTokenInput] = useState('');
-  // Slack
-  const [slackBotToken, setSlackBotToken] = useState('');
-  const [slackAppToken, setSlackAppToken] = useState('');
-  // Feishu
-  const [feishuAppId, setFeishuAppId] = useState('');
-  const [feishuAppSecret, setFeishuAppSecret] = useState('');
-  // Matrix (like a login form)
-  const [matrixServer, setMatrixServer] = useState('');
-  const [matrixUser, setMatrixUser] = useState('');
-  const [matrixPass, setMatrixPass] = useState('');
-  // Google Chat (file path selected via file picker)
-  const [gchatKeyFile, setGchatKeyFile] = useState('');
+  // Single state for all config fields (replaces 9 separate useState)
+  const [formValues, setFormValues] = useState<Record<string, string>>({});
 
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [testError, setTestError] = useState<string | null>(null);
@@ -64,9 +83,13 @@ export default function Channels() {
   const [asciiQR, setAsciiQR] = useState<string | null>(null);
   const [channelProgress, setChannelProgress] = useState<string | null>(null);
   const [configuredChannels, setConfiguredChannels] = useState<Set<string>>(new Set());
-  const [channels, setChannels] = useState<Channel[]>(CHANNELS);
+  const [channels, setChannels] = useState<ChannelDef[]>(getAllChannels());
   const [loadingChannels, setLoadingChannels] = useState(true);
   const hasLoadedOnce = useRef(false);
+
+  // Get the active channel definition from registry
+  const activeChannel = activeWizard ? getChannel(activeWizard) : undefined;
+  const isOneClick = activeChannel?.connectionType === 'one-click';
 
   const loadConfiguredChannels = async (showLoading = true) => {
     if (!window.electronAPI) { setLoadingChannels(false); return; }
@@ -79,17 +102,14 @@ export default function Channels() {
     } catch {
       setConfiguredChannels(new Set(['local']));
     }
+    // Load dynamic channel registry from backend (OpenClaw catalog discovery)
     try {
-      const supported = await (window.electronAPI as any).channelListSupported?.();
-      if (supported?.success && supported.channels?.length > 0) {
-        const knownIds = new Set(CHANNELS.map(c => c.id));
-        const extra: Channel[] = [];
-        for (const ch of supported.channels) {
-          if (!knownIds.has(ch)) extra.push({ id: ch, connected: false, supported: true });
-        }
-        if (extra.length > 0) setChannels([...CHANNELS, ...extra]);
+      const regResult = await (window.electronAPI as any).channelGetRegistry?.();
+      if (regResult?.channels?.length > 0) {
+        loadFromSerialized(regResult.channels);
+        setChannels(getAllChannels());
       }
-    } catch { /* fallback */ }
+    } catch { /* fallback to builtin */ }
     setLoadingChannels(false);
     hasLoadedOnce.current = true;
   };
@@ -101,10 +121,9 @@ export default function Channels() {
     if (!window.electronAPI) return;
     (window.electronAPI as any).onChannelQR?.((art: string) => {
       setAsciiQR(art);
-      setChannelProgress(null); // Clear progress once QR is shown
+      setChannelProgress(null);
     });
     (window.electronAPI as any).onChannelStatus?.((statusKey: string) => {
-      // statusKey is an i18n key, possibly with "::" dynamic param (e.g. "channels.status.loadingPlugin::feishu_doc")
       setChannelProgress(statusKey);
     });
   }, []);
@@ -112,23 +131,30 @@ export default function Channels() {
   const openWizard = async (channelId: string) => {
     setActiveWizard(channelId);
     setWizardStep('intro');
-    setTokenInput(''); setSlackBotToken(''); setSlackAppToken('');
-    setFeishuAppId(''); setFeishuAppSecret('');
-    setMatrixServer(''); setMatrixUser(''); setMatrixPass('');
-    setGchatKeyFile('');
+    setFormValues({});
     setAsciiQR(null); setChannelProgress(null);
     setTestStatus('idle'); setTestError(null); setLastError(null);
 
-    // Pre-fill if already configured
+    // Pre-fill from existing config
     if (window.electronAPI && configuredChannels.has(channelId)) {
       try {
         const res = await (window.electronAPI as any).channelReadConfig(channelId);
         if (res?.success && res.config) {
-          if (channelId === 'feishu') { setFeishuAppId(res.config.appId || ''); setFeishuAppSecret(res.config.appSecret || ''); }
-          else if (channelId === 'slack') { setSlackBotToken(res.config.botToken || res.config.bot_token || ''); setSlackAppToken(res.config.appToken || res.config.app_token || ''); }
-          else if (channelId === 'matrix') { setMatrixServer(res.config.homeserver || ''); setMatrixUser(res.config.userId || res.config.user_id || ''); }
-          else if (channelId === 'google-chat') { setGchatKeyFile(res.config.serviceAccountFile || ''); }
-          else if (res.config.token) { setTokenInput(res.config.token); }
+          const ch = getChannel(channelId);
+          if (ch) {
+            const prefilled: Record<string, string> = {};
+            for (const field of ch.configFields) {
+              // Try exact key, then snake_case variant
+              const val = res.config[field.key]
+                || res.config[field.key.replace(/[A-Z]/g, (c: string) => '_' + c.toLowerCase())];
+              if (val) prefilled[field.key] = val;
+            }
+            // Also try generic 'token' field
+            if (Object.keys(prefilled).length === 0 && res.config.token) {
+              prefilled.token = res.config.token;
+            }
+            setFormValues(prefilled);
+          }
         }
       } catch { /* start fresh */ }
     }
@@ -136,26 +162,26 @@ export default function Channels() {
 
   const closeWizard = () => { setActiveWizard(null); loadConfiguredChannels(false); };
 
-  // Build config for save — only the essentials, backend handles defaults
+  // Build config from form values — driven by channel definition
   const buildConfig = (): Record<string, string> | null => {
-    if (!activeWizard) return null;
-    switch (activeWizard) {
-      case 'feishu': return (feishuAppId && feishuAppSecret) ? { appId: feishuAppId, appSecret: feishuAppSecret } : null;
-      case 'slack': return (slackBotToken && slackAppToken) ? { botToken: slackBotToken, appToken: slackAppToken } : null;
-      case 'matrix': return (matrixServer && matrixUser && matrixPass) ? { homeserver: matrixServer, userId: matrixUser, password: matrixPass } : null;
-      case 'google-chat': return gchatKeyFile ? { serviceAccountFile: gchatKeyFile } : null;
-      default: return tokenInput ? { token: tokenInput } : null;
+    if (!activeChannel) return null;
+    const config: Record<string, string> = {};
+    for (const field of activeChannel.configFields) {
+      const val = formValues[field.key]?.trim();
+      if (field.required && !val) return null;
+      if (val) config[field.key] = val;
     }
+    return Object.keys(config).length > 0 ? config : null;
   };
 
   const isFormValid = (): boolean => {
-    if (!activeWizard) return false;
-    if (ONE_CLICK_CHANNELS.includes(activeWizard)) return true;
+    if (!activeChannel) return false;
+    if (isOneClick) return true;
     return buildConfig() !== null;
   };
 
   const handleConnect = async () => {
-    if (!activeWizard) return;
+    if (!activeWizard || !activeChannel) return;
     setTestStatus('testing'); setTestError(null);
 
     if (!window.electronAPI) {
@@ -163,18 +189,13 @@ export default function Channels() {
       return;
     }
 
-    if (ONE_CLICK_CHANNELS.includes(activeWizard)) {
-      // One-click: backend handles install + login + config
+    if (isOneClick) {
       const result = await (window.electronAPI as any).channelSetup(activeWizard);
       setTestStatus(result.success ? 'success' : 'error');
       if (!result.success) {
-        const errorMsg = result.error
-          ? result.error
-          : t('channels.setupFailed', 'Setup failed. Check Gateway in Settings.');
-        setTestError(errorMsg);
+        setTestError(result.error || t('channels.setupFailed', 'Setup failed. Check Gateway in Settings.'));
       }
     } else {
-      // Save config via CLI, then test
       const config = buildConfig()!;
       const saveResult = await (window.electronAPI as any).channelSave(activeWizard, config);
       if (!saveResult.success) { setTestStatus('error'); setTestError(saveResult.error || t('channels.saveFailed', 'Could not save. Please try again.')); return; }
@@ -185,9 +206,9 @@ export default function Channels() {
     }
   };
 
-  // --- Guide content per channel ---
+  // --- Guide content —  rich guides for known channels, generic for dynamic ---
 
-  const oneClickGuide = (steps: string[]) => (
+  const oneClickGuide = (steps: (string | React.ReactNode)[]) => (
     <div className="space-y-2 text-sm">
       {steps.map((step, i) => (
         <div key={i} className="flex items-start gap-3 p-3 bg-slate-800/50 rounded-lg">
@@ -199,8 +220,9 @@ export default function Channels() {
   );
 
   const getGuide = () => {
-    if (!activeWizard) return null;
+    if (!activeWizard || !activeChannel) return null;
 
+    // Rich guides for known channels (preserved from original)
     switch (activeWizard) {
       case 'whatsapp':
         return oneClickGuide([
@@ -239,131 +261,44 @@ export default function Channels() {
               <>{t('channels.guide.telegram.step1')} <span className="text-brand-400 font-medium">@BotFather</span></>,
               <>{t('channels.guide.telegram.step2')} <span className="text-brand-400 font-medium">/newbot</span> — {t('channels.guide.telegram.step2.desc')}</>,
               <>{t('channels.guide.telegram.step3')} <span className="text-brand-400 font-medium">Token</span> — {t('channels.guide.telegram.step3.desc')}</>,
-            ] as any)}
+            ])}
           </div>
         );
-      default:
+      default: {
+        // Generic guide: try i18n key, fallback to channel description + docs link
+        const guideText = t(`channels.guide.${activeWizard}`, '') || activeChannel.description || t('channels.guide.default', 'Follow the steps below to connect this channel.');
+        const docsSlug = activeChannel.docsSlug || activeChannel.openclawId;
         return (
           <div className="p-4 bg-slate-800/50 rounded-xl">
-            <p className="text-sm text-slate-300">{t(`channels.guide.${activeWizard}`, t('channels.guide.default'))}</p>
+            <p className="text-sm text-slate-300">{guideText}</p>
             <button onClick={() => {
-              // Map frontend IDs to real doc slugs
-              const docSlugs: Record<string, string> = {
-                'google-chat': 'googlechat', 'wechat': 'googlechat', // wechat has no doc page, fallback
-                'feishu': 'googlechat', // feishu is plugin, no dedicated doc
-              };
-              const slug = docSlugs[activeWizard!] || activeWizard;
-              window.electronAPI?.openExternal(`https://docs.openclaw.ai/channels/${slug}`);
+              window.electronAPI?.openExternal(`https://docs.openclaw.ai/channels/${docsSlug}`);
             }}
               className="mt-3 flex items-center gap-1.5 text-sm text-brand-400 hover:text-brand-300">
               <ExternalLink size={14} /> {t('channels.viewTutorial')}
             </button>
           </div>
         );
+      }
     }
   };
 
-  // --- Token/credential form per channel ---
+  // --- Config form — now fully driven by registry ---
   const getTokenForm = () => {
-    if (!activeWizard) return null;
-
-    switch (activeWizard) {
-      case 'slack':
-        return (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.slack.botToken', 'Bot Token')}</label>
-              <PasswordInput value={slackBotToken} onChange={(e) => setSlackBotToken(e.target.value)}
-                placeholder="xoxb-..." className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
-              <p className="mt-1.5 text-xs text-slate-500">{t('channels.slackBotHint', 'Slack App → OAuth & Permissions → Bot User OAuth Token')}</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.slack.appToken', 'App Token')}</label>
-              <PasswordInput value={slackAppToken} onChange={(e) => setSlackAppToken(e.target.value)}
-                placeholder="xapp-..." className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
-              <p className="mt-1.5 text-xs text-slate-500">{t('channels.slackAppHint', 'Slack App → Basic Information → App-Level Tokens')}</p>
-            </div>
-          </div>
-        );
-      case 'feishu':
-        return (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.feishu.appId', 'App ID')}</label>
-              <PasswordInput value={feishuAppId} onChange={(e) => setFeishuAppId(e.target.value)}
-                placeholder="cli_xxxxxxxxxx" className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.feishu.appSecret', 'App Secret')}</label>
-              <PasswordInput value={feishuAppSecret} onChange={(e) => setFeishuAppSecret(e.target.value)}
-                placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
-            </div>
-          </div>
-        );
-      case 'matrix':
-        return (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.matrix.server', 'Server address')}</label>
-              <input value={matrixServer} onChange={(e) => setMatrixServer(e.target.value)}
-                placeholder="https://matrix.org" className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.matrix.user', 'Username')}</label>
-              <input value={matrixUser} onChange={(e) => setMatrixUser(e.target.value)}
-                placeholder="@mybot:matrix.org" className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.matrix.password', 'Password')}</label>
-              <PasswordInput value={matrixPass} onChange={(e) => setMatrixPass(e.target.value)}
-                placeholder="••••••••" className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
-            </div>
-          </div>
-        );
-      case 'google-chat':
-        return (
-          <div className="space-y-4">
-            <p className="text-xs text-slate-400">{t('channels.gchat.desc', 'You need a Google Cloud service account key file (JSON). Create one in Google Cloud Console → IAM → Service Accounts → Keys.')}</p>
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.gchat.keyFile', 'Service Account Key')}</label>
-              <div className="flex gap-2">
-                <input value={gchatKeyFile} readOnly
-                  placeholder={t('channels.gchat.noFile', 'No file selected')}
-                  className="flex-1 px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-400" />
-                <button onClick={async () => {
-                  if (window.electronAPI) {
-                    const result = await (window.electronAPI as any).selectFile?.({ filters: [{ name: 'JSON', extensions: ['json'] }] });
-                    if (result?.filePath) setGchatKeyFile(result.filePath);
-                  }
-                }} className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm text-slate-100 whitespace-nowrap">
-                  {t('channels.gchat.browse', 'Browse...')}
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      case 'line':
-        return (
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.lineToken', 'Channel Access Token')}</label>
-            <PasswordInput value={tokenInput} onChange={(e) => setTokenInput(e.target.value)}
-              placeholder={t('channels.paste')} className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
-            <p className="mt-1.5 text-xs text-slate-500">{t('channels.lineHint', 'LINE Developers Console → Messaging API → Channel Access Token')}</p>
-          </div>
-        );
-      default:
-        // Telegram, Discord — simple single token
-        return (
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">{t('channels.token')}</label>
-            <PasswordInput value={tokenInput} onChange={(e) => setTokenInput(e.target.value)}
-              placeholder={t('channels.paste')} className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
-          </div>
-        );
-    }
+    if (!activeChannel || activeChannel.configFields.length === 0) return null;
+    return (
+      <DynamicConfigForm
+        fields={activeChannel.configFields}
+        values={formValues}
+        onChange={(key, val) => setFormValues(prev => ({ ...prev, [key]: val }))}
+        t={t}
+      />
+    );
   };
 
-  const isOneClick = activeWizard ? ONE_CLICK_CHANNELS.includes(activeWizard) : false;
+  // Channel display helpers
+  const getChannelLabel = (ch: ChannelDef) => t(`channels.channel.${ch.id}`, ch.label);
+  const getChannelDesc = (ch: ChannelDef) => t(`channels.channel.${ch.id}.desc`, ch.description || '');
 
   return (
     <div className="h-full flex flex-col">
@@ -373,7 +308,6 @@ export default function Channels() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">
-        {/* Loading indicator */}
         {loadingChannels && (
           <div className="flex items-center gap-2 mb-4 p-3 bg-slate-800/30 rounded-lg text-xs text-slate-400">
             <Loader2 size={12} className="animate-spin" />
@@ -385,13 +319,13 @@ export default function Channels() {
         <div className="mb-6">
           <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">{t('channels.connected')}</h3>
           <div className="grid grid-cols-2 gap-3">
-            {channels.filter((c) => c.connected || configuredChannels.has(c.id)).map((ch) => (
+            {channels.filter((c) => c.id === 'local' || configuredChannels.has(c.id)).map((ch) => (
               <button key={ch.id} onClick={() => ch.id !== 'local' && openWizard(ch.id)} disabled={ch.id === 'local'}
                 className={`p-4 bg-emerald-600/10 border border-emerald-600/30 rounded-xl text-left ${ch.id !== 'local' ? 'hover:border-emerald-500/50 cursor-pointer' : ''} transition-colors`}>
                 <div className="flex items-center gap-3">
                   <ChannelIcon channelId={ch.id} size={28} />
                   <div className="flex-1">
-                    <div className="font-medium text-sm">{t(`channels.channel.${ch.id}`, ch.id)}</div>
+                    <div className="font-medium text-sm">{getChannelLabel(ch)}</div>
                     <div className="text-xs text-emerald-400">✅ {ch.id === 'local' ? t('channels.builtIn') : t('channels.configured')}</div>
                   </div>
                   {ch.id !== 'local' && <ChevronRight size={14} className="text-slate-600" />}
@@ -405,14 +339,14 @@ export default function Channels() {
         <div>
           <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">{t('channels.available')}</h3>
           <div className="grid grid-cols-2 gap-3">
-            {channels.filter((c) => !c.connected && !configuredChannels.has(c.id)).map((ch) => (
+            {channels.filter((c) => c.id !== 'local' && !configuredChannels.has(c.id)).map((ch) => (
               <button key={ch.id} onClick={() => openWizard(ch.id)}
                 className="p-4 bg-slate-800/50 border border-slate-700 rounded-xl hover:border-slate-600 transition-colors text-left group">
                 <div className="flex items-center gap-3">
                   <ChannelIcon channelId={ch.id} size={28} />
                   <div className="flex-1">
-                    <div className="font-medium text-sm">{t(`channels.channel.${ch.id}`)}</div>
-                    <div className="text-xs text-slate-500">{t(`channels.channel.${ch.id}.desc`)}</div>
+                    <div className="font-medium text-sm">{getChannelLabel(ch)}</div>
+                    <div className="text-xs text-slate-500">{getChannelDesc(ch)}</div>
                   </div>
                   <ChevronRight size={16} className="text-slate-600 group-hover:text-slate-400 transition-colors" />
                 </div>
@@ -423,13 +357,13 @@ export default function Channels() {
       </div>
 
       {/* Wizard Modal */}
-      {activeWizard && (
+      {activeWizard && activeChannel && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-8">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto">
             <div className="flex items-center justify-between p-5 border-b border-slate-800">
               <h2 className="text-lg font-semibold flex items-center gap-2">
                 <ChannelIcon channelId={activeWizard} size={24} />
-                {t('channels.connectPrefix')} {t(`channels.channel.${activeWizard}`)}
+                {t('channels.connectPrefix')} {getChannelLabel(activeChannel)}
                 {configuredChannels.has(activeWizard) && (
                   <span className="text-xs font-normal px-2 py-0.5 bg-amber-600/20 border border-amber-600/30 text-amber-400 rounded-full">
                     ✏️ {t('channels.editingBadge', 'Editing')}
@@ -440,7 +374,7 @@ export default function Channels() {
             </div>
 
             <div className="p-5 space-y-5">
-              {/* Step 1: Guide (one-click channels stay here; token channels proceed) */}
+              {/* Step 1: Guide */}
               {wizardStep === 'intro' && (
                 <>
                   {getGuide()}
@@ -467,7 +401,7 @@ export default function Channels() {
                 </>
               )}
 
-              {/* Step 2: Credentials (only for non one-click channels) */}
+              {/* Step 2: Credentials */}
               {wizardStep === 'token' && (
                 <>
                   {lastError && (
@@ -498,8 +432,7 @@ export default function Channels() {
                 <>
                   <div className={asciiQR ? 'py-2' : 'text-center py-6'}>
                     {testStatus === 'testing' && (
-                      <div className={asciiQR ? 'space-y-3' : 'space-y-3'}>
-                        {/* ASCII QR code display (WhatsApp / Signal CLI mode) */}
+                      <div>
                         {asciiQR ? (
                           <div className="space-y-3">
                             <p className="text-sm text-slate-300 text-center font-medium">

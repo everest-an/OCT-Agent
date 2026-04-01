@@ -72,8 +72,16 @@ export function getManagedOpenClawPrefix(homedir: string): string {
 }
 
 export function getManagedOpenClawEntrypoint(homedir: string): string | null {
-  const entry = path.join(getManagedOpenClawPrefix(homedir), 'node_modules', 'openclaw', 'openclaw.mjs');
-  return fs.existsSync(entry) ? entry : null;
+  const prefix = getManagedOpenClawPrefix(homedir);
+  // npm install -g --prefix puts packages under lib/node_modules/ (not node_modules/)
+  const candidates = [
+    path.join(prefix, 'lib', 'node_modules', 'openclaw', 'openclaw.mjs'),
+    path.join(prefix, 'node_modules', 'openclaw', 'openclaw.mjs'),
+  ];
+  for (const entry of candidates) {
+    if (fs.existsSync(entry)) return entry;
+  }
+  return null;
 }
 
 export function getGatewayPort(homedir: string): number {

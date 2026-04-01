@@ -257,6 +257,7 @@ function getEnhancedPath(): string {
     // User-specific paths FIRST — they override system defaults
     // (e.g. ~/.npm-global/bin/openclaw@3.28 must beat /usr/local/bin/openclaw@3.13)
     extras.push(
+      getManagedOpenClawBinDir(), // managed runtime — highest priority
       `${HOME}/.npm-global/bin`, // custom npm prefix — MUST be before /usr/local/bin
       `${HOME}/.local/bin`,
       '/opt/homebrew/bin',
@@ -810,22 +811,29 @@ ipcMain.handle('setup:install-plugin', async () => {
   const pluginTarball = resolveBundledCache('awareness-memory.tgz');
 
   // Primary: direct npm pack + extract (avoids path resolution issues in packaged Electron where cwd=/)
+  // Try default registry first, then npmmirror for users in China
   const extensionsDir = path.join(HOME, '.openclaw', 'extensions');
   const extDir = path.join(extensionsDir, 'openclaw-memory');
-  try {
-    fs.mkdirSync(extensionsDir, { recursive: true });
-    const nullDev = process.platform === 'win32' ? 'NUL' : '/dev/null';
-    const packOut = await runAsync(`cd "${extensionsDir}" && npm pack @awareness-sdk/openclaw-memory@latest 2>${nullDev}`, 60000);
-    const tgzName = packOut.trim().split('\n').pop()?.trim() || '';
-    if (!tgzName || !tgzName.endsWith('.tgz')) throw new Error('npm pack failed');
-    const tgzPath = path.join(extensionsDir, tgzName);
-    if (fs.existsSync(extDir)) fs.rmSync(extDir, { recursive: true, force: true });
-    fs.mkdirSync(extDir, { recursive: true });
-    await runAsync(`tar -xzf "${tgzPath}" -C "${extDir}" --strip-components=1`, 30000);
-    try { fs.unlinkSync(tgzPath); } catch { /* best-effort */ }
-    persistAwarenessPluginConfig({ enableSlot: true });
-    return { success: true, method: 'npm-direct' };
-  } catch { /* fall through */ }
+  const nullDev = process.platform === 'win32' ? 'NUL' : '/dev/null';
+  const setupRegistries = ['', '--registry=https://registry.npmmirror.com'];
+  let npmDirectOk = false;
+  for (const regFlag of setupRegistries) {
+    try {
+      fs.mkdirSync(extensionsDir, { recursive: true });
+      const packOut = await runAsync(`cd "${extensionsDir}" && npm pack @awareness-sdk/openclaw-memory@latest ${regFlag} 2>${nullDev}`, 120000);
+      const tgzName = packOut.trim().split('\n').pop()?.trim() || '';
+      if (!tgzName || !tgzName.endsWith('.tgz')) throw new Error('npm pack failed');
+      const tgzPath = path.join(extensionsDir, tgzName);
+      if (fs.existsSync(extDir)) fs.rmSync(extDir, { recursive: true, force: true });
+      fs.mkdirSync(extDir, { recursive: true });
+      await runAsync(`tar -xzf "${tgzPath}" -C "${extDir}" --strip-components=1`, 30000);
+      try { fs.unlinkSync(tgzPath); } catch { /* best-effort */ }
+      persistAwarenessPluginConfig({ enableSlot: true });
+      npmDirectOk = true;
+      return { success: true, method: regFlag ? 'npm-direct-mirror' : 'npm-direct' };
+    } catch { /* try next registry or fall through */ }
+  }
+  if (!npmDirectOk) { /* fall through to openclaw plugins install */ }
 
   // Fallback: openclaw plugins install with cd to HOME
   if (hasOpenClaw) {
@@ -1105,27 +1113,14 @@ ipcMain.handle('app:upgrade-component', async (_e, component: string) => {
       const extensionsDir = path.join(HOME, '.openclaw', 'extensions');
       fs.mkdirSync(extensionsDir, { recursive: true });
 
-      // Primary: direct npm pack + extract (avoids openclaw/clawhub path resolution issues in packaged Electron where cwd=/)
-      try {
-        const nullDev = process.platform === 'win32' ? 'NUL' : '/dev/null';
-        const packOut = await runAsync(`cd "${extensionsDir}" && npm pack @awareness-sdk/openclaw-memory@latest 2>${nullDev}`, 60000);
-        // npm pack outputs the tarball filename (e.g. "awareness-sdk-openclaw-memory-0.5.16.tgz")
-        const tgzName = packOut.trim().split('\n').pop()?.trim() || '';
-        if (!tgzName || !tgzName.endsWith('.tgz')) {
-          throw new Error('npm pack did not produce a tarball');
-        }
-        const tgzPath = path.join(extensionsDir, tgzName);
-        fs.mkdirSync(extDir, { recursive: true });
-        await runAsync(`tar -xzf "${tgzPath}" -C "${extDir}" --strip-components=1`, 30000);
-        // Clean up tarball
-        try { fs.unlinkSync(tgzPath); } catch { /* best-effort */ }
-        // Install production dependencies
-        await runAsync(`cd "${extDir}" && npm install --omit=dev --no-audit --no-fund`, 90000);
+      const nullDev = process.platform === 'win32' ? 'NUL' : '/dev/null';
+      const pluginRegistries = ['', '--registry=https://registry.npmmirror.com'];
 
-        // Read installed version and update openclaw.json
+      // Helper: read installed version and update openclaw.json
+      const finalizePluginUpgrade = (dir: string): string => {
         let newVer = 'latest';
         try {
-          const pkg = JSON.parse(fs.readFileSync(path.join(extDir, 'package.json'), 'utf8'));
+          const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
           newVer = pkg.version || 'latest';
         } catch { /* best-effort */ }
         try {
@@ -1142,16 +1137,45 @@ ipcMain.handle('app:upgrade-component', async (_e, component: string) => {
             }
           }
         } catch { /* best-effort: config update is non-critical */ }
+        return newVer;
+      };
 
-        return { success: true, version: newVer, method: 'npm-direct' };
-      } catch (directErr: any) {
-        // Fallback: openclaw plugins install with cd to HOME (avoid cwd=/ in Electron)
+      // Strategy 1: direct npm pack + extract (try default registry, then npmmirror)
+      for (const regFlag of pluginRegistries) {
         try {
-          await runAsync(`cd "${HOME}" && openclaw plugins install @awareness-sdk/openclaw-memory`, 90000);
-          return { success: true, method: 'openclaw-plugin' };
-        } catch (e: any) {
-          throw new Error(`Plugin upgrade failed: ${directErr.message?.slice(0, 200) || e.message?.slice(0, 200)}`);
-        }
+          const packOut = await runAsync(`cd "${extensionsDir}" && npm pack @awareness-sdk/openclaw-memory@latest ${regFlag} 2>${nullDev}`, 120000);
+          // npm pack outputs the tarball filename (e.g. "awareness-sdk-openclaw-memory-0.5.17.tgz")
+          const tgzName = packOut.trim().split('\n').pop()?.trim() || '';
+          if (!tgzName || !tgzName.endsWith('.tgz')) {
+            throw new Error('npm pack did not produce a tarball');
+          }
+          const tgzPath = path.join(extensionsDir, tgzName);
+          if (fs.existsSync(extDir)) fs.rmSync(extDir, { recursive: true, force: true });
+          fs.mkdirSync(extDir, { recursive: true });
+          await runAsync(`tar -xzf "${tgzPath}" -C "${extDir}" --strip-components=1`, 30000);
+          try { fs.unlinkSync(tgzPath); } catch { /* best-effort */ }
+          // Install production dependencies (5 min — native deps like better-sqlite3 may need compilation)
+          await runAsync(`cd "${extDir}" && npm install --omit=dev --no-audit --no-fund`, 300000);
+
+          const newVer = finalizePluginUpgrade(extDir);
+          return { success: true, version: newVer, method: regFlag ? 'npm-direct-mirror' : 'npm-direct' };
+        } catch { /* try next registry or fall through */ }
+      }
+
+      // Strategy 2: openclaw plugins install (avoid cwd=/ in Electron)
+      try {
+        await runAsync(`cd "${HOME}" && openclaw plugins install @awareness-sdk/openclaw-memory`, 120000);
+        const newVer = finalizePluginUpgrade(extDir);
+        return { success: true, version: newVer, method: 'openclaw-plugin' };
+      } catch { /* fall through to clawhub */ }
+
+      // Strategy 3: clawhub install (same as initial install fallback)
+      try {
+        await runAsync(`cd "${HOME}" && npx -y clawhub@latest install awareness-memory --force`, 120000);
+        const newVer = finalizePluginUpgrade(extDir);
+        return { success: true, version: newVer, method: 'clawhub' };
+      } catch (e: any) {
+        throw new Error(`Plugin upgrade failed: ${e.message?.slice(0, 200)}`);
       }
     } else if (component === 'daemon') {
       // Stop existing daemon, then restart with latest via npx
@@ -2120,6 +2144,10 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, opti
     })();
     const chatTimeout = setTimeout(() => chatResolve(), 120000);
 
+    // Track seen tool IDs to avoid duplicates from cumulative delta events
+    const seenToolIds = new Set<string>();
+    const completedToolIds = new Set<string>();
+
     // Subscribe to chat events for this session BEFORE sending
     chatEventHandler = (payload: any) => {
       if (!payload) return;
@@ -2144,26 +2172,39 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, opti
             send('chat:status', { type: 'generating' });
           }
 
-          // Tool use detection in content blocks
+          // Tool use / thinking detection in content blocks (with dedup for cumulative deltas)
           if (Array.isArray(msg.content)) {
             for (const block of msg.content) {
               if (block.type === 'tool_use') {
-                send('chat:status', {
-                  type: 'tool_call',
-                  tool: block.name || 'tool',
-                  toolStatus: 'running',
-                  toolId: block.id || `tc-${Date.now()}`,
-                });
+                const toolId = block.id || `tc-${Date.now()}`;
+                if (!seenToolIds.has(toolId)) {
+                  seenToolIds.add(toolId);
+                  send('chat:status', {
+                    type: 'tool_call',
+                    tool: block.name || 'tool',
+                    toolStatus: 'running',
+                    toolId,
+                  });
+                }
               }
               if (block.type === 'tool_result') {
-                send('chat:status', {
-                  type: 'tool_update',
-                  toolId: block.tool_use_id || '',
-                  toolStatus: 'completed',
-                });
+                const toolId = block.tool_use_id || '';
+                if (toolId && !completedToolIds.has(toolId)) {
+                  completedToolIds.add(toolId);
+                  send('chat:status', {
+                    type: 'tool_update',
+                    toolId,
+                    toolStatus: 'completed',
+                  });
+                }
               }
               if (block.type === 'thinking') {
+                // Forward thinking content text to frontend (not just status)
+                const thinkingText = block.thinking || block.text || '';
                 send('chat:status', { type: 'thinking' });
+                if (thinkingText) {
+                  send('chat:thinking', thinkingText);
+                }
               }
             }
           }
@@ -2187,8 +2228,11 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, opti
     send('chat:status', { type: 'thinking' });
 
     // Send message via Gateway WebSocket RPC (returns immediately with runId)
+    // Pass verbose:'on' for tool call visibility and reasoning:'on' for thinking content
     await ws.chatSend(sid, fullMessage, {
       thinking: options?.thinkingLevel && options.thinkingLevel !== 'off' ? options.thinkingLevel : undefined,
+      verbose: 'on',
+      reasoning: 'on',
     });
 
     // Wait for agent to finish (final/error/aborted event or 120s timeout)
@@ -2273,87 +2317,86 @@ async function chatSendViaCli(
   });
 }
 
-// --- Channel Configuration ---
+// --- Channel Configuration (registry-driven) ---
+// Import channel registry for dynamic channel metadata
+import {
+  getChannel, getChannelByOpenclawId, toOpenclawId, toFrontendId,
+  buildCLIFlags, getAllChannels, serializeRegistry,
+  mergeCatalog, mergeChannelOptions, type ChannelDef, type CatalogEntry,
+} from '../src/lib/channel-registry';
+
+// Discover channels from OpenClaw installation at startup
+function discoverOpenClawChannels(): void {
+  try {
+    // Find openclaw install path
+    const ocPath = safeShellExec('which openclaw 2>/dev/null')?.trim();
+    if (!ocPath) return;
+    const distDir = path.resolve(path.dirname(ocPath), '..', 'lib', 'node_modules', 'openclaw', 'dist');
+
+    // Load channel-catalog.json
+    try {
+      const catalogPath = path.join(distDir, 'channel-catalog.json');
+      const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
+      if (catalog.entries) mergeCatalog(catalog.entries as CatalogEntry[]);
+    } catch { /* catalog not found */ }
+
+    // Load cli-startup-metadata.json
+    try {
+      const metaPath = path.join(distDir, 'cli-startup-metadata.json');
+      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      if (meta.channelOptions) mergeChannelOptions(meta.channelOptions);
+    } catch { /* metadata not found */ }
+  } catch { /* openclaw not installed */ }
+}
+
+// Run discovery once at module load
+discoverOpenClawChannels();
+
+// IPC: return full channel registry to frontend
+ipcMain.handle('channel:get-registry', async () => {
+  return { channels: serializeRegistry() };
+});
 
 ipcMain.handle('channel:save', async (_e, channelId: string, config: Record<string, string>) => {
   try {
-    // Feishu is plugin-based, write directly to openclaw.json
-    if (channelId === 'feishu') {
+    const channelDef = getChannel(channelId);
+    const openclawId = channelDef?.openclawId || channelId;
+    const pluginPkg = channelDef?.pluginPackage || `@openclaw/${openclawId}`;
+    const saveStrategy = channelDef?.saveStrategy || 'cli';
+
+    // Install plugin first (all channels need this)
+    try { await runAsync(`openclaw plugins install "${pluginPkg}" 2>&1`, 60000); } catch { /* already installed */ }
+
+    if (saveStrategy === 'json-direct') {
+      // WeChat (third-party plugin) — write directly to openclaw.json
       const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
       let existing: any = {};
       try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
       if (!existing.channels) existing.channels = {};
-      existing.channels.feishu = { ...existing.channels.feishu, ...config, enabled: true };
+      existing.channels[openclawId] = { ...existing.channels[openclawId], ...config, enabled: true };
       fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
-      // Install feishu plugin, restart gateway, bind agent
-      try { await runAsync('openclaw plugins install @openclaw/feishu 2>&1', 60000); } catch { /* already installed */ }
-      try { await runAsync('openclaw gateway restart 2>&1', 20000); } catch { /* non-fatal */ }
-      try { await runAsync('openclaw agents bind --agent main --bind feishu 2>&1', 10000); } catch { /* non-fatal */ }
-      return { success: true };
-    }
-
-    // Matrix: not in --channel enum, write config directly to openclaw.json
-    // Google Chat: complex config (serviceAccountFile), write directly
-    // WeChat: plugin-based, write directly (same as feishu)
-    if (channelId === 'matrix' || channelId === 'google-chat' || channelId === 'googlechat') {
-      const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
-      let existing: any = {};
-      try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
-      if (!existing.channels) existing.channels = {};
-      const key = channelId === 'google-chat' ? 'googlechat' : channelId;
-      existing.channels[key] = { ...existing.channels[key], ...config, enabled: true };
-      fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
-      // Install plugin, restart gateway, bind agent
-      const pluginId = key === 'googlechat' ? 'googlechat' : key;
-      try { await runAsync(`openclaw plugins install @openclaw/${pluginId} 2>&1`, 60000); } catch { /* already installed */ }
-      try { await runAsync('openclaw gateway restart 2>&1', 20000); } catch { /* non-fatal */ }
-      try { await runAsync(`openclaw agents bind --agent main --bind ${key} 2>&1`, 10000); } catch { /* non-fatal */ }
-      return { success: true };
-    }
-
-    // Native channels: install plugin first, then use `openclaw channels add` with real CLI flags
-    // Channel plugins are NOT bundled in the main openclaw package — they must be installed
-    // via `openclaw plugins install @openclaw/<channel>` before the gateway can load them.
-    // Verified via `openclaw channels add --help` (2026.3.28):
-    //   --channel (telegram|whatsapp|discord|irc|googlechat|slack|signal|imessage|line)
-    //   --token (Telegram/Discord/LINE)
-    //   --bot-token + --app-token (Slack)
-    //   --signal-number + --cli-path + --http-url (Signal)
-    //   --cli-path + --db-path (iMessage)
-    //   --homeserver + --user-id + --password + --access-token (Matrix — but not in --channel enum)
-    //   --webhook-url + --audience + --audience-type (Google Chat)
-    try {
-      await runAsync(`openclaw plugins install @openclaw/${channelId} 2>&1`, 60000);
-    } catch { /* already installed or bundled fallback */ }
-    const esc = (v: string) => v.replace(/"/g, '\\"');
-    const args: string[] = [`--channel ${channelId}`];
-    // Map config keys to real CLI flags
-    if (config.token) args.push(`--token "${esc(config.token)}"`);
-    if (config.botToken) args.push(`--bot-token "${esc(config.botToken)}"`);
-    if (config.appToken) args.push(`--app-token "${esc(config.appToken)}"`);
-
-    const addCmd = `openclaw channels add ${args.join(' ')} 2>&1`;
-    try {
-      await runAsync(addCmd, 15000);
-      // After channels add succeeds, restart gateway and bind to agent
-      try { await runAsync('openclaw gateway restart 2>&1', 20000); } catch { /* non-fatal */ }
-      try { await runAsync(`openclaw agents bind --agent main --bind ${channelId} 2>&1`, 10000); } catch { /* non-fatal */ }
-      return { success: true };
-    } catch (firstErr: any) {
-      const msg = firstErr.message || '';
-      if (msg.includes('already') || msg.includes('exists')) {
-        try {
-          await runAsync(`openclaw channels remove --channel ${channelId} 2>&1`, 10000);
+    } else {
+      // CLI strategy — use `openclaw channels add` with flags from registry
+      const cliFlags = channelDef ? buildCLIFlags(channelDef, config) : '';
+      const addCmd = `openclaw channels add --channel ${openclawId} ${cliFlags} 2>&1`;
+      try {
+        await runAsync(addCmd, 15000);
+      } catch (firstErr: any) {
+        const msg = firstErr.message || '';
+        if (msg.includes('already') || msg.includes('exists')) {
+          // Remove and retry
+          try { await runAsync(`openclaw channels remove --channel ${openclawId} 2>&1`, 10000); } catch {}
           await runAsync(addCmd, 15000);
-          try { await runAsync('openclaw gateway restart 2>&1', 20000); } catch { /* non-fatal */ }
-          try { await runAsync(`openclaw agents bind --agent main --bind ${channelId} 2>&1`, 10000); } catch { /* non-fatal */ }
-          return { success: true };
-        } catch (retryErr: any) {
-          return { success: false, error: retryErr.message?.slice(0, 300) };
+        } else {
+          return { success: false, error: msg.slice(0, 300) };
         }
       }
-      return { success: false, error: msg.slice(0, 300) };
     }
+
+    // Common post-steps: restart gateway + bind to main agent
+    try { await runAsync('openclaw gateway restart 2>&1', 20000); } catch { /* non-fatal */ }
+    try { await runAsync(`openclaw agents bind --agent main --bind ${openclawId} 2>&1`, 10000); } catch { /* non-fatal */ }
+    return { success: true };
   } catch (err: any) {
     return { success: false, error: (err.message || String(err)).slice(0, 300) };
   }
@@ -2364,13 +2407,14 @@ ipcMain.handle('channel:test', async (_e, channelId: string) => {
   try {
     const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
     const existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    const channelConfig = existing?.channels?.[channelId];
+    // Try both frontend ID and openclaw ID
+    const ocId = toOpenclawId(channelId);
+    const channelConfig = existing?.channels?.[channelId] || existing?.channels?.[ocId];
     if (!channelConfig || !channelConfig.enabled) {
       return { success: false, error: 'Channel not configured' };
     }
-    const hasCredentials = channelConfig.token || channelConfig.botToken || channelConfig.appId || channelConfig.appSecret
-      || channelConfig.webhook || channelConfig.bot_token || channelConfig.signal_number || channelConfig.db_path
-      || channelConfig.homeserver || channelConfig.webhook_url || channelConfig.serviceAccountFile;
+    // Dynamic credential check: any key besides 'enabled' that has a truthy value
+    const hasCredentials = Object.keys(channelConfig).some(k => k !== 'enabled' && channelConfig[k]);
     if (!hasCredentials) {
       return { success: false, error: 'No credentials found' };
     }
@@ -2400,7 +2444,9 @@ ipcMain.handle('channel:read-config', async (_e, channelId: string) => {
   try {
     const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
     const existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    const channelConfig = existing?.channels?.[channelId];
+    // Try frontend ID first, then openclaw ID (handles wechat → openclaw-weixin etc.)
+    const ocId = toOpenclawId(channelId);
+    const channelConfig = existing?.channels?.[channelId] || existing?.channels?.[ocId];
     if (channelConfig) {
       return { success: true, config: channelConfig };
     }
@@ -2561,67 +2607,57 @@ function channelLoginWithQR(loginCmd: string, timeoutMs = 120000): Promise<{ suc
 }
 
 ipcMain.handle('channel:setup', async (_e: any, channelId: string) => {
-  // Sanitize channelId to prevent command injection — only allow alphanumeric, hyphens, underscores
+  // Sanitize channelId to prevent command injection
   const safeChannelId = channelId.replace(/[^a-zA-Z0-9_-]/g, '');
   if (!safeChannelId || safeChannelId !== channelId) {
     return { success: false, error: `Invalid channel ID: ${channelId}` };
   }
 
-  // Helper: send progress status to frontend
   const sendStatus = (msg: string) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('channel:status', msg);
   };
 
-  // Helper: bind channel to main agent after login
   const bindToMainAgent = async (bindId: string) => {
     sendStatus('channels.status.binding');
     try { await safeShellExecAsync(`openclaw agents bind --agent main --bind ${bindId} 2>&1`, 10000); } catch { /* non-fatal */ }
   };
 
-  // WeChat: plugin-based (openclaw-weixin)
-  if (safeChannelId === 'wechat') {
-    sendStatus('channels.status.installingWechat');
-    try { await runAsync('openclaw plugins install "@tencent-weixin/openclaw-weixin" 2>&1', 30000); } catch { /* already installed */ }
-    sendStatus('channels.status.connectingWechat');
-    const res = await channelLoginWithQR('openclaw channels login --channel openclaw-weixin --verbose');
-    if (res.success) await bindToMainAgent('openclaw-weixin');
-    return res;
-  }
+  // Lookup channel definition from registry
+  const channelDef = getChannel(safeChannelId);
+  const openclawId = channelDef?.openclawId || safeChannelId;
+  const pluginPkg = channelDef?.pluginPackage || `@openclaw/${openclawId}`;
+  const setupFlow = channelDef?.setupFlow || 'qr-login';
 
-  // Signal: add channel first, then QR link
-  if (safeChannelId === 'signal') {
-    sendStatus('channels.status.configuringSignal');
-    try { await runAsync('openclaw channels add --channel signal 2>&1', 15000); } catch { /* may exist */ }
-    sendStatus('channels.status.connectingSignal');
-    const res = await channelLoginWithQR('openclaw channels login --channel signal --verbose');
-    if (res.success) await bindToMainAgent('signal');
-    return res;
-  }
+  // Install plugin first
+  sendStatus(`channels.status.configuring::${channelDef?.label || safeChannelId}`);
+  try { await runAsync(`openclaw plugins install "${pluginPkg}" 2>&1`, 30000); } catch { /* already installed */ }
 
-  // iMessage: just add — no login needed (macOS auto-detects)
-  if (safeChannelId === 'imessage') {
-    sendStatus('channels.status.configuringImessage');
+  // Execute flow based on registry setupFlow
+  if (setupFlow === 'add-only') {
+    // iMessage-style: just add, no login needed
     try {
-      await runAsync('openclaw channels add --channel imessage 2>&1', 15000);
-      await bindToMainAgent('imessage');
-      return { success: true, output: 'iMessage connected.' };
+      await runAsync(`openclaw channels add --channel ${openclawId} 2>&1`, 15000);
+      await bindToMainAgent(openclawId);
+      return { success: true, output: `${channelDef?.label || safeChannelId} connected.` };
     } catch (err: any) {
       return { success: false, error: err.message?.slice(0, 300) };
     }
   }
 
-  // WhatsApp + others: add then QR login
-  sendStatus(`channels.status.configuring::${safeChannelId}`);
-  try { await safeShellExecAsync(`openclaw channels add --channel ${safeChannelId} 2>&1`, 10000); } catch { /* may exist */ }
-  sendStatus(`channels.status.connecting::${safeChannelId}`);
-  const res = await channelLoginWithQR(`openclaw channels login --channel ${safeChannelId} --verbose`);
-  if (res.success) await bindToMainAgent(safeChannelId);
+  if (setupFlow === 'add-then-login') {
+    // Signal-style: add channel first, then QR login
+    try { await runAsync(`openclaw channels add --channel ${openclawId} 2>&1`, 15000); } catch { /* may exist */ }
+  }
+
+  // qr-login (default) or add-then-login: run channels login with QR detection
+  sendStatus(`channels.status.connecting::${channelDef?.label || safeChannelId}`);
+  const res = await channelLoginWithQR(`openclaw channels login --channel ${openclawId} --verbose`);
+  if (res.success) await bindToMainAgent(openclawId);
   return res;
 });
 
 // Channel status: fast config read first, then CLI check cached for 60s
 const _channelStatusCache: { configured: string[]; ts: number } = { configured: [], ts: 0 };
-const _keyToFrontend: Record<string, string> = { 'openclaw-weixin': 'wechat', 'googlechat': 'google-chat' };
 
 function readConfiguredFromFile(): string[] {
   try {
@@ -2630,7 +2666,7 @@ function readConfiguredFromFile(): string[] {
     const channels = existing?.channels || {};
     const configured: string[] = [];
     for (const [id, cfg] of Object.entries(channels)) {
-      if ((cfg as any)?.enabled) configured.push(_keyToFrontend[id] || id);
+      if ((cfg as any)?.enabled) configured.push(toFrontendId(id));
     }
     return configured;
   } catch { return []; }
@@ -2659,7 +2695,7 @@ ipcMain.handle('channel:list-configured', async () => {
         })
         .map((ch: any) => {
           const id = (ch.id || ch.name || '').toLowerCase();
-          return _keyToFrontend[id] || id;
+          return toFrontendId(id);
         })
         .filter(Boolean);
       if (jsonConfigured.length > 0) {
@@ -2673,13 +2709,13 @@ ipcMain.handle('channel:list-configured', async () => {
     for (const line of output.split('\n')) {
       // Pattern 1: "- telegram default: configured, enabled" (current format)
       const m1 = line.match(/^-\s+(\S+)\s+.*?:\s*(configured|linked|active)/i);
-      if (m1) { configured.push(_keyToFrontend[m1[1].toLowerCase()] || m1[1].toLowerCase()); continue; }
+      if (m1) { configured.push(toFrontendId(m1[1].toLowerCase())); continue; }
       // Pattern 2: "telegram: configured" (simplified format)
       const m2 = line.match(/^\s*(\w[\w-]*)\s*:\s*(configured|linked|active|enabled)/i);
-      if (m2 && m2[1] !== 'Channels') { configured.push(_keyToFrontend[m2[1].toLowerCase()] || m2[1].toLowerCase()); continue; }
+      if (m2 && m2[1] !== 'Channels') { configured.push(toFrontendId(m2[1].toLowerCase())); continue; }
       // Pattern 3: "telegram [configured]" (bracket format)
       const m3 = line.match(/^\s*(\w[\w-]*)\s+\[(configured|linked|active)\]/i);
-      if (m3) { configured.push(_keyToFrontend[m3[1].toLowerCase()] || m3[1].toLowerCase()); }
+      if (m3) { configured.push(toFrontendId(m3[1].toLowerCase())); }
     }
     if (configured.length > 0) {
       _channelStatusCache.configured = configured;
@@ -2749,15 +2785,7 @@ async function getGatewayWs(): Promise<GatewayClient> {
 }
 
 /** Channel icon lookup for known channels. */
-const CHANNEL_ICONS: Record<string, string> = {
-  'openclaw-weixin': '💬',
-  'whatsapp': '📱',
-  'imessage': '💬',
-  'telegram': '✈️',
-  'discord': '🎮',
-  'feishu': '🐦',
-  'slack': '💼',
-};
+// CHANNEL_ICONS removed — frontend now uses <ChannelIcon> component with registry
 
 ipcMain.handle('channel:sessions', async () => {
   try {
@@ -2765,21 +2793,19 @@ ipcMain.handle('channel:sessions', async () => {
     const result = await gw.sessionsList();
     const sessions = result?.sessions || [];
 
-    // Filter to channel sessions only (exclude local CLI sessions)
     const channelSessions = sessions
       .filter((s: any) => {
-        // Channel sessions have origin.provider that is NOT 'webchat'
         const provider = s.origin?.provider || s.lastChannel || '';
         return provider && provider !== 'webchat' && !s.key?.includes(':subagent:');
       })
       .map((s: any) => {
-        const channel = s.lastChannel || s.origin?.provider || 'unknown';
+        const rawChannel = s.lastChannel || s.origin?.provider || 'unknown';
+        const channel = toFrontendId(rawChannel); // Map openclaw-weixin → wechat etc.
         const displayName = s.origin?.from || s.displayName || s.key || '';
         return {
           sessionKey: s.key,
           sessionId: s.sessionId,
           channel,
-          channelIcon: CHANNEL_ICONS[channel] || '📨',
           displayName,
           status: s.status || 'idle',
           updatedAt: s.updatedAt,

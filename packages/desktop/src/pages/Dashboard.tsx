@@ -7,6 +7,7 @@ import { useAppConfig, MODEL_PROVIDERS, useDynamicProviders } from '../lib/store
 import { trackUsage } from '../lib/usage';
 import { useI18n } from '../lib/i18n';
 import BootstrapWizard from '../components/BootstrapWizard';
+import ChannelIcon from '../components/ChannelIcon';
 import logoUrl from '../assets/logo.png';
 
 // --- Types ---
@@ -42,6 +43,7 @@ interface Message {
   files?: AttachedFile[];
   model?: string;
   toolCalls?: ToolCallInfo[];
+  thinking?: string;
 }
 
 interface ChatSession {
@@ -56,7 +58,6 @@ interface ChannelSession {
   sessionKey: string;
   sessionId: string;
   channel: string;
-  channelIcon: string;
   displayName: string;
   status: string;
   updatedAt: number;
@@ -755,7 +756,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
                       activeChannelKey === cs.sessionKey ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                     }`}
                   >
-                    <span className="text-xs">{cs.channelIcon}</span>
+                    <ChannelIcon channelId={cs.channel} size={16} />
                     <span className="truncate flex-1 text-xs">{cs.displayName || cs.channel}</span>
                     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cs.status === 'running' ? 'bg-green-400 animate-pulse' : 'bg-slate-600'}`} />
                   </div>
@@ -968,7 +969,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
                 const cs = channelSessions.find(s => s.sessionKey === activeChannelKey);
                 return cs ? (
                   <>
-                    <span>{cs.channelIcon}</span>
+                    <ChannelIcon channelId={cs.channel} size={18} />
                     <span className="text-sm text-slate-200 font-medium">{cs.displayName || cs.channel}</span>
                     <span className="text-xs text-slate-500">{cs.channel}</span>
                   </>

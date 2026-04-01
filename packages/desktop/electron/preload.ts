@@ -39,6 +39,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onChatStatus: (callback: (status: { type: string; tool?: string; toolStatus?: string; toolId?: string }) => void) => {
     ipcRenderer.on('chat:status', (_e: any, status: any) => callback(status));
   },
+  onChatThinking: (callback: (text: string) => void) => {
+    ipcRenderer.on('chat:thinking', (_e: any, text: string) => callback(text));
+  },
 
   // Channel management
   channelSave: (channelId: string, config: Record<string, string>) => ipcRenderer.invoke('channel:save', channelId, config),
@@ -47,6 +50,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   channelSetup: (channelId: string) => ipcRenderer.invoke('channel:setup', channelId),
   channelListConfigured: () => ipcRenderer.invoke('channel:list-configured'),
   channelListSupported: () => ipcRenderer.invoke('channel:list-supported'),
+  channelGetRegistry: () => ipcRenderer.invoke('channel:get-registry'),
   onChannelQR: (callback: (art: string) => void) => {
     ipcRenderer.on('channel:qr-art', (_e: any, art: string) => callback(art));
   },
