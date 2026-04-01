@@ -2328,10 +2328,34 @@ import {
 // Discover channels from OpenClaw installation at startup
 function discoverOpenClawChannels(): void {
   try {
-    // Find openclaw install path
-    const ocPath = safeShellExec('which openclaw 2>/dev/null')?.trim();
-    if (!ocPath) return;
-    const distDir = path.resolve(path.dirname(ocPath), '..', 'lib', 'node_modules', 'openclaw', 'dist');
+    // Find openclaw dist dir — try multiple strategies
+    let distDir = '';
+
+    // Strategy 1: resolve `which openclaw` symlink
+    try {
+      const ocPath = safeShellExec('which openclaw 2>/dev/null')?.trim();
+      if (ocPath) {
+        const realPath = fs.realpathSync(ocPath);
+        distDir = path.join(path.dirname(realPath), 'dist');
+      }
+    } catch { /* which failed */ }
+
+    // Strategy 2: common npm global paths
+    if (!distDir || !fs.existsSync(distDir)) {
+      const candidates = [
+        path.join(HOME, '.npm-global', 'lib', 'node_modules', 'openclaw', 'dist'),
+        '/usr/local/lib/node_modules/openclaw/dist',
+        '/opt/homebrew/lib/node_modules/openclaw/dist',
+      ];
+      if (process.platform === 'win32') {
+        candidates.unshift(path.join(process.env.APPDATA || '', 'npm', 'node_modules', 'openclaw', 'dist'));
+      }
+      for (const c of candidates) {
+        if (fs.existsSync(c)) { distDir = c; break; }
+      }
+    }
+
+    if (!distDir || !fs.existsSync(distDir)) return;
 
     // Load channel-catalog.json
     try {
