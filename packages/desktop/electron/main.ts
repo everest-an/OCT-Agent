@@ -2130,13 +2130,11 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, opti
 
   let fullResponseText = '';
   let chatEventHandler: ((payload: any) => void) | null = null;
+  let allEventsHandler: ((evt: any) => void) | null = null;
 
   try {
     const ws = await getGatewayWs();
 
-    // chat.send RPC returns immediately with {status:"started", runId}.
-    // Actual content arrives via event:chat stream events.
-    // We must wait for a "final"/"error"/"aborted" event before resolving.
     const { promise: chatDone, resolve: chatResolve } = (() => {
       let r: () => void;
       const p = new Promise<void>(res => { r = res; });
@@ -2144,80 +2142,87 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, opti
     })();
     const chatTimeout = setTimeout(() => chatResolve(), 120000);
 
-    // Track seen tool IDs to avoid duplicates from cumulative delta events
+    // Dedup sets for cumulative delta events
     const seenToolIds = new Set<string>();
     const completedToolIds = new Set<string>();
+    let lastThinkingText = '';
 
-    // Subscribe to chat events for this session BEFORE sending
+    // --- 1) Log ALL gateway events for diagnostics (Cmd+Option+I to see in DevTools) ---
+    allEventsHandler = (evt: any) => {
+      const eventName = evt?.event || 'unknown';
+      const preview = JSON.stringify(evt?.payload || evt).slice(0, 600);
+      console.log(`[gw:${eventName}]`, preview);
+    };
+    ws.on('gateway-event', allEventsHandler);
+
+    // --- 2) Handle chat events (text deltas, tool blocks, thinking blocks) ---
     chatEventHandler = (payload: any) => {
       if (!payload) return;
       const payloadSession = payload.sessionKey || payload.key || '';
-      // Gateway prefixes sessionKey with "agent:main:" — match by suffix
       if (payloadSession && !payloadSession.endsWith(sid) && payloadSession !== sid) return;
 
-      const state = payload.state; // delta | final | aborted | error
+      const state = payload.state;
       const msg = payload.message;
 
-      if (state === 'delta' && msg) {
-        // Streaming text — delta events are CUMULATIVE (each contains full text so far)
-        if (msg.role === 'assistant') {
-          const content = Array.isArray(msg.content)
-            ? msg.content.map((c: any) => c.type === 'text' ? (c.text || '') : '').join('')
-            : (typeof msg.content === 'string' ? msg.content : '');
-          if (content && content.length > fullResponseText.length) {
-            // Send only the NEW portion since last event
-            const newChunk = content.slice(fullResponseText.length);
-            fullResponseText = content;
-            send('chat:stream', newChunk);
-            send('chat:status', { type: 'generating' });
-          }
+      if (state === 'delta' && msg && msg.role === 'assistant') {
+        // --- Extract text from content (handles both string and block array) ---
+        let textContent = '';
+        if (Array.isArray(msg.content)) {
+          textContent = msg.content.map((c: any) => c.type === 'text' ? (c.text || '') : '').join('');
+        } else if (typeof msg.content === 'string') {
+          textContent = msg.content;
+        }
 
-          // Tool use / thinking detection in content blocks (with dedup for cumulative deltas)
-          if (Array.isArray(msg.content)) {
-            for (const block of msg.content) {
-              if (block.type === 'tool_use') {
-                const toolId = block.id || `tc-${Date.now()}`;
-                if (!seenToolIds.has(toolId)) {
-                  seenToolIds.add(toolId);
-                  send('chat:status', {
-                    type: 'tool_call',
-                    tool: block.name || 'tool',
-                    toolStatus: 'running',
-                    toolId,
-                  });
-                }
+        // Stream only new portion (delta events are cumulative)
+        if (textContent && textContent.length > fullResponseText.length) {
+          const newChunk = textContent.slice(fullResponseText.length);
+          fullResponseText = textContent;
+          send('chat:stream', newChunk);
+          send('chat:status', { type: 'generating' });
+        }
+
+        // --- Parse content blocks for tool_use / tool_result / thinking ---
+        if (Array.isArray(msg.content)) {
+          for (const block of msg.content) {
+            if (block.type === 'tool_use') {
+              const toolId = block.id || `tc-${Date.now()}`;
+              if (!seenToolIds.has(toolId)) {
+                seenToolIds.add(toolId);
+                send('chat:status', { type: 'tool_call', tool: block.name || 'tool', toolStatus: 'running', toolId });
               }
-              if (block.type === 'tool_result') {
-                const toolId = block.tool_use_id || '';
-                if (toolId && !completedToolIds.has(toolId)) {
-                  completedToolIds.add(toolId);
-                  send('chat:status', {
-                    type: 'tool_update',
-                    toolId,
-                    toolStatus: 'completed',
-                  });
-                }
+            } else if (block.type === 'tool_result') {
+              const toolId = block.tool_use_id || '';
+              if (toolId && !completedToolIds.has(toolId)) {
+                completedToolIds.add(toolId);
+                send('chat:status', { type: 'tool_update', toolId, toolStatus: 'completed' });
               }
-              if (block.type === 'thinking') {
-                // Forward thinking content text to frontend (not just status)
-                const thinkingText = block.thinking || block.text || '';
+            } else if (block.type === 'thinking' || block.type === 'reasoning') {
+              const text = block.thinking || block.reasoning || block.text || '';
+              if (text && text !== lastThinkingText) {
+                lastThinkingText = text;
                 send('chat:status', { type: 'thinking' });
-                if (thinkingText) {
-                  send('chat:thinking', thinkingText);
-                }
+                send('chat:thinking', text);
               }
             }
           }
         }
+
+        // --- Check if the whole message.content string IS reasoning (OpenClaw sends
+        //     reasoning as separate chat messages prefixed with "Reasoning:") ---
+        if (typeof msg.content === 'string' && msg.content.startsWith('Reasoning:')) {
+          const reasoningText = msg.content.replace(/^Reasoning:\s*/, '');
+          if (reasoningText && reasoningText !== lastThinkingText) {
+            lastThinkingText = reasoningText;
+            // Undo: don't add reasoning prefix to main response text
+            fullResponseText = fullResponseText.replace(msg.content, '').trim();
+            send('chat:thinking', reasoningText);
+            send('chat:status', { type: 'thinking' });
+          }
+        }
       } else if (state === 'final') {
-        // Run completed — resolve the wait
         clearTimeout(chatTimeout);
         chatResolve();
-      } else if (state === 'aborted') {
-        send('chat:status', { type: 'error' });
-        clearTimeout(chatTimeout);
-        chatResolve();
-      } else if (state === 'error') {
+      } else if (state === 'aborted' || state === 'error') {
         send('chat:status', { type: 'error' });
         clearTimeout(chatTimeout);
         chatResolve();
@@ -2227,19 +2232,23 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, opti
     ws.on('event:chat', chatEventHandler);
     send('chat:status', { type: 'thinking' });
 
-    // Send message via Gateway WebSocket RPC (returns immediately with runId)
-    // Pass verbose:'on' for tool call visibility and reasoning:'on' for thinking content
-    await ws.chatSend(sid, fullMessage, {
+    // --- 3) Prepend inline directives for verbose + reasoning visibility ---
+    // OpenClaw parses /v and /reasoning from message text and strips them before LLM.
+    // This enables tool call events and thinking content for this specific message.
+    const directives = '/v on /reasoning on ';
+    const messageWithDirectives = directives + fullMessage;
+
+    // Send message via Gateway WebSocket RPC
+    await ws.chatSend(sid, messageWithDirectives, {
       thinking: options?.thinkingLevel && options.thinkingLevel !== 'off' ? options.thinkingLevel : undefined,
-      verbose: 'on',
-      reasoning: 'on',
     });
 
-    // Wait for agent to finish (final/error/aborted event or 120s timeout)
+    // Wait for agent to finish
     await chatDone;
 
-    // Unsubscribe from chat events
+    // Cleanup listeners
     ws.removeListener('event:chat', chatEventHandler);
+    ws.removeListener('gateway-event', allEventsHandler);
 
     const text = fullResponseText.trim() || 'No response';
     send('chat:stream-end', {});
@@ -2261,8 +2270,9 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, opti
 
     return { success: true, text, sessionId: sid };
   } catch (err: any) {
-    if (chatEventHandler && gatewayWsClient) {
-      gatewayWsClient.removeListener('event:chat', chatEventHandler);
+    if (gatewayWsClient) {
+      if (chatEventHandler) gatewayWsClient.removeListener('event:chat', chatEventHandler);
+      if (allEventsHandler) gatewayWsClient.removeListener('gateway-event', allEventsHandler);
     }
     send('chat:stream-end', {});
     const errorMsg = err?.message || String(err);
@@ -2328,34 +2338,35 @@ import {
 // Discover channels from OpenClaw installation at startup
 function discoverOpenClawChannels(): void {
   try {
-    // Find openclaw dist dir — try multiple strategies
     let distDir = '';
 
-    // Strategy 1: resolve `which openclaw` symlink
+    // Strategy 1: `npm root -g` → <prefix>/lib/node_modules → append openclaw/dist
+    // This is the most reliable cross-platform approach (works with nvm, custom prefix, Windows)
     try {
-      const ocPath = safeShellExec('which openclaw 2>/dev/null')?.trim();
-      if (ocPath) {
-        const realPath = fs.realpathSync(ocPath);
-        distDir = path.join(path.dirname(realPath), 'dist');
+      const globalRoot = safeShellExec('npm root -g 2>/dev/null')?.trim();
+      if (globalRoot) {
+        const candidate = path.join(globalRoot, 'openclaw', 'dist');
+        if (fs.existsSync(candidate)) distDir = candidate;
       }
-    } catch { /* which failed */ }
+    } catch { /* npm not in PATH */ }
 
-    // Strategy 2: common npm global paths
-    if (!distDir || !fs.existsSync(distDir)) {
-      const candidates = [
-        path.join(HOME, '.npm-global', 'lib', 'node_modules', 'openclaw', 'dist'),
-        '/usr/local/lib/node_modules/openclaw/dist',
-        '/opt/homebrew/lib/node_modules/openclaw/dist',
-      ];
-      if (process.platform === 'win32') {
-        candidates.unshift(path.join(process.env.APPDATA || '', 'npm', 'node_modules', 'openclaw', 'dist'));
-      }
-      for (const c of candidates) {
-        if (fs.existsSync(c)) { distDir = c; break; }
-      }
+    // Strategy 2: resolve `which openclaw` symlink
+    if (!distDir) {
+      try {
+        const ocPath = safeShellExec('which openclaw 2>/dev/null')?.trim();
+        if (ocPath) {
+          const realPath = fs.realpathSync(ocPath);
+          const candidate = path.join(path.dirname(realPath), 'dist');
+          if (fs.existsSync(candidate)) distDir = candidate;
+        }
+      } catch { /* which failed */ }
     }
 
-    if (!distDir || !fs.existsSync(distDir)) return;
+    if (!distDir) {
+      console.log('[channel-registry] OpenClaw dist not found, using builtins only');
+      return;
+    }
+    console.log(`[channel-registry] Found OpenClaw at: ${distDir}`);
 
     // Load channel-catalog.json
     try {
@@ -2373,11 +2384,37 @@ function discoverOpenClawChannels(): void {
   } catch { /* openclaw not installed */ }
 }
 
-// Run discovery once at module load
-discoverOpenClawChannels();
+// Lazy discovery: run once on first registry request (not at module load,
+// because Electron's PATH may not be fully set up during early startup)
+let _discoveryDone = false;
 
 // IPC: return full channel registry to frontend
 ipcMain.handle('channel:get-registry', async () => {
+  if (!_discoveryDone) {
+    _discoveryDone = true;
+    // Try sync first, fallback to async npm root
+    discoverOpenClawChannels();
+    // If sync discovery found nothing, try async with full PATH
+    if (getAllChannels().length <= 2) {
+      try {
+        const globalRoot = await safeShellExecAsync('npm root -g 2>/dev/null', 5000);
+        if (globalRoot) {
+          const distDir = path.join(globalRoot.trim(), 'openclaw', 'dist');
+          if (fs.existsSync(distDir)) {
+            try {
+              const catalog = JSON.parse(fs.readFileSync(path.join(distDir, 'channel-catalog.json'), 'utf8'));
+              if (catalog.entries) mergeCatalog(catalog.entries as CatalogEntry[]);
+            } catch {}
+            try {
+              const meta = JSON.parse(fs.readFileSync(path.join(distDir, 'cli-startup-metadata.json'), 'utf8'));
+              if (meta.channelOptions) mergeChannelOptions(meta.channelOptions);
+            } catch {}
+            console.log(`[channel-registry] Async discovery found ${getAllChannels().length} channels at: ${distDir}`);
+          }
+        }
+      } catch {}
+    }
+  }
   return { channels: serializeRegistry() };
 });
 
