@@ -2327,7 +2327,7 @@ async function chatSendViaCli(
 import {
   getChannel, getChannelByOpenclawId, toOpenclawId, toFrontendId,
   buildCLIFlags, getAllChannels, serializeRegistry,
-  mergeCatalog, mergeChannelOptions, parseCliSupportedChannels, setCliSupportedChannels,
+  mergeCatalog, mergeChannelOptions, parseCliHelp, applyCliHelp,
   type CatalogEntry,
 } from './channel-registry';
 
@@ -2367,15 +2367,14 @@ function discoverOpenClawChannels(): void {
     debugLog(`dist found: ${distDir}`);
     console.log(`[channel-registry] Found OpenClaw at: ${distDir}`);
 
-    // Parse CLI-supported channels from `openclaw channels add --help`
-    // This determines which channels use CLI vs json-direct save strategy
+    // Parse CLI help: extracts supported channel enum + per-channel config fields
     try {
       const helpOutput = safeShellExec('openclaw channels add --help 2>/dev/null');
       if (helpOutput) {
-        const cliChannels = parseCliSupportedChannels(helpOutput);
+        const { cliChannels, channelFields } = parseCliHelp(helpOutput);
         if (cliChannels.size > 0) {
-          setCliSupportedChannels(cliChannels);
-          debugLog(`CLI-supported channels: ${[...cliChannels].join(', ')}`);
+          applyCliHelp(cliChannels, channelFields);
+          debugLog(`CLI channels: ${[...cliChannels].join(', ')}; fields for: ${[...channelFields.keys()].join(', ')}`);
         }
       }
     } catch { /* help not available */ }
@@ -2420,12 +2419,12 @@ ipcMain.handle('channel:get-registry', async () => {
           const exists = fs.existsSync(distDir);
           debugLog(`async distDir: ${distDir} exists=${exists}`);
           if (exists) {
-            // Parse CLI enum for save strategy detection
+            // Parse CLI help for save strategy + config fields
             try {
               const helpOut = await safeShellExecAsync('openclaw channels add --help 2>/dev/null', 5000);
               if (helpOut) {
-                const cliCh = parseCliSupportedChannels(helpOut);
-                if (cliCh.size > 0) { setCliSupportedChannels(cliCh); debugLog(`async CLI channels: ${[...cliCh].join(', ')}`); }
+                const { cliChannels, channelFields } = parseCliHelp(helpOut);
+                if (cliChannels.size > 0) { applyCliHelp(cliChannels, channelFields); debugLog(`async CLI channels: ${[...cliChannels].join(', ')}`); }
               }
             } catch { /* help not available */ }
             try {

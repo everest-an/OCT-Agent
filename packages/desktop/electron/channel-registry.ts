@@ -73,98 +73,162 @@ interface KnownOverride {
   label?: string;
   color?: string;
   iconType?: 'svg';
-  connectionType?: 'one-click' | 'multi-field';
-  configFields?: ConfigField[];
-  saveStrategy?: 'json-direct'; // only set for channels NOT in `openclaw channels add --channel` enum
+  connectionType?: 'one-click';  // only for QR/auto-setup channels
   setupFlow?: 'qr-login' | 'add-only' | 'add-then-login';
   order?: number;
+  // Note: configFields are now 100% dynamic from CLI --help parsing
+  // Note: saveStrategy is dynamic from CLI --channel enum detection
 }
 
-// Dynamic: populated at runtime from `openclaw channels add --help`
-// Channels in this set use CLI `channels add`, others use json-direct write
+// ---------------------------------------------------------------------------
+// Dynamic CLI parsing — populated at runtime from `openclaw channels add --help`
+// ---------------------------------------------------------------------------
+
 let _cliSupportedChannels = new Set<string>();
+// Dynamic config fields parsed from CLI help, keyed by channel ID
+let _dynamicConfigFields = new Map<string, ConfigField[]>();
 
-/** Parse CLI-supported channels from `openclaw channels add --help` output */
-export function parseCliSupportedChannels(helpOutput: string): Set<string> {
-  const match = helpOutput.match(/--channel\s+<\w+>\s+Channel\s*\n\s*\(([^)]+)\)/);
-  if (match) {
-    return new Set(match[1].split('|').map(s => s.trim().toLowerCase()));
+/** Known channel name aliases in CLI help descriptions → channel ID */
+const CHANNEL_NAME_ALIASES: Record<string, string> = {
+  'telegram': 'telegram', 'discord': 'discord', 'slack': 'slack',
+  'whatsapp': 'whatsapp', 'signal': 'signal', 'imessage': 'imessage',
+  'matrix': 'matrix', 'google chat': 'googlechat', 'googlechat': 'googlechat',
+  'tlon': 'tlon', 'nostr': 'nostr', 'bluebubbles': 'bluebubbles',
+  'irc': 'irc', 'line': 'line', 'feishu': 'feishu', 'msteams': 'msteams',
+  'microsoft teams': 'msteams', 'teams': 'msteams',
+};
+
+/** Flags to skip (generic, boolean, or advanced/optional) */
+const SKIP_FLAGS = new Set([
+  '--channel', '--account', '--name', '--use-env', '--no-auto-discover-channels',
+  '--auto-discover-channels', '--help', '-h',
+  // Advanced/optional — users rarely need these
+  '--auth-dir', '--cli-path', '--device-name', '--dm-allowlist',
+  '--group-channels', '--initial-sync-limit', '--region', '--service',
+  '--http-host', '--http-port', '--relay-urls', '--token-file',
+  '--audience', '--audience-type',
+]);
+
+/**
+ * Parse `openclaw channels add --help` output to extract:
+ * 1. CLI-supported channel enum (--channel choices)
+ * 2. Per-channel config fields (flag → channel mapping from descriptions)
+ */
+export function parseCliHelp(helpOutput: string): {
+  cliChannels: Set<string>;
+  channelFields: Map<string, ConfigField[]>;
+} {
+  const cliChannels = new Set<string>();
+  const channelFields = new Map<string, ConfigField[]>();
+
+  // 1. Parse --channel enum
+  const enumMatch = helpOutput.match(/--channel\s+<\w+>\s+Channel\s*\n\s*\(([^)]+)\)/);
+  if (enumMatch) {
+    for (const ch of enumMatch[1].split('|')) cliChannels.add(ch.trim().toLowerCase());
   }
-  return new Set();
+
+  // 2. Parse each --flag line and map to channels
+  const lines = helpOutput.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const m = line.match(/^(--[\w-]+)\s+(?:<(\w+)>)?\s*(.*)/);
+    if (!m) continue;
+
+    const [, flag, typeHint = '', descStart] = m;
+    if (SKIP_FLAGS.has(flag)) continue;
+
+    // Multi-line descriptions: join continuation lines
+    let desc = descStart;
+    while (i + 1 < lines.length && lines[i + 1].match(/^\s{20,}/)) {
+      desc += ' ' + lines[++i].trim();
+    }
+    const descLower = desc.toLowerCase();
+
+    // Match channel names in description
+    const matchedChannels: string[] = [];
+    for (const [name, chId] of Object.entries(CHANNEL_NAME_ALIASES)) {
+      if (descLower.includes(name)) matchedChannels.push(chId);
+    }
+    // Generic "Bot token (Telegram/Discord)" → split on /
+    if (matchedChannels.length === 0 && descLower.includes('bot token')) {
+      const slashMatch = desc.match(/\(([^)]+)\)/);
+      if (slashMatch) {
+        for (const part of slashMatch[1].split('/')) {
+          const alias = CHANNEL_NAME_ALIASES[part.trim().toLowerCase()];
+          if (alias) matchedChannels.push(alias);
+        }
+      }
+    }
+    if (matchedChannels.length === 0) continue;
+
+    // Deduplicate
+    const uniqueChannels = [...new Set(matchedChannels)];
+
+    // Determine field type
+    const isSecret = ['token', 'password', 'key', 'secret'].includes(typeHint)
+      || /password|secret|token|key/i.test(desc);
+    const fieldType: 'password' | 'text' = isSecret ? 'password' : 'text';
+
+    // Extract placeholder from parentheses
+    const phMatch = desc.match(/\(([^)]+)\)/);
+    const placeholder = phMatch ? phMatch[1] : '';
+
+    // Generate camelCase key from flag name
+    const key = flag.replace(/^--/, '').replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+
+    // Clean label: remove channel name prefix and parenthetical
+    let label = desc.split('(')[0].trim();
+
+    const field: ConfigField = { key, label, placeholder, type: fieldType, required: true, cliFlag: flag };
+
+    for (const ch of uniqueChannels) {
+      if (!channelFields.has(ch)) channelFields.set(ch, []);
+      channelFields.get(ch)!.push(field);
+    }
+  }
+
+  return { cliChannels, channelFields };
 }
 
-/** Set the CLI-supported channels (called from main.ts after running --help) */
+/** Apply parsed CLI help data to the registry */
+export function applyCliHelp(cliChannels: Set<string>, channelFields: Map<string, ConfigField[]>): void {
+  _cliSupportedChannels = cliChannels;
+  _dynamicConfigFields = channelFields;
+}
+
+// Legacy exports for backward compat
+export function parseCliSupportedChannels(helpOutput: string): Set<string> {
+  return parseCliHelp(helpOutput).cliChannels;
+}
 export function setCliSupportedChannels(channels: Set<string>): void {
   _cliSupportedChannels = channels;
 }
-
-/** Check if a channel uses CLI or json-direct */
 export function isCliSupported(id: string): boolean {
   return _cliSupportedChannels.has(id);
 }
 
-const KNOWN_OVERRIDES: Record<string, KnownOverride> = {
-  // -- One-click channels (QR / auto) --
-  whatsapp: { color: '#25D366', iconType: 'svg', connectionType: 'one-click', configFields: [], setupFlow: 'qr-login', order: 3 },
-  signal:   { color: '#3A76F0', iconType: 'svg', connectionType: 'one-click', configFields: [], setupFlow: 'add-then-login', order: 6 },
-  imessage: { color: '#34C759', iconType: 'svg', connectionType: 'one-click', configFields: [], setupFlow: 'add-only', order: 7 },
+// ---------------------------------------------------------------------------
+// KNOWN_OVERRIDES — only visual/UX overrides, NO configFields
+// Config fields are now dynamically parsed from CLI --help
+// ---------------------------------------------------------------------------
 
-  // -- Single-token channels (with brand colors for SVG icons) --
+const KNOWN_OVERRIDES: Record<string, KnownOverride> = {
+  // One-click channels (QR / auto setup)
+  whatsapp: { color: '#25D366', iconType: 'svg', connectionType: 'one-click', setupFlow: 'qr-login', order: 3 },
+  signal:   { color: '#3A76F0', iconType: 'svg', connectionType: 'one-click', setupFlow: 'add-then-login', order: 6 },
+  imessage: { color: '#34C759', iconType: 'svg', connectionType: 'one-click', setupFlow: 'add-only', order: 7 },
+
+  // Brand colors + SVG icons + sort order
   telegram: { color: '#26A5E4', iconType: 'svg', order: 1 },
   discord:  { color: '#5865F2', iconType: 'svg', order: 2 },
-  line:     { color: '#06C755', iconType: 'svg', order: 10 },
+  slack:    { color: '#4A154B', iconType: 'svg', order: 5 },
   feishu:   { color: '#3370FF', iconType: 'svg', order: 8 },
+  googlechat: { label: 'Google Chat', color: '#1A73E8', iconType: 'svg', order: 9 },
+  line:     { color: '#06C755', iconType: 'svg', order: 10 },
+  matrix:   { color: '#0DBD8B', iconType: 'svg', order: 11 },
 
-  // -- Multi-field channels --
-  slack: {
-    color: '#4A154B', iconType: 'svg', connectionType: 'multi-field', order: 5,
-    configFields: [
-      { key: 'botToken', label: 'Bot Token (xoxb-...)', placeholder: 'xoxb-...', type: 'password', required: true, cliFlag: '--bot-token' },
-      { key: 'appToken', label: 'App Token (xapp-...)', placeholder: 'xapp-...', type: 'password', required: true, cliFlag: '--app-token' },
-    ],
-  },
-  matrix: {
-    color: '#0DBD8B', iconType: 'svg', connectionType: 'multi-field', order: 11,
-    configFields: [
-      { key: 'homeserver', label: 'Homeserver URL', placeholder: 'https://matrix.org', type: 'text', required: true, cliFlag: '--homeserver' },
-      { key: 'userId', label: 'User ID', placeholder: '@bot:matrix.org', type: 'text', required: true, cliFlag: '--user-id' },
-      { key: 'password', label: 'Password', placeholder: '', type: 'password', required: true, cliFlag: '--password' },
-    ],
-  },
-  googlechat: {
-    label: 'Google Chat', color: '#1A73E8', iconType: 'svg', connectionType: 'multi-field', order: 9,
-    configFields: [
-      { key: 'webhookUrl', label: 'Webhook URL', placeholder: 'https://chat.googleapis.com/...', type: 'text', required: true, cliFlag: '--webhook-url' },
-    ],
-  },
-  nostr: {
-    connectionType: 'multi-field',
-    configFields: [
-      { key: 'privateKey', label: 'Private Key (nsec...)', placeholder: 'nsec1...', type: 'password', required: true, cliFlag: '--private-key' },
-    ],
-  },
-  tlon: {
-    connectionType: 'multi-field',
-    configFields: [
-      { key: 'ship', label: 'Ship Name', placeholder: '~sampel-palnet', type: 'text', required: true, cliFlag: '--ship' },
-      { key: 'url', label: 'Ship URL', placeholder: 'https://...', type: 'text', required: true, cliFlag: '--url' },
-      { key: 'code', label: 'Login Code', placeholder: '', type: 'password', required: true, cliFlag: '--code' },
-    ],
-  },
-  msteams: {
-    label: 'Microsoft Teams', connectionType: 'multi-field',
-    configFields: [
-      { key: 'appId', label: 'App ID', placeholder: '', type: 'text', required: true, cliFlag: '' },
-      { key: 'appPassword', label: 'App Password', placeholder: '', type: 'password', required: true, cliFlag: '' },
-      { key: 'tenantId', label: 'Tenant ID', placeholder: '', type: 'text', required: true, cliFlag: '' },
-    ],
-  },
-  bluebubbles: {
-    connectionType: 'multi-field',
-    configFields: [
-      { key: 'webhookPath', label: 'Webhook Path', placeholder: '', type: 'text', required: true, cliFlag: '--webhook-path' },
-    ],
-  },
+  // Friendly labels for channels with non-obvious IDs
+  msteams:  { label: 'Microsoft Teams' },
 };
 
 // Default single-token config field (used for most channels)
@@ -220,7 +284,22 @@ function buildDynamicChannel(id: string, label: string, opts: {
 }): ChannelDef {
   const override = KNOWN_OVERRIDES[id];
   const isOneClick = override?.connectionType === 'one-click';
-  const isMultiField = override?.connectionType === 'multi-field';
+
+  // Config fields priority: dynamic CLI help > default token
+  const dynamicFields = _dynamicConfigFields.get(id);
+  let configFields: ConfigField[];
+  let connectionType: ChannelDef['connectionType'];
+
+  if (isOneClick) {
+    configFields = [];
+    connectionType = 'one-click';
+  } else if (dynamicFields && dynamicFields.length > 0) {
+    configFields = dynamicFields;
+    connectionType = dynamicFields.length > 1 ? 'multi-field' : 'token';
+  } else {
+    configFields = [{ ...DEFAULT_TOKEN_FIELD }];
+    connectionType = 'token';
+  }
 
   return {
     id,
@@ -229,8 +308,8 @@ function buildDynamicChannel(id: string, label: string, opts: {
     description: opts.description || '',
     color: override?.color || hashColor(id),
     iconType: override?.iconType || 'letter',
-    connectionType: isOneClick ? 'one-click' : isMultiField ? 'multi-field' : 'token',
-    configFields: isOneClick ? [] : (override?.configFields || [{ ...DEFAULT_TOKEN_FIELD }]),
+    connectionType,
+    configFields,
     saveStrategy: _cliSupportedChannels.has(id) ? 'cli' : 'json-direct',
     pluginPackage: opts.npmSpec || `@openclaw/${id}`,
     setupFlow: override?.setupFlow,

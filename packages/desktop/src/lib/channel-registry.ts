@@ -19,4 +19,6 @@ export {
   mergeCatalog,
   mergeChannelOptions,
   loadFromSerialized,
+  parseCliHelp,
+  applyCliHelp,
 } from '../../electron/channel-registry';
