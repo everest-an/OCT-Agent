@@ -2336,6 +2336,15 @@ function discoverOpenClawChannels(): void {
   try {
     let distDir = '';
 
+    // Strategy 0: managed runtime dist (AwarenessClaw bundled install)
+    const managedCandidates = [
+      path.join(HOME, '.awareness-claw', 'openclaw-runtime', 'node_modules', 'openclaw', 'dist'),
+      path.join(HOME, '.awareness-claw', 'openclaw-runtime', 'lib', 'node_modules', 'openclaw', 'dist'),
+    ];
+    for (const candidate of managedCandidates) {
+      if (fs.existsSync(candidate)) { distDir = candidate; break; }
+    }
+
     // Strategy 1: `npm root -g` → <prefix>/lib/node_modules → append openclaw/dist
     // This is the most reliable cross-platform approach (works with nvm, custom prefix, Windows)
     try {
@@ -2360,7 +2369,7 @@ function discoverOpenClawChannels(): void {
 
     const debugLog = (msg: string) => { try { fs.appendFileSync(path.join(HOME, '.awareness-channel-debug.log'), `[${new Date().toISOString()}] ${msg}\n`); } catch {} };
     if (!distDir) {
-      debugLog('dist NOT found. sync safeShellExec npm-root-g and which-openclaw both failed');
+      debugLog('dist NOT found. managed runtime + npm-root-g + which-openclaw all failed');
       console.log('[channel-registry] OpenClaw dist not found, using builtins only');
       return;
     }
@@ -2412,13 +2421,38 @@ ipcMain.handle('channel:get-registry', async () => {
     if (getAllChannels().length <= 2) {
       debugLog(`Sync discovery found only ${getAllChannels().length} channels, trying async...`);
       try {
-        const globalRoot = await safeShellExecAsync('npm root -g 2>/dev/null', 5000);
-        debugLog(`async npm root -g: "${globalRoot?.trim()}"`);
-        if (globalRoot) {
-          const distDir = path.join(globalRoot.trim(), 'openclaw', 'dist');
-          const exists = fs.existsSync(distDir);
-          debugLog(`async distDir: ${distDir} exists=${exists}`);
-          if (exists) {
+        // Async strategy 0: managed runtime dist (AwarenessClaw bundled install)
+        const managedDist = [
+          path.join(HOME, '.awareness-claw', 'openclaw-runtime', 'node_modules', 'openclaw', 'dist'),
+          path.join(HOME, '.awareness-claw', 'openclaw-runtime', 'lib', 'node_modules', 'openclaw', 'dist'),
+        ].find((p) => fs.existsSync(p));
+        if (managedDist) {
+          debugLog(`async managed distDir: ${managedDist} exists=true`);
+          // Parse CLI help for save strategy + config fields
+          try {
+            const helpOut = await safeShellExecAsync('openclaw channels add --help 2>/dev/null', 5000);
+            if (helpOut) {
+              const { cliChannels, channelFields } = parseCliHelp(helpOut);
+              if (cliChannels.size > 0) { applyCliHelp(cliChannels, channelFields); debugLog(`async CLI channels: ${[...cliChannels].join(', ')}`); }
+            }
+          } catch { /* help not available */ }
+          try {
+            const catalog = JSON.parse(fs.readFileSync(path.join(managedDist, 'channel-catalog.json'), 'utf8'));
+            if (catalog.entries) { mergeCatalog(catalog.entries as CatalogEntry[]); debugLog(`catalog merged: ${catalog.entries.length} entries`); }
+          } catch (e: any) { debugLog(`catalog error: ${e.message}`); }
+          try {
+            const meta = JSON.parse(fs.readFileSync(path.join(managedDist, 'cli-startup-metadata.json'), 'utf8'));
+            if (meta.channelOptions) { mergeChannelOptions(meta.channelOptions); debugLog(`metadata merged: ${meta.channelOptions.length} options`); }
+          } catch (e: any) { debugLog(`metadata error: ${e.message}`); }
+          debugLog(`Final channel count: ${getAllChannels().length}`);
+        } else {
+          const globalRoot = await safeShellExecAsync('npm root -g 2>/dev/null', 5000);
+          debugLog(`async npm root -g: "${globalRoot?.trim()}"`);
+          if (globalRoot) {
+            const distDir = path.join(globalRoot.trim(), 'openclaw', 'dist');
+            const exists = fs.existsSync(distDir);
+            debugLog(`async distDir: ${distDir} exists=${exists}`);
+            if (exists) {
             // Parse CLI help for save strategy + config fields
             try {
               const helpOut = await safeShellExecAsync('openclaw channels add --help 2>/dev/null', 5000);
@@ -2436,6 +2470,7 @@ ipcMain.handle('channel:get-registry', async () => {
               if (meta.channelOptions) { mergeChannelOptions(meta.channelOptions); debugLog(`metadata merged: ${meta.channelOptions.length} options`); }
             } catch (e: any) { debugLog(`metadata error: ${e.message}`); }
             debugLog(`Final channel count: ${getAllChannels().length}`);
+            }
           }
         }
       } catch (e: any) { debugLog(`async fallback error: ${e.message}`); }
