@@ -29,7 +29,7 @@ export default function Settings() {
 
   // Cloud auth state
   const [showCloudAuth, setShowCloudAuth] = useState(false);
-  const [cloudAuthStep, setCloudAuthStep] = useState<'init' | 'waiting' | 'select' | 'done' | 'error'>('init');
+  const [cloudAuthStep, setCloudAuthStep] = useState<'init' | 'loading' | 'waiting' | 'select' | 'done' | 'error'>('init');
   const [cloudDeviceCode, setCloudDeviceCode] = useState('');
   const [cloudUserCode, setCloudUserCode] = useState('');
   const [cloudVerifyUrl, setCloudVerifyUrl] = useState('');

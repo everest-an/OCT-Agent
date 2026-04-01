@@ -2319,7 +2319,9 @@ ipcMain.handle('channel:save', async (_e, channelId: string, config: Record<stri
       return { success: true };
     }
 
-    // Native channels: use `openclaw channels add` with real CLI flags
+    // Native channels: install plugin first, then use `openclaw channels add` with real CLI flags
+    // Channel plugins are NOT bundled in the main openclaw package — they must be installed
+    // via `openclaw plugins install @openclaw/<channel>` before the gateway can load them.
     // Verified via `openclaw channels add --help` (2026.3.28):
     //   --channel (telegram|whatsapp|discord|irc|googlechat|slack|signal|imessage|line)
     //   --token (Telegram/Discord/LINE)
@@ -2328,6 +2330,9 @@ ipcMain.handle('channel:save', async (_e, channelId: string, config: Record<stri
     //   --cli-path + --db-path (iMessage)
     //   --homeserver + --user-id + --password + --access-token (Matrix — but not in --channel enum)
     //   --webhook-url + --audience + --audience-type (Google Chat)
+    try {
+      await runAsync(`openclaw plugins install @openclaw/${channelId} 2>&1`, 60000);
+    } catch { /* already installed or bundled fallback */ }
     const esc = (v: string) => v.replace(/"/g, '\\"');
     const args: string[] = [`--channel ${channelId}`];
     // Map config keys to real CLI flags
@@ -2338,6 +2343,9 @@ ipcMain.handle('channel:save', async (_e, channelId: string, config: Record<stri
     const addCmd = `openclaw channels add ${args.join(' ')} 2>&1`;
     try {
       await runAsync(addCmd, 15000);
+      // After channels add succeeds, restart gateway and bind to agent
+      try { await runAsync('openclaw gateway restart 2>&1', 20000); } catch { /* non-fatal */ }
+      try { await runAsync(`openclaw agents bind --agent main --bind ${channelId} 2>&1`, 10000); } catch { /* non-fatal */ }
       return { success: true };
     } catch (firstErr: any) {
       const msg = firstErr.message || '';
@@ -2345,6 +2353,8 @@ ipcMain.handle('channel:save', async (_e, channelId: string, config: Record<stri
         try {
           await runAsync(`openclaw channels remove --channel ${channelId} 2>&1`, 10000);
           await runAsync(addCmd, 15000);
+          try { await runAsync('openclaw gateway restart 2>&1', 20000); } catch { /* non-fatal */ }
+          try { await runAsync(`openclaw agents bind --agent main --bind ${channelId} 2>&1`, 10000); } catch { /* non-fatal */ }
           return { success: true };
         } catch (retryErr: any) {
           return { success: false, error: retryErr.message?.slice(0, 300) };
@@ -2366,7 +2376,7 @@ ipcMain.handle('channel:test', async (_e, channelId: string) => {
     if (!channelConfig || !channelConfig.enabled) {
       return { success: false, error: 'Channel not configured' };
     }
-    const hasCredentials = channelConfig.token || channelConfig.appId || channelConfig.webhook
+    const hasCredentials = channelConfig.token || channelConfig.botToken || channelConfig.appId || channelConfig.webhook
       || channelConfig.bot_token || channelConfig.signal_number || channelConfig.db_path
       || channelConfig.homeserver || channelConfig.webhook_url;
     if (!hasCredentials) {

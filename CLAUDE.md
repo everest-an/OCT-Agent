@@ -348,6 +348,14 @@ AwarenessClaw/
 - **修复**：在 `channels login` 前先 `openclaw channels add --channel <id>`（非交互式），确保通道配置存在；如需插件安装，用 `openclaw plugins install @openclaw/<channel>` 代替交互式提示
 - **注意**：Telegram/Discord/Slack 实际走 token 流程不走 QR，它们不在 `ONE_CLICK_CHANNELS` 中，但如果用户手动尝试 login 仍会卡住
 
+### 内置通道插件未预编译到 dist（严重踩坑）
+- **问题**：`openclaw` npm 包的 `dist/telegram/`（以及 whatsapp/discord/signal/slack/irc/googlechat）目录为空或只有 stub 文件（如 `audit.js`、`token.js`），缺少主入口 `index.js`
+- **根因**：`BUNDLED_PLUGIN_METADATA` 中声明了 `dirName: "telegram"` 等，但 `resolveBundledPluginGeneratedPath()` 检测到 `index.js` 不存在时静默跳过，不报错
+- **结果**：`channels add --channel telegram --token xxx` 能写入 config，但 Gateway 永远不加载该通道——`channels list` 为空，`agents bind --bind telegram` 报 "Unknown channel"
+- **正确安装方式**：`openclaw plugins install @openclaw/<channel>`（如 `@openclaw/telegram`），OpenClaw 会从 bundled extensions 目录安装完整插件到 `~/.openclaw/extensions/telegram/`
+- **安装后必须**：`openclaw gateway restart` + `openclaw agents bind --agent main --bind <channel>`
+- **桌面端规则**：`channel:setup` IPC 必须在写入 config 前先执行 `plugins install @openclaw/<channel>`，否则通道永远不会被加载
+
 ### OpenClaw 每次 CLI 命令都重新加载所有插件（性能坑）
 - **问题**：`openclaw channels login` 启动时加载 10+ 个插件（feishu_doc/chat/wiki/drive/bitable、device-pair、phone-control、talk-voice、awareness-memory 等），耗时 15-20 秒，用户看到长时间 spinner
 - **无法跳过**：OpenClaw CLI 没有 `--no-plugins`/`--skip-plugins` 选项

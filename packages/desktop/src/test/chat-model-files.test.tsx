@@ -12,6 +12,7 @@ describe('Dashboard - model and file attachment', () => {
       modelId: 'qwen-turbo-latest',
       apiKey: 'test-key',
       thinkingLevel: 'low',
+      bootstrapCompleted: true,
     }));
   });
 

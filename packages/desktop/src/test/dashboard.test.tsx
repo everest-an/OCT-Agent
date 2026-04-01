@@ -8,6 +8,7 @@ describe('Dashboard (Chat)', () => {
     // Set a model so empty state shows suggestions (not "select model" prompt)
     localStorage.setItem('awareness-claw-config', JSON.stringify({
       language: 'zh', providerKey: 'qwen-portal', modelId: 'qwen-turbo-latest',
+      bootstrapCompleted: true,
     }));
   });
 
