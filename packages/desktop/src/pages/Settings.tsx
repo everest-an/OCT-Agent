@@ -330,7 +330,7 @@ export default function Settings() {
 
     const doPoll = async () => {
       if (Date.now() - startTime > expiresIn) {
-        setCloudAuthStep('error');
+        // Don't jump to error — stay on waiting screen so user can click refresh
         return;
       }
       try {
