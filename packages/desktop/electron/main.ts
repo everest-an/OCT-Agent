@@ -2106,17 +2106,26 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, opti
 
   let fullResponseText = '';
   let chatEventHandler: ((payload: any) => void) | null = null;
-  let activeRunId = '';
 
   try {
     const ws = await getGatewayWs();
+
+    // chat.send RPC returns immediately with {status:"started", runId}.
+    // Actual content arrives via event:chat stream events.
+    // We must wait for a "final"/"error"/"aborted" event before resolving.
+    const { promise: chatDone, resolve: chatResolve } = (() => {
+      let r: () => void;
+      const p = new Promise<void>(res => { r = res; });
+      return { promise: p, resolve: r! };
+    })();
+    const chatTimeout = setTimeout(() => chatResolve(), 120000);
 
     // Subscribe to chat events for this session BEFORE sending
     chatEventHandler = (payload: any) => {
       if (!payload) return;
       const payloadSession = payload.sessionKey || payload.key || '';
-      // Only process events for our session
-      if (payloadSession && payloadSession !== sid) return;
+      // Gateway prefixes sessionKey with "agent:main:" — match by suffix
+      if (payloadSession && !payloadSession.endsWith(sid) && payloadSession !== sid) return;
 
       const state = payload.state; // delta | final | aborted | error
       const msg = payload.message;
@@ -2160,30 +2169,34 @@ ipcMain.handle('chat:send', async (_e, message: string, sessionId?: string, opti
           }
         }
       } else if (state === 'final') {
-        // Run completed
-        send('chat:stream-end', {});
+        // Run completed — resolve the wait
+        clearTimeout(chatTimeout);
+        chatResolve();
       } else if (state === 'aborted') {
         send('chat:status', { type: 'error' });
-        send('chat:stream-end', {});
+        clearTimeout(chatTimeout);
+        chatResolve();
       } else if (state === 'error') {
         send('chat:status', { type: 'error' });
-        send('chat:stream-end', {});
+        clearTimeout(chatTimeout);
+        chatResolve();
       }
     };
 
     ws.on('event:chat', chatEventHandler);
     send('chat:status', { type: 'thinking' });
 
-    // Send message via Gateway WebSocket RPC
-    // Gateway returns when the run completes (or after 120s timeout)
-    const result = await ws.chatSend(sid, fullMessage, {
+    // Send message via Gateway WebSocket RPC (returns immediately with runId)
+    await ws.chatSend(sid, fullMessage, {
       thinking: options?.thinkingLevel && options.thinkingLevel !== 'off' ? options.thinkingLevel : undefined,
     });
+
+    // Wait for agent to finish (final/error/aborted event or 120s timeout)
+    await chatDone;
 
     // Unsubscribe from chat events
     ws.removeListener('event:chat', chatEventHandler);
 
-    activeRunId = result?.runId || '';
     const text = fullResponseText.trim() || 'No response';
     send('chat:stream-end', {});
 
