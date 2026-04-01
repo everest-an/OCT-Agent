@@ -371,3 +371,41 @@ AwarenessClaw/
 - **降级规则**：如果 Windows 拒绝创建计划任务，桌面端必须 fallback 到 `openclaw gateway run --force` 的当前用户会话模式，保证用户先能聊天，再提示后续可选的管理员修复
 - **用户文案规则**：提示里必须明确“这是本地服务安装权限问题，不是 Qwen/OpenAI API Key 配置问题”
 ![alt text](<截屏2026-04-01 09.13.13.png>)
+
+### 统一通道注册表架构（2026-04-01 实施）
+
+**核心设计**：只有 `wechat` + `local` 是内置通道，其余全部从 OpenClaw 动态发现。
+
+**数据源**：
+- `<openclaw>/dist/channel-catalog.json` — 10 个通道的 label/blurb/npmSpec
+- `<openclaw>/dist/cli-startup-metadata.json` — 22 个通道 ID 列表
+- `openclaw channels add --help` — 动态解析 `--channel` 枚举（决定 CLI vs json-direct）
+
+**KNOWN_OVERRIDES（增强层，不是 hardcode）**：
+- 提供品牌色、多字段表单、one-click 流程等 UX 增强
+- 新通道自动显示（首字母图标 + 通用 token 表单），无需代码改动
+- OpenClaw 更新后新增通道 → 重启 app 自动出现
+
+**CLI vs json-direct 规则**：
+- `openclaw channels add --channel` 枚举中的通道（telegram/whatsapp/discord/irc/googlechat/slack/signal/imessage/line）→ 走 `channels add` CLI
+- 不在枚举中的通道（msteams/nostr/tlon/mattermost 等）→ 直接写 `openclaw.json channels[id] = { ...config, enabled: true }`
+- 通过运行时解析 `--help` 输出动态判断，不 hardcode
+
+**通道配置 schema 来源**：
+- OpenClaw 的 `openclaw.plugin.json` 中 `configSchema` 大多为空 `{}`
+- 真实 schema 在运行时 Zod 定义中（如 `MSTeamsConfigSchema` 包含 `appId`, `appPassword`, `tenantId`）
+- 无法在不执行 JS 的情况下读取 → 多字段通道仍需在 `KNOWN_OVERRIDES` 中维护配置表单
+- 通用 token 通道（大多数）自动用默认 `--token` 表单
+
+**文件结构**：
+- `electron/channel-registry.ts` — 核心注册表（Electron 主进程用）
+- `src/lib/channel-registry.ts` — re-export 给前端 React 组件用
+- `src/components/ChannelIcon.tsx` — 12 个品牌 SVG + 动态首字母 fallback
+- `src/pages/Channels.tsx` — `DynamicConfigForm` 组件从注册表 configFields 渲染表单
+
+### Electron dev 模式踩坑（monorepo）
+- **问题**：`./node_modules/.bin/electron .` 在 monorepo 中找不到 electron 二进制（被 hoist 到根 node_modules）
+- **`require('electron')` 返回字符串**：在非 Electron 进程中 `require('electron')` 返回的是 electron 可执行文件的路径字符串，不是 API 对象
+- **正确方式**：在 `npm scripts` 中用 `electron .`（npm 自动加 PATH），或使用根 `node_modules/.bin/electron`
+- **tsconfig.electron.json rootDir**：必须保持 `"electron"`，不能改成 `"."`（否则编译输出目录结构变化，`package.json main` 路径断裂）
+- **共享文件**：需要被 Electron 和前端同时 import 的文件（如 channel-registry.ts）放在 `electron/` 目录，前端通过 `src/lib/` re-export
