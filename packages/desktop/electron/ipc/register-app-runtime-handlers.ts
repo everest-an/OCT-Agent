@@ -8,6 +8,7 @@ export function registerAppRuntimeHandlers(deps: {
   getLocalDaemonHealth: (timeoutMs?: number) => Promise<any | null>;
   runAsync: (cmd: string, timeoutMs?: number) => Promise<string>;
   getManagedOpenClawInstallCommand: (packageName?: string) => string;
+  getManagedOpenClawEntrypoint: () => string | null;
   ensureManagedOpenClawWindowsShim: () => void;
   shutdownLocalDaemon: (timeoutMs?: number) => Promise<boolean>;
   clearAwarenessLocalNpxCache: (homedir: string) => void;
@@ -127,18 +128,34 @@ export function registerAppRuntimeHandlers(deps: {
         }
 
         if (!upgraded) {
-          const managedCmd = deps.getManagedOpenClawInstallCommand('openclaw@latest');
-          const registries = ['', '--registry=https://registry.npmmirror.com'];
-          for (const reg of registries) {
-            try {
-              await deps.runAsync(`${managedCmd} ${reg}`.trim(), 120000);
-              upgraded = true;
-              break;
-            } catch {}
+          // Only install to managed prefix if we're ALREADY using managed,
+          // or if no global OpenClaw exists. Installing a second copy alongside
+          // a global install causes Gateway port conflicts.
+          const isAlreadyManaged = !!deps.getManagedOpenClawEntrypoint();
+
+          if (isAlreadyManaged || !preVer) {
+            const managedCmd = deps.getManagedOpenClawInstallCommand('openclaw@latest');
+            const registries = ['', '--registry=https://registry.npmmirror.com'];
+            for (const reg of registries) {
+              try {
+                await deps.runAsync(`${managedCmd} ${reg}`.trim(), 120000);
+                upgraded = true;
+                break;
+              } catch {}
+            }
           }
         }
 
         if (!upgraded) {
+          // Only try official install scripts if no global OpenClaw exists,
+          // to avoid installing a second copy that conflicts with the existing one.
+          const hasGlobal = !!preVer && !deps.getManagedOpenClawEntrypoint();
+          if (hasGlobal) {
+            return {
+              success: false,
+              error: 'OpenClaw upgrade failed. Your OpenClaw is globally installed — please update it in terminal:\n  openclaw update\nor:\n  npm install -g openclaw@latest',
+            };
+          }
           try {
             if (process.platform === 'win32') {
               await deps.runAsync('powershell -Command "irm https://openclaw.ai/install.ps1 | iex"', 120000);

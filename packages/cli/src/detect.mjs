@@ -25,14 +25,49 @@ export async function detectEnvironment() {
     hasAwarenessPlugin: false,
   };
 
-  // Detect OpenClaw
+  // Detect OpenClaw — check PATH first, then common locations
   try {
     const version = execSync('openclaw --version', { encoding: 'utf8', timeout: 5000 }).trim();
     env.openclawInstalled = true;
     env.openclawVersion = version;
     console.log(`✅ OpenClaw detected: ${version}`);
   } catch {
-    console.log('📦 OpenClaw not found, will install...');
+    // Not in PATH — check common install locations to avoid duplicate installs
+    const extraPaths = [
+      join(home, '.npm-global', 'bin', 'openclaw'),
+      join(home, '.awareness-claw', 'openclaw-runtime', 'bin', 'openclaw'),
+      '/usr/local/bin/openclaw',
+      '/opt/homebrew/bin/openclaw',
+    ];
+    let foundPath = null;
+    for (const p of extraPaths) {
+      if (existsSync(p)) { foundPath = p; break; }
+    }
+    if (foundPath) {
+      try {
+        const version = execSync(`"${foundPath}" --version`, { encoding: 'utf8', timeout: 5000 }).trim();
+        env.openclawInstalled = true;
+        env.openclawVersion = version;
+        console.log(`✅ OpenClaw found at ${foundPath}: ${version}`);
+      } catch {
+        // Binary exists but can't execute — still mark as installed to avoid duplicate
+        env.openclawInstalled = true;
+        console.log(`⚠️  OpenClaw found at ${foundPath} but couldn't get version`);
+      }
+    } else {
+      // Also check npm global root
+      try {
+        const npmRoot = execSync('npm root -g', { encoding: 'utf8', timeout: 5000, stdio: 'pipe' }).trim();
+        if (npmRoot && existsSync(join(npmRoot, 'openclaw', 'package.json'))) {
+          env.openclawInstalled = true;
+          console.log(`✅ OpenClaw detected in npm global (${npmRoot}), not in PATH`);
+        } else {
+          console.log('📦 OpenClaw not found, will install...');
+        }
+      } catch {
+        console.log('📦 OpenClaw not found, will install...');
+      }
+    }
   }
 
   // Check existing config

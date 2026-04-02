@@ -60,13 +60,16 @@ export function createShellUtils(options: { home: string; app: any }) {
         extras.push('/snap/bin');
       }
     } else if (process.platform === 'win32') {
+      const appdata = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+      const localappdata = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+      const programfiles = process.env.ProgramFiles || 'C:\\Program Files';
       extras.push(
         getManagedOpenClawBinDir(),
-        `${process.env.APPDATA}\\npm`,
-        `${process.env.LOCALAPPDATA}\\pnpm`,
-        `${process.env.ProgramFiles}\\nodejs`,
-        `${process.env.ProgramFiles} (x86)\\nodejs`,
-        `${process.env.LOCALAPPDATA}\\fnm_multishells`,
+        `${appdata}\\npm`,
+        `${localappdata}\\pnpm`,
+        `${programfiles}\\nodejs`,
+        `${process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'}\\nodejs`,
+        `${localappdata}\\fnm_multishells`,
       );
     } else {
       extras.push(getManagedOpenClawBinDir());
@@ -140,7 +143,7 @@ export function createShellUtils(options: { home: string; app: any }) {
   function repairWindowsGatewayServiceScript() {
     repairWindowsGatewayServiceScriptShared(home, {
       nodeCommand: getNodeInvocationCommand(),
-      tmpdir: process.env.TEMP,
+      tmpdir: process.env.TEMP || process.env.TMP || path.join(home, 'AppData', 'Local', 'Temp'),
     });
   }
 

@@ -42,12 +42,15 @@ import { registerSkillHandlers } from './ipc/register-skill-handlers';
 import { ensureInternalHook } from './internal-hook';
 import { readRuntimePreferences, writeRuntimePreferences } from './runtime-preferences';
 import { createShellUtils } from './shell-utils';
+import { isGatewayRunningOutput } from './openclaw-config';
 import {
-  normalizePluginAllow,
-  isGatewayRunningOutput,
-  GATEWAY_DEFAULTS,
-  writeExecApprovalAsk,
-} from './openclaw-config';
+  applyDesktopAwarenessPluginConfig,
+  mergeDesktopOpenClawConfig,
+  persistDesktopAwarenessPluginConfig,
+  redactSensitiveValues,
+  sanitizeDesktopAwarenessPluginConfig,
+  stripRedactedValues,
+} from './desktop-openclaw-config';
 
 let mainWindow: typeof BrowserWindow.prototype | null = null;
 let tray: typeof Tray.prototype | null = null;
@@ -71,6 +74,7 @@ const {
   getBundledNpmBin,
   getEnhancedPath,
   getGatewayPort,
+  getManagedOpenClawEntrypoint,
   getManagedOpenClawInstallCommand,
   getNodeVersion,
   readShellOutputAsync,
@@ -157,214 +161,21 @@ function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
-const REDACTED_VALUE = '__REDACTED__';
+const applyAwarenessPluginConfig = (config: Record<string, any>, options?: { enableSlot?: boolean }) => {
+  applyDesktopAwarenessPluginConfig(config, options);
+};
 
-const DESKTOP_DEFAULT_ALLOWED_TOOLS = [
-  'exec',
-  'awareness_init',
-  'awareness_recall',
-  'awareness_lookup',
-  'awareness_record',
-  'awareness_get_agent_prompt',
-];
+const sanitizeAwarenessPluginConfig = (config: Record<string, any>) => {
+  sanitizeDesktopAwarenessPluginConfig(config, HOME);
+};
 
-function hasAwarenessPluginInstalled() {
-  return fs.existsSync(path.join(HOME, '.openclaw', 'extensions', 'openclaw-memory', 'package.json'));
-}
+const persistAwarenessPluginConfig = (options?: { enableSlot?: boolean }) => {
+  persistDesktopAwarenessPluginConfig(HOME, options);
+};
 
-function ensureDesktopDefaultToolPermissions(config: Record<string, any>) {
-  config.tools = {
-    ...(config.tools || {}),
-    profile: config.tools?.profile || 'coding',
-  };
-
-  const existingAllow = new Set<string>(config.tools.alsoAllow || []);
-  for (const tool of DESKTOP_DEFAULT_ALLOWED_TOOLS) {
-    existingAllow.add(tool);
-  }
-  config.tools.alsoAllow = [...existingAllow];
-}
-
-function applyAwarenessPluginConfig(config: Record<string, any>, options?: { enableSlot?: boolean }) {
-  if (!config.plugins) config.plugins = {};
-  if (!config.plugins.entries) config.plugins.entries = {};
-
-  ensureDesktopDefaultToolPermissions(config);
-
-  config.plugins.entries['openclaw-memory'] = {
-    ...(config.plugins.entries['openclaw-memory'] || {}),
-    enabled: true,
-    config: {
-      ...(config.plugins.entries['openclaw-memory']?.config || {}),
-      autoRecall: true,
-      autoCapture: true,
-      recallLimit: 8,
-      localUrl: 'http://localhost:37800',
-      baseUrl: 'https://awareness.market/api/v1',
-      embeddingLanguage: 'multilingual',
-    },
-  };
-
-  if (options?.enableSlot) {
-    config.plugins.allow = Array.from(new Set([...(normalizePluginAllow(config.plugins.allow) || []), 'openclaw-memory']));
-    config.plugins.slots = { ...(config.plugins.slots || {}), memory: 'openclaw-memory' };
-  }
-}
-
-function sanitizeAwarenessPluginConfig(config: Record<string, any>) {
-  ensureDesktopDefaultToolPermissions(config);
-
-  config.gateway = {
-    ...(config.gateway || {}),
-    mode: GATEWAY_DEFAULTS.mode,
-    bind: config.gateway?.bind || GATEWAY_DEFAULTS.bind,
-    port: Number(config.gateway?.port) || GATEWAY_DEFAULTS.port,
-  };
-
-  if (!config.plugins) return;
-
-  const normalizedAllow = normalizePluginAllow(config.plugins.allow);
-  if (normalizedAllow) config.plugins.allow = normalizedAllow;
-  else delete config.plugins.allow;
-
-  if (config.plugins.entries?.['memory-awareness']) {
-    delete config.plugins.entries['memory-awareness'];
-  }
-
-  if (Array.isArray(config.plugins.allow)) {
-    config.plugins.allow = config.plugins.allow.filter((pluginId: string) => pluginId !== 'memory-awareness');
-    if (!hasAwarenessPluginInstalled()) {
-      config.plugins.allow = config.plugins.allow.filter((pluginId: string) => pluginId !== 'openclaw-memory');
-    }
-    if (config.plugins.allow.length === 0) delete config.plugins.allow;
-  }
-
-  if (config.plugins.slots?.memory === 'memory-awareness') {
-    delete config.plugins.slots.memory;
-  }
-
-  if (!hasAwarenessPluginInstalled() && config.plugins.slots?.memory === 'openclaw-memory') {
-    delete config.plugins.slots.memory;
-  }
-
-  if (config.plugins.slots && Object.keys(config.plugins.slots).length === 0) {
-    delete config.plugins.slots;
-  }
-}
-
-function persistAwarenessPluginConfig(options?: { enableSlot?: boolean }) {
-  const configDir = path.join(HOME, '.openclaw');
-  const configPath = path.join(configDir, 'openclaw.json');
-  fs.mkdirSync(configDir, { recursive: true });
-
-  let config: Record<string, any> = {};
-  try {
-    config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  } catch {
-    config = {};
-  }
-
-  applyAwarenessPluginConfig(config, options);
-  sanitizeAwarenessPluginConfig(config);
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  writeExecApprovalAsk(HOME, 'off');
-}
-
-function mergeOpenClawConfig(existing: Record<string, any>, incoming: Record<string, any>) {
-  const merged = JSON.parse(JSON.stringify(existing || {}));
-
-  for (const [key, value] of Object.entries(incoming || {})) {
-    if (key === 'models') {
-      merged.models = { ...(merged.models || {}) };
-      const incomingModels = value as any;
-      if (incomingModels?.providers) {
-        merged.models.providers = { ...(merged.models.providers || {}) };
-        for (const [providerKey, providerValue] of Object.entries(incomingModels.providers)) {
-          merged.models.providers[providerKey] = {
-            ...(merged.models.providers[providerKey] || {}),
-            ...(providerValue as any),
-          };
-        }
-      }
-    } else if (key === 'agents') {
-      merged.agents = JSON.parse(JSON.stringify(merged.agents || {}));
-      const incomingAgents = value as any;
-      if (incomingAgents?.defaults?.model?.primary) {
-        if (!merged.agents.defaults) merged.agents.defaults = {};
-        if (!merged.agents.defaults.model) merged.agents.defaults.model = {};
-        merged.agents.defaults.model.primary = incomingAgents.defaults.model.primary;
-      }
-    } else if (key === 'plugins') {
-      merged.plugins = JSON.parse(JSON.stringify(merged.plugins || {}));
-      const incomingPlugins = value as any;
-      const normalizedAllow = normalizePluginAllow(incomingPlugins.allow);
-      if (normalizedAllow) merged.plugins.allow = normalizedAllow;
-      if (incomingPlugins.slots) merged.plugins.slots = { ...(merged.plugins.slots || {}), ...incomingPlugins.slots };
-      if (incomingPlugins.entries) {
-        if (!merged.plugins.entries) merged.plugins.entries = {};
-        for (const [entryId, entryConfig] of Object.entries(incomingPlugins.entries)) {
-          const previous = merged.plugins.entries[entryId] || {};
-          merged.plugins.entries[entryId] = { ...previous, ...(entryConfig as any) };
-          if ((entryConfig as any)?.config && previous?.config) {
-            merged.plugins.entries[entryId].config = { ...previous.config, ...(entryConfig as any).config };
-          }
-        }
-      }
-    } else if (key === 'gateway') {
-      merged.gateway = {
-        ...(merged.gateway || {}),
-        ...(value as any),
-      };
-    } else if (key === 'tools') {
-      merged.tools = JSON.parse(JSON.stringify(merged.tools || {}));
-      const incomingTools = value as any;
-      if (incomingTools.alsoAllow) {
-        const existingAllow = new Set(merged.tools.alsoAllow || []);
-        for (const tool of incomingTools.alsoAllow) existingAllow.add(tool);
-        merged.tools.alsoAllow = [...existingAllow];
-      }
-      if (incomingTools.denied && incomingTools.denied.length > 0) merged.tools.denied = incomingTools.denied;
-      if (incomingTools.profile) merged.tools.profile = incomingTools.profile;
-    } else {
-      merged[key] = value;
-    }
-  }
-
-  sanitizeAwarenessPluginConfig(merged);
-
-  return merged;
-}
-
-function redactSensitiveValues(value: any): any {
-  if (Array.isArray(value)) return value.map(redactSensitiveValues);
-  if (!value || typeof value !== 'object') return value;
-
-  const redacted: Record<string, any> = {};
-  const sensitiveKeyPattern = /(api.?key|token|secret|password|appsecret|bot.?token|webhook|authorization)/i;
-
-  for (const [key, child] of Object.entries(value)) {
-    if (sensitiveKeyPattern.test(key)) redacted[key] = REDACTED_VALUE;
-    else redacted[key] = redactSensitiveValues(child);
-  }
-
-  return redacted;
-}
-
-function stripRedactedValues(value: any): any {
-  if (Array.isArray(value)) {
-    return value.map(stripRedactedValues).filter((item) => item !== undefined);
-  }
-  if (!value || typeof value !== 'object') {
-    return value === REDACTED_VALUE ? undefined : value;
-  }
-
-  const cleaned: Record<string, any> = {};
-  for (const [key, child] of Object.entries(value)) {
-    const next = stripRedactedValues(child);
-    if (next !== undefined) cleaned[key] = next;
-  }
-  return cleaned;
-}
+const mergeOpenClawConfig = (existing: Record<string, any>, incoming: Record<string, any>) => {
+  return mergeDesktopOpenClawConfig(existing, incoming, HOME);
+};
 
 function computeSha256(filePath: string) {
   const hash = crypto.createHash('sha256');
@@ -405,14 +216,6 @@ function repairOpenClawConfigFile() {
     if (!fs.existsSync(configPath)) return;
     const current = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     sanitizeAwarenessPluginConfig(current);
-    // Compatibility: OpenClaw >= 2026.3.31 rejects channels.telegram.token.
-    // Migrate legacy token -> botToken and remove token to keep config valid.
-    if (current?.channels?.telegram?.token) {
-      if (!current.channels.telegram.botToken) {
-        current.channels.telegram.botToken = current.channels.telegram.token;
-      }
-      delete current.channels.telegram.token;
-    }
     fs.writeFileSync(configPath, JSON.stringify(current, null, 2));
   } catch {
     // Best-effort config repair only.
@@ -437,15 +240,19 @@ async function startGatewayInUserSession(send?: (ch: string, data: any) => void)
       const child = runSpawn('cmd.exe', ['/d', '/c', 'start', '', '/b', 'openclaw', 'gateway', 'run', '--force'], {
         cwd: HOME,
         detached: true,
-        stdio: 'ignore',
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
+      child.stderr?.on('data', (d: Buffer) => console.error('[gateway-session]', d.toString().trim()));
+      child.on('exit', (code: number | null) => { if (code && code !== 0) console.error(`[gateway-session] exited with code ${code}`); });
       child.unref();
     } else {
       const child = runSpawn('openclaw', ['gateway', 'run', '--force'], {
         cwd: HOME,
         detached: true,
-        stdio: 'ignore',
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
+      child.stderr?.on('data', (d: Buffer) => console.error('[gateway-session]', d.toString().trim()));
+      child.on('exit', (code: number | null) => { if (code && code !== 0) console.error(`[gateway-session] exited with code ${code}`); });
       child.unref();
     }
   } catch (err: any) {
@@ -1246,6 +1053,7 @@ registerAppRuntimeHandlers({
   getLocalDaemonHealth,
   runAsync,
   getManagedOpenClawInstallCommand,
+  getManagedOpenClawEntrypoint,
   ensureManagedOpenClawWindowsShim,
   shutdownLocalDaemon,
   clearAwarenessLocalNpxCache,

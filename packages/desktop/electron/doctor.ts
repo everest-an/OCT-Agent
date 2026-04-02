@@ -120,9 +120,22 @@ function persistAwarenessPluginConfig(homedir: string) {
 
 function repairWindowsGatewayServiceScript(homedir: string) {
   // Detect Node.exe path dynamically on Windows; fallback to common location
-  const nodeCommand = process.platform === 'win32'
-    ? (process.execPath.endsWith('node.exe') ? `"${process.execPath}"` : '"C:\\Program Files\\nodejs\\node.exe"')
-    : 'node';
+  // Find node executable dynamically — never hardcode a specific path
+  let nodeCommand = 'node';
+  if (process.platform === 'win32') {
+    if (process.execPath.endsWith('node.exe')) {
+      nodeCommand = `"${process.execPath}"`;
+    } else {
+      // Search common locations
+      const candidates = [
+        path.join(process.env.ProgramFiles || 'C:\\Program Files', 'nodejs', 'node.exe'),
+        path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'nodejs', 'node.exe'),
+        path.join(process.env.LOCALAPPDATA || '', 'fnm_multishells', 'node.exe'),
+      ];
+      const found = candidates.find(p => fs.existsSync(p));
+      nodeCommand = found ? `"${found}"` : 'node';
+    }
+  }
   repairWindowsGatewayServiceScriptShared(homedir, {
     nodeCommand,
     tmpdir: path.join(homedir, 'AppData', 'Local', 'Temp'),
@@ -281,6 +294,12 @@ async function checkOpenclawCommandHealth(ctx: Ctx): Promise<CheckResult> {
 async function fixOpenclawCommandHealth(ctx: Ctx): Promise<FixResult> {
   try {
     if (ctx.deps.platform !== 'win32') {
+      // Best-effort: remove stale global OpenClaw to avoid two instances
+      try {
+        await ctx.deps.shellRun('npm uninstall -g openclaw 2>&1', 60000);
+      } catch {
+        // May need sudo — that's OK, managed install will still pin the correct version
+      }
       await ctx.deps.shellRun(`${getManagedOpenClawInstallCommand(ctx.deps.homedir, 'openclaw@latest')} 2>&1`, 120000);
       return {
         id: 'openclaw-command-health',

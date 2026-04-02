@@ -119,15 +119,44 @@ export function registerSetupHandlers(deps: {
 
     try {
       if (process.platform === 'win32') {
+        // Tier 1: winget (only if available — skip quickly if not)
+        const hasWinget = await deps.safeShellExecAsync('winget --version', 3000);
+        if (hasWinget) {
+          try {
+            await deps.runAsync('winget install OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements', 300000);
+            return { success: true, method: 'winget' };
+          } catch { /* fall through to MSI */ }
+        }
+
+        // Tier 2: MSI download + install
         try {
-          await deps.runAsync('winget install OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements', 300000);
-          return { success: true, method: 'winget' };
-        } catch {
           const msiUrl = 'https://nodejs.org/dist/v22.12.0/node-v22.12.0-x64.msi';
-          const msiPath = path.join(os.tmpdir(), 'node-installer.msi');
+          const msiPath = path.join(os.tmpdir(), `node-installer-${Date.now()}.msi`);
           await deps.downloadFile(msiUrl, msiPath);
+          if (!fs.existsSync(msiPath)) {
+            return { success: false, error: 'Download failed — file was not created.', hint: 'Check your internet connection and try again.' };
+          }
           await deps.runAsync(`msiexec /i "${msiPath}" /qn`, 300000);
+          // Verify Node.js is now available
+          await deps.sleep(2000);
+          if (!deps.getNodeVersion()) {
+            return {
+              success: false,
+              error: 'Node.js installer ran but node is not available. This usually means administrator rights are needed.',
+              hint: 'Please reopen AwarenessClaw as administrator, or install Node.js manually from https://nodejs.org',
+            };
+          }
           return { success: true, method: 'msi' };
+        } catch (msiErr) {
+          const msg = String(msiErr);
+          if (msg.includes('EACCES') || msg.includes('Access is denied') || msg.includes('elevation')) {
+            return {
+              success: false,
+              error: 'Node.js installation requires administrator rights.',
+              hint: 'Please reopen AwarenessClaw as administrator, or install Node.js manually from https://nodejs.org',
+            };
+          }
+          return { success: false, error: msg, hint: 'Please install Node.js 22+ manually from https://nodejs.org' };
         }
       } else if (process.platform === 'darwin') {
         const hasBrew = await deps.safeShellExecAsync('brew --version') !== null;
@@ -175,33 +204,71 @@ export function registerSetupHandlers(deps: {
   });
 
   ipcMain.handle('setup:install-openclaw', async () => {
+    // Check 1: PATH-based detection (uses enhanced PATH with managed prefix, ~/.npm-global/bin, etc.)
     const existing = await deps.safeShellExecAsync('openclaw --version');
     if (existing) {
       deps.ensureManagedOpenClawWindowsShim();
       return { success: true, alreadyInstalled: true, version: existing };
     }
 
+    // Check 2: detect global npm root for OpenClaw (covers cases where openclaw binary exists
+    // but isn't in enhanced PATH, e.g. user installed with sudo to a non-standard prefix)
+    const npmRoot = await deps.safeShellExecAsync('npm root -g', 5000);
+    if (npmRoot) {
+      const globalOpenClawPkg = path.join(npmRoot.trim(), 'openclaw', 'package.json');
+      if (fs.existsSync(globalOpenClawPkg)) {
+        // OpenClaw IS installed globally but not in our PATH — don't install a second copy
+        const ver = await deps.safeShellExecAsync('npm exec -g openclaw -- --version', 5000);
+        return {
+          success: true,
+          alreadyInstalled: true,
+          version: ver || 'installed (not in PATH)',
+          hint: 'OpenClaw is installed globally but not in your PATH. Restart your terminal or add it to PATH.',
+        };
+      }
+    }
+
+    // Not found anywhere — proceed with managed prefix install
     const registries = ['', '--registry=https://registry.npmmirror.com'];
     const managedInstallBase = deps.getManagedOpenClawInstallCommand('openclaw');
+    let lastError = '';
 
     for (const reg of registries) {
       try {
         await deps.runAsync(`${managedInstallBase} ${reg}`.trim(), 90000);
         deps.ensureManagedOpenClawWindowsShim();
         return { success: true };
-      } catch {}
+      } catch (err) {
+        lastError = String(err);
+      }
     }
 
     try {
       if (process.platform === 'win32') {
-        await deps.runAsync('powershell -Command "irm https://openclaw.ai/install.ps1 | iex"', 120000);
+        // Check PowerShell execution policy before attempting script install
+        const execPolicy = await deps.safeShellExecAsync('powershell -NoProfile -Command "Get-ExecutionPolicy"', 5000);
+        if (execPolicy?.trim().toLowerCase() === 'restricted') {
+          return {
+            success: false,
+            error: 'PowerShell execution policy is too restrictive to install OpenClaw.\nPlease run in PowerShell as administrator:\n  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser\nThen reopen AwarenessClaw.',
+          };
+        }
+        await deps.runAsync('powershell -NoProfile -Command "irm https://openclaw.ai/install.ps1 | iex"', 120000);
       } else {
         await deps.runAsync('curl -fsSL https://openclaw.ai/install.sh | bash', 120000);
       }
       deps.ensureManagedOpenClawWindowsShim();
       return { success: true, method: 'official-script' };
     } catch (err) {
-      return { success: false, error: String(err), hint: 'Install OpenClaw manually: npm install -g openclaw' };
+      const msg = String(err);
+      const isPermissionError = /EACCES|permission denied|Access is denied/i.test(msg) || /EACCES|permission denied/i.test(lastError);
+      if (isPermissionError) {
+        return {
+          success: false,
+          error: 'Permission denied during installation. Please run in terminal:\n  npm config set prefix ~/.npm-global\n  export PATH=~/.npm-global/bin:$PATH\n  npm install -g openclaw',
+        };
+      }
+      return { success: false, error: msg, hint: 'Install OpenClaw manually: npm install -g openclaw' };
     }
   });
 
