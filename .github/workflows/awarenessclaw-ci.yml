@@ -1,0 +1,60 @@
+name: AwarenessClaw CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - package.json
+      - package-lock.json
+      - packages/cli/**
+      - packages/desktop/**
+      - .github/workflows/awarenessclaw-ci.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - package.json
+      - package-lock.json
+      - packages/cli/**
+      - packages/desktop/**
+      - .github/workflows/awarenessclaw-ci.yml
+  workflow_dispatch:
+
+concurrency:
+  group: awarenessclaw-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build desktop
+        run: npm run build:desktop
+
+      - name: Build CLI smoke check
+        run: npm run build:cli
+
+      - name: Run targeted desktop tests
+        run: |
+          cd packages/desktop
+          npx vitest run \
+            src/test/agents.test.tsx \
+            src/test/dashboard.test.tsx \
+            src/test/settings.test.tsx \
+            src/test/workspace.test.tsx \
+            --reporter=verbose

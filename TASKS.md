@@ -344,6 +344,7 @@ OpenClaw 的 chat 质量依赖 `~/.openclaw/workspace/` 下的 MD 文档：
 - [x] **工具图标识别**：exec/bash/shell/command 类工具显示 Terminal 图标（2026-03-30）
 
 ### 测试质量提升（116 tests / 26 files — 2026-03-30）
+- [x] **AwarenessClaw 最小 CI**：新增 GitHub Actions workflow，针对 push / PR 运行 desktop build、CLI smoke build 和关键前端测试（agents/dashboard/settings/workspace），控制分钟消耗同时保证主链路回归（2026-04-02）
 - [x] **Skills 页端到端测试**：mock API 返回数据 → 验证技能列表渲染 + 搜索调用（2026-03-30）
 - [x] **Permissions 面板测试**：验证 profile 显示 + denied 命令移除调用 permissionsUpdate（2026-03-30）
 - [x] **Workspace 编辑器测试**：验证文件按钮显示 + 点击调用 workspaceReadFile（2026-03-30）
