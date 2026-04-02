@@ -13,16 +13,15 @@ interface AgentInfo {
   routes?: string[];
 }
 
-type WorkspaceFile = 'SOUL.md' | 'TOOLS.md' | 'IDENTITY.md' | 'USER.md' | 'MEMORY.md' | 'AGENTS.md';
-
-const WORKSPACE_FILES: { key: WorkspaceFile; label: string; desc: string }[] = [
-  { key: 'SOUL.md', label: 'SOUL.md', desc: 'System prompt — personality, role, behavior' },
-  { key: 'TOOLS.md', label: 'TOOLS.md', desc: 'Tool permissions and usage rules' },
-  { key: 'IDENTITY.md', label: 'IDENTITY.md', desc: 'Name, emoji, avatar configuration' },
-  { key: 'USER.md', label: 'USER.md', desc: 'User preferences and context' },
-  { key: 'MEMORY.md', label: 'MEMORY.md', desc: 'Persistent agent memory' },
-  { key: 'AGENTS.md', label: 'AGENTS.md', desc: 'Workspace-level agent defaults and routing notes' },
-];
+const WORKSPACE_FILE_META: Record<string, string> = {
+  'SOUL.md': 'System prompt — personality, role, behavior',
+  'TOOLS.md': 'Tool permissions and usage rules',
+  'IDENTITY.md': 'Name, emoji, avatar configuration',
+  'USER.md': 'User preferences and context',
+  'MEMORY.md': 'Persistent agent memory',
+  'AGENTS.md': 'Workspace-level agent defaults and routing notes',
+  'HEARTBEAT.md': 'Runtime heartbeat, cadence, and operating rhythm notes',
+};
 
 export default function Agents() {
   const { t } = useI18n();
@@ -51,9 +50,11 @@ export default function Agents() {
 
   // Workspace file editing
   const [fileEditAgentId, setFileEditAgentId] = useState<string | null>(null);
-  const [activeFile, setActiveFile] = useState<WorkspaceFile>('SOUL.md');
+  const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
+  const [activeFile, setActiveFile] = useState('');
   const [fileContent, setFileContent] = useState('');
   const [fileOriginal, setFileOriginal] = useState('');
+  const [fileListLoading, setFileListLoading] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
   const [fileSaving, setFileSaving] = useState(false);
   const [fileSaved, setFileSaved] = useState(false);
@@ -166,28 +167,71 @@ export default function Agents() {
   };
 
   // Workspace file editing
-  const loadFile = useCallback(async (agentId: string, fileName: WorkspaceFile) => {
+  const loadFile = useCallback(async (agentId: string, fileName: string) => {
     if (!window.electronAPI) return;
     setFileLoading(true);
     setFileSaved(false);
     try {
+      if (!(window.electronAPI as any).agentsReadFile) {
+        throw new Error('This desktop build does not expose agent file reading yet. Please restart with the latest package.');
+      }
       const result = await (window.electronAPI as any).agentsReadFile(agentId, fileName);
       if (result.success) {
         setFileContent(result.content || '');
         setFileOriginal(result.content || '');
+      } else {
+        throw new Error(result.error || `Failed to load ${fileName}`);
       }
-    } catch { /* ignore */ }
+    } catch (err: any) {
+      setFileContent('');
+      setFileOriginal('');
+      setError(err?.message || `Failed to load ${fileName}`);
+    }
     setFileLoading(false);
   }, []);
+
+  const loadWorkspaceFiles = useCallback(async (agentId: string) => {
+    if (!window.electronAPI) return;
+    setFileListLoading(true);
+    try {
+      if (!(window.electronAPI as any).agentsListFiles) {
+        throw new Error('This desktop build does not expose dynamic agent workspace files yet. Please restart with the latest package.');
+      }
+      const result = await (window.electronAPI as any).agentsListFiles(agentId);
+      if (!result?.success) {
+        throw new Error(result?.error || 'Failed to load workspace files');
+      }
+      const files = Array.isArray(result?.files) ? result.files : [];
+      setWorkspaceFiles(files);
+      if (files.length === 0) {
+        setActiveFile('');
+        setFileContent('');
+        setFileOriginal('');
+        return;
+      }
+      const nextFile = files.includes(activeFile) ? activeFile : files[0];
+      setActiveFile(nextFile);
+      await loadFile(agentId, nextFile);
+    } catch (err: any) {
+      setWorkspaceFiles([]);
+      setActiveFile('');
+      setFileContent('');
+      setFileOriginal('');
+      setError(err?.message || 'Failed to load workspace files');
+    } finally {
+      setFileListLoading(false);
+    }
+  }, [activeFile, loadFile]);
 
   const handleOpenFiles = (agentId: string) => {
     if (fileEditAgentId === agentId) {
       setFileEditAgentId(null);
+      setWorkspaceFiles([]);
+      setActiveFile('');
       return;
     }
     setFileEditAgentId(agentId);
-    setActiveFile('SOUL.md');
-    loadFile(agentId, 'SOUL.md');
+    void loadWorkspaceFiles(agentId);
   };
 
   const handleSaveFile = async () => {
@@ -387,15 +431,15 @@ export default function Agents() {
                   <div className="border-t border-slate-700/50 bg-slate-900/50">
                     {/* File tabs */}
                     <div className="grid grid-cols-2 gap-1 border-b border-slate-700/30 p-2 sm:grid-cols-3 xl:grid-cols-6">
-                      {WORKSPACE_FILES.map((f) => (
-                        <button key={f.key}
-                          onClick={() => { setActiveFile(f.key); loadFile(agent.id, f.key); }}
+                      {workspaceFiles.map((fileName) => (
+                        <button key={fileName}
+                          onClick={() => { setActiveFile(fileName); void loadFile(agent.id, fileName); }}
                           className={`rounded-lg px-3 py-2 text-[11px] text-left transition-colors ${
-                            activeFile === f.key
+                            activeFile === fileName
                               ? 'bg-brand-600/10 text-brand-400 ring-1 ring-brand-500/40'
                               : 'text-slate-500 hover:bg-slate-800/70 hover:text-slate-300'
                           }`}>
-                          {f.label}
+                          {fileName}
                         </button>
                       ))}
                     </div>
@@ -403,15 +447,19 @@ export default function Agents() {
                     {/* File description */}
                     <div className="px-4 pt-2">
                       <p className="text-[10px] text-slate-500">
-                        {WORKSPACE_FILES.find(f => f.key === activeFile)?.desc}
+                        {activeFile ? (WORKSPACE_FILE_META[activeFile] || `OpenClaw workspace file: ${activeFile}`) : 'No markdown workspace files found for this agent.'}
                       </p>
                     </div>
 
                     {/* Editor */}
                     <div className="p-4">
-                      {fileLoading ? (
+                      {fileListLoading || fileLoading ? (
                         <div className="flex items-center justify-center py-8">
                           <Loader2 size={16} className="animate-spin text-slate-500" />
+                        </div>
+                      ) : !activeFile ? (
+                        <div className="rounded-lg border border-dashed border-slate-700 px-4 py-8 text-sm text-slate-500">
+                          This agent does not expose any top-level markdown workspace files yet.
                         </div>
                       ) : (
                         <textarea

@@ -142,6 +142,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   agentsSetIdentity: (id: string, name: string, emoji: string, avatar?: string, theme?: string) => ipcRenderer.invoke('agents:set-identity', id, name, emoji, avatar, theme),
   agentsBind: (id: string, binding: string) => ipcRenderer.invoke('agents:bind', id, binding),
   agentsUnbind: (id: string, binding: string) => ipcRenderer.invoke('agents:unbind', id, binding),
+  agentsListFiles: (id: string) => ipcRenderer.invoke('agents:list-files', id),
+  agentsReadFile: (id: string, fileName: string) => ipcRenderer.invoke('agents:read-file', id, fileName),
+  agentsWriteFile: (id: string, fileName: string, content: string) => ipcRenderer.invoke('agents:write-file', id, fileName, content),
 
   // Models (dynamic)
   modelsReadProviders: () => ipcRenderer.invoke('models:read-providers'),

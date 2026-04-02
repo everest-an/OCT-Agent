@@ -35,6 +35,15 @@ export interface ElectronAPI {
   openclawConfigRead?: (dotPath?: string) => Promise<{ success: boolean; value: unknown; error?: string }>;
   openclawConfigWrite?: (dotPath: string, value: unknown) => Promise<{ success: boolean; error?: string }>;
   openclawConfigSchema?: () => Promise<{ success: boolean; schema?: Record<string, unknown>; error?: string }>;
+  agentsList?: () => Promise<{ success: boolean; agents?: Array<{ id: string; name?: string; emoji?: string; model?: string; bindings?: string[]; isDefault?: boolean; workspace?: string; routes?: string[] }>; error?: string }>;
+  agentsAdd?: (name: string, model?: string, systemPrompt?: string) => Promise<{ success: boolean; error?: string }>;
+  agentsDelete?: (id: string) => Promise<{ success: boolean; error?: string }>;
+  agentsSetIdentity?: (id: string, name: string, emoji: string, avatar?: string, theme?: string) => Promise<{ success: boolean; error?: string }>;
+  agentsBind?: (id: string, binding: string) => Promise<{ success: boolean; error?: string }>;
+  agentsUnbind?: (id: string, binding: string) => Promise<{ success: boolean; error?: string }>;
+  agentsListFiles?: (id: string) => Promise<{ success: boolean; files?: string[]; error?: string }>;
+  agentsReadFile?: (id: string, fileName: string) => Promise<{ success: boolean; content?: string; path?: string; error?: string }>;
+  agentsWriteFile?: (id: string, fileName: string, content: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 export interface EnvironmentInfo {

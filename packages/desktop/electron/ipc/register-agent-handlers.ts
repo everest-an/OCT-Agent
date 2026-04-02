@@ -3,6 +3,55 @@ import path from 'path';
 import { ipcMain } from 'electron';
 import { parseJsonShellOutput } from '../openclaw-shell-output';
 
+const DEFAULT_AGENT_IDS = new Set(['main', 'default']);
+const PREFERRED_MARKDOWN_ORDER = [
+  'AGENTS.md',
+  'HEARTBEAT.md',
+  'IDENTITY.md',
+  'MEMORY.md',
+  'SOUL.md',
+  'TOOLS.md',
+  'USER.md',
+];
+
+function toAgentSlug(agentId: string) {
+  return agentId.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+}
+
+function isAllowedMarkdownFile(fileName: string) {
+  return path.basename(fileName) === fileName && /^[A-Za-z0-9._-]+\.md$/i.test(fileName);
+}
+
+function getAgentReadDirectories(home: string, agentId: string) {
+  const slug = toAgentSlug(agentId);
+  const globalWorkspaceDir = path.join(home, '.openclaw', 'workspace');
+  const workspaceDir = path.join(home, '.openclaw', 'workspaces', slug);
+  const agentDir = path.join(home, '.openclaw', 'agents', slug, 'agent');
+  return DEFAULT_AGENT_IDS.has(agentId) ? [globalWorkspaceDir, agentDir] : [workspaceDir, agentDir];
+}
+
+function listMarkdownFilesFromDirectories(directories: string[]) {
+  const discovered = new Set<string>();
+  for (const directory of directories) {
+    if (!fs.existsSync(directory)) continue;
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      if (!isAllowedMarkdownFile(entry.name)) continue;
+      discovered.add(entry.name);
+    }
+  }
+  return Array.from(discovered).sort((left, right) => {
+    const leftIndex = PREFERRED_MARKDOWN_ORDER.indexOf(left);
+    const rightIndex = PREFERRED_MARKDOWN_ORDER.indexOf(right);
+    if (leftIndex !== -1 || rightIndex !== -1) {
+      if (leftIndex === -1) return 1;
+      if (rightIndex === -1) return -1;
+      return leftIndex - rightIndex;
+    }
+    return left.localeCompare(right);
+  });
+}
+
 export function registerAgentHandlers(deps: {
   home: string;
   safeShellExecAsync: (cmd: string, timeoutMs?: number) => Promise<string | null>;
@@ -121,16 +170,19 @@ export function registerAgentHandlers(deps: {
     }
   });
 
-  ipcMain.handle('agents:read-file', async (_e: any, agentId: string, fileName: string) => {
-    const allowedFiles = ['SOUL.md', 'TOOLS.md', 'IDENTITY.md', 'USER.md', 'MEMORY.md', 'AGENTS.md'];
-    if (!allowedFiles.includes(fileName)) return { success: false, error: 'File not allowed' };
+  ipcMain.handle('agents:list-files', async (_e: any, agentId: string) => {
     try {
-      const slug = agentId.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-      const candidates = [
-        path.join(deps.home, '.openclaw', 'workspaces', slug, fileName),
-        path.join(deps.home, '.openclaw', 'agents', slug, 'agent', fileName),
-        path.join(deps.home, '.openclaw', 'workspace', fileName),
-      ];
+      const directories = getAgentReadDirectories(deps.home, agentId);
+      return { success: true, files: listMarkdownFilesFromDirectories(directories) };
+    } catch (err: any) {
+      return { success: false, error: err.message?.slice(0, 200), files: [] };
+    }
+  });
+
+  ipcMain.handle('agents:read-file', async (_e: any, agentId: string, fileName: string) => {
+    if (!isAllowedMarkdownFile(fileName)) return { success: false, error: 'File not allowed' };
+    try {
+      const candidates = getAgentReadDirectories(deps.home, agentId).map((directory) => path.join(directory, fileName));
       for (const fp of candidates) {
         if (fs.existsSync(fp)) {
           return { success: true, content: fs.readFileSync(fp, 'utf-8'), path: fp };
@@ -143,14 +195,13 @@ export function registerAgentHandlers(deps: {
   });
 
   ipcMain.handle('agents:write-file', async (_e: any, agentId: string, fileName: string, content: string) => {
-    const allowedFiles = ['SOUL.md', 'TOOLS.md', 'IDENTITY.md', 'USER.md', 'MEMORY.md', 'AGENTS.md'];
-    if (!allowedFiles.includes(fileName)) return { success: false, error: 'File not allowed' };
+    if (!isAllowedMarkdownFile(fileName)) return { success: false, error: 'File not allowed' };
     try {
-      const slug = agentId.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+      const slug = toAgentSlug(agentId);
       const wsDir = path.join(deps.home, '.openclaw', 'workspaces', slug);
       const agentDir = path.join(deps.home, '.openclaw', 'agents', slug, 'agent');
       const globalWs = path.join(deps.home, '.openclaw', 'workspace');
-      const isDefault = agentId === 'main' || agentId === 'default';
+      const isDefault = DEFAULT_AGENT_IDS.has(agentId);
       const targets = isDefault ? [globalWs] : [wsDir, agentDir];
       for (const dir of targets) {
         fs.mkdirSync(dir, { recursive: true });
