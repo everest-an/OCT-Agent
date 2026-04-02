@@ -42,6 +42,8 @@ import { ensureInternalHook } from './internal-hook';
 import { readRuntimePreferences, writeRuntimePreferences } from './runtime-preferences';
 import { createShellUtils } from './shell-utils';
 import { isGatewayRunningOutput } from './openclaw-config';
+import { getAgentWorkspaceDir } from './openclaw-config';
+import { resolveDashboardUrl } from './openclaw-dashboard';
 import {
   applyDesktopAwarenessPluginConfig,
   mergeDesktopOpenClawConfig,
@@ -526,6 +528,10 @@ async function getGatewayWs(): Promise<GatewayClient> {
 
 const WORKSPACE_DIR = path.join(HOME, '.openclaw', 'workspace');
 
+function readCurrentWorkspaceDir() {
+  return getAgentWorkspaceDir(HOME);
+}
+
 const doctor = createDoctor({
   shellExec: safeShellExecAsync,
   shellRun: runAsync,
@@ -573,8 +579,9 @@ function createTray() {
     },
     {
       label: 'Open Dashboard',
-      click: () => {
-        shell.openExternal('http://localhost:18789');
+      click: async () => {
+        const url = await resolveDashboardUrl(readShellOutputAsync);
+        shell.openExternal(url);
       },
     },
     { type: 'separator' },
@@ -705,7 +712,7 @@ registerSkillHandlers({
 });
 registerCloudWorkspaceHandlers({
   home: HOME,
-  workspaceDir: WORKSPACE_DIR,
+  getWorkspaceDir: readCurrentWorkspaceDir,
 });
 registerConfigIoHandlers({
   home: HOME,

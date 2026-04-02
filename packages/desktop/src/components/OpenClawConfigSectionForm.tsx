@@ -49,6 +49,7 @@ export default function OpenClawConfigSectionForm({
       return [
         enabled === false ? 'disabled' : 'enabled',
         customized > 0 ? `${customized} custom values` : 'all defaults',
+        'usually no action needed',
       ].join(' · ');
     }
 
@@ -61,7 +62,7 @@ export default function OpenClawConfigSectionForm({
         let lastGroup: string | undefined;
         const primaryFields = section.fields.filter((field) => field.prominence !== 'advanced');
         const advancedFields = section.fields.filter((field) => field.prominence === 'advanced');
-        const visibleFields = expandedSections[section.key] ? section.fields : (primaryFields.length > 0 ? primaryFields : section.fields);
+        const visibleFields = expandedSections[section.key] ? section.fields : primaryFields;
         const showAdvancedToggle = advancedFields.length > 0;
         const isExpanded = expandedSections[section.key];
 
@@ -87,6 +88,11 @@ export default function OpenClawConfigSectionForm({
             </div>
 
             <div className="divide-y divide-slate-700/50">
+              {!isExpanded && visibleFields.length === 0 ? (
+                <div className="px-4 py-3 text-xs text-slate-500">
+                  Hidden by default to keep this page short. Open advanced only if you need to fine-tune this behavior.
+                </div>
+              ) : null}
               {visibleFields.map((field) => {
                 const currentValue = values?.[field.path];
                 const showGroup = field.group && field.group !== lastGroup;

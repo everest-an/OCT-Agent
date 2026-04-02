@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Clock, Plus, Trash2, RefreshCw, Loader2, ExternalLink, ChevronDown, ChevronRight, Calendar, Timer } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
+import { useExternalNavigator } from '../lib/useExternalNavigator';
 
 interface CronJob {
   id?: string;
@@ -84,6 +85,7 @@ const PRESETS = [
 
 export default function Automation() {
   const { t } = useI18n();
+  const { openDashboard, isOpening } = useExternalNavigator();
   const [jobs, setJobs] = useState<CronJob[]>([]);
   const [loading, setLoading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -250,10 +252,11 @@ export default function Automation() {
               {t('common.refresh')}
             </button>
             <button
-              onClick={() => window.electronAPI?.openExternal('http://localhost:18789')}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 rounded-lg transition-colors"
+              onClick={() => { void openDashboard('automation-dashboard'); }}
+              disabled={isOpening('automation-dashboard')}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 disabled:text-slate-600 bg-slate-800 rounded-lg transition-colors"
             >
-              <ExternalLink size={12} /> {t('auto.dashboard', 'Dashboard')}
+              {isOpening('automation-dashboard') ? <Loader2 size={12} className="animate-spin" /> : <ExternalLink size={12} />} {t('auto.dashboard', 'Dashboard')}
             </button>
           </div>
         </div>

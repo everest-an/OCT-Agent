@@ -19,16 +19,46 @@ export const GATEWAY_DEFAULTS = {
 };
 
 export const DEFAULT_EXEC_APPROVAL_ASK = 'on-miss' as const;
+export const DEFAULT_EXEC_APPROVAL_SECURITY = 'deny' as const;
+export const DEFAULT_EXEC_APPROVAL_ASK_FALLBACK = 'deny' as const;
 
-export type ExecApprovalAsk = 'off' | 'on-miss';
+export type ExecApprovalAsk = 'off' | 'on-miss' | 'always';
+export type ExecApprovalSecurity = 'deny' | 'allowlist' | 'full';
+
+export type ExecApprovalAllowlistEntry = {
+  id?: string;
+  pattern: string;
+  source?: string;
+  lastUsedAt?: number;
+  lastUsedCommand?: string;
+  lastResolvedPath?: string;
+};
+
+export type ExecApprovalSettings = {
+  security: ExecApprovalSecurity;
+  ask: ExecApprovalAsk;
+  askFallback: ExecApprovalSecurity;
+  autoAllowSkills: boolean;
+  allowlist: ExecApprovalAllowlistEntry[];
+};
 
 interface ExecApprovalsConfig {
   version: number;
   defaults?: {
     ask?: string;
+    security?: string;
+    askFallback?: string;
+    autoAllowSkills?: boolean;
     [key: string]: unknown;
   };
-  agents?: Record<string, unknown>;
+  agents?: Record<string, {
+    ask?: string;
+    security?: string;
+    askFallback?: string;
+    autoAllowSkills?: boolean;
+    allowlist?: ExecApprovalAllowlistEntry[];
+    [key: string]: unknown;
+  }>;
   socket?: Record<string, unknown>;
   [key: string]: unknown;
 }
@@ -90,6 +120,18 @@ export function getGatewayPort(homedir: string): number {
   }
 }
 
+export function getAgentWorkspaceDir(homedir: string): string {
+  const fallback = path.join(homedir, '.openclaw', 'workspace');
+  try {
+    const configPath = path.join(homedir, '.openclaw', 'openclaw.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const configured = config?.agents?.defaults?.workspace;
+    return typeof configured === 'string' && configured.trim() ? configured.trim() : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export function getExecApprovalsPath(homedir: string): string {
   return path.join(homedir, '.openclaw', 'exec-approvals.json');
 }
@@ -117,22 +159,82 @@ export function readExecApprovalsConfig(homedir: string): ExecApprovalsConfig {
 
 export function getExecApprovalAsk(homedir: string): ExecApprovalAsk {
   const config = readExecApprovalsConfig(homedir);
-  return config.defaults?.ask === 'off' ? 'off' : DEFAULT_EXEC_APPROVAL_ASK;
+  const ask = config.defaults?.ask;
+  return ask === 'off' || ask === 'always' ? ask : DEFAULT_EXEC_APPROVAL_ASK;
 }
 
 export function writeExecApprovalAsk(homedir: string, ask: ExecApprovalAsk): void {
+  writeExecApprovalSettings(homedir, { ask });
+}
+
+function normalizeExecApprovalSecurity(value: unknown): ExecApprovalSecurity {
+  return value === 'deny' || value === 'full' ? value : DEFAULT_EXEC_APPROVAL_SECURITY;
+}
+
+function normalizeExecApprovalAsk(value: unknown): ExecApprovalAsk {
+  return value === 'off' || value === 'always' ? value : DEFAULT_EXEC_APPROVAL_ASK;
+}
+
+function normalizeAllowlist(value: unknown): ExecApprovalAllowlistEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === 'object')
+    .map((entry) => ({
+      ...(typeof entry.id === 'string' ? { id: entry.id } : {}),
+      pattern: typeof entry.pattern === 'string' ? entry.pattern.trim() : '',
+      ...(typeof entry.source === 'string' ? { source: entry.source } : {}),
+      ...(typeof entry.lastUsedAt === 'number' ? { lastUsedAt: entry.lastUsedAt } : {}),
+      ...(typeof entry.lastUsedCommand === 'string' ? { lastUsedCommand: entry.lastUsedCommand } : {}),
+      ...(typeof entry.lastResolvedPath === 'string' ? { lastResolvedPath: entry.lastResolvedPath } : {}),
+    }))
+    .filter((entry) => entry.pattern);
+}
+
+export function getExecApprovalSettings(homedir: string, agentId = 'main'): ExecApprovalSettings {
+  const config = readExecApprovalsConfig(homedir);
+  const defaults = config.defaults || {};
+  const agent = config.agents?.[agentId] || {};
+
+  return {
+    security: normalizeExecApprovalSecurity(agent.security ?? defaults.security),
+    ask: normalizeExecApprovalAsk(agent.ask ?? defaults.ask),
+    askFallback: normalizeExecApprovalSecurity(agent.askFallback ?? defaults.askFallback ?? DEFAULT_EXEC_APPROVAL_ASK_FALLBACK),
+    autoAllowSkills: typeof (agent.autoAllowSkills ?? defaults.autoAllowSkills) === 'boolean'
+      ? Boolean(agent.autoAllowSkills ?? defaults.autoAllowSkills)
+      : false,
+    allowlist: normalizeAllowlist(agent.allowlist),
+  };
+}
+
+export function writeExecApprovalSettings(
+  homedir: string,
+  updates: Partial<ExecApprovalSettings>,
+  agentId = 'main',
+): void {
   const configPath = getExecApprovalsPath(homedir);
   const config = readExecApprovalsConfig(homedir);
+  const defaults = config.defaults || {};
+  const agents = typeof config.agents === 'object' && config.agents ? config.agents : {};
+  const agent = agents[agentId] || {};
 
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   fs.writeFileSync(configPath, JSON.stringify({
     ...config,
     version: typeof config.version === 'number' ? config.version : 1,
     defaults: {
-      ...(config.defaults || {}),
-      ask,
+      ...defaults,
+      ...(updates.security !== undefined ? { security: updates.security } : {}),
+      ...(updates.ask !== undefined ? { ask: updates.ask } : {}),
+      ...(updates.askFallback !== undefined ? { askFallback: updates.askFallback } : {}),
+      ...(updates.autoAllowSkills !== undefined ? { autoAllowSkills: updates.autoAllowSkills } : {}),
     },
-    agents: typeof config.agents === 'object' && config.agents ? config.agents : {},
+    agents: {
+      ...agents,
+      [agentId]: {
+        ...agent,
+        ...(updates.allowlist !== undefined ? { allowlist: updates.allowlist } : {}),
+      },
+    },
   }, null, 2));
 }
 

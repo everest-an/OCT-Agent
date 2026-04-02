@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import Channels from '../pages/Channels';
 
@@ -39,5 +39,39 @@ describe('Channels Page', () => {
       await act(async () => { fireEvent.click(discordBtn); });
       expect(screen.getByText(/Connect Discord/)).toBeInTheDocument();
     }
+  });
+
+  it('opens official OpenClaw tutorial link and disables the button while opening', async () => {
+    const api = window.electronAPI as any;
+    let resolveOpen: (() => void) | null = null;
+    api.openExternal = vi.fn().mockImplementation(() => new Promise<void>((resolve) => {
+      resolveOpen = resolve;
+    }));
+
+    await act(async () => { render(<Channels />); });
+
+    const discordBtn = screen.getByText('Discord').closest('button');
+    expect(discordBtn).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(discordBtn as HTMLButtonElement);
+    });
+
+    const tutorialButton = screen.getByRole('button', { name: /View detailed tutorial/i });
+
+    await act(async () => {
+      fireEvent.click(tutorialButton);
+    });
+
+    expect(api.openExternal).toHaveBeenCalledWith('https://docs.openclaw.ai/channels/discord');
+    expect(tutorialButton).toBeDisabled();
+
+    await act(async () => {
+      resolveOpen?.();
+    });
+
+    await waitFor(() => {
+      expect(tutorialButton).not.toBeDisabled();
+    });
   });
 });

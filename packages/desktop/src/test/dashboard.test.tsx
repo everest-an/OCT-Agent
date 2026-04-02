@@ -150,6 +150,8 @@ describe('Dashboard (Chat)', () => {
       fireEvent.click(screen.getAllByText(/Project folder|项目目录/)[0].closest('button') as HTMLButtonElement);
     });
 
+    expect(screen.getAllByText(/DemoApp/).length).toBeGreaterThan(0);
+
     const textarea = screen.getByPlaceholderText(/输入消息|Type a message/);
     await act(async () => {
       fireEvent.change(textarea, { target: { value: 'edit local files' } });
@@ -163,6 +165,77 @@ describe('Dashboard (Chat)', () => {
       expect(api.chatSend).toHaveBeenCalledWith('edit local files', expect.any(String), expect.objectContaining({
         workspacePath: 'E:\\Projects\\DemoApp',
       }));
+    });
+  });
+
+  it('updates the project folder label immediately after selection', async () => {
+    const api = window.electronAPI as any;
+    api.selectDirectory = vi.fn().mockResolvedValue({ directoryPath: 'E:\\Projects\\StuckRestart' });
+
+    await act(async () => { render(<Dashboard />); });
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByText(/Project folder|项目目录/)[0].closest('button') as HTMLButtonElement);
+    });
+
+    expect(screen.getAllByText(/StuckRestart/).length).toBeGreaterThan(0);
+  });
+
+  it('renders a permissions selector aligned with Settings presets and can switch to Developer', async () => {
+    const api = window.electronAPI as any;
+    api.permissionsGet = vi.fn().mockResolvedValue({
+      success: true,
+      profile: 'coding',
+      alsoAllow: ['awareness_init', 'awareness_get_agent_prompt'],
+      denied: ['exec', 'bash', 'shell', 'camera.snap', 'screen.record', 'contacts.add', 'calendar.add', 'sms.send'],
+      execSecurity: 'deny',
+      execAsk: 'on-miss',
+      execAskFallback: 'deny',
+      execAutoAllowSkills: false,
+      execAllowlist: [],
+    });
+    api.permissionsUpdate = vi.fn().mockResolvedValue({ success: true });
+
+    await act(async () => { render(<Dashboard />); });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle(/Switch permissions/));
+    });
+
+    expect(screen.getAllByText('Safe').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Standard').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Developer').length).toBeGreaterThan(0);
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByText('Developer')[0]);
+    });
+
+    await waitFor(() => {
+      expect(api.permissionsUpdate).toHaveBeenCalledWith(expect.objectContaining({
+        alsoAllow: ['awareness_init', 'awareness_get_agent_prompt', 'exec', 'awareness_recall', 'awareness_record', 'awareness_lookup', 'awareness_perception'],
+        denied: [],
+        execSecurity: 'full',
+        execAsk: 'off',
+        execAskFallback: 'full',
+        execAutoAllowSkills: true,
+      }));
+    });
+  });
+
+  it('opens OpenClaw dashboard via resolved dashboard url', async () => {
+    const api = window.electronAPI as any;
+    api.getDashboardUrl = vi.fn().mockResolvedValue({ url: 'http://127.0.0.1:18789/chat' });
+    api.openExternal = vi.fn().mockResolvedValue(undefined);
+
+    await act(async () => { render(<Dashboard />); });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle(/OpenClaw Dashboard|OpenClaw 控制台/));
+    });
+
+    await waitFor(() => {
+      expect(api.getDashboardUrl).toHaveBeenCalled();
+      expect(api.openExternal).toHaveBeenCalledWith('http://127.0.0.1:18789/chat');
     });
   });
 
@@ -424,6 +497,43 @@ describe('Dashboard (Chat)', () => {
     });
   });
 
+  it('ignores trailing status events after the assistant response has already completed', async () => {
+    let statusCallback: ((status: any) => void) | null = null;
+    let resolveChat: ((value: any) => void) | null = null;
+    const api = window.electronAPI as any;
+    api.onChatStatus = (cb: any) => { statusCallback = cb; };
+    api.chatSend = vi.fn(() => new Promise((resolve) => {
+      resolveChat = resolve;
+    }));
+
+    await act(async () => { render(<Dashboard />); });
+
+    const textarea = screen.getByPlaceholderText(/输入消息/) as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'finish cleanly' } });
+    });
+
+    const buttons = screen.getAllByRole('button');
+    const sendBtn = buttons[buttons.length - 1];
+    await act(async () => { fireEvent.click(sendBtn); });
+
+    await act(async () => {
+      statusCallback?.({ type: 'tool_call', tool: 'exec', toolStatus: 'running', toolId: 'tool-1', detail: 'pwd' });
+      resolveChat?.({ success: true, text: 'done', sessionId: 'test-session' });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('done')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      statusCallback?.({ type: 'tool_update', toolId: 'tool-1', toolStatus: 'failed', detail: 'late failure should be ignored' });
+    });
+
+    expect(screen.queryByText(/出错了|Response timed out or failed/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/late failure should be ignored/)).not.toBeInTheDocument();
+  });
+
   it('keeps approval requests actionable instead of showing no response', async () => {
     let statusCallback: ((status: any) => void) | null = null;
     const api = window.electronAPI as any;
@@ -469,7 +579,7 @@ describe('Dashboard (Chat)', () => {
     });
   });
 
-  it('routes unconfigured providers to Settings instead of opening a second config flow', async () => {
+  it('routes unconfigured providers to Models instead of opening a second config flow', async () => {
     const onNavigate = vi.fn();
     localStorage.setItem('awareness-claw-config', JSON.stringify({
       language: 'zh', providerKey: 'qwen-portal', modelId: 'qwen-turbo-latest',
@@ -493,7 +603,7 @@ describe('Dashboard (Chat)', () => {
       fireEvent.click(screen.getAllByText(/GPT-4o/i)[0]);
     });
 
-    expect(onNavigate).toHaveBeenCalledWith('settings');
+    expect(onNavigate).toHaveBeenCalledWith('models');
   });
 
   it('restores provider-specific credentials when quick switching from chat header', async () => {

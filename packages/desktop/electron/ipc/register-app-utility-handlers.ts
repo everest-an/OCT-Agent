@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { ipcMain } from 'electron';
+import { resolveDashboardUrl } from '../openclaw-dashboard';
 
 export function registerAppUtilityHandlers(deps: {
   safeShellExecAsync: (cmd: string, timeoutMs?: number) => Promise<string | null>;
@@ -8,21 +9,8 @@ export function registerAppUtilityHandlers(deps: {
   homedir: string;
 }) {
   ipcMain.handle('app:get-dashboard-url', async () => {
-    const output = await deps.readShellOutputAsync('openclaw dashboard --no-open', 10000);
-    if (!output) return { url: null };
-
-    const patterns = [
-      /Dashboard URL:\s*(http[^\s]+)/i,
-      /dashboard:\s*(http[^\s]+)/i,
-      /url:\s*(http[^\s]+)/i,
-      /(http:\/\/localhost:\d+[^\s]*)/,
-    ];
-    for (const pattern of patterns) {
-      const match = output.match(pattern);
-      if (match) return { url: match[1] };
-    }
-
-    return { url: null };
+    const url = await resolveDashboardUrl(deps.readShellOutputAsync);
+    return { url };
   });
 
   ipcMain.handle('logs:recent', async () => {

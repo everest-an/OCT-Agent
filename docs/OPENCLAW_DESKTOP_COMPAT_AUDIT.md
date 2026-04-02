@@ -418,10 +418,16 @@
 
 #### Project Folder / Workspace
 
+更新说明（2026-04-02，B-010 之后）：
+
+- 本节原始结论基于修复前行为，彼时 `workspacePath` 确实更像 prompt 注入
+- 在 B-010 修复后，Desktop 已改为把用户选择目录写入 `openclaw.json` 的 `agents.defaults.workspace`，并在切换后重启 Gateway
+- 因此此处“未接入真实 cwd / workspace”的历史结论只能作为修复前背景，不能再作为当前最终判断
+
 - prompt：`Inspect package.json in the current project directory and list the scripts.`
 - 结果：模型最终回答当前项目目录里不存在 `package.json`
 
-结合第 9.1 节此前结论：
+结合第 9.1 节此前结论（修复前）：
 
 - Desktop 传入的 `workspacePath` 仍更像 prompt 注入，而不是真正接管 OpenClaw 的执行 cwd
 - 因此 Project Folder 语义目前仍不能视为已经和 OpenClaw chat 的真实工作目录行为完全对齐
@@ -460,12 +466,12 @@
 | 基础 agent 回复 | 通过 | 已闭环 | agent 路径恢复正常 |
 | Browser | 未通过 | 已定性 | 环境缺失 `BRAVE_API_KEY`，不是 Desktop 独有回归 |
 | Memory write -> recall | 未通过 | 已定性 | 本地文件已写入，但 recall 未命中新写内容；更像索引/检索策略/session 作用域缺口 |
-| Project Folder / workspace cwd | 未通过 | 已定性 | `workspacePath` 仍更像 prompt 注入，不是真实 cwd 接管 |
+| Project Folder / workspace cwd | 修复后待人工复核 | 已修复代码 + 待 UI deep smoke | Desktop 已改为同步 `agents.defaults.workspace` 并重启 Gateway；需以 UI 路径复核真实文件写入是否落在所选目录 |
 | approval / tool continue | 未通过 | 已定性 | 设计链路存在，但真实 Gateway 自动化下未稳定闭合；更像宿主审批策略 + 模型分支共同作用 |
 
 因此截至本节：
 
 - 如果标准是“Desktop 是否已经具备 OpenClaw chat 的基础聊天能力”，答案是 `yes`
-- 如果标准是“Desktop 是否已经符合 OpenClaw chat 的全部关键功能并完成高阶链路闭环”，答案是 `no`
+- 如果标准是“Desktop 是否已经符合 OpenClaw chat 的全部关键功能并完成高阶链路闭环”，答案目前仍是 `no`，但 `Project Folder / workspace cwd` 已不应继续按“仅 prompt 注入”归因，需以修复后的 UI deep smoke 结果为准
 
 这就是当前阶段的最终判定；后续继续测试，应视为针对具体缺口的专项修复验证，而不是再重复做一轮全量可用性判断。

@@ -183,6 +183,7 @@ export default function App() {
           </div>
           {currentPage === 'memory' && <div className="h-full overflow-y-auto"><Memory /></div>}
           {currentPage === 'channels' && <div className="h-full overflow-y-auto"><Channels /></div>}
+          {currentPage === 'models' && <div className="h-full overflow-y-auto"><Models /></div>}
           {currentPage === 'skills' && <div className="h-full overflow-y-auto"><Skills /></div>}
           {currentPage === 'automation' && <div className="h-full overflow-y-auto"><Automation /></div>}
           {currentPage === 'agents' && <div className="h-full overflow-y-auto"><Agents /></div>}

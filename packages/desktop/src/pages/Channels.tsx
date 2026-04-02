@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { ChevronRight, ChevronLeft, Check, ExternalLink, X, Loader2 } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
+import { useExternalNavigator } from '../lib/useExternalNavigator';
 import PasswordInput from '../components/PasswordInput';
 import ChannelIcon from '../components/ChannelIcon';
 import {
@@ -64,6 +65,7 @@ function DynamicConfigForm({ fields, values, onChange, t }: {
 
 export default function Channels() {
   const { t } = useI18n();
+  const { openExternal, isOpening } = useExternalNavigator();
 
   const translateStatus = (statusKey: string): string => {
     const [key, param] = statusKey.split('::');
@@ -280,10 +282,11 @@ export default function Channels() {
           <div className="p-4 bg-slate-800/50 rounded-xl">
             <p className="text-sm text-slate-300">{guideText}</p>
             <button onClick={() => {
-              window.electronAPI?.openExternal(`https://docs.openclaw.ai/channels/${docsSlug}`);
+              void openExternal(`https://docs.openclaw.ai/channels/${docsSlug}`, `channel-guide-${docsSlug}`);
             }}
+              disabled={isOpening(`channel-guide-${docsSlug}`)}
               className="mt-3 flex items-center gap-1.5 text-sm text-brand-400 hover:text-brand-300">
-              <ExternalLink size={14} /> {t('channels.viewTutorial')}
+              {isOpening(`channel-guide-${docsSlug}`) ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />} {t('channels.viewTutorial')}
             </button>
           </div>
         );

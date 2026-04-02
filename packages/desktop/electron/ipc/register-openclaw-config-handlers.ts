@@ -1,7 +1,13 @@
 import fs from 'fs';
 import path from 'path';
 import { ipcMain } from 'electron';
-import { DEFAULT_EXEC_APPROVAL_ASK, getExecApprovalAsk, writeExecApprovalAsk, type ExecApprovalAsk } from '../openclaw-config';
+import {
+  getExecApprovalSettings,
+  writeExecApprovalSettings,
+  type ExecApprovalAllowlistEntry,
+  type ExecApprovalAsk,
+  type ExecApprovalSecurity,
+} from '../openclaw-config';
 import { parseJsonShellOutput } from '../openclaw-shell-output';
 
 function getConfigPath(home: string) {
@@ -101,19 +107,32 @@ export function registerOpenClawConfigHandlers(deps: {
       const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
       const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       const tools = config.tools || {};
+      const execApprovals = getExecApprovalSettings(deps.home);
       return {
         success: true,
         profile: tools.profile || 'default',
         alsoAllow: tools.alsoAllow || [],
         denied: tools.denied || [],
-        execAsk: getExecApprovalAsk(deps.home),
+        execSecurity: execApprovals.security,
+        execAsk: execApprovals.ask,
+        execAskFallback: execApprovals.askFallback,
+        execAutoAllowSkills: execApprovals.autoAllowSkills,
+        execAllowlist: execApprovals.allowlist,
       };
     } catch (err: any) {
       return { success: false, error: err.message };
     }
   });
 
-  ipcMain.handle('permissions:update', async (_e, changes: { alsoAllow?: string[]; denied?: string[]; execAsk?: ExecApprovalAsk }) => {
+  ipcMain.handle('permissions:update', async (_e, changes: {
+    alsoAllow?: string[];
+    denied?: string[];
+    execSecurity?: ExecApprovalSecurity;
+    execAsk?: ExecApprovalAsk;
+    execAskFallback?: ExecApprovalSecurity;
+    execAutoAllowSkills?: boolean;
+    execAllowlist?: ExecApprovalAllowlistEntry[];
+  }) => {
     try {
       const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
       let config: any = {};
@@ -129,9 +148,22 @@ export function registerOpenClawConfigHandlers(deps: {
           delete config.tools.denied;
         }
       }
-      const execAsk = changes.execAsk ?? DEFAULT_EXEC_APPROVAL_ASK;
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-      writeExecApprovalAsk(deps.home, execAsk);
+      if (
+        changes.execSecurity !== undefined ||
+        changes.execAsk !== undefined ||
+        changes.execAskFallback !== undefined ||
+        changes.execAutoAllowSkills !== undefined ||
+        changes.execAllowlist !== undefined
+      ) {
+        writeExecApprovalSettings(deps.home, {
+          ...(changes.execSecurity !== undefined ? { security: changes.execSecurity } : {}),
+          ...(changes.execAsk !== undefined ? { ask: changes.execAsk } : {}),
+          ...(changes.execAskFallback !== undefined ? { askFallback: changes.execAskFallback } : {}),
+          ...(changes.execAutoAllowSkills !== undefined ? { autoAllowSkills: changes.execAutoAllowSkills } : {}),
+          ...(changes.execAllowlist !== undefined ? { allowlist: changes.execAllowlist } : {}),
+        });
+      }
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message };

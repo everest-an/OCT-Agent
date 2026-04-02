@@ -78,11 +78,6 @@ export function registerChatHandlers(deps: {
       deps.sendToRenderer(channel, payload);
     };
 
-    const gatewayReady = await deps.ensureGatewayRunning();
-    if (!gatewayReady.ok) {
-      return { success: false, text: '', error: gatewayReady.error || 'Gateway failed to start. Please check Settings → Gateway and try again.' };
-    }
-
     const sid = sessionId || `ac-${Date.now()}`;
 
     let fullMessage = message;
@@ -109,7 +104,12 @@ export function registerChatHandlers(deps: {
       } catch {
         return { success: false, text: '', error: 'The selected project folder could not be found.', sessionId: sid };
       }
-      fullMessage = `[Current project directory: ${requestedWorkspace}] (use this as base for relative file paths)\n${fullMessage}`;
+      fullMessage = `[Project working directory: ${requestedWorkspace}] Use this directory as the default root for file operations in this chat. When the user asks you to read, write, edit, or create project files, prefer absolute paths inside this directory or set your command cwd there. Do not treat this folder as the agent's home workspace; AGENTS.md, USER.md, SOUL.md, MEMORY.md, and other agent-scoped files still follow the configured agent workspace.\n\n${fullMessage}`;
+    }
+
+    const gatewayReady = await deps.ensureGatewayRunning();
+    if (!gatewayReady.ok) {
+      return { success: false, text: '', error: gatewayReady.error || 'Gateway failed to start. Please check Settings → Gateway and try again.' };
     }
 
     let fullResponseText = '';

@@ -6,7 +6,7 @@ import { ipcMain } from 'electron';
 
 export function registerCloudWorkspaceHandlers(deps: {
   home: string;
-  workspaceDir: string;
+  getWorkspaceDir: () => string;
 }) {
   const daemonBase = 'http://127.0.0.1:37800/api/v1';
 
@@ -118,7 +118,7 @@ export function registerCloudWorkspaceHandlers(deps: {
     const allowed = ['SOUL.md', 'USER.md', 'IDENTITY.md', 'TOOLS.md', 'MEMORY.md', 'AGENTS.md'];
     if (!allowed.includes(filename)) return { success: false, error: 'File not allowed' };
     try {
-      const filePath = path.join(deps.workspaceDir, filename);
+      const filePath = path.join(deps.getWorkspaceDir(), filename);
       if (!fs.existsSync(filePath)) return { success: true, content: '', exists: false };
       return { success: true, content: fs.readFileSync(filePath, 'utf8'), exists: true };
     } catch (err: any) {
@@ -130,7 +130,9 @@ export function registerCloudWorkspaceHandlers(deps: {
     const allowed = ['SOUL.md', 'USER.md', 'IDENTITY.md', 'TOOLS.md', 'MEMORY.md', 'AGENTS.md'];
     if (!allowed.includes(filename)) return { success: false, error: 'File not allowed' };
     try {
-      const filePath = path.join(deps.workspaceDir, filename);
+      const workspaceDir = deps.getWorkspaceDir();
+      fs.mkdirSync(workspaceDir, { recursive: true });
+      const filePath = path.join(workspaceDir, filename);
       fs.writeFileSync(filePath, content);
       return { success: true };
     } catch (err: any) {

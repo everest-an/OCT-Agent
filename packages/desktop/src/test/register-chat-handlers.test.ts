@@ -151,4 +151,49 @@ describe('registerChatHandlers', () => {
       expect.objectContaining({ agentId: 'researcher' }),
     );
   });
+
+  it('treats the selected project folder as an operation root without switching agent workspace', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: {
+            role: 'assistant',
+            content: 'workspace switched',
+          },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    const workspaceDir = process.cwd();
+
+    registerChatHandlers({
+      sendToRenderer: vi.fn(),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, 'hello', 'test-session', { workspacePath: workspaceDir });
+
+    expect(result).toMatchObject({ success: true, text: 'workspace switched', sessionId: 'test-session' });
+    expect(ws.chatSend).toHaveBeenCalledWith(
+      'test-session',
+      expect.stringContaining(`[Project working directory: ${workspaceDir}]`),
+      expect.any(Object),
+    );
+    expect(ws.chatSend).toHaveBeenCalledWith(
+      'test-session',
+      expect.stringContaining("Do not treat this folder as the agent's home workspace"),
+      expect.any(Object),
+    );
+  });
 });

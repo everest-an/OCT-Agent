@@ -40,6 +40,9 @@ describe('openclaw capability schema helpers', () => {
     ]);
     expect(sections[0].fields[1].type).toBe('select');
     expect(sections[0].fields[2].type).toBe('password');
+    expect(sections[0].fields.find((field) => field.path === 'tools.web.search.provider')?.prominence).toBe('primary');
+    expect(sections[0].fields.find((field) => field.path === 'tools.web.search.apiKey')?.prominence).toBe('primary');
+    expect(sections[0].fields.find((field) => field.path === 'tools.web.search.enabled')?.prominence).toBe('advanced');
   });
 
   it('writes nested values immutably for schema-driven forms', () => {

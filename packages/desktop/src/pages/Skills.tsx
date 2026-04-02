@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Search, Download, Check, ExternalLink, Loader2, Trash2, RefreshCw, Package, AlertCircle, X, Save, Globe, Terminal, FolderOpen, Brain, Eye, MessageSquare, Clock, Zap } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
+import { useExternalNavigator } from '../lib/useExternalNavigator';
 
 interface InstalledSkill {
   slug: string;
@@ -58,6 +59,7 @@ const PAGE_SIZE = 20;
 
 export default function Skills() {
   const { t } = useI18n();
+  const { openExternal, isOpening } = useExternalNavigator();
   const [installed, setInstalled] = useState<Record<string, InstalledSkill>>({});
   const [remoteSkills, setRemoteSkills] = useState<RemoteSkill[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -215,10 +217,11 @@ export default function Skills() {
               {t('skills.refresh')}
             </button>
             <button
-              onClick={() => api?.openExternal('https://clawhub.ai')}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 rounded-lg transition-colors"
+              onClick={() => { void openExternal('https://clawhub.ai', 'skills-clawhub'); }}
+              disabled={isOpening('skills-clawhub')}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 disabled:text-slate-600 bg-slate-800 rounded-lg transition-colors"
             >
-              <ExternalLink size={12} /> ClawHub
+              {isOpening('skills-clawhub') ? <Loader2 size={12} className="animate-spin" /> : <ExternalLink size={12} />} ClawHub
             </button>
           </div>
         </div>

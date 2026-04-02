@@ -1,4 +1,4 @@
-import { CheckCircle } from 'lucide-react';
+import { CheckCircle, Loader2 } from 'lucide-react';
 import type { UsageStats } from '../../lib/usage';
 
 export function SettingsUsagePanel({
@@ -54,6 +54,7 @@ export function SettingsVersionPanel({
   versionInfo,
   t,
   onOpenGithub,
+  githubOpening,
 }: {
   packageVersion: string;
   versionInfo: {
@@ -68,6 +69,7 @@ export function SettingsVersionPanel({
   } | null;
   t: (key: string, fallback?: string) => string;
   onOpenGithub: () => void;
+  githubOpening: boolean;
 }) {
   return (
     <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 p-4 space-y-2">
@@ -114,7 +116,8 @@ export function SettingsVersionPanel({
         </div>
       )}
       <div className="flex justify-center pt-2">
-        <button onClick={onOpenGithub} className="text-xs text-brand-500 hover:text-brand-400">
+        <button onClick={onOpenGithub} disabled={githubOpening} className="flex items-center gap-1 text-xs text-brand-500 hover:text-brand-400 disabled:text-slate-500">
+          {githubOpening ? <Loader2 size={12} className="animate-spin" /> : null}
           GitHub
         </button>
       </div>

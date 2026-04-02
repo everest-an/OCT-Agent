@@ -31,12 +31,12 @@ type JsonSchemaNode = Record<string, any>;
 const SECTION_META: Record<string, { title: string; description?: string; order?: number }> = {
   search: {
     title: 'Web Search',
-    description: 'Configure the search provider and credentials used by OpenClaw web search.',
+    description: 'Most users only need to pick a search provider and add a credential if that provider requires one.',
     order: 1,
   },
   fetch: {
     title: 'Page Fetch',
-    description: 'Tune how OpenClaw fetches and extracts webpage content.',
+    description: 'Leave this alone unless you need to tune how OpenClaw reads webpages.',
     order: 2,
   },
 };
@@ -79,10 +79,8 @@ const FIELD_META: Record<string, { label: string; description?: string; order?: 
 };
 
 const PRIMARY_FIELDS = new Set([
-  'tools.web.search.enabled',
   'tools.web.search.provider',
   'tools.web.search.apiKey',
-  'tools.web.fetch.enabled',
 ]);
 
 const SKIP_PATHS = new Set([

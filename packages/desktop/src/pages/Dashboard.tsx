@@ -1,13 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Send, Paperclip, ChevronDown, ChevronRight, ExternalLink, Loader2, Copy, Check, X, File, Image, Brain, Key, Wrench, Search, BookOpen, Save, Zap, CheckCircle2, Terminal, AlertTriangle, FolderOpen, Bot } from 'lucide-react';
+import { ChevronDown, ChevronRight, Loader2, Copy, Check, X, Brain, Key, Wrench, Search, BookOpen, Save, Zap, CheckCircle2, Terminal, Paperclip } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAppConfig, useDynamicProviders, getProviderProfile, hasProviderCredentials } from '../lib/store';
 import { trackUsage } from '../lib/usage';
 import { useI18n } from '../lib/i18n';
+import { useExternalNavigator } from '../lib/useExternalNavigator';
 import BootstrapWizard from '../components/BootstrapWizard';
-import ChannelIcon from '../components/ChannelIcon';
+import { ChannelConversationView } from '../components/dashboard/ChannelConversationView';
+import { ChatComposer } from '../components/dashboard/ChatComposer';
+import { ChatMessagesPane } from '../components/dashboard/ChatMessagesPane';
 import { ChatTracePanel, type ChatTraceEvent } from '../components/dashboard/ChatTracePanel';
+import { DashboardHeader } from '../components/dashboard/DashboardHeader';
 import { SessionSidebar } from '../components/dashboard/SessionSidebar';
 import logoUrl from '../assets/logo.png';
 
@@ -78,6 +82,19 @@ interface ChannelMessage {
 }
 
 type AgentStatus = 'idle' | 'thinking' | 'generating' | 'error';
+type ExecApprovalSecurity = 'deny' | 'allowlist' | 'full';
+type ExecApprovalAsk = 'off' | 'on-miss' | 'always';
+
+type PermissionState = {
+  alsoAllow: string[];
+  denied: string[];
+  execSecurity: ExecApprovalSecurity;
+  execAsk: ExecApprovalAsk;
+  execAskFallback: ExecApprovalSecurity;
+  execAutoAllowSkills: boolean;
+};
+
+type ChatPermissionPresetKey = 'safe' | 'standard' | 'developer' | 'custom';
 
 // --- Tool call display helpers ---
 
@@ -207,6 +224,43 @@ const SESSIONS_KEY = 'awareness-claw-sessions';
 const ACTIVE_SESSION_KEY = 'awareness-claw-active-session';
 const PROJECT_ROOT_KEY = 'awareness-claw-project-root';
 
+const BASE_REQUIRED_TOOLS = ['awareness_init', 'awareness_get_agent_prompt'] as const;
+const STANDARD_ALLOWED_TOOLS = ['exec', 'awareness_recall', 'awareness_record', 'awareness_lookup'] as const;
+const DEVELOPER_EXTRA_TOOLS = ['awareness_perception'] as const;
+
+const CHAT_PERMISSION_PRESETS = {
+  safe: {
+    label: 'Safe',
+    desc: 'Minimal tool allowlist. File-changing host exec stays blocked by default.',
+    alsoAllow: [...BASE_REQUIRED_TOOLS] as string[],
+    denied: ['exec', 'bash', 'shell', 'camera.snap', 'screen.record', 'contacts.add', 'calendar.add', 'sms.send'],
+    execSecurity: 'deny' as const,
+    execAsk: 'on-miss' as const,
+    execAskFallback: 'deny' as const,
+    execAutoAllowSkills: false,
+  },
+  standard: {
+    label: 'Standard',
+    desc: 'Coding + Awareness tools, with host exec still going through OpenClaw approvals.',
+    alsoAllow: [...BASE_REQUIRED_TOOLS, ...STANDARD_ALLOWED_TOOLS] as string[],
+    denied: ['camera.snap', 'screen.record', 'contacts.add', 'calendar.add', 'sms.send'],
+    execSecurity: 'allowlist' as const,
+    execAsk: 'on-miss' as const,
+    execAskFallback: 'deny' as const,
+    execAutoAllowSkills: false,
+  },
+  developer: {
+    label: 'Developer',
+    desc: 'Broad tool access. Host exec is fully opened for trusted local automation.',
+    alsoAllow: [...BASE_REQUIRED_TOOLS, ...STANDARD_ALLOWED_TOOLS, ...DEVELOPER_EXTRA_TOOLS] as string[],
+    denied: [] as string[],
+    execSecurity: 'full' as const,
+    execAsk: 'off' as const,
+    execAskFallback: 'full' as const,
+    execAutoAllowSkills: true,
+  },
+} as const;
+
 function loadSessions(): ChatSession[] {
   try {
     return JSON.parse(localStorage.getItem(SESSIONS_KEY) || '[]');
@@ -225,6 +279,23 @@ function createSession(): ChatSession {
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
+}
+
+function detectChatPermissionPreset(permissions: PermissionState | null): ChatPermissionPresetKey {
+  if (!permissions) return 'safe';
+
+  for (const [key, preset] of Object.entries(CHAT_PERMISSION_PRESETS) as Array<[Exclude<ChatPermissionPresetKey, 'custom'>, typeof CHAT_PERMISSION_PRESETS.safe]>) {
+    const allowMatch = JSON.stringify([...preset.alsoAllow].sort()) === JSON.stringify([...permissions.alsoAllow].sort());
+    const denyMatch = JSON.stringify([...preset.denied].sort()) === JSON.stringify([...permissions.denied].sort());
+    const execMatch =
+      preset.execSecurity === permissions.execSecurity &&
+      preset.execAsk === permissions.execAsk &&
+      preset.execAskFallback === permissions.execAskFallback &&
+      preset.execAutoAllowSkills === permissions.execAutoAllowSkills;
+    if (allowMatch && denyMatch && execMatch) return key;
+  }
+
+  return 'custom';
 }
 
 // --- Typewriter effect (RAF-based, low CPU) ---
@@ -308,9 +379,10 @@ function TypewriterMessage({ content, isNew }: { content: string; isNew: boolean
 
 // --- Main Component ---
 
-export default function Dashboard({ isActive = true, onNavigate }: { isActive?: boolean; onNavigate?: (page: 'chat' | 'memory' | 'channels' | 'skills' | 'automation' | 'agents' | 'settings') => void }) {
+export default function Dashboard({ isActive = true, onNavigate }: { isActive?: boolean; onNavigate?: (page: 'chat' | 'memory' | 'channels' | 'models' | 'skills' | 'automation' | 'agents' | 'settings') => void }) {
   const { config, syncConfig, selectModel, updateConfig } = useAppConfig();
   const { t } = useI18n();
+  const { openDashboard, isOpening } = useExternalNavigator();
   const [sessions, setSessions] = useState<ChatSession[]>(loadSessions);
   const [activeSessionId, setActiveSessionId] = useState<string>(
     localStorage.getItem(ACTIVE_SESSION_KEY) || ''
@@ -330,6 +402,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
   const [streamingContent, setStreamingContent] = useState('');
   const streamingRef = useRef('');
   const streamChunkCountRef = useRef(0);
+  const activeRunRef = useRef(false);
   const [thinkingContent, setThinkingContent] = useState('');
   const thinkingRef = useRef('');
   const [traceEvents, setTraceEvents] = useState<ChatTraceEvent[]>([]);
@@ -355,6 +428,10 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
   const [agents, setAgents] = useState<Array<{ id: string; name: string; emoji: string; isDefault?: boolean }>>([]);
   const [showAgentMenu, setShowAgentMenu] = useState(false);
   const agentMenuRef = useRef<HTMLDivElement>(null);
+  const [permissions, setPermissions] = useState<PermissionState | null>(null);
+  const [showPermissionMenu, setShowPermissionMenu] = useState(false);
+  const [permissionUpdating, setPermissionUpdating] = useState(false);
+  const permissionMenuRef = useRef<HTMLDivElement>(null);
   // Bootstrap onboarding
   const [showBootstrap, setShowBootstrap] = useState(false);
   // Memory warning toast
@@ -362,6 +439,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
   const memoryWarningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const resetChatActivityTimeout = useCallback(() => {
+    if (!activeRunRef.current) return;
     if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
     streamTimeoutRef.current = setTimeout(() => {
       setAgentStatus('error');
@@ -407,6 +485,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
 
     // Debug: forward main-process gateway events to DevTools console
     api.onChatDebug?.((msg: string) => {
+      if (!activeRunRef.current) return;
       console.log(msg);
       resetChatActivityTimeout();
       recordTraceEvent({
@@ -419,6 +498,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
 
     // Thinking content from agent reasoning
     api.onChatThinking?.((text: string) => {
+      if (!activeRunRef.current) return;
       const hadThinking = !!thinkingRef.current;
       thinkingRef.current = text;
       setThinkingContent(text);
@@ -435,6 +515,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
 
     // Stream text chunks from agent response
     api.onChatStream?.((chunk: string) => {
+      if (!activeRunRef.current) return;
       streamingRef.current += chunk;
       streamChunkCountRef.current += 1;
       setStreamingContent(streamingRef.current);
@@ -453,6 +534,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
 
     // Status events (agent lifecycle + tool calls + gateway auto-start)
     api.onChatStatus?.((status: { type: string; tool?: string; toolStatus?: string; toolId?: string; message?: string; detail?: string; approvalRequestId?: string; approvalCommand?: string }) => {
+      if (!activeRunRef.current) return;
       resetChatActivityTimeout();
       if (status.type === 'gateway') {
         // Gateway auto-start status — show as thinking with a message
@@ -608,6 +690,18 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
   useEffect(() => {
     const api = window.electronAPI as any;
     if (!api) return;
+    api.permissionsGet?.().then((res: any) => {
+      if (res?.success) {
+        setPermissions({
+          alsoAllow: Array.isArray(res.alsoAllow) ? res.alsoAllow : [],
+          denied: Array.isArray(res.denied) ? res.denied : [],
+          execSecurity: res.execSecurity || 'deny',
+          execAsk: res.execAsk || 'on-miss',
+          execAskFallback: res.execAskFallback || 'deny',
+          execAutoAllowSkills: Boolean(res.execAutoAllowSkills),
+        });
+      }
+    }).catch(() => {});
     // Load agents
     api.agentsList?.().then((res: any) => {
       if (res?.success && res.agents?.length > 0) {
@@ -640,6 +734,17 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [showAgentMenu]);
+
+  useEffect(() => {
+    if (!showPermissionMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (permissionMenuRef.current && !permissionMenuRef.current.contains(e.target as Node)) {
+        setShowPermissionMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showPermissionMenu]);
 
   // Persist sessions
   useEffect(() => {
@@ -686,9 +791,50 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
   };
 
   const handleSelectProjectRoot = async () => {
-    const result = await (window.electronAPI as any)?.selectDirectory?.();
-    if (result?.directoryPath) setProjectRoot(result.directoryPath);
+    const api = window.electronAPI as any;
+    const result = await api?.selectDirectory?.();
+    if (!result?.directoryPath) return;
+
+    setProjectRoot(result.directoryPath);
   };
+
+  const activePermissionPreset = detectChatPermissionPreset(permissions);
+  const permissionOptions = (Object.entries(CHAT_PERMISSION_PRESETS) as Array<[Exclude<ChatPermissionPresetKey, 'custom'>, typeof CHAT_PERMISSION_PRESETS.safe]>).map(([key, preset]) => ({
+    key,
+    label: preset.label,
+    desc: preset.desc,
+  }));
+  const selectedPermissionLabel = activePermissionPreset === 'custom'
+    ? 'Custom'
+    : CHAT_PERMISSION_PRESETS[activePermissionPreset].label;
+
+  const applyChatPermissionPreset = useCallback(async (presetKey: string) => {
+    if (!window.electronAPI) return;
+    if (presetKey !== 'safe' && presetKey !== 'standard' && presetKey !== 'developer') return;
+    const preset = CHAT_PERMISSION_PRESETS[presetKey];
+    setPermissionUpdating(true);
+    setShowPermissionMenu(false);
+    try {
+      await (window.electronAPI as any).permissionsUpdate({
+        alsoAllow: [...preset.alsoAllow],
+        denied: [...preset.denied],
+        execSecurity: preset.execSecurity,
+        execAsk: preset.execAsk,
+        execAskFallback: preset.execAskFallback,
+        execAutoAllowSkills: preset.execAutoAllowSkills,
+      });
+      setPermissions({
+        alsoAllow: [...preset.alsoAllow],
+        denied: [...preset.denied],
+        execSecurity: preset.execSecurity,
+        execAsk: preset.execAsk,
+        execAskFallback: preset.execAskFallback,
+        execAutoAllowSkills: preset.execAutoAllowSkills,
+      });
+    } finally {
+      setPermissionUpdating(false);
+    }
+  }, []);
 
   // --- Send message — Gateway handles queuing via its Command Queue (collect mode) ---
 
@@ -708,6 +854,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
     if (!canSendMessage(trimmed)) return;
     sendingRef.current = true;
     setIsSending(true);
+    activeRunRef.current = true;
 
     const pendingFiles = options?.files ?? attachedFiles;
     const userText = options?.userText ?? trimmed;
@@ -785,6 +932,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
         updatedAt: Date.now(),
       }));
       trackUsage(config.providerKey, config.modelId, trimmed, responseText);
+      activeRunRef.current = false;
       if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
       streamingRef.current = '';
       setStreamingContent('');
@@ -795,6 +943,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
       setLiveThinkingExpanded(false);
       setAgentStatus('idle');
       } finally {
+        activeRunRef.current = false;
         sendingRef.current = false;
         setIsSending(false);
       }
@@ -824,6 +973,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
 
   const handleStopActiveRequest = useCallback(async () => {
     await (window.electronAPI as any)?.chatAbort?.(activeSessionId);
+    activeRunRef.current = false;
     if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
     traceEventsRef.current = [];
     setTraceEvents([]);
@@ -903,9 +1053,21 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
     }
   };
 
-  const statusLabel = agentStatus === 'thinking' ? t('chat.status.thinking') :
-    agentStatus === 'generating' ? t('chat.status.generating') :
-    agentStatus === 'error' ? t('chat.status.error') : null;
+  const renderStreamingContent = useCallback((content: string) => (
+    <div className="prose prose-invert prose-sm max-w-none">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+        code({ children, className }) {
+          const isInline = !className;
+          if (isInline) return <code className="px-1.5 py-0.5 bg-slate-700/80 rounded text-brand-300 text-[12px]">{children}</code>;
+          return <CodeBlock code={String(children).replace(/\n$/, '')} language={className} />;
+        },
+        p({ children }) { return <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>; },
+      }}>
+        {content}
+      </ReactMarkdown>
+      <span className="animate-pulse text-brand-400 ml-0.5">▊</span>
+    </div>
+  ), []);
 
   return (
     <div className="h-full flex relative"
@@ -982,544 +1144,118 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
 
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header — compact single-row layout */}
-        <div className="px-3 py-1.5 border-b border-slate-800/80 flex items-center gap-1.5 flex-shrink-0 h-10">
-          <button onClick={() => setShowSidebar(!showSidebar)}
-            className="p-1 text-slate-500 hover:text-slate-200 hover:bg-slate-800 rounded-md transition-colors"
-            title={t('chat.sessionList', 'Session list')}
-          >
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="1.5" rx="0.75" fill="currentColor"/><rect x="2" y="7.25" width="12" height="1.5" rx="0.75" fill="currentColor"/><rect x="2" y="11.5" width="12" height="1.5" rx="0.75" fill="currentColor"/></svg>
-          </button>
-
-          <img src={logoUrl} alt="AwarenessClaw" className="w-5 h-5 rounded" />
-
-          {/* Project folder — single line, compact */}
-          <button
-            onClick={handleSelectProjectRoot}
-            aria-label={projectRoot ? t('chat.workspace.change', 'Change folder') : t('chat.workspace.select', 'Choose folder')}
-            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors hover:bg-slate-800 max-w-[200px]"
-            title={projectRoot || t('chat.workspace.select', 'Choose folder')}
-          >
-            <FolderOpen size={11} className="shrink-0 text-sky-400/70" />
-            <span className="truncate text-xs text-slate-400">{projectRootName || t('chat.workspace.none', 'No folder')}</span>
-          </button>
-
-          <div className="flex-1" />
-
-          {/* Model selector — compact pill */}
-          <div className="relative">
-            <button onClick={() => setShowModelSelector(!showModelSelector)}
-              className="flex items-center gap-1 px-2 py-0.5 text-[11px] hover:bg-slate-800 rounded-md text-slate-500 transition-colors"
-            >
-              {currentProvider?.emoji} {config.modelId?.split('/').pop() || t('chat.selectModel', 'Select model')}
-              <ChevronDown size={9} />
-            </button>
-            {showModelSelector && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowModelSelector(false)} />
-                <div className="absolute top-full left-0 mt-1 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 max-h-[400px] overflow-y-auto">
-                  {allProviders.map(provider => {
-                    const providerProfile = getProviderProfile(config, provider.key);
-                    const isConfigured = hasProviderCredentials(config, provider.key, provider.needsKey);
-                    return (
-                      <div key={provider.key}>
-                        <div className="px-3 py-1.5 text-[10px] font-medium border-b border-slate-800 sticky top-0 bg-slate-900 flex items-center justify-between">
-                          <span className="text-slate-500">{provider.emoji} {provider.name}</span>
-                          {isConfigured ? <span className="text-emerald-500">✅</span> : provider.needsKey ? <span className="text-amber-500">🔑</span> : <span className="text-slate-600">{t('chat.free', 'Free')}</span>}
-                        </div>
-                        {provider.models.map(model => (
-                          <button key={model.id}
-                            onClick={() => {
-                              if (provider.needsKey && !isConfigured) {
-                                setShowModelSelector(false);
-                                onNavigate?.('settings');
-                                return;
-                              }
-
-                              selectModel(provider.key, model.id, allProviders);
-                              void syncConfig(allProviders);
-                              setShowModelSelector(false);
-                            }}
-                            className={`w-full text-left px-4 py-1.5 text-xs transition-colors ${
-                              provider.needsKey && !isConfigured ? 'text-slate-500 hover:bg-slate-850' : 'hover:bg-slate-800'
-                            } ${
-                              config.providerKey === provider.key && config.modelId === model.id ? 'text-brand-400' : 'text-slate-300'
-                            }`}
-                            title={provider.needsKey && !isConfigured ? t('chat.configureInSettings', 'Configure this provider in Settings first') : undefined}
-                          >
-                            {model.label}
-                            {config.providerKey === provider.key && config.modelId === model.id && (
-                              <span className="ml-1 text-brand-400 font-medium">✓ {t('chat.active', 'Active')}</span>
-                            )}
-                            {provider.needsKey && !isConfigured && (
-                              <span className="ml-1 text-[10px] text-amber-500">{t('chat.setupInSettings', 'Set up in Settings')}</span>
-                            )}
-                          </button>
-                        ))}
-                        {provider.needsKey && !isConfigured && (
-                          <button
-                            onClick={() => {
-                              setShowModelSelector(false);
-                              onNavigate?.('settings');
-                            }}
-                            className="w-full text-left px-4 py-2 text-[11px] text-sky-400 hover:bg-slate-800 transition-colors border-t border-slate-800"
-                          >
-                            {t('chat.openSettingsToConfigure', 'Open Settings to configure API Key / Base URL')}
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
-            )}
-          </div>
-
-          <div className="flex-1" />
-
-          <button onClick={() => window.electronAPI?.openExternal('http://localhost:18789')}
-            className="p-1 text-slate-600 hover:text-slate-300 rounded-md transition-colors"
-            title={t('chat.openclawDashboard', 'OpenClaw Dashboard')}
-          >
-            <ExternalLink size={12} />
-          </button>
-        </div>
+        <DashboardHeader
+          t={t}
+          logoUrl={logoUrl}
+          showSidebar={showSidebar}
+          projectRoot={projectRoot}
+          projectRootName={projectRootName}
+          config={config}
+          allProviders={allProviders}
+          showModelSelector={showModelSelector}
+          onToggleSidebar={() => setShowSidebar(!showSidebar)}
+          onSelectProjectRoot={handleSelectProjectRoot}
+          onToggleModelSelector={() => setShowModelSelector(!showModelSelector)}
+          onCloseModelSelector={() => setShowModelSelector(false)}
+          onNavigateModels={() => onNavigate?.('models')}
+          onSelectModel={(providerKey, modelId) => selectModel(providerKey, modelId, allProviders)}
+          onSyncConfig={() => { void syncConfig(allProviders); }}
+          onOpenDashboard={() => { void openDashboard('chat-dashboard'); }}
+          dashboardOpening={isOpening('chat-dashboard')}
+        />
         {/* Channel conversation view (when a channel session is selected) */}
         {activeChannelKey ? (
-          <div className="flex-1 flex flex-col min-h-0">
-            {/* Channel header */}
-            <div className="px-4 py-2 border-b border-slate-800/50 flex items-center gap-2">
-              <button onClick={handleBackToLocal} className="p-1 text-slate-500 hover:text-slate-200 hover:bg-slate-800 rounded-md transition-colors" title="Back">
-                <ChevronRight size={14} className="rotate-180" />
-              </button>
-              {(() => {
-                const cs = channelSessions.find(s => s.sessionKey === activeChannelKey);
-                return cs ? (
-                  <>
-                    <ChannelIcon channelId={cs.channel} size={18} />
-                    <span className="text-sm text-slate-200 font-medium">{cs.displayName || cs.channel}</span>
-                    <span className="text-xs text-slate-500">{cs.channel}</span>
-                  </>
-                ) : <span className="text-sm text-slate-400">{activeChannelKey}</span>;
-              })()}
-            </div>
-
-            {/* Channel messages */}
-            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-              <div className="max-w-3xl mx-auto space-y-4 w-full">
-                {channelLoading ? (
-                  <div className="flex items-center justify-center py-12 text-slate-500">
-                    <Loader2 size={20} className="animate-spin mr-2" />
-                    <span className="text-sm">Loading history...</span>
-                  </div>
-                ) : channelMessages.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-12 text-slate-500">
-                    <span className="text-sm">No messages yet</span>
-                  </div>
-                ) : (
-                  channelMessages.map(m => (
-                    m.role === 'user' ? (
-                      <div key={m.id} className="flex justify-end">
-                        <div className="max-w-[75%] px-4 py-3 rounded-2xl rounded-br-md text-sm bg-brand-600 text-white">
-                          {m.content}
-                        </div>
-                      </div>
-                    ) : (
-                      <div key={m.id} className="flex justify-start">
-                        <div className="max-w-[85%] text-sm text-slate-200">
-                          <TypewriterMessage content={m.content} isNew={false} />
-                        </div>
-                      </div>
-                    )
-                  ))
-                )}
-                <div ref={messagesEndRef} />
-              </div>
-            </div>
-
-            {/* Channel reply input */}
-            <div className="px-4 py-3 border-t border-slate-800/50">
-              <div className="max-w-3xl mx-auto relative">
-                <textarea
-                  value={channelReplyText}
-                  onChange={e => setChannelReplyText(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleChannelReply(); } }}
-                  placeholder="Reply to this channel..."
-                  className="w-full pl-4 pr-12 py-3 bg-slate-900 border border-slate-700/50 rounded-2xl text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none placeholder:text-slate-600"
-                  style={{ minHeight: '44px', maxHeight: '120px' }}
-                  disabled={channelReplying}
-                />
-                <button
-                  onClick={handleChannelReply}
-                  disabled={!channelReplyText.trim() || channelReplying}
-                  className="absolute right-2 bottom-2 p-1.5 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg transition-colors"
-                >
-                  {channelReplying ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                </button>
-              </div>
-            </div>
-          </div>
+          <ChannelConversationView
+            activeChannelKey={activeChannelKey}
+            channelSessions={channelSessions}
+            channelLoading={channelLoading}
+            channelMessages={channelMessages}
+            channelReplyText={channelReplyText}
+            channelReplying={channelReplying}
+            messagesEndRef={messagesEndRef}
+            onBack={handleBackToLocal}
+            onReplyTextChange={setChannelReplyText}
+            onReplySubmit={handleChannelReply}
+          />
         ) : (
         <>
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
-          <div className="max-w-3xl mx-auto space-y-5 w-full">
-          {messages.length === 0 && agentStatus === 'idle' && (
-            <div className="flex flex-col items-center justify-center h-full text-slate-500 space-y-6">
-              <img src={logoUrl} alt="" className="w-16 h-16 opacity-30" />
-              {!config.modelId ? (
-                <div className="text-center space-y-3">
-                  <p className="text-base mb-1">{t('chat.selectModel') || 'Select a model to start chatting'}</p>
-                  <button
-                    onClick={() => setShowModelSelector(true)}
-                    className="px-4 py-2 text-sm bg-brand-600 hover:bg-brand-500 text-white rounded-lg transition-colors"
-                  >
-                    {t('chat.selectModelBtn') || 'Choose Model'}
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <div className="text-center">
-                    <p className="text-base mb-1">{t('chat.empty.title')}</p>
-                    <p className="text-xs text-slate-600">{t('chat.empty.subtitle')}</p>
-                  </div>
-                  <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-left">
-                    <div className="flex items-start gap-3">
-                      <div className="rounded-xl bg-sky-500/10 p-2 text-sky-400">
-                        <FolderOpen size={18} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-xs uppercase tracking-[0.16em] text-slate-500">{t('chat.workspace.current', 'Project folder')}</div>
-                        <div className="mt-1 truncate text-sm text-slate-200">{projectRoot || t('chat.workspace.none', 'No project folder selected')}</div>
-                        <p className="mt-1 text-xs text-slate-500">{t('chat.workspace.hint', 'AI file edits will run inside this local project folder')}</p>
-                      </div>
-                      <button
-                        onClick={handleSelectProjectRoot}
-                        className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-slate-700"
-                      >
-                        {projectRoot ? t('chat.workspace.change', 'Change folder') : t('chat.workspace.select', 'Choose folder')}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2 max-w-lg justify-center">
-                    {[t('chat.suggest.plan'), t('chat.suggest.review'), t('chat.suggest.analyze')].map(q => (
-                      <button key={q} onClick={() => setInput(q)}
-                        className="px-3 py-1.5 text-xs bg-slate-800/80 hover:bg-slate-700 rounded-xl text-slate-300 border border-slate-700/50 transition-colors"
-                      >
-                        {q}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
+        <ChatMessagesPane
+          t={t}
+          logoUrl={logoUrl}
+          config={config}
+          messages={messages}
+          agentStatus={agentStatus}
+          thinkingContent={thinkingContent}
+          traceEvents={traceEvents}
+          activeToolCalls={activeToolCalls}
+          streamingContent={streamingContent}
+          newestMsgId={newestMsgId}
+          copiedId={copiedId}
+          projectRoot={projectRoot}
+          messagesEndRef={messagesEndRef}
+          liveThinkingExpanded={liveThinkingExpanded}
+          onToggleLiveThinking={() => setLiveThinkingExpanded((value) => !value)}
+          onSelectProjectRoot={handleSelectProjectRoot}
+          onSelectModel={() => setShowModelSelector(true)}
+          onSuggestionSelect={setInput}
+          onCopyMessage={copyMessage}
+          onApproveTool={handleApproveTool}
+          onCopyApproval={handleCopyApproval}
+          onStopRequest={handleStopActiveRequest}
+          onDismissError={() => {
+            if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
+            streamingRef.current = '';
+            setStreamingContent('');
+            thinkingRef.current = '';
+            setThinkingContent('');
+            traceEventsRef.current = [];
+            setTraceEvents([]);
+            setAgentStatus('idle');
+          }}
+          renderStreamingContent={renderStreamingContent}
+          TypewriterMessage={TypewriterMessage}
+          ThinkingBlock={ThinkingBlock}
+          LiveThinkingBlock={LiveThinkingBlock}
+        />
 
-          {messages.map(msg => (
-            msg.role === 'user' ? (
-              /* User message — right-aligned bubble */
-              <div key={msg.id} className="flex justify-end group">
-                <div className="max-w-[75%]">
-                  <div className="px-4 py-3 rounded-2xl rounded-br-md text-sm bg-brand-600 text-white">
-                    {msg.files && msg.files.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mb-2">
-                        {msg.files.map((f, i) => (
-                          <span key={i} className="flex items-center gap-1 px-2 py-0.5 bg-black/20 rounded text-[10px]">
-                            <File size={10} /> {f.name}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    <span className="whitespace-pre-wrap">{msg.content}</span>
-                  </div>
-                  <div className="text-right mt-1">
-                    <span className="text-[10px] text-slate-600">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              /* AI message — full-width with subtle background */
-              <div key={msg.id} className="group -mx-4 px-4 py-3 rounded-xl hover:bg-slate-800/30 transition-colors">
-                <div className="flex gap-3">
-                  <img src={logoUrl} alt="" className="w-6 h-6 rounded-md mt-0.5 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    {/* Meta line */}
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[11px] text-slate-500 font-medium">AwarenessClaw</span>
-                      {msg.model && <span className="text-[10px] text-slate-600">{msg.model.split('/').pop()}</span>}
-                      <span className="text-[10px] text-slate-600">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    </div>
-
-                    {msg.thinking && !msg.traceEvents?.length && (
-                      <ThinkingBlock thinking={msg.thinking} />
-                    )}
-
-                    <ChatTracePanel
-                      t={t}
-                      thinking={msg.thinking}
-                      toolCalls={msg.toolCalls}
-                      traceEvents={msg.traceEvents}
-                      onApprove={handleApproveTool}
-                      onCopyApproval={handleCopyApproval}
-                      onStopRequest={handleStopActiveRequest}
-                    />
-
-                    {/* Content — no bubble, direct text */}
-                    <div className="text-sm text-slate-200 leading-relaxed">
-                      <TypewriterMessage content={msg.content} isNew={msg.id === newestMsgId} />
-                    </div>
-
-                    {/* Action buttons */}
-                    <div className="mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-3">
-                      <button onClick={() => copyMessage(msg)}
-                        className="text-slate-600 hover:text-slate-300 text-[10px] flex items-center gap-1 transition-colors"
-                      >
-                        {copiedId === msg.id ? <><Check size={10} /> {t('common.copied', 'Copied')}</> : <><Copy size={10} /> {t('common.copy', 'Copy')}</>}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )
-          ))}
-
-          {/* Streaming response or status indicator */}
-          {agentStatus !== 'idle' && (
-            <div className="group -mx-4 px-4 py-3 bg-slate-800/20 rounded-xl">
-              <div className="flex gap-3">
-                <img src={logoUrl} alt="" className={`w-6 h-6 rounded-md mt-0.5 flex-shrink-0 ${agentStatus !== 'error' ? 'animate-pulse' : ''}`} />
-                <div className="flex-1 min-w-0">
-                  {/* Meta line */}
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[11px] text-slate-500 font-medium">{t('app.name', 'AwarenessClaw')}</span>
-                    {config.modelId && <span className="text-[10px] text-slate-600">{config.modelId.split('/').pop()}</span>}
-                  </div>
-
-                  {/* Live thinking content */}
-                  {agentStatus !== 'error' && thinkingContent && !traceEvents.length && (
-                    <LiveThinkingBlock
-                      thinking={thinkingContent}
-                      expanded={liveThinkingExpanded}
-                      onToggle={() => setLiveThinkingExpanded(v => !v)}
-                    />
-                  )}
-
-                  <ChatTracePanel
-                    t={t}
-                    thinking={thinkingContent}
-                    toolCalls={activeToolCalls}
-                    traceEvents={traceEvents}
-                    onApprove={handleApproveTool}
-                    onCopyApproval={handleCopyApproval}
-                    onStopRequest={handleStopActiveRequest}
-                    defaultExpanded={true}
-                    live={true}
-                  />
-
-                  {/* Error / stalled state */}
-                  {agentStatus === 'error' && (
-                    <div className="flex items-center gap-2 text-sm text-red-400">
-                      <AlertTriangle size={14} />
-                      <span>{t('chat.status.error', 'Response timed out or failed')}</span>
-                      <button
-                        onClick={() => {
-                          if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
-                          streamingRef.current = '';
-                          setStreamingContent('');
-                          thinkingRef.current = '';
-                          setThinkingContent('');
-                          traceEventsRef.current = [];
-                          setTraceEvents([]);
-                          setAgentStatus('idle');
-                        }}
-                        className="ml-2 px-2 py-0.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors"
-                      >
-                        {t('chat.dismiss', 'Dismiss')}
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Streaming text content — no bubble */}
-                  {agentStatus !== 'error' && streamingContent ? (
-                    <div className="text-sm text-slate-200 leading-relaxed">
-                      <div className="prose prose-invert prose-sm max-w-none">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-                          code({ children, className }) {
-                            const isInline = !className;
-                            if (isInline) return <code className="px-1.5 py-0.5 bg-slate-700/80 rounded text-brand-300 text-[12px]">{children}</code>;
-                            return <CodeBlock code={String(children).replace(/\n$/, '')} language={className} />;
-                          },
-                          p({ children }) { return <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>; },
-                        }}>
-                          {streamingContent}
-                        </ReactMarkdown>
-                        <span className="animate-pulse text-brand-400 ml-0.5">▊</span>
-                      </div>
-                    </div>
-                  ) : agentStatus !== 'error' ? (
-                    <div className="flex items-center gap-2 text-sm text-slate-400">
-                      <Loader2 size={14} className="animate-spin text-brand-400" />
-                      <span>{statusLabel}</span>
-                    </div>
-                  ) : null}
-
-                  {/* Stop button — abort the running agent */}
-                  {agentStatus !== 'error' && (
-                    <button
-                      onClick={async () => {
-                          await handleStopActiveRequest();
-                      }}
-                      className="mt-2 flex items-center gap-1.5 px-3 py-1 text-xs text-slate-400 hover:text-red-400 bg-slate-800/60 hover:bg-red-500/10 border border-slate-700/50 hover:border-red-500/30 rounded-lg transition-colors"
-                    >
-                      <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><rect width="10" height="10" rx="1.5" /></svg>
-                      {t('chat.stop', 'Stop')}
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div ref={messagesEndRef} />
-          </div>
-        </div>
-
-        {/* Memory warning toast */}
-        {memoryWarning && (
-          <div className="px-4 pb-1">
-            <div className="max-w-3xl mx-auto">
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-900/30 border border-amber-700/40 text-amber-300 text-xs animate-in fade-in slide-in-from-bottom-2">
-                <AlertTriangle size={14} className="flex-shrink-0" />
-                <span className="truncate">Memory save failed: {memoryWarning}</span>
-                <button onClick={() => setMemoryWarning(null)} className="ml-auto flex-shrink-0 text-amber-400 hover:text-amber-200">
-                  <X size={12} />
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Attachments with preview */}
-        {attachedFiles.length > 0 && (
-          <div className="px-4 py-2 border-t border-slate-800/50 space-y-2 max-w-3xl mx-auto">
-            <div className="flex gap-2 flex-wrap">
-              {attachedFiles.map((f, i) => (
-                <div key={i} className="bg-slate-800 rounded-lg border border-slate-700/50 overflow-hidden max-w-[240px]">
-                  {/* Image preview */}
-                  {f.preview?.type === 'image' && f.preview.dataUri && (
-                    <div className="w-full h-24 bg-slate-900 flex items-center justify-center">
-                      <img src={f.preview.dataUri} alt={f.name} className="max-w-full max-h-24 object-contain" />
-                    </div>
-                  )}
-                  {/* Text preview */}
-                  {f.preview?.type === 'text' && f.preview.content && (
-                    <div className="px-2 py-1.5 bg-slate-900 max-h-20 overflow-hidden">
-                      <pre className="text-[9px] text-slate-500 font-mono leading-tight whitespace-pre-wrap">{f.preview.content.slice(0, 200)}</pre>
-                      {f.preview.truncated && <span className="text-[9px] text-slate-600">...</span>}
-                    </div>
-                  )}
-                  {/* File info bar */}
-                  <div className="flex items-center gap-1.5 px-2 py-1">
-                    {f.preview?.type === 'image' ? <Image size={10} className="text-brand-400" /> : <File size={10} className="text-slate-400" />}
-                    <span className="text-[10px] text-slate-300 truncate flex-1">{f.name}</span>
-                    {f.preview?.size && <span className="text-[9px] text-slate-600">{(f.preview.size / 1024).toFixed(0)}KB</span>}
-                    <button
-                      onClick={() => setAttachedFiles(prev => prev.filter((_, j) => j !== i))}
-                      aria-label={`Remove ${f.name}`}
-                      title={`Remove ${f.name}`}
-                      className="text-slate-500 hover:text-red-400 flex-shrink-0"
-                    >
-                      <X size={10} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Input — Claude-style: buttons inside a unified input container */}
-        <div className="px-4 py-3">
-          <div className="max-w-3xl mx-auto">
-            <div className="relative bg-slate-800 rounded-2xl border border-slate-700/60 focus-within:border-brand-500/50 focus-within:ring-1 focus-within:ring-brand-500/20 transition-all">
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={
-                  agentStatus === 'thinking' || agentStatus === 'generating'
-                    ? t('chat.input.canQueue', 'AI is working... you can still type')
-                    : t('chat.input.placeholder')
-                }
-                rows={1}
-                className="w-full pl-4 pr-4 pt-3 pb-10 bg-transparent rounded-2xl text-sm focus:outline-none resize-none placeholder:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ minHeight: '52px', maxHeight: '160px', height: input.includes('\n') ? 'auto' : '52px' }}
-                disabled={false}
-              />
-              <input ref={fileInputRef} type="file" multiple className="hidden" aria-label={t('chat.attachFile', 'Attach file')}
-                onChange={e => { const files = Array.from(e.target.files || []).map(f => ({ name: f.name, path: (f as any).path || f.name })); attachFiles(files); }}
-              />
-              {/* Bottom toolbar inside the input box */}
-              <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between">
-                <div className="flex items-center gap-1">
-                  <button onClick={() => fileInputRef.current?.click()}
-                    aria-label={t('chat.attachFile', 'Attach file')}
-                    className="p-1.5 text-slate-500 hover:text-slate-300 hover:bg-slate-700 rounded-lg transition-colors" title={t('chat.attachFile', 'Attach file')}
-                  >
-                    <Paperclip size={14} />
-                  </button>
-                  {/* Agent selector */}
-                  {agents.length > 1 && (
-                    <div className="relative" ref={agentMenuRef}>
-                      <button
-                        onClick={() => setShowAgentMenu(!showAgentMenu)}
-                        className="flex items-center gap-1 px-2 py-1 text-[11px] text-slate-500 hover:text-slate-300 hover:bg-slate-700 rounded-lg transition-colors"
-                        title={t('chat.agent.switch')}
-                      >
-                        <span>{agents.find(a => a.id === config.selectedAgentId)?.emoji || '🤖'}</span>
-                        <span className="max-w-[80px] truncate">{agents.find(a => a.id === config.selectedAgentId)?.name || t('chat.agent.default')}</span>
-                        <ChevronDown size={10} />
-                      </button>
-                      {showAgentMenu && (
-                        <div className="absolute bottom-full left-0 mb-1 min-w-[180px] bg-slate-800 border border-slate-700 rounded-xl shadow-lg overflow-hidden z-50">
-                          {agents.map(a => (
-                            <button
-                              key={a.id}
-                              onClick={() => { updateConfig({ selectedAgentId: a.id }); setShowAgentMenu(false); }}
-                              className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors ${
-                                a.id === config.selectedAgentId ? 'bg-brand-600/20 text-brand-300' : 'text-slate-300 hover:bg-slate-700'
-                              }`}
-                            >
-                              <span>{a.emoji}</span>
-                              <span className="flex-1 truncate">{a.name}</span>
-                              {a.id === config.selectedAgentId && <Check size={12} className="text-brand-400" />}
-                            </button>
-                          ))}
-                          {onNavigate && (
-                            <button
-                              onClick={() => { setShowAgentMenu(false); onNavigate('agents'); }}
-                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left text-slate-500 hover:text-slate-300 hover:bg-slate-700 border-t border-slate-700 transition-colors"
-                            >
-                              <Bot size={12} />
-                              <span>{t('chat.agent.manage', 'Manage Agents')}</span>
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <button onClick={handleSend}
-                  disabled={!canSendCurrentMessage}
-                  className="p-1.5 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg transition-colors"
-                >
-                  {!canSendCurrentMessage && agentStatus !== 'idle' ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ChatComposer
+          t={t}
+          input={input}
+          textareaRef={textareaRef}
+          fileInputRef={fileInputRef}
+          attachedFiles={attachedFiles}
+          agents={agents}
+          showAgentMenu={showAgentMenu}
+          agentMenuRef={agentMenuRef}
+          selectedAgentId={config.selectedAgentId}
+          permissionOptions={permissionOptions}
+          showPermissionMenu={showPermissionMenu}
+          permissionMenuRef={permissionMenuRef}
+          selectedPermissionLabel={selectedPermissionLabel}
+          permissionUpdating={permissionUpdating}
+          canSendCurrentMessage={canSendCurrentMessage}
+          agentStatus={agentStatus}
+          memoryWarning={memoryWarning}
+          onInputChange={setInput}
+          onKeyDown={handleKeyDown}
+          onOpenFilePicker={() => fileInputRef.current?.click()}
+          onFilesSelected={(files) => {
+            const nextFiles = Array.from(files || []).map((file) => ({ name: file.name, path: (file as any).path || file.name }));
+            attachFiles(nextFiles);
+          }}
+          onRemoveFile={(index) => setAttachedFiles((prev) => prev.filter((_, currentIndex) => currentIndex !== index))}
+          onToggleAgentMenu={() => setShowAgentMenu(!showAgentMenu)}
+          onSelectAgent={(agentId) => {
+            updateConfig({ selectedAgentId: agentId });
+            setShowAgentMenu(false);
+          }}
+          onTogglePermissionMenu={() => setShowPermissionMenu(!showPermissionMenu)}
+          onSelectPermission={applyChatPermissionPreset}
+          onManageAgents={onNavigate ? () => { setShowAgentMenu(false); onNavigate('agents'); } : undefined}
+          onManagePermissions={onNavigate ? () => { setShowPermissionMenu(false); onNavigate('settings'); } : undefined}
+          onDismissMemoryWarning={() => setMemoryWarning(null)}
+          onSend={() => { void handleSend(); }}
+        />
         </>
         )}
       </div>

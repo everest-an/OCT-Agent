@@ -168,6 +168,10 @@ export function mergeDesktopOpenClawConfig(
     } else if (key === 'agents') {
       merged.agents = JSON.parse(JSON.stringify(merged.agents || {}));
       const incomingAgents = value as any;
+      if (incomingAgents?.defaults?.workspace !== undefined) {
+        if (!merged.agents.defaults) merged.agents.defaults = {};
+        merged.agents.defaults.workspace = incomingAgents.defaults.workspace;
+      }
       if (incomingAgents?.defaults?.model?.primary) {
         if (!merged.agents.defaults) merged.agents.defaults = {};
         if (!merged.agents.defaults.model) merged.agents.defaults.model = {};

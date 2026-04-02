@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import Settings from '../pages/Settings';
 
@@ -14,9 +14,9 @@ describe('Settings Page', () => {
     expect(screen.getByRole('heading', { name: /Settings/ })).toBeInTheDocument();
   });
 
-  it('renders model section', async () => {
+  it('does not render model section anymore', async () => {
     await act(async () => { render(<Settings />); });
-    expect(screen.getByText(/Current Model/)).toBeInTheDocument();
+    expect(screen.queryByText(/Current Model/)).not.toBeInTheDocument();
   });
 
   it('renders memory settings', async () => {
@@ -32,9 +32,65 @@ describe('Settings Page', () => {
 
   it('renders permissions panel summary', async () => {
     await act(async () => { render(<Settings />); });
-    expect(screen.getByText(/Shell command approval/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Host exec policy/).length).toBeGreaterThan(0);
     expect(screen.getByText(/Safe/)).toBeInTheDocument();
     expect(screen.getByText(/Standard/)).toBeInTheDocument();
+    expect(screen.getByText(/covers OpenClaw exec approval defaults plus the main agent allowlist/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Main agent allowlist/i).length).toBeGreaterThan(0);
+  });
+
+  it('updates exec security from the permissions panel', async () => {
+    const api = window.electronAPI as any;
+    api.permissionsGet = vi.fn().mockResolvedValue({
+      success: true,
+      profile: 'coding',
+      alsoAllow: [],
+      denied: [],
+      execSecurity: 'allowlist',
+      execAsk: 'on-miss',
+      execAskFallback: 'deny',
+      execAutoAllowSkills: false,
+      execAllowlist: [],
+    });
+    api.permissionsUpdate = vi.fn().mockResolvedValue({ success: true });
+
+    await act(async () => { render(<Settings />); });
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByText('Full')[0]);
+    });
+
+    expect(api.permissionsUpdate).toHaveBeenCalledWith(expect.objectContaining({ execSecurity: 'full' }));
+  });
+
+  it('adds an exec allowlist pattern from the permissions panel', async () => {
+    const api = window.electronAPI as any;
+    api.permissionsGet = vi.fn().mockResolvedValue({
+      success: true,
+      profile: 'coding',
+      alsoAllow: [],
+      denied: [],
+      execSecurity: 'allowlist',
+      execAsk: 'on-miss',
+      execAskFallback: 'deny',
+      execAutoAllowSkills: false,
+      execAllowlist: [],
+    });
+    api.permissionsUpdate = vi.fn().mockResolvedValue({ success: true });
+
+    await act(async () => { render(<Settings />); });
+
+    const input = screen.getByPlaceholderText('/opt/homebrew/bin/rg or ~/Projects/**/bin/tool');
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '/opt/homebrew/bin/rg' } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('add-allowlist-pattern'));
+    });
+
+    expect(api.permissionsUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      execAllowlist: [expect.objectContaining({ pattern: '/opt/homebrew/bin/rg' })],
+    }));
   });
 
   it('renders system section', async () => {
@@ -80,9 +136,8 @@ describe('Settings Page', () => {
     expect(labels.length).toBeGreaterThan(0);
   });
 
-  it('renders model restart hint after model change', async () => {
+  it('does not render model restart hint on settings page', async () => {
     await act(async () => { render(<Settings />); });
-    // The restart hint should not be visible initially
     expect(screen.queryByText(/new chat session/)).not.toBeInTheDocument();
   });
 
@@ -90,14 +145,18 @@ describe('Settings Page', () => {
     await act(async () => { render(<Settings />); });
     expect(screen.getByText(/Web & Browser/)).toBeInTheDocument();
     expect(screen.getByText(/Brave search needs an API key/)).toBeInTheDocument();
-    expect(screen.getByText(/Show advanced \(1\)/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Show advanced/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Most users only need to pick a search provider/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Search provider/i).length).toBeGreaterThan(1);
+    expect(screen.getByText(/^API key$/i)).toBeInTheDocument();
     expect(screen.queryByText(/Max results/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Enable fetch tool/i)).not.toBeInTheDocument();
   });
 
   it('reveals advanced web settings when expanded', async () => {
     await act(async () => { render(<Settings />); });
     await act(async () => {
-      fireEvent.click(screen.getByText(/Show advanced \(1\)/));
+      fireEvent.click(screen.getAllByText(/Show advanced/i)[0]);
     });
     expect(screen.getByText(/Hide advanced/)).toBeInTheDocument();
     expect(screen.getByText(/Max results/i)).toBeInTheDocument();

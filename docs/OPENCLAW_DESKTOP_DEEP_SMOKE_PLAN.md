@@ -200,6 +200,53 @@ Prompt：
 - Desktop 真实命中所选 agent
 - 行为不能退回 `main`
 
+### B-05 Project Folder -> 默认文件操作目录
+
+目标：
+
+- 验证 Desktop 顶部 `Project Folder` 切换后，聊天里的默认文件操作根目录会落到用户选中的目录
+- 验证 agent 自身的 `AGENTS.md` / `SOUL.md` / `USER.md` / `MEMORY.md` 仍然跟随 agent workspace，而不是被 `Project Folder` 覆盖
+
+建议使用临时目录：
+
+- macOS: `/tmp/awarenessclaw-project-folder-proof`
+
+执行步骤：
+
+1. 先清空或新建临时目录
+2. 打开 Desktop Chat，点击顶部 `Project Folder`
+3. 选择该临时目录
+4. 发送 prompt：
+  - `请在当前工作区创建一个名为 workspace-proof.txt 的文件，内容只写 WORKSPACE_OK。使用相对路径。`
+5. 在本机终端检查：
+  - `cat /tmp/awarenessclaw-project-folder-proof/workspace-proof.txt`
+6. 再发送 prompt：
+  - `列出当前工作区根目录下的文件名。`
+7. 再发送 prompt：
+  - `请读取 USER.md，并告诉我第一行是什么。`
+
+预期：
+
+- `workspace-proof.txt` 应真实出现在所选目录
+- 第二条 prompt 列出的根目录文件应与该临时目录一致
+- Settings 中 `AGENTS.md` / `SOUL.md` / `USER.md` 的读写应继续指向 agent workspace，而不是刚才选中的临时目录
+
+失败判定：
+
+- 文件仍写到 `~/.openclaw/workspace` 或其他旧目录
+- 模型仍回答“无法访问当前目录”，且终端中该目录没有任何 OpenClaw workspace 痕迹
+- `Project Folder` 一切换就把 agent workspace 一并改掉
+
+建议证据：
+
+- Desktop 截图：已选中的 `Project Folder`
+- 终端输出：目标目录 `ls -la`
+- 如失败，再补 `~/.openclaw/openclaw.json` 中 `agents.defaults.workspace`，确认它没有被 `Project Folder` 意外改写
+
+备注：
+
+- 当前 `openclaw agent` CLI 在不同版本上的参数与会话目标要求较敏感，手工验收优先以 Desktop UI 路径为准，不要只依赖独立 CLI 冒烟
+
 ## C. Thinking / Streaming / Tool State
 
 ### C-01 live thinking streaming
