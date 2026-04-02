@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { ipcMain } from 'electron';
 import type { GatewayClient } from '../gateway-ws';
+import { getExecApprovalSettings } from '../openclaw-config';
 
 type ChatSendOptions = {
   thinkingLevel?: string;
@@ -81,6 +82,16 @@ export function registerChatHandlers(deps: {
     const sid = sessionId || `ac-${Date.now()}`;
 
     let fullMessage = message;
+    const homeDir = os.homedir();
+    const desktopDir = path.join(homeDir, 'Desktop');
+    const documentsDir = path.join(homeDir, 'Documents');
+    const downloadsDir = path.join(homeDir, 'Downloads');
+    const hostApprovals = getExecApprovalSettings(homeDir, options?.agentId || 'main');
+    fullMessage = `[Local machine context] You are running inside the AwarenessClaw Desktop app on the user's own computer. When the user asks about local files or folders on this machine, do not answer with a generic safety/privacy refusal. Use the available tools (especially exec/read/write/edit when appropriate) to inspect or modify the local filesystem if the request is allowed by the current host approval policy. Common macOS folders for this user are: home=${homeDir}, desktop=${desktopDir}, documents=${documentsDir}, downloads=${downloadsDir}. If the user says "桌面", "desktop", or "我的桌面", resolve that to ${desktopDir}. If the user asks what files are there, inspect the directory first and report the actual result.
+
+  [Current host exec approvals] security=${hostApprovals.security}, ask=${hostApprovals.ask}, askFallback=${hostApprovals.askFallback}, autoAllowSkills=${hostApprovals.autoAllowSkills ? 'on' : 'off'}. This current host approval state is authoritative for this turn. If earlier conversation turns claimed local filesystem access was blocked by allowlist/privacy rules, do not blindly repeat that claim. Re-evaluate the request against the current approval state above and use tools when allowed.
+
+  ${fullMessage}`;
     if (options?.files && options.files.length > 0) {
       const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'];
       const images: string[] = [];

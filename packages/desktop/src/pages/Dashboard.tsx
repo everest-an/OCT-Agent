@@ -783,12 +783,12 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
     setSessions(prev => prev.map(s => s.id === id ? updater(s) : s));
   };
 
-  const handleNewSession = () => {
+  const handleNewSession = useCallback(() => {
     const s = createSession();
     setSessions(prev => [s, ...prev]);
     setActiveSessionId(s.id);
     setShowSidebar(false);
-  };
+  }, []);
 
   const handleSelectProjectRoot = async () => {
     const api = window.electronAPI as any;
@@ -812,6 +812,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
     if (!window.electronAPI) return;
     if (presetKey !== 'safe' && presetKey !== 'standard' && presetKey !== 'developer') return;
     const preset = CHAT_PERMISSION_PRESETS[presetKey];
+    const shouldStartFreshChat = Boolean(activeSession && activeSession.messages.length > 0);
     setPermissionUpdating(true);
     setShowPermissionMenu(false);
     try {
@@ -831,10 +832,13 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
         execAskFallback: preset.execAskFallback,
         execAutoAllowSkills: preset.execAutoAllowSkills,
       });
+      if (shouldStartFreshChat) {
+        handleNewSession();
+      }
     } finally {
       setPermissionUpdating(false);
     }
-  }, []);
+  }, [activeSession, handleNewSession]);
 
   // --- Send message — Gateway handles queuing via its Command Queue (collect mode) ---
 

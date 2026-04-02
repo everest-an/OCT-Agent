@@ -1,4 +1,6 @@
 import { EventEmitter } from 'events';
+import os from 'os';
+import path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { ipcHandleMock } = vi.hoisted(() => ({
@@ -147,7 +149,7 @@ describe('registerChatHandlers', () => {
     expect(result).toMatchObject({ success: true, text: 'agent specific reply', sessionId: 'test-session' });
     expect(ws.chatSend).toHaveBeenCalledWith(
       'test-session',
-      'hello',
+      expect.stringContaining('hello'),
       expect.objectContaining({ agentId: 'researcher' }),
     );
   });
@@ -193,6 +195,64 @@ describe('registerChatHandlers', () => {
     expect(ws.chatSend).toHaveBeenCalledWith(
       'test-session',
       expect.stringContaining("Do not treat this folder as the agent's home workspace"),
+      expect.any(Object),
+    );
+  });
+
+  it('injects desktop path context for natural-language desktop requests', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: {
+            role: 'assistant',
+            content: 'checked desktop',
+          },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    registerChatHandlers({
+      sendToRenderer: vi.fn(),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, '你看看我电脑桌面上有什么文件', 'test-session', {});
+
+    expect(result).toMatchObject({ success: true, text: 'checked desktop', sessionId: 'test-session' });
+    expect(ws.chatSend).toHaveBeenCalledWith(
+      'test-session',
+      expect.stringContaining('When the user asks about local files or folders on this machine, do not answer with a generic safety/privacy refusal'),
+      expect.any(Object),
+    );
+    expect(ws.chatSend).toHaveBeenCalledWith(
+      'test-session',
+      expect.stringContaining(`desktop=${path.join(os.homedir(), 'Desktop')}`),
+      expect.any(Object),
+    );
+    expect(ws.chatSend).toHaveBeenCalledWith(
+      'test-session',
+      expect.stringContaining('If the user says "桌面", "desktop", or "我的桌面"'),
+      expect.any(Object),
+    );
+    expect(ws.chatSend).toHaveBeenCalledWith(
+      'test-session',
+      expect.stringContaining('[Current host exec approvals] security='),
+      expect.any(Object),
+    );
+    expect(ws.chatSend).toHaveBeenCalledWith(
+      'test-session',
+      expect.stringContaining('If earlier conversation turns claimed local filesystem access was blocked by allowlist/privacy rules'),
       expect.any(Object),
     );
   });

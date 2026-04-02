@@ -222,6 +222,51 @@ describe('Dashboard (Chat)', () => {
     });
   });
 
+  it('starts a fresh chat session after changing permissions when the current session already has history', async () => {
+    const existingSession = {
+      id: 'session-existing',
+      title: 'Old chat',
+      messages: [
+        { id: 'msg-1', role: 'user', content: '旧权限上下文', timestamp: Date.now() },
+      ],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    localStorage.setItem('awareness-claw-sessions', JSON.stringify([existingSession]));
+    localStorage.setItem('awareness-claw-active-session', 'session-existing');
+
+    const api = window.electronAPI as any;
+    api.permissionsGet = vi.fn().mockResolvedValue({
+      success: true,
+      profile: 'coding',
+      alsoAllow: ['awareness_init', 'awareness_get_agent_prompt'],
+      denied: ['exec', 'bash', 'shell'],
+      execSecurity: 'deny',
+      execAsk: 'on-miss',
+      execAskFallback: 'deny',
+      execAutoAllowSkills: false,
+      execAllowlist: [],
+    });
+    api.permissionsUpdate = vi.fn().mockResolvedValue({ success: true });
+
+    await act(async () => { render(<Dashboard />); });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle(/Switch permissions/));
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByText('Developer')[0]);
+    });
+
+    await waitFor(() => {
+      const sessions = JSON.parse(localStorage.getItem('awareness-claw-sessions') || '[]');
+      expect(sessions).toHaveLength(2);
+      expect(sessions[0].id).not.toBe('session-existing');
+      expect(localStorage.getItem('awareness-claw-active-session')).not.toBe('session-existing');
+    });
+  });
+
   it('opens OpenClaw dashboard via resolved dashboard url', async () => {
     const api = window.electronAPI as any;
     api.getDashboardUrl = vi.fn().mockResolvedValue({ url: 'http://127.0.0.1:18789/chat' });
