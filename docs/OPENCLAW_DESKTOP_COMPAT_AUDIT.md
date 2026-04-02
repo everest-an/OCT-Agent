@@ -111,77 +111,80 @@
 
 ## 8. 第一轮 Smoke Run 执行稿
 
-执行时间：`待执行`
+执行时间：`2026-04-02 13:10`（自动化子集）
 
 环境：
 
 - OS：macOS
-- OpenClaw：`OpenClaw 2026.3.31 (213a704)`
-- Desktop build：已通过
+- OpenClaw：`OpenClaw 2026.4.1 (da64a97)`
+- Desktop commit：`786faf09e0b086ffed344fda5120973f917b4d92`
+- Desktop build：已通过（`cd AwarenessClaw/packages/desktop && npm run build`）
+- Chat tests：已通过（`npm test -- src/test/dashboard.test.tsx src/test/register-chat-handlers.test.ts`，20/20）
+- 自动化证据：`/tmp/openclaw-deep-smoke-20260402/*.json`
 
 ### 8.1 Startup / Lifecycle
 
 - [ ] 应用启动
-  - 结果：`待填写`
-  - 观察：`待填写`
+  - 结果：`未执行（需人工 GUI）`
+  - 观察：`本轮仅完成 build 与 gateway 事件流自动化；未打开 Desktop 窗口做白屏/崩溃核对`
 - [ ] 托盘与窗口行为
-  - 结果：`待填写`
-  - 观察：`待填写`
+  - 结果：`未执行（需人工 GUI）`
+  - 观察：`未覆盖 close -> hide -> restore`
 - [ ] 二次启动
-  - 结果：`待填写`
-  - 观察：`待填写`
+  - 结果：`未执行（需人工 GUI）`
+  - 观察：`未覆盖 single instance 唤起`
 - [ ] 退出行为
-  - 结果：`待填写`
-  - 观察：`待填写`
+  - 结果：`未执行（需人工 GUI）`
+  - 观察：`未覆盖僵尸进程检查`
 
 ### 8.2 Channel Setup
 
 - [ ] WeChat / URL QR 流
-  - 结果：`待填写`
+  - 结果：`未执行（需人工 GUI / 真实通道）`
   - stdout 特征：`待填写`
   - Desktop 状态：`待填写`
 - [ ] Signal / deep-link 流
-  - 结果：`待填写`
+  - 结果：`未执行（需人工 GUI / 系统协议）`
   - deep-link 行为：`待填写`
   - 失败文案：`待填写`
 - [ ] WhatsApp / ASCII QR 流
-  - 结果：`待填写`
+  - 结果：`未执行（需人工 GUI / 真实通道）`
   - QR 展示情况：`待填写`
   - 是否丢行/截断：`待填写`
 - [ ] add-only 流
-  - 结果：`待填写`
+  - 结果：`未执行（需人工 GUI / 真实通道）`
   - add 后是否直接成功：`待填写`
   - bind 是否执行：`待填写`
 - [ ] add-then-login 流
-  - 结果：`待填写`
+  - 结果：`未执行（需人工 GUI / 真实通道）`
   - add 失败是否阻断：`待填写`
   - login 是否继续：`待填写`
 - [ ] 超时与失败路径
-  - 结果：`待填写`
+  - 结果：`未执行（需人工 GUI / 真实通道）`
   - QR 超时文案：`待填写`
   - 非 QR 超时文案：`待填写`
 
 ### 8.3 Chat / Gateway
 
 - [ ] Gateway 连接
-  - 结果：`待填写`
-  - 观察：`待填写`
+  - 结果：`部分通过`
+  - 观察：`test-gateway-event-stream.mjs` 在 8 个 Round1 自动化场景里都拿到了 health / agent.lifecycle.start / chat 事件，说明 Desktop -> Gateway WebSocket 主路径已连通；但所有聊天请求最终都落在同一上游错误：LLM request failed: network connection error.`
 - [ ] thinking / tool 状态流
-  - 结果：`待填写`
-  - 事件顺序：`待填写`
+  - 结果：`阻塞`
+  - 事件顺序：`只观察到 health -> agent.lifecycle.start -> tick -> agent.lifecycle.error -> chat(state=error)`
 - [ ] CLI fallback
-  - 结果：`待填写`
-  - fallback 表现：`待填写`
+  - 结果：`未覆盖`
+  - fallback 表现：`本轮未刻意制造 WS 失败；当前失败发生在 Gateway 连通后的 LLM 上游阶段，不足以证明 CLI fallback 可用`
 - [ ] chat abort
-  - 结果：`待填写`
+  - 结果：`未覆盖`
   - 子进程残留情况：`待填写`
 
 ### 8.4 汇总结论
 
-- 通过项：`待填写`
-- 失败项：`待填写`
-- 新发现风险：`待填写`
-- 是否允许继续拆分高风险区：`待填写（yes / no）`
+- 通过项：`Desktop build 通过；dashboard/register-chat-handlers 测试 20/20 通过；Gateway 健康探测与 WS 事件流连通`
+- 失败项：`R1-03 exec approval、R1-04 thinking、R1-05 multi-agent、R1-06 skill invocation、R1-07 memory write/recall、R1-08 workspace、R1-10 recovery 这 8 个自动化场景全部在 chat 结束前收到同一错误：LLM request failed: network connection error。未进入 tool_call / approval / tool_result / final text 阶段`
+- 新发现风险：`当前最大阻塞不是 Desktop 前端状态机，而是上游 LLM 请求层不稳定；在该问题排除前，deep smoke 无法判断 Browser / Skill / Memory / 多 Agent / 项目目录这些高阶链路是真坏还是被统一短路`
+- 是否允许继续拆分高风险区：`no`
 
 ## 9. 深测结论（2026-04-01）
 

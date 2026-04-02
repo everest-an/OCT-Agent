@@ -260,6 +260,7 @@ export function registerChatHandlers(deps: {
 
       await ws.chatSend(sid, fullMessage, {
         thinking: options?.thinkingLevel && options.thinkingLevel !== 'off' ? options.thinkingLevel : undefined,
+        agentId: options?.agentId && options.agentId !== 'main' ? options.agentId : undefined,
       });
 
       await chatDone;
@@ -267,7 +268,7 @@ export function registerChatHandlers(deps: {
       ws.removeListener('event:chat', chatEventHandler);
       ws.removeListener('gateway-event', allEventsHandler);
 
-      const text = fullResponseText.trim() || '';
+      const text = fullResponseText.trim() || finalAssistantText || '';
       send('chat:stream-end', {});
 
       if (!text && !pendingApprovalRequestId) {

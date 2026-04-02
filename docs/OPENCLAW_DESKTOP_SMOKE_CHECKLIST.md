@@ -12,6 +12,8 @@
 1. 这次重构后，Desktop 和本机 OpenClaw 的关键结合点还能不能工作。
 2. 在没有补完这些手工验证之前，哪些区块不应该继续拆。
 
+如果要跑发布前或兼容性排查用的重度回归，请使用 [OPENCLAW_DESKTOP_DEEP_SMOKE_PLAN.md](OPENCLAW_DESKTOP_DEEP_SMOKE_PLAN.md)。那份文档覆盖了 browser、skills、memory、channels、多 Agent、thinking UI、权限审批、失败恢复等复杂链路。
+
 ## 2. 执行前提
 
 - 本机已安装 OpenClaw，且版本基线为 `OpenClaw 2026.3.31 (213a704)` 或更新兼容版本

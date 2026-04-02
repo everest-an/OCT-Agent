@@ -192,6 +192,103 @@ describe('Dashboard (Chat)', () => {
     });
   });
 
+  it('shows live thinking as a collapsible stream and auto-collapses when generation starts', async () => {
+    let thinkingCallback: ((text: string) => void) | null = null;
+    let statusCallback: ((status: any) => void) | null = null;
+    let resolveChat: ((value: any) => void) | null = null;
+    const api = window.electronAPI as any;
+    api.onChatThinking = (cb: any) => { thinkingCallback = cb; };
+    api.onChatStatus = (cb: any) => { statusCallback = cb; };
+    api.chatSend = vi.fn(() => new Promise((resolve) => {
+      resolveChat = resolve;
+    }));
+
+    await act(async () => { render(<Dashboard />); });
+
+    const textarea = screen.getByPlaceholderText(/输入消息/) as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'think first' } });
+    });
+
+    const buttons = screen.getAllByRole('button');
+    const sendBtn = buttons[buttons.length - 1];
+    await act(async () => { fireEvent.click(sendBtn); });
+
+    await act(async () => {
+      statusCallback?.({ type: 'thinking' });
+      thinkingCallback?.('step 1\nstep 2');
+    });
+
+    expect(screen.getAllByText(/Thinking process|思考过程/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/step 1\s*step 2/)).toBeInTheDocument();
+
+    await act(async () => {
+      statusCallback?.({ type: 'generating' });
+    });
+
+    expect(screen.queryByText(/step 1\s*step 2/)).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveChat?.({ success: true, text: 'done', sessionId: 'test-session' });
+    });
+  });
+
+  it('clears the composer immediately after send', async () => {
+    let resolveChat: ((value: any) => void) | null = null;
+    const api = window.electronAPI as any;
+    api.chatSend = vi.fn(() => new Promise((resolve) => {
+      resolveChat = resolve;
+    }));
+
+    await act(async () => { render(<Dashboard />); });
+
+    const textarea = screen.getByPlaceholderText(/输入消息/) as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'clear me' } });
+    });
+
+    const buttons = screen.getAllByRole('button');
+    const sendBtn = buttons[buttons.length - 1];
+    await act(async () => { fireEvent.click(sendBtn); });
+
+    expect(textarea.value).toBe('');
+    expect(api.chatSend).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveChat?.({ success: true, text: 'done', sessionId: 'test-session' });
+    });
+  });
+
+  it('does not send duplicate messages on repeated Enter presses', async () => {
+    let resolveChat: ((value: any) => void) | null = null;
+    const api = window.electronAPI as any;
+    api.chatSend = vi.fn(() => new Promise((resolve) => {
+      resolveChat = resolve;
+    }));
+
+    await act(async () => { render(<Dashboard />); });
+
+    const textarea = screen.getByPlaceholderText(/输入消息/) as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'only once' } });
+      fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false, nativeEvent: { isComposing: false } });
+      fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false, nativeEvent: { isComposing: false } });
+    });
+
+    expect(api.chatSend).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveChat?.({ success: true, text: 'done', sessionId: 'test-session' });
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false, nativeEvent: { isComposing: false } });
+    });
+
+    expect(api.chatSend).toHaveBeenCalledTimes(1);
+    expect(textarea.value).toBe('');
+  });
+
   it('shows tool calls block in completed message', async () => {
     // Pre-populate a session with a message that has tool calls
     const session = {

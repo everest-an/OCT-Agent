@@ -18,10 +18,13 @@ export interface ElectronAPI {
   onSetupDaemonStatus?: (callback: (status: { key: string; detail?: string }) => void) => (() => void);
   saveConfig: (config: Record<string, unknown>) => Promise<{ success: boolean }>;
   openAuthUrl: (url: string) => Promise<void>;
-  chatSend?: (message: string, sessionId?: string, options?: { thinkingLevel?: string; model?: string; files?: string[]; workspacePath?: string }) => Promise<{ success: boolean; text?: string; error?: string; sessionId?: string; awaitingApproval?: boolean; approvalRequestId?: string; approvalCommand?: string; approvalDetail?: string }>;
+  chatSend?: (message: string, sessionId?: string, options?: { thinkingLevel?: string; model?: string; files?: string[]; workspacePath?: string; agentId?: string }) => Promise<{ success: boolean; text?: string; error?: string; sessionId?: string; awaitingApproval?: boolean; approvalRequestId?: string; approvalCommand?: string; approvalDetail?: string }>;
+  chatAbort?: (sessionId?: string) => Promise<{ success: boolean; error?: string }>;
   chatApprove?: (sessionId: string, approvalRequestId: string) => Promise<{ success: boolean; command?: string; error?: string }>;
   onChatStream?: (callback: (chunk: string) => void) => void;
   onChatStreamEnd?: (callback: () => void) => void;
+  onChatThinking?: (callback: (text: string) => void) => void;
+  onChatDebug?: (callback: (msg: string) => void) => void;
   onChatStatus?: (callback: (status: { type: string; tool?: string; toolStatus?: string; toolId?: string; message?: string; detail?: string; approvalRequestId?: string; approvalCommand?: string }) => void) => void;
   onMemoryWarning?: (callback: (payload: { type: string; message: string }) => void) => void;
   filePreview?: (filePath: string) => Promise<unknown>;

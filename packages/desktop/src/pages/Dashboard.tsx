@@ -242,6 +242,41 @@ function ThinkingBlock({ thinking }: { thinking: string }) {
   );
 }
 
+function LiveThinkingBlock({
+  thinking,
+  expanded,
+  onToggle,
+}: {
+  thinking: string;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const { t } = useI18n();
+  if (!thinking) return null;
+
+  return (
+    <div className="mb-2 pb-2 border-b border-slate-700/30">
+      <button
+        onClick={onToggle}
+        className="flex items-center gap-1.5 text-[11px] text-purple-400/80 hover:text-purple-300 transition-colors"
+      >
+        <ChevronRight
+          size={12}
+          className={`transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
+        />
+        <Brain size={11} />
+        <span>{t('thinking.label', 'Thinking process')}</span>
+        <Loader2 size={10} className="animate-spin opacity-70" />
+      </button>
+      {expanded && (
+        <div className="mt-1.5 ml-4 pl-3 border-l border-purple-500/20 max-h-[150px] overflow-y-auto">
+          <p className="text-[11px] text-slate-500 leading-relaxed whitespace-pre-wrap">{thinking}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // --- Persistence ---
 
 const SESSIONS_KEY = 'awareness-claw-sessions';
@@ -374,6 +409,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
   const streamingRef = useRef('');
   const [thinkingContent, setThinkingContent] = useState('');
   const thinkingRef = useRef('');
+  const [liveThinkingExpanded, setLiveThinkingExpanded] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -429,8 +465,10 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
 
     // Thinking content from agent reasoning
     api.onChatThinking?.((text: string) => {
+      const hadThinking = !!thinkingRef.current;
       thinkingRef.current = text;
       setThinkingContent(text);
+      if (!hadThinking && text) setLiveThinkingExpanded(true);
     });
 
     // Stream text chunks from agent response
@@ -485,6 +523,13 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
       }
     });
   }, []);
+
+  useEffect(() => {
+    if (!thinkingContent) return;
+    if (streamingContent || activeToolCalls.length > 0 || agentStatus === 'generating' || agentStatus === 'idle') {
+      setLiveThinkingExpanded(false);
+    }
+  }, [thinkingContent, streamingContent, activeToolCalls.length, agentStatus]);
 
   // Listen for tray "New Chat" action
   useEffect(() => {
@@ -658,15 +703,21 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
   // --- Send message — Gateway handles queuing via its Command Queue (collect mode) ---
 
   const sendingRef = useRef(false);
+  const [isSending, setIsSending] = useState(false);
+
+  const canSendMessage = useCallback((text: string) => {
+    const trimmed = text.trim();
+    return trimmed.length > 0 && !sendingRef.current && !isSending && agentStatus === 'idle';
+  }, [agentStatus, isSending]);
+
   const runChatRequest = useCallback(async (
     text: string,
     options?: { userText?: string; files?: AttachedFile[]; clearComposer?: boolean }
   ) => {
     const trimmed = text.trim();
-    if (!trimmed) return;
-    // Guard against double-send (IME Enter confirmation + keydown)
-    if (sendingRef.current) return;
+    if (!canSendMessage(trimmed)) return;
     sendingRef.current = true;
+    setIsSending(true);
 
     const pendingFiles = options?.files ?? attachedFiles;
     const userText = options?.userText ?? trimmed;
@@ -689,6 +740,9 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
     if (options?.clearComposer !== false) {
       setInput('');
       setAttachedFiles([]);
+      if (textareaRef.current) {
+        textareaRef.current.style.height = '52px';
+      }
     }
 
     // Reset streaming state
@@ -699,6 +753,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
     setStreamingContent('');
     thinkingRef.current = '';
     setThinkingContent('');
+    setLiveThinkingExpanded(true);
     if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
     streamTimeoutRef.current = setTimeout(() => { setAgentStatus('error'); }, STREAM_TIMEOUT_MS);
 
@@ -737,14 +792,19 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
       setStreamingContent('');
       thinkingRef.current = '';
       setThinkingContent('');
+      setLiveThinkingExpanded(false);
       setAgentStatus('idle');
       } finally {
         sendingRef.current = false;
+        setIsSending(false);
       }
     }
-  }, [activeSessionId, attachedFiles, config.modelId, config.providerKey, config.selectedAgentId, config.thinkingLevel, projectRoot, t, updateSession]);
+  }, [activeSessionId, attachedFiles, canSendMessage, config.modelId, config.providerKey, config.selectedAgentId, config.thinkingLevel, projectRoot, t, updateSession]);
+
+  const canSendCurrentMessage = canSendMessage(input);
 
   const handleSend = async () => {
+    if (!canSendCurrentMessage) return;
     await runChatRequest(input);
   };
 
@@ -769,7 +829,10 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
   }, [activeSessionId]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+    if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
+    e.preventDefault();
+    if (!canSendMessage((e.currentTarget as HTMLTextAreaElement).value)) return;
+    void handleSend();
   };
 
   const attachFiles = useCallback(async (newFiles: { name: string; path: string }[]) => {
@@ -1344,13 +1407,11 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
 
                   {/* Live thinking content */}
                   {agentStatus !== 'error' && thinkingContent && (
-                    <div className="mb-2 pb-2 border-b border-slate-700/30">
-                      <div className="flex items-center gap-1.5 text-[11px] text-purple-400/70 mb-1">
-                        <Brain size={11} />
-                        <span>{t('thinking.label', 'Thinking process')}</span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 leading-relaxed ml-4 pl-3 border-l border-purple-500/20 max-h-[150px] overflow-y-auto whitespace-pre-wrap">{thinkingContent}</p>
-                    </div>
+                    <LiveThinkingBlock
+                      thinking={thinkingContent}
+                      expanded={liveThinkingExpanded}
+                      onToggle={() => setLiveThinkingExpanded(v => !v)}
+                    />
                   )}
 
                   {/* Tool calls section */}
@@ -1564,10 +1625,10 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
                   )}
                 </div>
                 <button onClick={handleSend}
-                  disabled={(!input.trim() && attachedFiles.length === 0) || agentStatus !== 'idle'}
+                  disabled={!canSendCurrentMessage}
                   className="p-1.5 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg transition-colors"
                 >
-                  {agentStatus !== 'idle' ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                  {!canSendCurrentMessage && agentStatus !== 'idle' ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
                 </button>
               </div>
             </div>

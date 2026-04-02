@@ -326,6 +326,7 @@ export class GatewayClient extends EventEmitter {
     if (options?.verbose) params.verbose = options.verbose;
     if (options?.reasoning) params.reasoning = options.reasoning;
     if (options?.attachments?.length) params.attachments = options.attachments;
+    if (options?.agentId) params.agentId = options.agentId;
     // chat.send uses 120s timeout (agent may take a while with tool calls)
     return this.rpc('chat.send', params, 120000);
   }
