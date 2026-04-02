@@ -1,6 +1,6 @@
-import { AlertTriangle, Check, CheckCircle, ChevronRight, Cloud, Code2, Download, ExternalLink, Loader2, Play, RefreshCw, RotateCw, Shield, Square, Trash2, Upload, Webhook } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ChevronRight, Cloud, Code2, Download, ExternalLink, Loader2, Play, RefreshCw, RotateCw, Shield, Square, Trash2, Upload, Webhook } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { SettingsModalShell, SettingsRow, SettingsSection, SettingsToggle } from './SettingsPrimitives';
+import { SettingsRow, SettingsSection, SettingsToggle } from './SettingsPrimitives';
 
 type TFunction = (key: string, fallback?: string) => string;
 
@@ -183,94 +183,6 @@ export function SettingsExtensionsPanel({
         </SettingsSection>
       )}
     </>
-  );
-}
-
-export function SettingsWorkspacePanel({
-  t,
-  onOpenFile,
-}: {
-  t: TFunction;
-  onOpenFile: (filename: string) => void;
-}) {
-  return (
-    <SettingsSection title={`📋 ${t('settings.workspace')}`}>
-      {['SOUL.md', 'USER.md', 'IDENTITY.md', 'TOOLS.md', 'AGENTS.md'].map((file) => {
-        const descMap: Record<string, string> = {
-          'SOUL.md': t('settings.workspace.personality'),
-          'USER.md': t('settings.workspace.userInfo'),
-          'IDENTITY.md': t('settings.workspace.identity'),
-          'TOOLS.md': t('settings.workspace.tools'),
-          'AGENTS.md': t('settings.workspace.agents'),
-        };
-        return (
-          <SettingsRow key={file} label={file} desc={descMap[file] || ''}>
-            <button
-              onClick={() => onOpenFile(file)}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors"
-            >
-              {t('common.edit')} <ChevronRight size={12} />
-            </button>
-          </SettingsRow>
-        );
-      })}
-    </SettingsSection>
-  );
-}
-
-export function SettingsWorkspaceEditorModal({
-  t,
-  editingFile,
-  fileContent,
-  fileSaving,
-  fileSaveSuccess,
-  onChange,
-  onClose,
-  onSave,
-}: {
-  t: TFunction;
-  editingFile: string | null;
-  fileContent: string;
-  fileSaving: boolean;
-  fileSaveSuccess: boolean;
-  onChange: (value: string) => void;
-  onClose: () => void;
-  onSave: () => void;
-}) {
-  if (!editingFile) return null;
-
-  return (
-    <SettingsModalShell
-      title={<span className="font-semibold text-sm">{editingFile}</span>}
-      onClose={onClose}
-      maxWidthClass="max-w-3xl"
-      zIndexClass="z-[60]"
-      paddingClass="p-0"
-      footer={(
-        <div className="flex items-center justify-end gap-2 p-4">
-          {fileSaveSuccess && (
-            <span className="flex items-center gap-1 text-xs text-emerald-400 mr-2">
-              <CheckCircle size={14} /> {t('common.saved', 'Saved')}
-            </span>
-          )}
-          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">{t('common.cancel')}</button>
-          <button
-            onClick={onSave}
-            disabled={fileSaving || fileSaveSuccess}
-            className="px-4 py-2 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 text-white rounded-lg text-sm transition-colors flex items-center gap-1"
-          >
-            {fileSaving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} {t('common.save')}
-          </button>
-        </div>
-      )}
-    >
-      <textarea
-        value={fileContent}
-        onChange={(event) => onChange(event.target.value)}
-        className="flex-1 p-4 bg-slate-950 text-sm font-mono text-slate-300 leading-relaxed resize-none focus:outline-none min-h-[400px]"
-        spellCheck={false}
-      />
-    </SettingsModalShell>
   );
 }
 

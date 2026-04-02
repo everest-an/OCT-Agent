@@ -10,7 +10,7 @@ import { SettingsPermissionsPanel } from '../components/settings/SettingsPermiss
 import { SettingsUsagePanel, SettingsVersionPanel } from '../components/settings/SettingsStatsPanels';
 import { SettingsCloudAuthModal } from '../components/settings/SettingsCloudAuthModal';
 import { SettingsAppearancePanel, SettingsMemoryPanel, SettingsMemoryPrivacyPanel, SettingsTokenPanel } from '../components/settings/SettingsCorePanels';
-import { SettingsExtensionsPanel, SettingsGatewayPanel, SettingsHealthPanel, SettingsLogsModal, SettingsSecurityAuditPanel, SettingsSystemPanel, SettingsWorkspaceEditorModal, SettingsWorkspacePanel } from '../components/settings/SettingsOperationsPanels';
+import { SettingsExtensionsPanel, SettingsGatewayPanel, SettingsHealthPanel, SettingsLogsModal, SettingsSecurityAuditPanel, SettingsSystemPanel } from '../components/settings/SettingsOperationsPanels';
 import { buildDynamicSectionsFromSchema, getValueAtPath, setValueAtPath, type DynamicConfigSection } from '../lib/openclaw-capabilities';
 import pkg from '../../package.json';
 
@@ -231,12 +231,6 @@ export default function Settings() {
     loadVersions();
   }, []);
 
-  // Workspace files state
-  const [editingFile, setEditingFile] = useState<string | null>(null);
-  const [fileContent, setFileContent] = useState('');
-  const [fileSaving, setFileSaving] = useState(false);
-  const [fileSaveSuccess, setFileSaveSuccess] = useState(false);
-
   // Load permissions, plugins, hooks on mount
   useEffect(() => {
     const api = window.electronAPI as any;
@@ -321,30 +315,6 @@ export default function Settings() {
     };
     setPermissions(updated);
     await (window.electronAPI as any).permissionsUpdate(changes);
-  };
-
-  const loadWorkspaceFile = async (filename: string) => {
-    if (!window.electronAPI) return;
-    const res = await (window.electronAPI as any).workspaceReadFile(filename);
-    if (res.success) {
-      setFileContent(res.content || '');
-      setEditingFile(filename);
-    } else {
-      // File doesn't exist yet — open editor with empty content to allow creating it
-      setFileContent('');
-      setEditingFile(filename);
-    }
-  };
-
-  const saveWorkspaceFile = async () => {
-    if (!window.electronAPI || !editingFile) return;
-    setFileSaving(true);
-    const res = await (window.electronAPI as any).workspaceWriteFile(editingFile, fileContent);
-    setFileSaving(false);
-    if (res?.success !== false) {
-      setFileSaveSuccess(true);
-      setTimeout(() => { setFileSaveSuccess(false); setEditingFile(null); }, 1500);
-    }
   };
 
   // Check gateway status — only poll when page is visible, reduced frequency
@@ -788,8 +758,6 @@ export default function Settings() {
           }}
         />
 
-        <SettingsWorkspacePanel t={t} onOpenFile={loadWorkspaceFile} />
-
         <SettingsGatewayPanel
           t={t}
           gatewayStatus={gatewayStatus}
@@ -843,17 +811,6 @@ export default function Settings() {
             localStorage.removeItem('awareness-claw-setup-done');
             window.location.reload();
           }}
-        />
-
-        <SettingsWorkspaceEditorModal
-          t={t}
-          editingFile={editingFile}
-          fileContent={fileContent}
-          fileSaving={fileSaving}
-          fileSaveSuccess={fileSaveSuccess}
-          onChange={setFileContent}
-          onClose={() => setEditingFile(null)}
-          onSave={saveWorkspaceFile}
         />
 
         <SettingsLogsModal t={t} show={showLogs} logs={logs} onClose={() => setShowLogs(false)} />
