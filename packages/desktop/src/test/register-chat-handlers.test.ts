@@ -256,4 +256,85 @@ describe('registerChatHandlers', () => {
       expect.any(Object),
     );
   });
+
+  it('forwards gateway agent tool events into chat status updates with tool output detail', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        ws.emit('gateway-event', {
+          event: 'agent',
+          payload: {
+            runId: 'run-1',
+            sessionKey: 'test-session',
+            stream: 'tool',
+            data: {
+              phase: 'start',
+              name: 'exec',
+              toolCallId: 'tool-1',
+              args: { command: 'ls -la ~/Desktop' },
+            },
+          },
+        });
+        ws.emit('gateway-event', {
+          event: 'agent',
+          payload: {
+            runId: 'run-1',
+            sessionKey: 'test-session',
+            stream: 'tool',
+            data: {
+              phase: 'result',
+              name: 'exec',
+              toolCallId: 'tool-1',
+              result: { stdout: '.DS_Store\ntest.txt' },
+            },
+          },
+        });
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: {
+            role: 'assistant',
+            content: 'done',
+          },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    const sendToRenderer = vi.fn();
+
+    registerChatHandlers({
+      sendToRenderer,
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, 'hello', 'test-session', {});
+
+    expect(result).toMatchObject({ success: true, text: 'done', sessionId: 'test-session' });
+    expect(sendToRenderer).toHaveBeenCalledWith(
+      'chat:status',
+      expect.objectContaining({
+        type: 'tool_call',
+        tool: 'exec',
+        toolId: 'tool-1',
+        detail: expect.stringContaining('ls -la ~/Desktop'),
+      }),
+    );
+    expect(sendToRenderer).toHaveBeenCalledWith(
+      'chat:status',
+      expect.objectContaining({
+        type: 'tool_update',
+        toolId: 'tool-1',
+        toolStatus: 'completed',
+        detail: expect.stringContaining('.DS_Store'),
+      }),
+    );
+  });
 });

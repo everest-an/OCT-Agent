@@ -55,6 +55,24 @@ interface Message {
   traceEvents?: ChatTraceEvent[];
 }
 
+function finalizeToolCalls(toolCalls: ToolCallInfo[], shouldFinalize: boolean): ToolCallInfo[] | undefined {
+  if (toolCalls.length === 0) return undefined;
+  if (!shouldFinalize) return [...toolCalls];
+
+  return toolCalls.map((toolCall) => {
+    if (
+      toolCall.status === 'running' ||
+      toolCall.status === 'recalling' ||
+      toolCall.status === 'saving' ||
+      toolCall.status === 'cached' ||
+      toolCall.status === 'approved'
+    ) {
+      return { ...toolCall, status: 'completed' };
+    }
+    return toolCall;
+  });
+}
+
 interface ChatSession {
   id: string;
   title: string;
@@ -488,12 +506,6 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
       if (!activeRunRef.current) return;
       console.log(msg);
       resetChatActivityTimeout();
-      recordTraceEvent({
-        kind: 'debug',
-        label: t('chat.trace.gatewayEvent', 'Gateway event'),
-        detail: msg,
-        raw: msg,
-      });
     });
 
     // Thinking content from agent reasoning
@@ -913,6 +925,10 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
         workspacePath: projectRoot || undefined,
         agentId: config.selectedAgentId || 'main',
       });
+      const finalizedToolCalls = finalizeToolCalls(
+        toolCallsRef.current,
+        Boolean(result?.success && !result?.awaitingApproval),
+      );
       const responseText = streamingRef.current.trim()
         || result.text
         || result.error
@@ -924,7 +940,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
         content: responseText,
         timestamp: Date.now(),
         model: config.modelId,
-        toolCalls: toolCallsRef.current.length > 0 ? [...toolCallsRef.current] : undefined,
+        toolCalls: finalizedToolCalls,
         thinking: thinkingRef.current || undefined,
         traceEvents: traceEventsRef.current.length > 0 ? [...traceEventsRef.current] : undefined,
       };
@@ -938,6 +954,8 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
       trackUsage(config.providerKey, config.modelId, trimmed, responseText);
       activeRunRef.current = false;
       if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
+      toolCallsRef.current = [];
+      setActiveToolCalls([]);
       streamingRef.current = '';
       setStreamingContent('');
       thinkingRef.current = '';

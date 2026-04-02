@@ -29,6 +29,53 @@ function extractAssistantText(message: any): string {
   return '';
 }
 
+function truncateDetail(text: string, maxChars = 600): string {
+  return text.length > maxChars ? `${text.slice(0, maxChars - 1)}…` : text;
+}
+
+function extractToolDetail(value: unknown): string | undefined {
+  if (value == null) return undefined;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed ? truncateDetail(trimmed) : undefined;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((entry) => extractToolDetail(entry))
+      .filter((entry): entry is string => Boolean(entry));
+    return parts.length > 0 ? truncateDetail(parts.join('\n')) : undefined;
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const directKeys = ['text', 'output', 'stdout', 'stderr', 'message', 'detail', 'summary'];
+    for (const key of directKeys) {
+      const extracted = extractToolDetail(record[key]);
+      if (extracted) return extracted;
+    }
+    if (Array.isArray(record.content)) {
+      const contentParts = (record.content as unknown[])
+        .map((entry) => {
+          if (entry && typeof entry === 'object') {
+            const block = entry as Record<string, unknown>;
+            return extractToolDetail(block.text ?? block.content ?? block.output);
+          }
+          return extractToolDetail(entry);
+        })
+        .filter((entry): entry is string => Boolean(entry));
+      if (contentParts.length > 0) return truncateDetail(contentParts.join('\n'));
+    }
+    try {
+      return truncateDetail(JSON.stringify(record));
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
 export function registerChatHandlers(deps: {
   sendToRenderer: (channel: string, payload: any) => void;
   ensureGatewayRunning: () => Promise<{ ok: boolean; error?: string }>;
@@ -159,11 +206,12 @@ export function registerChatHandlers(deps: {
 
       allEventsHandler = (evt: any) => {
         const eventName = evt?.event || 'unknown';
-        const preview = JSON.stringify(evt?.payload || evt).slice(0, 800);
+        const payload = evt?.payload || evt;
+        const preview = JSON.stringify(payload).slice(0, 800);
         send('chat:debug', `[gw:${eventName}] ${preview}`);
 
         if (eventName.endsWith('.approval.requested')) {
-          const request = evt?.payload?.request || {};
+          const request = payload?.request || {};
           const toolName = eventName.replace(/\.approval\.requested$/, '') || request.tool || 'tool';
           const detailParts: string[] = [];
           if (request.command) detailParts.push(String(request.command));
@@ -182,6 +230,49 @@ export function registerChatHandlers(deps: {
             approvalCommand,
             detail: pendingApprovalDetail,
           });
+        }
+
+        if (eventName === 'agent') {
+          const sessionKey = typeof payload?.sessionKey === 'string' ? payload.sessionKey : '';
+          if (sessionKey && sessionKey !== sid) return;
+
+          if (payload?.stream === 'tool') {
+            const data = payload?.data || {};
+            const phase = typeof data.phase === 'string' ? data.phase : '';
+            const toolName = typeof data.name === 'string' ? data.name : 'tool';
+            const toolId = typeof data.toolCallId === 'string' ? data.toolCallId : '';
+            if (!toolId) return;
+
+            if (phase === 'start') {
+              send('chat:status', {
+                type: 'tool_call',
+                tool: toolName,
+                toolStatus: 'running',
+                toolId,
+                detail: extractToolDetail(data.args),
+              });
+              return;
+            }
+
+            if (phase === 'update') {
+              send('chat:status', {
+                type: 'tool_update',
+                toolId,
+                toolStatus: 'running',
+                detail: extractToolDetail(data.partialResult),
+              });
+              return;
+            }
+
+            if (phase === 'result') {
+              send('chat:status', {
+                type: 'tool_update',
+                toolId,
+                toolStatus: data.isError ? 'failed' : 'completed',
+                detail: extractToolDetail(data.result),
+              });
+            }
+          }
         }
       };
       ws.on('gateway-event', allEventsHandler);
@@ -409,8 +500,8 @@ async function chatSendViaCli(
     const command = `openclaw agent --session-id "${sid}" -m "${escapedMsg}" --verbose on${thinkingFlag}${agentFlag}`;
     const enhancedPath = deps.getEnhancedPath();
     const child = process.platform === 'win32'
-      ? spawn(deps.wrapWindowsCommand(command), [], { cwd: os.homedir(), shell: 'cmd.exe', env: { ...process.env, PATH: enhancedPath, NO_COLOR: '1', FORCE_COLOR: '0' } })
-      : spawn('/bin/bash', ['--norc', '--noprofile', '-c', `export PATH="${enhancedPath}"; ${command}`], { cwd: os.homedir(), env: { ...process.env, PATH: enhancedPath } });
+      ? spawn(deps.wrapWindowsCommand(command), [], { cwd: options?.workspacePath || os.homedir(), shell: 'cmd.exe', env: { ...process.env, PATH: enhancedPath, NO_COLOR: '1', FORCE_COLOR: '0' } })
+      : spawn('/bin/bash', ['--norc', '--noprofile', '-c', `export PATH="${enhancedPath}"; ${command}`], { cwd: options?.workspacePath || os.homedir(), env: { ...process.env, PATH: enhancedPath } });
 
     activeChatChild = child;
     child.stdout?.on('data', (data: Buffer) => {

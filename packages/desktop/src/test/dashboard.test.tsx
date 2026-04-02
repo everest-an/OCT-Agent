@@ -447,7 +447,7 @@ describe('Dashboard (Chat)', () => {
     expect(screen.getByText(/Run trace|运行链路/)).toBeInTheDocument();
   });
 
-  it('shows debug timeline and persists trace events into the completed assistant message', async () => {
+  it('hides raw gateway debug noise and finalizes active tool calls on successful completion', async () => {
     let statusCallback: ((status: any) => void) | null = null;
     let thinkingCallback: ((text: string) => void) | null = null;
     let debugCallback: ((text: string) => void) | null = null;
@@ -483,6 +483,7 @@ describe('Dashboard (Chat)', () => {
       expect(screen.getAllByText(/Gateway started in app session/).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/open https:\/\/google.com/).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/先检查是否可以调用浏览器工具/).length).toBeGreaterThan(0);
+      expect(screen.queryByText(/\[gw:tool\.exec\.started\]/)).not.toBeInTheDocument();
     });
 
     await act(async () => {
@@ -494,6 +495,13 @@ describe('Dashboard (Chat)', () => {
       expect(screen.getAllByText(/Run trace|运行链路/).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/Gateway started in app session/).length).toBeGreaterThan(0);
     });
+
+    const sessions = JSON.parse(localStorage.getItem('awareness-claw-sessions') || '[]');
+    const msgs = sessions[0]?.messages || [];
+    const assistantMsg = msgs.find((m: any) => m.role === 'assistant');
+    expect(assistantMsg).toBeDefined();
+    expect(assistantMsg?.traceEvents?.some((event: any) => String(event?.detail || '').includes('[gw:tool.exec.started]'))).toBe(false);
+    expect(assistantMsg?.toolCalls?.[0]?.status).toBe('completed');
   });
 
   it('shows approval and failure detail in active tool status', async () => {
