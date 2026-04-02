@@ -300,3 +300,172 @@
 - Desktop 现在已经具备承接审批流的前端状态展示能力，这是必须项，不再是可选优化
 - 当前真实宿主行为下，仍然可能有工具需要用户确认，这和“开箱即用”并不矛盾；关键是不能静默卡住
 - 后续如果要进一步追求“默认免审批”，必须先拿到 OpenClaw 宿主第二层审批策略的正式配置口径，否则不应在 Desktop 里伪造承诺
+
+## 11. 三次复测结论（2026-04-02，网络恢复后）
+
+### 11.1 之前的统一 network error 更像是瞬时网络抖动，不是持久配置错误
+
+本轮继续排查时，直接验证了三条链路：
+
+1. 直接请求 `qwen-portal` 的 `/models` 接口，返回 `200 OK`
+2. `openclaw agent --message "Reply with exactly OK." --thinking low --json` 可正常返回 `OK`
+3. 重新执行 `packages/desktop/scripts/test-gateway-event-stream.mjs "Reply with exactly OK."`，最终收到 `chat(state=final)`，正文为 `OK`
+
+结论：
+
+- `qwen-portal` provider 本身不是持续性坏配置
+- `qwen-max-latest` 也不是绝对不可用，因为 CLI 与 Gateway 基础请求在网络恢复后都可成功
+- 第 8 节里那一批 `LLM request failed: network connection error.` 更接近 2026-04-02 当时的真实外网抖动，而不是 Desktop 特有缺陷
+
+### 11.2 thinking streaming 与基础 agent 路径当前可用
+
+复测 prompt：
+
+- `Think briefly first, then answer in steps: how to connect an Electron chat app to a Gateway event stream?`
+- `Who are you now? Reply with current agent name and responsibility only.`
+
+结果：
+
+- thinking 场景事件统计为：`health * 2`、`agent:lifecycle * 2`、`agent:assistant * 259`、`chat:delta * 115`、`chat:final * 1`
+- 最终收到完整正文，说明 Gateway 主路径下的 assistant streaming 与最终落盘恢复正常
+- agent 身份问答也收到 `chat(state=final)`，说明基础 agent 返回链路已恢复
+
+这意味着：
+
+- 之前第 8 节里因统一 network error 被判定为 fail 的基础 chat / thinking / agent 场景，不能继续简单归因为 Desktop 回归
+- 至少在当前网络恢复后的环境里，这三类链路都可以跑通
+
+### 11.3 当前仍然稳定存在的问题：exec approval 事件后直接 final 空消息
+
+复测 prompt：
+
+- `Use the exec tool to run pwd and reply with only the working directory.`
+
+事件序列：
+
+- `health`
+- `agent:lifecycle(start)`
+- `exec.approval.requested`
+- `presence`
+- `health`
+- `health`
+- `agent:lifecycle(end)`
+- `chat(state=final)`
+
+关键现象：
+
+- 本轮不再出现统一的 `network connection error`
+- 但在出现 `exec.approval.requested` 后，没有看到后续 `tool_result`、审批继续执行、或任何最终正文
+- 最终直接落到 `chat(state=final)` 且正文为空
+
+结论：
+
+- 当前最值得继续跟进的真实兼容问题，已经从“统一上游网络错误”收敛为“审批流出现后，Desktop / Gateway 脚本路径没有继续执行到可见结果”
+- 这与第 10.2 节的判断一致：`alsoAllow` 不是唯一审批开关；即使基础聊天恢复，审批链路仍然是高风险区
+
+### 11.4 当前停止线更新
+
+- `chat` 基础链路：恢复为 `可用`
+- `thinking` streaming：恢复为 `可用`
+- `multi-agent` 基线回答：恢复为 `可用`
+- `exec approval` 继续执行：仍为 `阻塞`
+- `CLI fallback`、`chat abort`、`channel setup`、`startup/lifecycle GUI`：仍未完成实测
+
+因此当前结论更新为：
+
+- 不再把“统一 network error”视为当前主阻塞
+- 但高风险区继续拆分结论仍保持 `no`，因为审批流闭环和其余最小手工门槛仍未完成
+
+### 11.5 approval 闭环自动化复测结果：仍不能视为已完全对齐 OpenClaw chat
+
+本轮继续做了一次更接近闭环的验证：
+
+- 读取 renderer 侧实现，确认 `Approve once` 实际不是走独立 UI 魔法，而是再次调用 `chatSend('/approve <id> allow-once')`
+- 相关代码位于 `src/pages/Dashboard.tsx` 的 `handleApproveTool()` / `runChatRequest()`
+- 对应前端测试已覆盖该设计路径：`src/test/dashboard.test.tsx` 中 `keeps approval requests actionable instead of showing no response`
+
+随后做了两条真实 Gateway 自动化尝试：
+
+1. 自动捕获 `exec.approval.requested` 后发送 `/approve ...`
+2. 使用更强提示强制模型必须调用 `exec`
+
+结果：
+
+- 第一条尝试里，模型没有进入 approval，而是直接返回 `NO`
+- 第二条尝试里，模型也没有稳定发出 `exec.approval.requested`，而是直接返回一段最终文本，内容是 `exec` 受 allowlist miss 限制，无法执行 `pwd`
+
+结论：
+
+- 当前 approval/tool 路径还不够稳定，至少自动化实测下不能稳定收敛到 `approval.requested -> /approve -> tool_result -> final text`
+- 因此现在仍不能把 Desktop 判断为“已经符合 OpenClaw chat 的全部功能”
+- 更准确的状态是：基础聊天、thinking、基础 agent 回复已恢复；但 approval / tool / 更高阶能力仍未完成充分实证闭环
+
+### 11.6 三个高阶场景复测结果：Memory / Workspace / Browser 仍未闭环
+
+在网络恢复后，又补跑了 3 个最关键的高阶场景：
+
+#### Memory
+
+- 写入 prompt：`Please remember this exact decision: use WebSocket as primary path and do not default to CLI fallback.`
+- 结果：收到最终文本，明确声称“已记录成功”
+- 但紧接着召回 prompt：`What decision did we just make?`
+- 结果：模型回答“当前没有看到刚刚做出的具体决定”，并只提到了更旧的 `MEMORY.md` 测试记录
+
+判断：
+
+- 这说明“记忆写入成功”的最终话术，当前不能直接视为真实 recall 闭环证据
+- 至少在这一轮自动化复测里，Memory 的 `write -> new session recall` 还没有闭住
+
+#### Project Folder / Workspace
+
+- prompt：`Inspect package.json in the current project directory and list the scripts.`
+- 结果：模型最终回答当前项目目录里不存在 `package.json`
+
+结合第 9.1 节此前结论：
+
+- Desktop 传入的 `workspacePath` 仍更像 prompt 注入，而不是真正接管 OpenClaw 的执行 cwd
+- 因此 Project Folder 语义目前仍不能视为已经和 OpenClaw chat 的真实工作目录行为完全对齐
+
+#### Browser
+
+- prompt：`Open Google and search for today's latest news, then give me 5 summaries with sources.`
+- 结果：模型最终明确返回当前缺少 web search 所需 API key，并提示需要配置 `BRAVE_API_KEY` / `openclaw configure --section web`
+
+判断：
+
+- 这不是 Desktop 独有回归，更像运行环境前置条件未满足
+- 但从“是否已符合 OpenClaw chat 全部功能”的标准看，当前 Browser 能力仍不能算已完成，因为环境本身还没具备可执行前提
+
+### 11.7 当前总判断
+
+截至本轮排查，最准确的产品判断是：
+
+- 已恢复并可用：基础 chat、Gateway 主路径、thinking streaming、基础 agent 回复
+- 未形成实证闭环：approval / tool 继续执行、Memory 写入后新会话召回、Project Folder 真实 cwd 接管
+- 受环境前置条件阻塞：Browser（缺少 web search API key）
+
+因此：
+
+- 当前不能把 AwarenessClaw Desktop 视为“已经符合 OpenClaw chat 的全部功能”
+- 只能说它已经接近基础聊天能力对齐，但在 approval、memory、workspace、browser 这些高阶链路上仍存在未闭环缺口
+
+### 11.8 本轮测试闭环结论（可作为当前最终判定）
+
+这轮自动化与代码核对已经把当前可测范围基本跑完，可以形成一个明确闭环：
+
+| 能力 | 当前状态 | 结论类型 | 根因归类 |
+|------|----------|----------|----------|
+| 基础 chat | 通过 | 已闭环 | Gateway 主路径恢复正常 |
+| thinking streaming | 通过 | 已闭环 | 网络恢复后 `chat:delta` / `chat:final` 正常 |
+| 基础 agent 回复 | 通过 | 已闭环 | agent 路径恢复正常 |
+| Browser | 未通过 | 已定性 | 环境缺失 `BRAVE_API_KEY`，不是 Desktop 独有回归 |
+| Memory write -> recall | 未通过 | 已定性 | 本地文件已写入，但 recall 未命中新写内容；更像索引/检索策略/session 作用域缺口 |
+| Project Folder / workspace cwd | 未通过 | 已定性 | `workspacePath` 仍更像 prompt 注入，不是真实 cwd 接管 |
+| approval / tool continue | 未通过 | 已定性 | 设计链路存在，但真实 Gateway 自动化下未稳定闭合；更像宿主审批策略 + 模型分支共同作用 |
+
+因此截至本节：
+
+- 如果标准是“Desktop 是否已经具备 OpenClaw chat 的基础聊天能力”，答案是 `yes`
+- 如果标准是“Desktop 是否已经符合 OpenClaw chat 的全部关键功能并完成高阶链路闭环”，答案是 `no`
+
+这就是当前阶段的最终判定；后续继续测试，应视为针对具体缺口的专项修复验证，而不是再重复做一轮全量可用性判断。
