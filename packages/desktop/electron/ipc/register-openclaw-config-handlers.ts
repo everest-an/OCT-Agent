@@ -2,9 +2,40 @@ import fs from 'fs';
 import path from 'path';
 import { ipcMain } from 'electron';
 import { DEFAULT_EXEC_APPROVAL_ASK, getExecApprovalAsk, writeExecApprovalAsk, type ExecApprovalAsk } from '../openclaw-config';
+import { parseJsonShellOutput } from '../openclaw-shell-output';
+
+function getConfigPath(home: string) {
+  return path.join(home, '.openclaw', 'openclaw.json');
+}
+
+function readConfig(home: string) {
+  const configPath = getConfigPath(home);
+  try {
+    return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function writeConfig(home: string, config: Record<string, any>) {
+  const configPath = getConfigPath(home);
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+}
+
+function getByPath(value: any, dotPath?: string) {
+  if (!dotPath) return value;
+  return dotPath.split('.').reduce((acc, part) => acc?.[part], value);
+}
+
+function buildNestedPatch(dotPath: string, value: any) {
+  return dotPath.split('.').reverse().reduce((acc, part) => ({ [part]: acc }), value);
+}
 
 export function registerOpenClawConfigHandlers(deps: {
   home: string;
+  safeShellExecAsync?: (cmd: string, timeoutMs?: number) => Promise<string | null>;
+  mergeOpenClawConfig?: (existing: Record<string, any>, incoming: Record<string, any>) => Record<string, any>;
 }) {
   ipcMain.handle('plugins:list', async () => {
     try {
@@ -102,6 +133,41 @@ export function registerOpenClawConfigHandlers(deps: {
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
       writeExecApprovalAsk(deps.home, execAsk);
       return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('openclaw-config:read', async (_e, dotPath?: string) => {
+    try {
+      const config = readConfig(deps.home);
+      return { success: true, value: getByPath(config, dotPath) };
+    } catch (err: any) {
+      return { success: false, error: err.message, value: undefined };
+    }
+  });
+
+  ipcMain.handle('openclaw-config:write', async (_e, dotPath: string, value: any) => {
+    try {
+      const existing = readConfig(deps.home);
+      const merge = deps.mergeOpenClawConfig || ((current: Record<string, any>, incoming: Record<string, any>) => ({ ...current, ...incoming }));
+      const incoming = buildNestedPatch(dotPath, value);
+      const merged = merge(existing, incoming);
+      writeConfig(deps.home, merged);
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('openclaw-config:schema', async () => {
+    try {
+      const output = await deps.safeShellExecAsync?.('openclaw config schema 2>&1', 20000);
+      const schema = parseJsonShellOutput<Record<string, any>>(output || null);
+      if (!schema) {
+        return { success: false, error: 'Failed to parse OpenClaw config schema.' };
+      }
+      return { success: true, schema };
     } catch (err: any) {
       return { success: false, error: err.message };
     }

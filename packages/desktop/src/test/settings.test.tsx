@@ -30,6 +30,13 @@ describe('Settings Page', () => {
     expect(screen.getByText(/OpenClaw Gateway/)).toBeInTheDocument();
   });
 
+  it('renders permissions panel summary', async () => {
+    await act(async () => { render(<Settings />); });
+    expect(screen.getByText(/Shell command approval/)).toBeInTheDocument();
+    expect(screen.getByText(/Safe/)).toBeInTheDocument();
+    expect(screen.getByText(/Standard/)).toBeInTheDocument();
+  });
+
   it('renders system section', async () => {
     await act(async () => { render(<Settings />); });
     expect(screen.getByText('AwarenessClaw')).toBeInTheDocument();
@@ -77,5 +84,22 @@ describe('Settings Page', () => {
     await act(async () => { render(<Settings />); });
     // The restart hint should not be visible initially
     expect(screen.queryByText(/new chat session/)).not.toBeInTheDocument();
+  });
+
+  it('collapses advanced web settings by default', async () => {
+    await act(async () => { render(<Settings />); });
+    expect(screen.getByText(/Web & Browser/)).toBeInTheDocument();
+    expect(screen.getByText(/Brave search needs an API key/)).toBeInTheDocument();
+    expect(screen.getByText(/Show advanced \(1\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/Max results/i)).not.toBeInTheDocument();
+  });
+
+  it('reveals advanced web settings when expanded', async () => {
+    await act(async () => { render(<Settings />); });
+    await act(async () => {
+      fireEvent.click(screen.getByText(/Show advanced \(1\)/));
+    });
+    expect(screen.getByText(/Hide advanced/)).toBeInTheDocument();
+    expect(screen.getByText(/Max results/i)).toBeInTheDocument();
   });
 });

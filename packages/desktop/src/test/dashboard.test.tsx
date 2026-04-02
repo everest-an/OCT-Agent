@@ -33,6 +33,19 @@ describe('Dashboard (Chat)', () => {
     expect(screen.getByPlaceholderText(/输入消息/)).toBeInTheDocument();
   });
 
+  it('opens session sidebar from header toggle', async () => {
+    await act(async () => { render(<Dashboard />); });
+
+    expect(screen.queryByTitle(/新对话|New Session/)).not.toBeInTheDocument();
+
+    const sessionListButton = screen.getByTitle(/会话列表|Session list/);
+    await act(async () => {
+      fireEvent.click(sessionListButton);
+    });
+
+    expect(screen.getByTitle(/新对话|New Session/)).toBeInTheDocument();
+  });
+
   it('shows bootstrap wizard when onboarding is not completed and USER.md is missing', async () => {
     localStorage.setItem('awareness-claw-config', JSON.stringify({
       language: 'zh', providerKey: 'qwen-portal', modelId: 'qwen-turbo-latest',

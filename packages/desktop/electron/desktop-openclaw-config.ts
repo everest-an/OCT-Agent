@@ -18,6 +18,24 @@ const DESKTOP_DEFAULT_ALLOWED_TOOLS = [
   'awareness_get_agent_prompt',
 ];
 
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function deepMergePlainObjects(target: Record<string, any>, source: Record<string, any>) {
+  const merged: Record<string, any> = { ...target };
+
+  for (const [key, value] of Object.entries(source)) {
+    if (isPlainObject(value) && isPlainObject(merged[key])) {
+      merged[key] = deepMergePlainObjects(merged[key], value);
+    } else {
+      merged[key] = value;
+    }
+  }
+
+  return merged;
+}
+
 function hasAwarenessPluginInstalled(homedir: string) {
   return fs.existsSync(path.join(homedir, '.openclaw', 'extensions', 'openclaw-memory', 'package.json'));
 }
@@ -179,6 +197,16 @@ export function mergeDesktopOpenClawConfig(
     } else if (key === 'tools') {
       merged.tools = JSON.parse(JSON.stringify(merged.tools || {}));
       const incomingTools = value as any;
+      const toolExtras = { ...(incomingTools || {}) };
+
+      delete toolExtras.alsoAllow;
+      delete toolExtras.denied;
+      delete toolExtras.profile;
+
+      if (Object.keys(toolExtras).length > 0) {
+        merged.tools = deepMergePlainObjects(merged.tools, toolExtras);
+      }
+
       if (incomingTools.alsoAllow) {
         const existingAllow = new Set(merged.tools.alsoAllow || []);
         for (const tool of incomingTools.alsoAllow) existingAllow.add(tool);

@@ -696,6 +696,8 @@ registerMemoryHandlers();
 registerFileDialogHandlers();
 registerOpenClawConfigHandlers({
   home: HOME,
+  safeShellExecAsync,
+  mergeOpenClawConfig,
 });
 registerSkillHandlers({
   home: HOME,

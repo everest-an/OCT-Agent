@@ -49,12 +49,12 @@ describe('Settings Page — Permissions Panel', () => {
     });
 
     // Open advanced settings to see the checkbox-based tool/command pickers
-    const advancedBtn = screen.getByText(/Show advanced/i);
+    const advancedBtn = screen.getAllByText(/Show advanced/i).at(-1)!;
     await act(async () => { fireEvent.click(advancedBtn); });
 
     // In advanced mode, "Camera" is a known denied command shown as a checkbox button.
     // Click it to toggle it off (remove from denied).
-    const cameraBtn = screen.getByText('Camera').closest('button');
+    const cameraBtn = screen.getAllByText('Camera')[1].closest('button');
     expect(cameraBtn).toBeTruthy();
 
     await act(async () => {
@@ -118,5 +118,41 @@ describe('Settings Page — Permissions Panel', () => {
 
     api.permissionsGet = origGet;
     api.permissionsUpdate = origUpdate;
+  });
+
+  it('shows clear allowed and available permission summaries', async () => {
+    const api = window.electronAPI as any;
+    const origGet = api.permissionsGet;
+
+    api.permissionsGet = () => Promise.resolve({
+      success: true,
+      profile: 'coding',
+      alsoAllow: ['awareness_recall', 'exec'],
+      denied: ['camera.snap'],
+      execAsk: 'on-miss',
+    });
+
+    await act(async () => { render(<Settings />); });
+
+    await waitFor(() => {
+      expect(screen.getByText('Already Allowed')).toBeInTheDocument();
+      expect(screen.getByText('Can Be Enabled')).toBeInTheDocument();
+      expect(screen.getByText('Blocked Right Now')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Memory Recall')).toBeInTheDocument();
+    expect(screen.getByText('Shell Commands')).toBeInTheDocument();
+    expect(screen.getByText('Camera')).toBeInTheDocument();
+
+    api.permissionsGet = origGet;
+  });
+
+  it('shows provider guidance when Brave web search is selected', async () => {
+    await act(async () => { render(<Settings />); });
+
+    await waitFor(() => {
+      expect(screen.getByText('Brave search needs an API key')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Current status: provider selected, but credential is still missing/i)).toBeInTheDocument();
   });
 });

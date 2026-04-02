@@ -32,6 +32,9 @@ export interface ElectronAPI {
   selectDirectory?: () => Promise<{ directoryPath: string | null }>;
   permissionsGet?: () => Promise<{ success: boolean; profile: string; alsoAllow: string[]; denied: string[]; execAsk?: 'off' | 'on-miss'; error?: string }>;
   permissionsUpdate?: (changes: { alsoAllow?: string[]; denied?: string[]; execAsk?: 'off' | 'on-miss' }) => Promise<{ success: boolean; error?: string }>;
+  openclawConfigRead?: (dotPath?: string) => Promise<{ success: boolean; value: unknown; error?: string }>;
+  openclawConfigWrite?: (dotPath: string, value: unknown) => Promise<{ success: boolean; error?: string }>;
+  openclawConfigSchema?: () => Promise<{ success: boolean; schema?: Record<string, unknown>; error?: string }>;
 }
 
 export interface EnvironmentInfo {
