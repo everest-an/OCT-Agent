@@ -5,7 +5,7 @@
 
 ## 一句话结论
 
-OpenClaw 当前并没有像 Cursor / Claude Code / Windsurf 那样的通用 `mcpServers` 配置面，也没有现成的“外部 MCP Server 管理中心”。它的原生扩展模型是 `plugins` + `skills` + `tools`。  
+OpenClaw 官方侧已经出现了 **MCP 相关基础设施与控制台入口**，因此不能再简单表述为“官方不支持 MCP”。但就当前公开文档与可验证配置模型看，它**还不像 Cursor / Claude Code / Windsurf 那样，以稳定、文档化的 `mcpServers` 配置面作为主要扩展入口**。它的原生扩展模型仍然是 `plugins` + `skills` + `tools`。  
 但在我们这套集成里，OpenClaw **已经通过插件方式间接支持 MCP**：`openclaw-memory` 插件会把 Awareness 的能力注册成 OpenClaw 工具，并且在本地模式下直接调用本地 daemon 的 `/mcp` 接口。
 
 所以如果我们要做“管理 MCP 的功能”，最合理的第一步不是做一个泛化的 OpenClaw MCP 平台，而是先做一个 **Awareness MCP 管理面板**：管理 daemon 健康、插件配置、工具可用性、调用诊断。  
@@ -19,7 +19,7 @@ OpenClaw 当前并没有像 Cursor / Claude Code / Windsurf 那样的通用 `mcp
 
 结论分两层看：
 
-1. **作为通用宿主平台**：没有看到 OpenClaw 官方提供类似 IDE 的通用 `mcpServers` 配置能力。
+1. **作为通用宿主平台**：已能看到官方 MCP 相关基础设施迹象与控制台入口，但当前公开资料里还没有形成一个像 IDE 那样清晰稳定、文档化的 `mcpServers` 主配置模型。
 2. **作为我们当前的集成结果**：支持，方式是 `openclaw-memory` 插件在 OpenClaw 内注册工具，再由插件去调用 Awareness MCP。
 
 换句话说：
@@ -45,7 +45,17 @@ OpenClaw 当前并没有像 Cursor / Claude Code / Windsurf 那样的通用 `mcp
 
 ## 2. 证据链：源码和文档里到底有什么
 
-## 2.1 OpenClaw 官方配置模型里没有通用 `mcpServers`
+## 2.1 OpenClaw 官方已经出现 MCP 迹象，但公开主配置仍以 plugin 模型为主
+
+这次补充核对后，有几条新证据：
+
+1. 本地 Control UI 存在 `http://127.0.0.1:18789/infrastructure` 页面入口。
+2. OpenClaw 官方仓库最新提交列表里已经出现 `add MCP doctor ...` 之类的变更说明。
+3. 官方插件 / SDK / Internals 文档持续在扩展能力注册、registry、runtime 这一层演进，这为 MCP bridge 提供了可落点的插件基础设施。
+
+因此更准确的表述应该是：
+
+> OpenClaw 官方**已经开始具备 MCP 基础设施能力**，但当前对外公开、稳定、文档化的主扩展模型仍然主要是 `plugins / skills / tools`，而不是 IDE 式直接配置 `mcpServers`。
 
 从 OpenClaw 官方文档看，配置主轴是：
 
@@ -75,10 +85,13 @@ OpenClaw 当前并没有像 Cursor / Claude Code / Windsurf 那样的通用 `mcp
 
 对应资料：
 
-- OpenClaw 插件文档说明扩展方式是插件注册能力，而不是通用 MCP server 注册。
-- 配置参考文档里有完整的 `plugins`、`skills`、`tools`、`acp` 章节，但没有 OpenClaw 自己的 `mcpServers` 顶层配置。
+- OpenClaw 插件文档说明扩展方式仍然以插件注册能力为主。
+- 配置参考文档里有完整的 `plugins`、`skills`、`tools`、`acp` 章节；至少在当前公开文档中，还没有看到清晰稳定的 `openclaw.json -> mcpServers` 顶层配置契约。
 
-这和 IDE 生态的 MCP 使用方式不同。IDE 是把 MCP 当“外部工具接入协议”；OpenClaw 是把插件当“内部扩展机制”。
+这说明当前阶段更像是：
+
+- IDE 生态：把 MCP 当“直接接外部工具的标准配置协议”
+- OpenClaw：已经出现 MCP 基础设施，但主要还是把插件当“正式扩展机制”
 
 ## 2.2 OpenClaw 原生扩展机制是插件注册工具
 
@@ -248,7 +261,7 @@ OpenClaw **可以通过插件接入一个底层基于 MCP 的能力源**。
 
 ### 4.2 不能直接说“原生通用支持”的部分
 
-目前没有证据表明 OpenClaw 官方已经提供类似下面这种通用模型：
+截至当前可核对的公开文档，还没有看到 OpenClaw 官方把下面这种模型作为稳定主入口文档化：
 
 ```json
 {
