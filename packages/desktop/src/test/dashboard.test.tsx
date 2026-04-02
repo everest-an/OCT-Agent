@@ -33,6 +33,37 @@ describe('Dashboard (Chat)', () => {
     expect(screen.getByPlaceholderText(/输入消息/)).toBeInTheDocument();
   });
 
+  it('shows bootstrap wizard when onboarding is not completed and USER.md is missing', async () => {
+    localStorage.setItem('awareness-claw-config', JSON.stringify({
+      language: 'zh', providerKey: 'qwen-portal', modelId: 'qwen-turbo-latest',
+      bootstrapCompleted: false,
+    }));
+    const api = window.electronAPI as any;
+    api.workspaceReadFile = vi.fn().mockResolvedValue({ success: true, content: '', exists: false });
+
+    await act(async () => { render(<Dashboard />); });
+
+    await waitFor(() => {
+      expect(screen.getByText('欢迎使用 AwarenessClaw')).toBeInTheDocument();
+    });
+  });
+
+  it('skips bootstrap wizard when USER.md already exists', async () => {
+    localStorage.setItem('awareness-claw-config', JSON.stringify({
+      language: 'zh', providerKey: 'qwen-portal', modelId: 'qwen-turbo-latest',
+      bootstrapCompleted: false,
+    }));
+    const api = window.electronAPI as any;
+    api.workspaceReadFile = vi.fn().mockResolvedValue({ success: true, content: '# User\n\n- Name: Edwin', exists: true });
+
+    await act(async () => { render(<Dashboard />); });
+
+    await waitFor(() => {
+      expect(api.workspaceReadFile).toHaveBeenCalledWith('USER.md');
+    });
+    expect(screen.queryByText('欢迎使用 AwarenessClaw')).not.toBeInTheDocument();
+  });
+
   it('clicking suggested prompt fills input', async () => {
     await act(async () => { render(<Dashboard />); });
     fireEvent.click(screen.getByText(/学习计划/));

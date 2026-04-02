@@ -115,7 +115,7 @@ export function registerCloudWorkspaceHandlers(deps: {
   });
 
   ipcMain.handle('workspace:read-file', async (_e, filename: string) => {
-    const allowed = ['SOUL.md', 'USER.md', 'IDENTITY.md', 'TOOLS.md', 'MEMORY.md'];
+    const allowed = ['SOUL.md', 'USER.md', 'IDENTITY.md', 'TOOLS.md', 'MEMORY.md', 'AGENTS.md'];
     if (!allowed.includes(filename)) return { success: false, error: 'File not allowed' };
     try {
       const filePath = path.join(deps.workspaceDir, filename);
@@ -127,7 +127,7 @@ export function registerCloudWorkspaceHandlers(deps: {
   });
 
   ipcMain.handle('workspace:write-file', async (_e, filename: string, content: string) => {
-    const allowed = ['SOUL.md', 'USER.md', 'IDENTITY.md', 'TOOLS.md', 'MEMORY.md'];
+    const allowed = ['SOUL.md', 'USER.md', 'IDENTITY.md', 'TOOLS.md', 'MEMORY.md', 'AGENTS.md'];
     if (!allowed.includes(filename)) return { success: false, error: 'File not allowed' };
     try {
       const filePath = path.join(deps.workspaceDir, filename);

@@ -1049,8 +1049,14 @@ export default function Settings() {
 
         {/* Workspace */}
         <Section title={`📋 ${t('settings.workspace')}`}>
-          {['SOUL.md', 'USER.md', 'IDENTITY.md', 'TOOLS.md'].map(file => {
-            const descMap: Record<string, string> = { 'SOUL.md': t('settings.workspace.personality'), 'USER.md': t('settings.workspace.userInfo'), 'IDENTITY.md': t('settings.workspace.identity'), 'TOOLS.md': t('settings.workspace.tools') };
+          {['SOUL.md', 'USER.md', 'IDENTITY.md', 'TOOLS.md', 'AGENTS.md'].map(file => {
+            const descMap: Record<string, string> = {
+              'SOUL.md': t('settings.workspace.personality'),
+              'USER.md': t('settings.workspace.userInfo'),
+              'IDENTITY.md': t('settings.workspace.identity'),
+              'TOOLS.md': t('settings.workspace.tools'),
+              'AGENTS.md': t('settings.workspace.agents'),
+            };
             return (
             <Row key={file} label={file} desc={descMap[file] || ''}>
 

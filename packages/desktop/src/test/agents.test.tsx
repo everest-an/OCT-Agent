@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import Agents from '../pages/Agents';
 
@@ -56,5 +56,23 @@ describe('Agents page', () => {
       return svg !== null;
     });
     expect(deleteButtons).toHaveLength(0);
+  });
+
+  it('shows AGENTS.md in the agent file editor', async () => {
+    await act(async () => { render(<Agents />); });
+    await waitFor(() => {
+      expect(screen.getByText('Claw')).toBeInTheDocument();
+    });
+
+    const editDefinitionButton = screen.getAllByRole('button').find((button) => button.getAttribute('title') === 'Edit Definition');
+    expect(editDefinitionButton).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(editDefinitionButton!);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'AGENTS.md' })).toBeInTheDocument();
+    });
   });
 });

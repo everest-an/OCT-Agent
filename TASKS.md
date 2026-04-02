@@ -151,6 +151,7 @@ OpenClaw 的 chat 质量依赖 `~/.openclaw/workspace/` 下的 MD 文档：
 | **HEARTBEAT.md** | 定时检查任务 | 低 |
 | **AGENTS.md** | 工作区设置 | 低 |
 - [x] **Settings 页集成 MD 编辑器**：Settings Workspace section 已有 SOUL.md/USER.md/IDENTITY.md/TOOLS.md 的模态编辑器，支持创建+修改+保存（2026-03-30）
+- [x] **AGENTS.md 可视化编辑支持**：Settings / Agents 页面均已纳入 AGENTS.md，便于直接查看和修改 OpenClaw 工作区默认规则；同时补充 bootstrap 触发测试，明确 onboarding 以 USER.md 是否存在为准（2026-04-02）
 - [x] **首次使用 Bootstrap 引导**：新用户首次打开 Chat 时显示 3 步向导（名字→AI 风格→AI 名字），自动生成 SOUL.md/USER.md/IDENTITY.md，支持跳过。检测 USER.md 存在则跳过引导。中英双语。（2026-03-31）
 - [x] **Agent 人格设定 UI**：Settings Workspace + Agents 页均可编辑 SOUL.md（系统提示词），用户无需懂 Markdown（2026-03-30）
 

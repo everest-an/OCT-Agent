@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { ipcMain } from 'electron';
 import type { CatalogEntry, ChannelDef, ConfigField } from '../channel-registry';
+import { migrateLegacyChannelConfig } from '../openclaw-config';
 
 let discoveryDone = false;
 
@@ -141,6 +142,7 @@ export function registerChannelConfigHandlers(deps: {
         try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
         if (!existing.channels) existing.channels = {};
         existing.channels[openclawId] = { ...existing.channels[openclawId], ...config, enabled: true };
+        migrateLegacyChannelConfig(existing);
         fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
       } else {
         const cliFlags = channelDef ? deps.buildCLIFlags(channelDef, config) : '';

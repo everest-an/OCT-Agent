@@ -13,7 +13,7 @@ interface AgentInfo {
   routes?: string[];
 }
 
-type WorkspaceFile = 'SOUL.md' | 'TOOLS.md' | 'IDENTITY.md' | 'USER.md' | 'MEMORY.md';
+type WorkspaceFile = 'SOUL.md' | 'TOOLS.md' | 'IDENTITY.md' | 'USER.md' | 'MEMORY.md' | 'AGENTS.md';
 
 const WORKSPACE_FILES: { key: WorkspaceFile; label: string; desc: string }[] = [
   { key: 'SOUL.md', label: 'SOUL.md', desc: 'System prompt — personality, role, behavior' },
@@ -21,6 +21,7 @@ const WORKSPACE_FILES: { key: WorkspaceFile; label: string; desc: string }[] = [
   { key: 'IDENTITY.md', label: 'IDENTITY.md', desc: 'Name, emoji, avatar configuration' },
   { key: 'USER.md', label: 'USER.md', desc: 'User preferences and context' },
   { key: 'MEMORY.md', label: 'MEMORY.md', desc: 'Persistent agent memory' },
+  { key: 'AGENTS.md', label: 'AGENTS.md', desc: 'Workspace-level agent defaults and routing notes' },
 ];
 
 export default function Agents() {
@@ -385,14 +386,14 @@ export default function Agents() {
                 {fileEditAgentId === agent.id && (
                   <div className="border-t border-slate-700/50 bg-slate-900/50">
                     {/* File tabs */}
-                    <div className="flex border-b border-slate-700/30 overflow-x-auto">
+                    <div className="grid grid-cols-2 gap-1 border-b border-slate-700/30 p-2 sm:grid-cols-3 xl:grid-cols-6">
                       {WORKSPACE_FILES.map((f) => (
                         <button key={f.key}
                           onClick={() => { setActiveFile(f.key); loadFile(agent.id, f.key); }}
-                          className={`px-3 py-2 text-[11px] whitespace-nowrap border-b-2 transition-colors ${
+                          className={`rounded-lg px-3 py-2 text-[11px] text-left transition-colors ${
                             activeFile === f.key
-                              ? 'border-brand-500 text-brand-400'
-                              : 'border-transparent text-slate-500 hover:text-slate-300'
+                              ? 'bg-brand-600/10 text-brand-400 ring-1 ring-brand-500/40'
+                              : 'text-slate-500 hover:bg-slate-800/70 hover:text-slate-300'
                           }`}>
                           {f.label}
                         </button>

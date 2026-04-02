@@ -155,6 +155,15 @@ export function writeExecApprovalAsk(homedir: string, ask: ExecApprovalAsk): voi
   }, null, 2));
 }
 
+export function migrateLegacyChannelConfig(config: Record<string, any>): void {
+  if (config?.channels?.telegram?.token) {
+    if (!config.channels.telegram.botToken) {
+      config.channels.telegram.botToken = config.channels.telegram.token;
+    }
+    delete config.channels.telegram.token;
+  }
+}
+
 // --- Windows Gateway service script repair ---
 
 export interface GatewayServiceScriptOptions {

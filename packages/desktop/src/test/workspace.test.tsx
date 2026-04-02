@@ -10,15 +10,16 @@ describe('Settings – Workspace file editor', () => {
 
   it('renders Workspace section', async () => {
     await act(async () => { render(<Settings />); });
-    expect(screen.getByText(/Workspace/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Workspace/ })).toBeInTheDocument();
   });
 
-  it('shows workspace file buttons (SOUL.md, USER.md, IDENTITY.md, TOOLS.md)', async () => {
+  it('shows workspace file buttons (SOUL.md, USER.md, IDENTITY.md, TOOLS.md, AGENTS.md)', async () => {
     await act(async () => { render(<Settings />); });
     expect(screen.getByText('SOUL.md')).toBeInTheDocument();
     expect(screen.getByText('USER.md')).toBeInTheDocument();
     expect(screen.getByText('IDENTITY.md')).toBeInTheDocument();
     expect(screen.getByText('TOOLS.md')).toBeInTheDocument();
+    expect(screen.getByText('AGENTS.md')).toBeInTheDocument();
   });
 
   it('calls workspaceReadFile when a file button is clicked', async () => {

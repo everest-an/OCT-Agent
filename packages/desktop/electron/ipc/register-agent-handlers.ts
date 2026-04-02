@@ -117,7 +117,7 @@ export function registerAgentHandlers(deps: {
   });
 
   ipcMain.handle('agents:read-file', async (_e: any, agentId: string, fileName: string) => {
-    const allowedFiles = ['SOUL.md', 'TOOLS.md', 'IDENTITY.md', 'USER.md', 'MEMORY.md'];
+    const allowedFiles = ['SOUL.md', 'TOOLS.md', 'IDENTITY.md', 'USER.md', 'MEMORY.md', 'AGENTS.md'];
     if (!allowedFiles.includes(fileName)) return { success: false, error: 'File not allowed' };
     try {
       const slug = agentId.toLowerCase().replace(/[^a-z0-9-]/g, '-');
@@ -138,7 +138,7 @@ export function registerAgentHandlers(deps: {
   });
 
   ipcMain.handle('agents:write-file', async (_e: any, agentId: string, fileName: string, content: string) => {
-    const allowedFiles = ['SOUL.md', 'TOOLS.md', 'IDENTITY.md', 'USER.md', 'MEMORY.md'];
+    const allowedFiles = ['SOUL.md', 'TOOLS.md', 'IDENTITY.md', 'USER.md', 'MEMORY.md', 'AGENTS.md'];
     if (!allowedFiles.includes(fileName)) return { success: false, error: 'File not allowed' };
     try {
       const slug = agentId.toLowerCase().replace(/[^a-z0-9-]/g, '-');
