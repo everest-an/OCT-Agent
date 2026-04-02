@@ -1,11 +1,9 @@
 const electron = require('electron');
 const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, dialog } = electron;
 import path from 'path';
-import { spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import https from 'https';
-import http from 'http';
 import crypto from 'crypto';
 import { createDaemonWatchdog } from './daemon-watchdog';
 import { createDoctor } from './doctor';
@@ -29,6 +27,7 @@ import { registerChannelConfigHandlers } from './ipc/register-channel-config-han
 import { registerChannelListHandlers } from './ipc/register-channel-list-handlers';
 import { registerChannelSessionHandlers } from './ipc/register-channel-session-handlers';
 import { registerChannelSetupHandlers } from './ipc/register-channel-setup-handlers';
+import { registerChatHandlers } from './ipc/register-chat-handlers';
 import { registerCloudWorkspaceHandlers } from './ipc/register-cloud-workspace-handlers';
 import { registerConfigIoHandlers } from './ipc/register-config-io-handlers';
 import { registerCronHandlers } from './ipc/register-cron-handlers';
@@ -421,359 +420,6 @@ async function ensureGatewayRunning(): Promise<{ ok: boolean; error?: string }> 
   }
 }
 
-/**
- * Chat via `openclaw agent -m "..." --json`
- * Non-interactive, one message at a time, returns JSON response.
- * Streaming: read stdout line by line as response comes in.
- */
-
-// Track active chat child process for abort support
-let activeChatChild: ReturnType<typeof spawn> | null = null;
-
-ipcMain.handle('chat:abort', async (_e: any, sessionKey?: string) => {
-  // Try WebSocket abort first (graceful)
-  if (gatewayWsClient?.isConnected && sessionKey) {
-    try {
-      await gatewayWsClient.chatAbort(sessionKey);
-      return { success: true };
-    } catch { /* fall through to CLI kill */ }
-  }
-  // Fallback: kill CLI child process
-  if (activeChatChild) {
-    try { activeChatChild.kill('SIGTERM'); } catch { /* already dead */ }
-    activeChatChild = null;
-    return { success: true };
-  }
-  return { success: false, error: 'No active chat' };
-});
-
-ipcMain.handle('chat:approve', async (_e: any, sessionKey: string, approvalRequestId: string, decision?: 'allow-once') => {
-  if (!sessionKey || !approvalRequestId) {
-    return { success: false, error: 'Missing approval context' };
-  }
-
-  try {
-    const ws = await getGatewayWs();
-    const command = `/approve ${approvalRequestId} ${decision || 'allow-once'}`;
-    await ws.chatSend(sessionKey, command);
-    return { success: true, command };
-  } catch (err: any) {
-    return { success: false, error: err?.message || String(err) };
-  }
-});
-
-ipcMain.handle('chat:send', async (_e: any, message: string, sessionId?: string, options?: { thinkingLevel?: string; model?: string; files?: string[]; workspacePath?: string; agentId?: string }) => {
-  const send = (ch: string, data: any) => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(ch, data);
-  };
-
-  // Auto-start Gateway if not running
-  const gatewayReady = await ensureGatewayRunning();
-  if (!gatewayReady.ok) {
-    return { success: false, text: '', error: gatewayReady.error || 'Gateway failed to start. Please check Settings → Gateway and try again.' };
-  }
-
-  const sid = sessionId || `ac-${Date.now()}`;
-
-  // Build full message with file/workspace context
-  let fullMessage = message;
-  if (options?.files && options.files.length > 0) {
-    const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'];
-    const images: string[] = [];
-    const others: string[] = [];
-    for (const f of options.files) {
-      const ext = path.extname(f).toLowerCase();
-      (imageExts.includes(ext) ? images : others).push(f);
-    }
-    const parts: string[] = [];
-    if (images.length > 0) parts.push(`[Images to analyze: ${images.join(', ')}] (use exec tool to read or describe these image files)`);
-    if (others.length > 0) parts.push(`[Attached files: ${others.join(', ')}]`);
-    fullMessage = `${parts.join('\n')}\n\n${message}`;
-  }
-  const requestedWorkspace = options?.workspacePath?.trim();
-  if (requestedWorkspace) {
-    try {
-      if (!fs.statSync(requestedWorkspace).isDirectory()) {
-        return { success: false, text: '', error: 'The selected project folder is not available.', sessionId: sid };
-      }
-    } catch {
-      return { success: false, text: '', error: 'The selected project folder could not be found.', sessionId: sid };
-    }
-    fullMessage = `[Current project directory: ${requestedWorkspace}] (use this as base for relative file paths)\n${fullMessage}`;
-  }
-
-  // --- WebSocket RPC to Gateway (replaces CLI spawn) ---
-  // Gateway's Command Queue handles message ordering automatically (default: collect mode).
-  // Chat events (delta/tool_use/thinking) stream via WebSocket events → forwarded to frontend.
-
-  let fullResponseText = '';
-  let chatEventHandler: ((payload: any) => void) | null = null;
-  let allEventsHandler: ((evt: any) => void) | null = null;
-
-  try {
-    const ws = await getGatewayWs();
-
-    const { promise: chatDone, resolve: chatResolve } = (() => {
-      let r: () => void;
-      const p = new Promise<void>(res => { r = res; });
-      return { promise: p, resolve: r! };
-    })();
-    const chatTimeout = setTimeout(() => chatResolve(), 120000);
-
-    // Dedup sets for cumulative delta events
-    const seenToolIds = new Set<string>();
-    const completedToolIds = new Set<string>();
-    let lastThinkingText = '';
-    let pendingApprovalRequestId = '';
-    let pendingApprovalCommand = '';
-    let pendingApprovalDetail = '';
-
-    // --- 1) Log ALL gateway events to renderer DevTools for diagnostics ---
-    // (console.log in main process doesn't show in Chromium DevTools, must use IPC)
-    allEventsHandler = (evt: any) => {
-      const eventName = evt?.event || 'unknown';
-      const preview = JSON.stringify(evt?.payload || evt).slice(0, 800);
-      send('chat:debug', `[gw:${eventName}] ${preview}`);
-
-      if (eventName.endsWith('.approval.requested')) {
-        const request = evt?.payload?.request || {};
-        const toolName = eventName.replace(/\.approval\.requested$/, '') || request.tool || 'tool';
-        const detailParts: string[] = [];
-        if (request.command) detailParts.push(String(request.command));
-        if (request.cwd) detailParts.push(`cwd: ${request.cwd}`);
-        const requestId = request.id || `approval-${toolName}-${Date.now()}`;
-        const approvalCommand = `/approve ${requestId} allow-once`;
-        pendingApprovalRequestId = requestId;
-        pendingApprovalCommand = approvalCommand;
-        pendingApprovalDetail = detailParts.join(' | ') || 'Waiting for approval';
-        send('chat:status', {
-          type: 'tool_approval',
-          tool: toolName,
-          toolStatus: 'awaiting_approval',
-          toolId: requestId,
-          approvalRequestId: requestId,
-          approvalCommand,
-          detail: pendingApprovalDetail,
-        });
-      }
-    };
-    ws.on('gateway-event', allEventsHandler);
-
-    // --- 2) Handle chat events (text deltas, tool blocks, thinking blocks) ---
-    chatEventHandler = (payload: any) => {
-      if (!payload) return;
-      const payloadSession = payload.sessionKey || payload.key || '';
-      if (payloadSession && !payloadSession.endsWith(sid) && payloadSession !== sid) return;
-
-      const state = payload.state;
-      const msg = payload.message;
-
-      if (state === 'delta' && msg && msg.role === 'assistant') {
-        // --- Extract text from content (handles both string and block array) ---
-        let textContent = '';
-        if (Array.isArray(msg.content)) {
-          textContent = msg.content.map((c: any) => c.type === 'text' ? (c.text || '') : '').join('');
-        } else if (typeof msg.content === 'string') {
-          textContent = msg.content;
-        }
-
-        // Stream only new portion (delta events are cumulative)
-        if (textContent && textContent.length > fullResponseText.length) {
-          const newChunk = textContent.slice(fullResponseText.length);
-          fullResponseText = textContent;
-          send('chat:stream', newChunk);
-          send('chat:status', { type: 'generating' });
-        }
-
-        // --- Parse content blocks for tool_use / tool_result / thinking ---
-        if (Array.isArray(msg.content)) {
-          for (const block of msg.content) {
-            if (block.type === 'tool_use') {
-              const toolId = block.id || `tc-${Date.now()}`;
-              if (!seenToolIds.has(toolId)) {
-                seenToolIds.add(toolId);
-                send('chat:status', { type: 'tool_call', tool: block.name || 'tool', toolStatus: 'running', toolId });
-              }
-            } else if (block.type === 'tool_result') {
-              const toolId = block.tool_use_id || '';
-              if (toolId && !completedToolIds.has(toolId)) {
-                completedToolIds.add(toolId);
-                send('chat:status', { type: 'tool_update', toolId, toolStatus: 'completed' });
-              }
-            } else if (block.type === 'thinking' || block.type === 'reasoning') {
-              const text = block.thinking || block.reasoning || block.text || '';
-              if (text && text !== lastThinkingText) {
-                lastThinkingText = text;
-                send('chat:status', { type: 'thinking' });
-                send('chat:thinking', text);
-              }
-            }
-          }
-        }
-
-        // --- Check if the whole message.content string IS reasoning (OpenClaw sends
-        //     reasoning as separate chat messages prefixed with "Reasoning:") ---
-        if (typeof msg.content === 'string' && msg.content.startsWith('Reasoning:')) {
-          const reasoningText = msg.content.replace(/^Reasoning:\s*/, '');
-          if (reasoningText && reasoningText !== lastThinkingText) {
-            lastThinkingText = reasoningText;
-            // Undo: don't add reasoning prefix to main response text
-            fullResponseText = fullResponseText.replace(msg.content, '').trim();
-            send('chat:thinking', reasoningText);
-            send('chat:status', { type: 'thinking' });
-          }
-        }
-      } else if (state === 'final') {
-        clearTimeout(chatTimeout);
-        chatResolve();
-      } else if (state === 'aborted' || state === 'error') {
-        send('chat:status', { type: 'error' });
-        clearTimeout(chatTimeout);
-        chatResolve();
-      }
-    };
-
-    ws.on('event:chat', chatEventHandler);
-    send('chat:status', { type: 'thinking' });
-
-    // Send message via Gateway WebSocket RPC
-    await ws.chatSend(sid, fullMessage, {
-      thinking: options?.thinkingLevel && options.thinkingLevel !== 'off' ? options.thinkingLevel : undefined,
-    });
-
-    // Wait for agent to finish
-    await chatDone;
-
-    // Cleanup listeners
-    ws.removeListener('event:chat', chatEventHandler);
-    ws.removeListener('gateway-event', allEventsHandler);
-
-    const text = fullResponseText.trim() || '';
-    send('chat:stream-end', {});
-
-    const parseMcpTextPayload = (mcpResponse: any) => {
-      const textPayload = mcpResponse?.result?.content?.[0]?.text;
-      if (!textPayload || typeof textPayload !== 'string') return {};
-      try {
-        return JSON.parse(textPayload);
-      } catch {
-        return {};
-      }
-    };
-
-    // Fire-and-forget: write desktop chat to Awareness memory
-    if (text) {
-      const memoryToolId = `memory-save-${Date.now()}`;
-      send('chat:status', {
-        type: 'tool_call',
-        tool: 'awareness_record',
-        toolStatus: 'saving',
-        toolId: memoryToolId,
-        detail: 'Save this turn to Awareness memory',
-      });
-
-      callMcpStrict('awareness_record', {
-        action: 'remember',
-        content: `Request: ${message}\nResult: ${text}`,
-        event_type: 'turn_brief',
-        source: 'desktop',
-      }).then((result) => {
-        const parsed = parseMcpTextPayload(result);
-        if (parsed?.error) {
-          throw new Error(parsed.error);
-        }
-        send('chat:status', {
-          type: 'tool_update',
-          toolId: memoryToolId,
-          toolStatus: 'completed',
-          detail: parsed?.filepath || 'Saved to Awareness memory',
-        });
-      }).catch((err) => {
-        console.warn('[chat] Memory record failed:', err.message);
-        send('chat:status', {
-          type: 'tool_update',
-          toolId: memoryToolId,
-          toolStatus: 'failed',
-          detail: err.message,
-        });
-        mainWindow?.webContents.send('chat:memory-warning', {
-          type: 'record-failed',
-          message: err.message,
-        });
-      });
-    }
-
-    if (!text && pendingApprovalRequestId) {
-      return {
-        success: true,
-        text: '',
-        sessionId: sid,
-        awaitingApproval: true,
-        approvalRequestId: pendingApprovalRequestId,
-        approvalCommand: pendingApprovalCommand,
-        approvalDetail: pendingApprovalDetail,
-      };
-    }
-
-    return { success: true, text: text || 'No response', sessionId: sid };
-  } catch (err: any) {
-    if (gatewayWsClient) {
-      if (chatEventHandler) gatewayWsClient.removeListener('event:chat', chatEventHandler);
-      if (allEventsHandler) gatewayWsClient.removeListener('gateway-event', allEventsHandler);
-    }
-    send('chat:stream-end', {});
-    const errorMsg = err?.message || String(err);
-    // If WebSocket fails, fallback to CLI spawn (degraded mode without tool visibility)
-    if (errorMsg.includes('WebSocket') || errorMsg.includes('connect') || errorMsg.includes('timed out')) {
-      console.warn('[chat] WebSocket failed, falling back to CLI:', errorMsg);
-      return chatSendViaCli(message, sid, options, send);
-    }
-    return { success: false, text: '', error: errorMsg, sessionId: sid };
-  }
-});
-
-/** Fallback: send chat via CLI spawn when WebSocket is unavailable */
-async function chatSendViaCli(
-  message: string, sid: string,
-  options: { thinkingLevel?: string; files?: string[]; workspacePath?: string; agentId?: string } | undefined,
-  send: (ch: string, data: any) => void,
-): Promise<any> {
-  return new Promise((resolve) => {
-    let stdout = '';
-    const thinkingFlag = options?.thinkingLevel && options.thinkingLevel !== 'off'
-      ? ` --thinking ${options.thinkingLevel}` : '';
-    const agentFlag = options?.agentId && options.agentId !== 'main' ? ` --agent "${options.agentId}"` : '';
-    const escapedMsg = message.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`');
-    const cmd = rewriteOpenClawCommand(`openclaw agent --session-id "${sid}" -m "${escapedMsg}" --verbose on${thinkingFlag}${agentFlag}`);
-    const enhancedPath = getEnhancedPath();
-    const child = process.platform === 'win32'
-      ? spawn(wrapWindowsCommand(cmd), [], { cwd: os.homedir(), shell: 'cmd.exe', env: { ...process.env, PATH: enhancedPath, NO_COLOR: '1', FORCE_COLOR: '0' } })
-      : spawn('/bin/bash', ['--norc', '--noprofile', '-c', `export PATH="${enhancedPath}"; ${cmd}`], { cwd: os.homedir(), env: { ...process.env, PATH: enhancedPath } });
-
-    activeChatChild = child;
-    child.stdout?.on('data', (data: Buffer) => {
-      const chunk = stripAnsi(data.toString()).replace(/\r/g, '');
-      stdout += chunk;
-      // Simple streaming — send non-noise lines
-      for (const line of chunk.split('\n')) {
-        const t = line.trim();
-        if (t && !t.startsWith('[') && !t.startsWith('Config') && !t.startsWith('Registered') && !t.includes('plugin')) {
-          send('chat:stream', t + '\n');
-        }
-      }
-    });
-    child.stderr?.on('data', () => {});
-    child.on('exit', () => {
-      activeChatChild = null;
-      send('chat:stream-end', {});
-      const clean = stdout.split('\n').filter(l => l.trim() && !l.trim().startsWith('[') && !l.includes('Config') && !l.includes('plugin')).join('\n').trim();
-      resolve({ success: true, text: clean || 'No response', sessionId: sid });
-    });
-    child.on('error', (err) => resolve({ success: false, error: String(err), sessionId: sid }));
-    setTimeout(() => { try { child.kill(); } catch {} resolve({ success: false, error: 'Response timeout', sessionId: sid }); }, 120000);
-  });
-}
-
 // --- Channel Configuration (registry-driven) ---
 // Import channel registry for dynamic channel metadata
 import {
@@ -888,73 +534,6 @@ async function getGatewayWs(): Promise<GatewayClient> {
 
 const WORKSPACE_DIR = path.join(HOME, '.openclaw', 'workspace');
 
-// --- Cloud Memory Auth (via local daemon proxy) ---
-
-const DAEMON_BASE = 'http://127.0.0.1:37800/api/v1';
-
-/** POST JSON to daemon */
-function daemonPost(route: string, body: Record<string, any> = {}): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify(body);
-    const req = http.request(`${DAEMON_BASE}${route}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
-      timeout: 15000,
-    }, (res) => {
-      let raw = '';
-      res.on('data', (chunk: string) => { raw += chunk; });
-      res.on('end', () => {
-        try { resolve(JSON.parse(raw)); } catch { reject(new Error('Invalid JSON from daemon')); }
-      });
-    });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('Daemon request timeout')); });
-    req.write(data);
-    req.end();
-  });
-}
-
-/** GET JSON from daemon */
-function daemonGet(route: string): Promise<any> {
-  return new Promise((resolve, reject) => {
-    http.get(`${DAEMON_BASE}${route}`, { timeout: 10000 }, (res) => {
-      let raw = '';
-      res.on('data', (chunk: string) => { raw += chunk; });
-      res.on('end', () => {
-        try { resolve(JSON.parse(raw)); } catch { reject(new Error('Invalid JSON from daemon')); }
-      });
-    }).on('error', reject).on('timeout', function(this: any) { this.destroy(); reject(new Error('Timeout')); });
-  });
-}
-
-// --- Memory API (local daemon + cloud compatible) ---
-
-/** Call local daemon MCP tool via JSON-RPC */
-function callMcp(toolName: string, args: Record<string, any>): Promise<any> {
-  return new Promise((resolve) => {
-    const req = http.request('http://127.0.0.1:37800/mcp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      timeout: 15000,
-    }, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch { resolve({ error: 'Invalid JSON' }); }
-      });
-    });
-    req.on('error', (err) => resolve({ error: String(err) }));
-    req.on('timeout', () => { req.destroy(); resolve({ error: 'Timeout' }); });
-    req.write(JSON.stringify({
-      jsonrpc: '2.0', id: Date.now(),
-      method: 'tools/call',
-      params: { name: toolName, arguments: args },
-    }));
-    req.end();
-  });
-}
-
 const doctor = createDoctor({
   shellExec: safeShellExecAsync,
   shellRun: runAsync,
@@ -1057,6 +636,21 @@ registerAppRuntimeHandlers({
   ensureManagedOpenClawWindowsShim,
   shutdownLocalDaemon,
   clearAwarenessLocalNpxCache,
+});
+registerChatHandlers({
+  sendToRenderer: (channel, payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(channel, payload);
+    }
+  },
+  ensureGatewayRunning,
+  getGatewayWs,
+  getConnectedGatewayWs: () => (gatewayWsClient?.isConnected ? gatewayWsClient : null),
+  callMcpStrict,
+  rewriteOpenClawCommand,
+  getEnhancedPath,
+  wrapWindowsCommand,
+  stripAnsi,
 });
 registerAgentHandlers({
   home: HOME,
