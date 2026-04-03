@@ -67,6 +67,30 @@ export default function Channels() {
   const { t } = useI18n();
   const { openExternal, isOpening } = useExternalNavigator();
 
+  const extractPairingCodeFromText = (rawInput: string): string | null => {
+    const input = String(rawInput || '').trim();
+    if (!input) return null;
+
+    const commandMatch = input.match(/openclaw\s+pairing\s+approve\s+[a-zA-Z0-9_-]+\s+([A-HJ-NP-Z2-9]{8})/i);
+    if (commandMatch?.[1]) return commandMatch[1].toUpperCase();
+
+    const labelMatch = input.match(/pairing\s*code\s*[:：]\s*([A-HJ-NP-Z2-9]{8})/i);
+    if (labelMatch?.[1]) return labelMatch[1].toUpperCase();
+
+    const codeOnly = input.toUpperCase().replace(/\s+/g, '');
+    if (/^[A-HJ-NP-Z2-9]{8}$/.test(codeOnly)) return codeOnly;
+
+    if (!/pairing|approve|code/i.test(input)) return null;
+    const candidates = Array.from(input.toUpperCase().matchAll(/\b([A-HJ-NP-Z2-9]{8})\b/g)).map((m) => m[1]);
+    const unique = Array.from(new Set(candidates));
+    return unique.length === 1 ? unique[0] : null;
+  };
+
+  const isTimeoutLike = (message: string | null) => {
+    const text = String(message || '').toLowerCase();
+    return text.includes('timed out') || text.includes('timeout');
+  };
+
   const translateStatus = (statusKey: string): string => {
     const [key, param] = statusKey.split('::');
     const translated = t(key, '');
@@ -83,6 +107,10 @@ export default function Channels() {
   const [testError, setTestError] = useState<string | null>(null);
   const [testNotice, setTestNotice] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [pairingCode, setPairingCode] = useState('');
+  const [pairingApproving, setPairingApproving] = useState(false);
+  const [pairingError, setPairingError] = useState<string | null>(null);
+  const [pairingNotice, setPairingNotice] = useState<string | null>(null);
   const [asciiQR, setAsciiQR] = useState<string | null>(null);
   const [channelProgress, setChannelProgress] = useState<string | null>(null);
   const [configuredChannels, setConfiguredChannels] = useState<Set<string>>(new Set());
@@ -137,10 +165,60 @@ export default function Channels() {
     });
   }, []);
 
+  // Silent prefill: if hints/errors contain a pairing code, auto-populate input.
+  useEffect(() => {
+    if (activeWizard !== 'telegram') return;
+    if (pairingCode.trim()) return;
+
+    const combinedHints = [testError, lastError, testNotice, channelProgress]
+      .filter(Boolean)
+      .join('\n');
+    const detected = extractPairingCodeFromText(combinedHints);
+    if (detected) setPairingCode(detected);
+  }, [activeWizard, pairingCode, testError, lastError, testNotice, channelProgress]);
+
+  useEffect(() => {
+    if (activeWizard !== 'telegram') return;
+    if (wizardStep === 'intro') return;
+    if (pairingCode.trim()) return;
+    if (!window.electronAPI) return;
+
+    let disposed = false;
+    let inFlight = false;
+
+    const tick = async () => {
+      if (disposed || inFlight || pairingApproving) return;
+      inFlight = true;
+      try {
+        const result = await (window.electronAPI as any).channelPairingLatestCode?.('telegram');
+        if (!disposed && result?.success && result?.code) {
+          setPairingCode(result.code);
+          setPairingNotice(t('channels.pairing.latestFilled', 'Latest pending pairing code has been filled automatically.'));
+          setPairingError(null);
+        }
+      } catch {
+        // Silent background retry.
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    void tick();
+    const timer = setInterval(() => { void tick(); }, 8000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [activeWizard, wizardStep, pairingCode, pairingApproving, t]);
+
   const openWizard = async (channelId: string) => {
     setActiveWizard(channelId);
     setWizardStep('intro');
     setFormValues({});
+    setPairingCode('');
+    setPairingApproving(false);
+    setPairingError(null);
+    setPairingNotice(null);
     setAsciiQR(null); setChannelProgress(null);
     setTestStatus('idle'); setTestError(null); setTestNotice(null); setLastError(null);
 
@@ -234,6 +312,89 @@ export default function Channels() {
     }
   };
 
+  const handleApprovePairing = async () => {
+    if (!activeWizard || !window.electronAPI) return;
+
+    const rawPairingInput = pairingCode.trim();
+    if (!rawPairingInput) {
+      setPairingError(t('channels.pairing.codeRequired', 'Please paste the pairing code from Telegram first.'));
+      return;
+    }
+
+    setPairingApproving(true);
+    setPairingError(null);
+    setPairingNotice(null);
+
+    try {
+      const result = await (window.electronAPI as any).channelPairingApprove?.(activeWizard, rawPairingInput);
+      if (!result?.success) {
+        setPairingError(result?.error || t('channels.pairing.approveFailed', 'Could not approve this pairing code.'));
+        return;
+      }
+
+      setPairingCode('');
+      setPairingNotice(result.message || t('channels.pairing.approvedNotice', 'Pairing approved.'));
+      setTestError(null);
+      setLastError(null);
+      setTestStatus('success');
+      setTestNotice(result.pendingConfirmation
+        ? t('channels.pairing.pending', 'Pairing approved. OpenClaw is still syncing, please wait a few seconds.')
+        : t('channels.pairing.ready', 'Pairing approved and channel routing is ready.'));
+      setWizardStep('test');
+
+      await loadConfiguredChannels(false);
+
+      if (result?.connectivity?.ready) {
+        const probe = await (window.electronAPI as any).channelTest?.(activeWizard);
+        if (probe && !probe.success) {
+          setTestStatus('error');
+          setTestError(probe.error || probe.output || t('channels.pairing.probeFailed', 'Pairing was approved, but channel health check failed.'));
+        }
+      }
+    } catch (err: any) {
+      setPairingError(err?.message || t('channels.pairing.approveFailed', 'Could not approve this pairing code.'));
+    } finally {
+      setPairingApproving(false);
+    }
+  };
+
+  const renderTelegramPairingPanel = () => {
+    if (activeWizard !== 'telegram') return null;
+
+    return (
+      <div className="p-3 bg-slate-800/50 border border-slate-700 rounded-lg space-y-2">
+        <p className="text-xs text-slate-300">
+          {t('channels.pairing.help', 'Received a Telegram pairing prompt? Paste the 8-character code or the full "openclaw pairing approve ..." line here.')}
+        </p>
+        <div className="flex gap-2">
+          <input
+            value={pairingCode}
+            onChange={(e) => {
+              const incoming = e.target.value;
+              const detected = extractPairingCodeFromText(incoming);
+              setPairingCode(detected || incoming);
+            }}
+            placeholder={t('channels.pairing.placeholder', 'Paste code or full approve line')}
+            className="flex-1 px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500"
+          />
+          <button
+            onClick={handleApprovePairing}
+            disabled={pairingApproving || !pairingCode.trim()}
+            className="px-3 py-2 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 disabled:text-slate-500 rounded-lg text-xs font-medium text-white"
+          >
+            {pairingApproving ? <Loader2 size={12} className="animate-spin" /> : t('channels.pairing.approveBtn', 'Approve')}
+          </button>
+        </div>
+        {pairingNotice && (
+          <p className="text-[11px] text-emerald-400 bg-emerald-900/20 rounded px-2 py-1">{pairingNotice}</p>
+        )}
+        {pairingError && (
+          <p className="text-[11px] text-red-400 bg-red-900/20 rounded px-2 py-1">{pairingError}</p>
+        )}
+      </div>
+    );
+  };
+
   // --- Guide content —  rich guides for known channels, generic for dynamic ---
 
   const oneClickGuide = (steps: (string | React.ReactNode)[]) => (
@@ -279,16 +440,6 @@ export default function Channels() {
             {oneClickGuide([
               t('channels.guide.oneclick.gateway', 'Make sure Gateway is running (Settings page)'),
               t('channels.guide.oneclick.click', 'Click "Connect" — we\'ll detect your Messages automatically'),
-            ])}
-          </div>
-        );
-      case 'telegram':
-        return (
-          <div className="space-y-3 text-sm">
-            {oneClickGuide([
-              <>{t('channels.guide.telegram.step1')} <span className="text-brand-400 font-medium">@BotFather</span></>,
-              <>{t('channels.guide.telegram.step2')} <span className="text-brand-400 font-medium">/newbot</span> — {t('channels.guide.telegram.step2.desc')}</>,
-              <>{t('channels.guide.telegram.step3')} <span className="text-brand-400 font-medium">Token</span> — {t('channels.guide.telegram.step3.desc')}</>,
             ])}
           </div>
         );
@@ -443,7 +594,13 @@ export default function Channels() {
                   </span>
                 )}
               </h2>
-              <button onClick={closeWizard} className="text-slate-500 hover:text-slate-300"><X size={20} /></button>
+              <button
+                onClick={closeWizard}
+                aria-label={t('common.close', 'Close')}
+                className="text-slate-500 hover:text-slate-300"
+              >
+                <X size={20} />
+              </button>
             </div>
 
             <div className="p-5 space-y-5">
@@ -487,6 +644,7 @@ export default function Channels() {
                     </div>
                   )}
                   {getTokenForm()}
+                  {renderTelegramPairingPanel()}
                   <div className="flex justify-between">
                     <button onClick={() => setWizardStep('intro')} className="px-4 py-2 text-slate-400 hover:text-slate-200 flex items-center gap-1 text-sm">
                       <ChevronLeft size={14} /> {t('channels.back')}
@@ -553,12 +711,22 @@ export default function Channels() {
                     )}
                     {testStatus === 'error' && (
                       <div className="space-y-3">
-                        <p className="text-red-400">{t('channels.failed')}</p>
+                        <p className="text-red-400">
+                          {isTimeoutLike(testError)
+                            ? t('channels.failedTimeoutTitle', 'Connection timed out while OpenClaw was still loading')
+                            : t('channels.failed')}
+                        </p>
+                        {isTimeoutLike(testError) && (
+                          <p className="text-xs text-amber-400/80 bg-amber-900/20 rounded-lg px-3 py-2 text-left break-words">
+                            {t('channels.failedTimeoutHint', 'This is usually not a bad token. Wait 20-60 seconds, then retry. If Telegram sent a pairing code, approve it first.')}
+                          </p>
+                        )}
                         {testError && (
                           <p className="text-xs text-red-400/70 bg-red-900/20 rounded-lg px-3 py-2 text-left break-words max-h-24 overflow-y-auto">
                             {testError}
                           </p>
                         )}
+                        {renderTelegramPairingPanel()}
                         <button onClick={() => {
                           if (!isOneClick && testError) setLastError(testError);
                           setTestError(null);

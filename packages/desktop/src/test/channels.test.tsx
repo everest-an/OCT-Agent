@@ -153,4 +153,92 @@ describe('Channels Page', () => {
       expect(tutorialButton).not.toBeDisabled();
     });
   });
+
+  it('shows telegram pairing code input and triggers one-click approve', async () => {
+    const api = window.electronAPI as any;
+    api.channelPairingApprove = vi.fn().mockResolvedValue({
+      success: true,
+      message: 'Pairing approved and telegram is ready.',
+      connectivity: { ready: true },
+    });
+    api.channelTest = vi.fn().mockResolvedValue({ success: true, output: 'ok' });
+
+    await act(async () => { render(<Channels />); });
+
+    const telegramBtn = screen.getAllByText('Telegram')[0]?.closest('button');
+    expect(telegramBtn).toBeTruthy();
+    await act(async () => { fireEvent.click(telegramBtn as HTMLButtonElement); });
+
+    const nextBtn = screen.getByRole('button', { name: /Next/i });
+    await act(async () => { fireEvent.click(nextBtn); });
+
+    expect(screen.getByPlaceholderText(/Paste code or full approve line/i)).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.change(screen.getByPlaceholderText(/Paste code or full approve line/i), { target: { value: 'C4AVKKA9' } });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    });
+
+    expect(api.channelPairingApprove).toHaveBeenCalledWith('telegram', 'C4AVKKA9');
+  });
+
+  it('silently extracts pairing code when user pastes full approve command', async () => {
+    const api = window.electronAPI as any;
+    api.channelPairingApprove = vi.fn().mockResolvedValue({ success: true, connectivity: { ready: true } });
+    api.channelTest = vi.fn().mockResolvedValue({ success: true });
+
+    await act(async () => { render(<Channels />); });
+
+    const telegramBtn = screen.getAllByText('Telegram')[0]?.closest('button');
+    expect(telegramBtn).toBeTruthy();
+    await act(async () => { fireEvent.click(telegramBtn as HTMLButtonElement); });
+
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Next/i })); });
+
+    const pairingInput = screen.getByPlaceholderText(/Paste code or full approve line/i) as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(pairingInput, { target: { value: 'openclaw pairing approve telegram C4AVKKA9' } });
+    });
+
+    expect(pairingInput.value).toBe('C4AVKKA9');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    });
+
+    expect(api.channelPairingApprove).toHaveBeenCalledWith('telegram', 'C4AVKKA9');
+  });
+
+  it('auto-fills latest pairing code and still allows manual edit', async () => {
+    const api = window.electronAPI as any;
+    api.channelPairingLatestCode = vi.fn().mockResolvedValue({
+      success: true,
+      code: 'LJK9MNP2',
+      codes: ['LJK9MNP2'],
+    });
+
+    await act(async () => { render(<Channels />); });
+
+    const telegramBtn = screen.getAllByText('Telegram')[0]?.closest('button');
+    expect(telegramBtn).toBeTruthy();
+    await act(async () => { fireEvent.click(telegramBtn as HTMLButtonElement); });
+
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Next/i })); });
+
+    const pairingInput = screen.getByPlaceholderText(/Paste code or full approve line/i) as HTMLInputElement;
+
+    await waitFor(() => {
+      expect(api.channelPairingLatestCode).toHaveBeenCalledWith('telegram');
+      expect(pairingInput.value).toBe('LJK9MNP2');
+    });
+
+    await act(async () => {
+      fireEvent.change(pairingInput, { target: { value: 'ABCD2345' } });
+    });
+
+    expect(pairingInput.value).toBe('ABCD2345');
+  });
 });

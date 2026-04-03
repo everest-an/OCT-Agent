@@ -78,6 +78,8 @@ Object.defineProperty(window, 'electronAPI', {
     channelSave: () => Promise.resolve({ success: true }),
     channelTest: () => Promise.resolve({ success: true }),
     channelSetup: () => Promise.resolve({ success: true }),
+    channelPairingApprove: () => Promise.resolve({ success: true, message: 'Pairing approved and telegram is ready.', connectivity: { ready: true } }),
+    channelPairingLatestCode: () => Promise.resolve({ success: true, code: 'C4AVKKA9', codes: ['C4AVKKA9'] }),
     channelReadConfig: () => Promise.resolve({ success: false }),
     selectFile: () => Promise.resolve({ filePath: null }),
     cronList: () => Promise.resolve({ jobs: [] }),

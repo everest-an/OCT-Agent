@@ -69,6 +69,7 @@
 - [x] 通道配置写入 openclaw.json（Telegram/Discord/Slack/Feishu）（2026-03-30）
 - [x] 测试连接功能（channel:test IPC）（2026-03-30）
 - [x] 通道状态检测框架（读取 openclaw.json channels）（2026-03-30）
+- [x] Telegram 无终端配对闭环：频道页新增“粘贴配对码 + 一键 Approve”，批准后自动重绑 main agent 并自动连通性检测（2026-04-04）
 
 ### 定时任务（Cron）
 - [x] Cron 可视化管理页面（独立"自动化"tab）（2026-03-30）

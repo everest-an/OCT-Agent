@@ -7,6 +7,148 @@ import { migrateLegacyChannelConfig } from '../openclaw-config';
 
 let discoveryDone = false;
 
+const CHANNEL_ADD_IDLE_TIMEOUT_MS = 45000;
+const CHANNEL_REMOVE_IDLE_TIMEOUT_MS = 30000;
+const GATEWAY_RESTART_IDLE_TIMEOUT_MS = 30000;
+const CHANNEL_BIND_IDLE_TIMEOUT_MS = 30000;
+const CHANNEL_PAIRING_IDLE_TIMEOUT_MS = 30000;
+
+const RESERVED_PAIRING_WORDS = new Set([
+  'TELEGRAM',
+  'WHATSAPP',
+  'DISCORD',
+  'IMESSAGE',
+  'OPENCLAW',
+  'PAIRING',
+  'APPROVED',
+  'APPROVE',
+  'PENDING',
+  'CHANNEL',
+]);
+
+function sanitizeChannelId(channelId: string): string | null {
+  const trimmed = String(channelId || '').trim();
+  if (!trimmed) return null;
+  return /^[a-zA-Z0-9_-]+$/.test(trimmed) ? trimmed : null;
+}
+
+function isTimeoutLike(message: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.includes('timed out') || lower.includes('timeout');
+}
+
+function channelAppearsConfigured(listOutput: string | null, openclawId: string): boolean {
+  if (!listOutput) return false;
+  const target = openclawId.toLowerCase();
+  return listOutput
+    .split('\n')
+    .some((line) => {
+      const lower = line.toLowerCase();
+      if (!lower.includes(target)) return false;
+      return /configured|enabled|active|linked/i.test(line);
+    });
+}
+
+function sanitizePairingCode(pairingCode: string): string | null {
+  const normalized = String(pairingCode || '').trim().toUpperCase().replace(/\s+/g, '');
+  if (!normalized) return null;
+  if (!/^[A-HJ-NP-Z2-9]{8}$/.test(normalized)) return null;
+  if (RESERVED_PAIRING_WORDS.has(normalized)) return null;
+  return normalized;
+}
+
+function escapeRegExp(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractPairingCodeFromInput(rawInput: string): string | null {
+  const input = String(rawInput || '').trim();
+  if (!input) return null;
+
+  // 1) Exact command line format from Telegram prompt
+  const commandMatch = input.match(/openclaw\s+pairing\s+approve\s+[a-zA-Z0-9_-]+\s+([A-HJ-NP-Z2-9]{8})/i);
+  if (commandMatch?.[1]) return commandMatch[1].toUpperCase();
+
+  // 2) "Pairing code: XXXXXXXX" format
+  const labelMatch = input.match(/pairing\s*code\s*[:：]\s*([A-HJ-NP-Z2-9]{8})/i);
+  if (labelMatch?.[1]) return labelMatch[1].toUpperCase();
+
+  // 3) Raw code only input
+  const rawCode = sanitizePairingCode(input);
+  if (rawCode) return rawCode;
+
+  // 4) Single candidate fallback only when unambiguous
+  const candidates = Array.from(input.toUpperCase().matchAll(/\b([A-HJ-NP-Z2-9]{8})\b/g)).map((m) => m[1]);
+  const unique = Array.from(new Set(candidates));
+  if (unique.length === 1) return unique[0];
+
+  return null;
+}
+
+function collectPairingCodesFromValue(value: any, out: string[]) {
+  if (typeof value === 'string') {
+    const code = sanitizePairingCode(value);
+    if (code) out.push(code);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectPairingCodesFromValue(item, out);
+    return;
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, any>;
+    for (const key of Object.keys(record)) {
+      const val = record[key];
+      if (/code|pair/i.test(key) && typeof val === 'string') {
+        const code = sanitizePairingCode(val);
+        if (code) out.push(code);
+      }
+      collectPairingCodesFromValue(val, out);
+    }
+  }
+}
+
+function extractPendingPairingCodes(output: string | null): string[] {
+  if (!output) return [];
+
+  const unique = new Set<string>();
+  const ordered: string[] = [];
+  const addCode = (code: string | null) => {
+    if (!code || unique.has(code)) return;
+    unique.add(code);
+    ordered.push(code);
+  };
+
+  const objectStart = output.indexOf('{');
+  const arrayStart = output.indexOf('[');
+  const jsonStart = [objectStart, arrayStart].filter(index => index >= 0).sort((a, b) => a - b)[0];
+  if (jsonStart !== undefined) {
+    try {
+      const parsed = JSON.parse(output.slice(jsonStart));
+      const collected: string[] = [];
+      collectPairingCodesFromValue(parsed, collected);
+      for (const code of collected) addCode(code);
+    } catch {
+      // Fall back to line regex parsing.
+    }
+  }
+
+  const lines = output.split(/\r?\n/);
+  for (const line of lines) {
+    const commandMatch = line.match(/openclaw\s+pairing\s+approve\s+[a-zA-Z0-9_-]+\s+([A-HJ-NP-Z2-9]{8})/i);
+    if (commandMatch?.[1]) addCode(sanitizePairingCode(commandMatch[1]));
+
+    const labelMatch = line.match(/pairing\s*code\s*[:=]\s*([A-HJ-NP-Z2-9]{8})/i);
+    if (labelMatch?.[1]) addCode(sanitizePairingCode(labelMatch[1]));
+
+    if (!/pair|pending|approve|code/i.test(line)) continue;
+    const candidates = line.toUpperCase().match(/\b[A-HJ-NP-Z2-9]{8}\b/g) || [];
+    for (const raw of candidates) addCode(sanitizePairingCode(raw));
+  }
+
+  return ordered;
+}
+
 function coerceTelegramCliConfig(channelDef: ChannelDef | undefined, config: Record<string, string>) {
   if (!channelDef) return config;
   if (channelDef.openclawId !== 'telegram' && channelDef.id !== 'telegram') return config;
@@ -29,6 +171,13 @@ function normalizeTelegramConfigInFile(config: any) {
 
 function formatChannelActionError(openclawId: string, action: 'install' | 'bind', rawError: string): string {
   const message = (rawError || '').trim();
+
+  if (isTimeoutLike(message)) {
+    if (openclawId === 'telegram') {
+      return 'OpenClaw is still loading Telegram or waiting for pairing confirmation. Wait 20-60 seconds, run "openclaw pairing list telegram", approve any pending code, then retry.';
+    }
+    return `OpenClaw is still loading channel "${openclawId}". Please wait a moment and retry.`;
+  }
 
   if (/spawn\s+npx\s+ENOENT/i.test(message)) {
     return 'OpenClaw could not launch required helper tools (npx not found in runtime PATH). Please rerun Setup to repair the runtime, then retry channel setup.';
@@ -78,6 +227,43 @@ export function registerChannelConfigHandlers(deps: {
   buildCLIFlags: (channelDef: ChannelDef, config: Record<string, string>) => string;
   toOpenclawId: (channelId: string) => string;
 }) {
+  const bindChannelToMainAgent = async (openclawId: string) => {
+    try {
+      await deps.runAsync(`openclaw agents bind --agent main --bind ${openclawId} 2>&1`, CHANNEL_BIND_IDLE_TIMEOUT_MS);
+      return { success: true as const, retried: false as const };
+    } catch {
+      try { await deps.runAsync('openclaw gateway restart 2>&1', GATEWAY_RESTART_IDLE_TIMEOUT_MS); } catch {}
+      try {
+        await deps.runAsync(`openclaw agents bind --agent main --bind ${openclawId} 2>&1`, CHANNEL_BIND_IDLE_TIMEOUT_MS);
+        return { success: true as const, retried: true as const };
+      } catch (retryErr: any) {
+        return {
+          success: false as const,
+          retried: true as const,
+          error: (retryErr?.message || String(retryErr)).slice(0, 240),
+        };
+      }
+    }
+  };
+
+  const detectChannelConnectivity = async (openclawId: string, channelId: string) => {
+    const [statusOutput, listOutput] = await Promise.all([
+      deps.readShellOutputAsync('openclaw channels status --probe 2>&1', CHANNEL_ADD_IDLE_TIMEOUT_MS),
+      deps.readShellOutputAsync('openclaw channels list 2>&1', CHANNEL_ADD_IDLE_TIMEOUT_MS),
+    ]);
+
+    const listed = !!listOutput && (
+      listOutput.toLowerCase().includes(openclawId.toLowerCase())
+      || listOutput.toLowerCase().includes(channelId.toLowerCase())
+    );
+    const gatewayActive = !!statusOutput && /(running|active|connected|ready|ok)/i.test(statusOutput);
+    return {
+      listed,
+      gatewayActive,
+      ready: listed && gatewayActive,
+    };
+  };
+
   ipcMain.handle('channel:get-registry', async () => {
     const stderrRedirect = process.platform === 'win32' ? '2>NUL' : '2>/dev/null';
     const dlog = (msg: string) => { try { fs.appendFileSync(path.join(os.homedir(), '.awareness-channel-debug.log'), `[${new Date().toISOString()}] ${msg}\n`); } catch { } };
@@ -173,11 +359,20 @@ export function registerChannelConfigHandlers(deps: {
 
   ipcMain.handle('channel:save', async (_e, channelId: string, config: Record<string, string>) => {
     try {
-      const channelDef = deps.getChannel(channelId);
+      const safeChannelId = sanitizeChannelId(channelId);
+      if (!safeChannelId || safeChannelId !== channelId) {
+        return { success: false, error: `Invalid channel ID: ${channelId}` };
+      }
+
+      const channelDef = deps.getChannel(safeChannelId);
       const openclawId = channelDef?.openclawId || channelId;
+      const safeOpenclawId = sanitizeChannelId(openclawId);
+      if (!safeOpenclawId) {
+        return { success: false, error: `Invalid OpenClaw channel ID: ${openclawId}` };
+      }
       const pluginPkg = channelDef?.pluginPackage || `@openclaw/${openclawId}`;
       const saveStrategy = channelDef?.saveStrategy || 'cli';
-      const configForCli = openclawId === 'telegram' ? coerceTelegramCliConfig(channelDef, config) : config;
+      const configForCli = safeOpenclawId === 'telegram' ? coerceTelegramCliConfig(channelDef, config) : config;
       let pluginInstallError: string | null = null;
 
       try {
@@ -191,26 +386,45 @@ export function registerChannelConfigHandlers(deps: {
         let existing: any = {};
         try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
         if (!existing.channels) existing.channels = {};
-        existing.channels[openclawId] = { ...existing.channels[openclawId], ...config, enabled: true };
+        existing.channels[safeOpenclawId] = { ...existing.channels[safeOpenclawId], ...config, enabled: true };
         normalizeTelegramConfigInFile(existing);
         fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
       } else {
         const cliFlags = channelDef ? deps.buildCLIFlags(channelDef, configForCli) : '';
-        const addCmd = `openclaw channels add --channel ${openclawId} ${cliFlags} 2>&1`;
+        const addCmd = `openclaw channels add --channel ${safeOpenclawId} ${cliFlags} 2>&1`;
         try {
-          await deps.runAsync(addCmd, 15000);
+          await deps.runAsync(addCmd, CHANNEL_ADD_IDLE_TIMEOUT_MS);
         } catch (firstErr: any) {
           const msg = firstErr.message || '';
           if (msg.includes('already') || msg.includes('exists')) {
-            try { await deps.runAsync(`openclaw channels remove --channel ${openclawId} 2>&1`, 10000); } catch {}
-            await deps.runAsync(addCmd, 15000);
+            try { await deps.runAsync(`openclaw channels remove --channel ${safeOpenclawId} 2>&1`, CHANNEL_REMOVE_IDLE_TIMEOUT_MS); } catch {}
+            try {
+              await deps.runAsync(addCmd, CHANNEL_ADD_IDLE_TIMEOUT_MS);
+            } catch (retryErr: any) {
+              const retryMsg = retryErr?.message || String(retryErr);
+              if (isTimeoutLike(retryMsg)) {
+                const listOutput = await deps.readShellOutputAsync('openclaw channels list 2>&1', CHANNEL_ADD_IDLE_TIMEOUT_MS);
+                if (!channelAppearsConfigured(listOutput, safeOpenclawId)) {
+                  return { success: false, error: formatChannelActionError(safeOpenclawId, 'install', retryMsg) };
+                }
+              } else {
+                return { success: false, error: retryMsg.slice(0, 300) };
+              }
+            }
           } else {
-            return { success: false, error: msg.slice(0, 300) };
+            if (isTimeoutLike(msg)) {
+              const listOutput = await deps.readShellOutputAsync('openclaw channels list 2>&1', CHANNEL_ADD_IDLE_TIMEOUT_MS);
+              if (!channelAppearsConfigured(listOutput, safeOpenclawId)) {
+                return { success: false, error: formatChannelActionError(safeOpenclawId, 'install', msg) };
+              }
+            } else {
+              return { success: false, error: msg.slice(0, 300) };
+            }
           }
         }
       }
 
-      if (openclawId === 'telegram') {
+      if (safeOpenclawId === 'telegram') {
         try {
           const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
           const existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -219,19 +433,148 @@ export function registerChannelConfigHandlers(deps: {
         } catch {}
       }
 
-      try { await deps.runAsync('openclaw gateway restart 2>&1', 20000); } catch {}
+      try { await deps.runAsync('openclaw gateway restart 2>&1', GATEWAY_RESTART_IDLE_TIMEOUT_MS); } catch {}
 
       try {
-        await deps.runAsync(`openclaw agents bind --agent main --bind ${openclawId} 2>&1`, 10000);
+        await deps.runAsync(`openclaw agents bind --agent main --bind ${safeOpenclawId} 2>&1`, CHANNEL_BIND_IDLE_TIMEOUT_MS);
       } catch (bindErr: any) {
         const bindMsg = bindErr?.message || String(bindErr);
         const combined = pluginInstallError ? `${pluginInstallError}\n${bindMsg}` : bindMsg;
-        return { success: false, error: formatChannelActionError(openclawId, 'bind', combined) };
+        return { success: false, error: formatChannelActionError(safeOpenclawId, 'bind', combined) };
       }
 
       return { success: true };
     } catch (err: any) {
       return { success: false, error: (err.message || String(err)).slice(0, 300) };
+    }
+  });
+
+  ipcMain.handle('channel:pairing-approve', async (_e, channelId: string, pairingCode: string) => {
+    try {
+      const safeChannelId = sanitizeChannelId(channelId);
+      if (!safeChannelId || safeChannelId !== channelId) {
+        return { success: false, error: `Invalid channel ID: ${channelId}` };
+      }
+
+      const channelDef = deps.getChannel(safeChannelId);
+      const openclawId = channelDef?.openclawId || deps.toOpenclawId(safeChannelId) || safeChannelId;
+      const safeOpenclawId = sanitizeChannelId(openclawId);
+      if (!safeOpenclawId) {
+        return { success: false, error: `Invalid OpenClaw channel ID: ${openclawId}` };
+      }
+
+      const safePairingCode = extractPairingCodeFromInput(pairingCode);
+      if (!safePairingCode) {
+        return {
+          success: false,
+          error: 'Could not parse pairing code. Paste the 8-character code, or paste the full line containing "openclaw pairing approve ...".',
+        };
+      }
+
+      const pendingOutput = await deps.readShellOutputAsync(`openclaw pairing list ${safeOpenclawId} 2>&1`, CHANNEL_PAIRING_IDLE_TIMEOUT_MS);
+      if (!pendingOutput) {
+        return {
+          success: false,
+          error: 'Could not verify pending pairing requests yet. Please retry in a few seconds.',
+        };
+      }
+
+      const codeRegex = new RegExp(`\\b${escapeRegExp(safePairingCode)}\\b`, 'i');
+      if (!codeRegex.test(pendingOutput)) {
+        if (/no pending|none|empty/i.test(pendingOutput)) {
+          return {
+            success: false,
+            error: 'No pending pairing request found. Send a new Telegram message to get a fresh code, then try again.',
+          };
+        }
+        return {
+          success: false,
+          error: `Pairing code ${safePairingCode} is not in the current pending list. Please use the latest code shown by Telegram.`,
+        };
+      }
+
+      try {
+        await deps.runAsync(`openclaw pairing approve ${safeOpenclawId} ${safePairingCode} 2>&1`, CHANNEL_PAIRING_IDLE_TIMEOUT_MS);
+      } catch (approveErr: any) {
+        const msg = (approveErr?.message || String(approveErr)).slice(0, 260);
+        return {
+          success: false,
+          error: isTimeoutLike(msg)
+            ? 'Pairing approve timed out. Please retry after OpenClaw finishes loading plugins.'
+            : msg,
+        };
+      }
+
+      const bindResult = await bindChannelToMainAgent(safeOpenclawId);
+      if (!bindResult.success) {
+        return {
+          success: false,
+          error: `Pairing approved, but channel binding failed: ${bindResult.error}`,
+        };
+      }
+
+      const connectivity = await detectChannelConnectivity(safeOpenclawId, safeChannelId);
+      if (connectivity.ready) {
+        return {
+          success: true,
+          message: `Pairing approved and ${safeChannelId} is ready.`,
+          connectivity,
+          bindRetried: bindResult.retried,
+        };
+      }
+
+      return {
+        success: true,
+        pendingConfirmation: true,
+        message: 'Pairing approved. OpenClaw is still syncing the channel state. Please retry in a few seconds.',
+        connectivity,
+        bindRetried: bindResult.retried,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: (err?.message || String(err)).slice(0, 300),
+      };
+    }
+  });
+
+  ipcMain.handle('channel:pairing-latest-code', async (_e, channelId: string) => {
+    try {
+      const safeChannelId = sanitizeChannelId(channelId);
+      if (!safeChannelId || safeChannelId !== channelId) {
+        return { success: false, error: `Invalid channel ID: ${channelId}` };
+      }
+
+      const channelDef = deps.getChannel(safeChannelId);
+      const openclawId = channelDef?.openclawId || deps.toOpenclawId(safeChannelId) || safeChannelId;
+      const safeOpenclawId = sanitizeChannelId(openclawId);
+      if (!safeOpenclawId) {
+        return { success: false, error: `Invalid OpenClaw channel ID: ${openclawId}` };
+      }
+
+      const pendingOutput = await deps.readShellOutputAsync(`openclaw pairing list ${safeOpenclawId} 2>&1`, CHANNEL_PAIRING_IDLE_TIMEOUT_MS);
+      if (!pendingOutput) {
+        return { success: false, error: 'Could not read pending pairing requests yet.' };
+      }
+
+      const codes = extractPendingPairingCodes(pendingOutput);
+      if (codes.length === 0) {
+        return {
+          success: false,
+          error: 'No pending pairing code found. Send a new Telegram message to generate one.',
+        };
+      }
+
+      return {
+        success: true,
+        code: codes[0],
+        codes,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: (err?.message || String(err)).slice(0, 300),
+      };
     }
   });
 

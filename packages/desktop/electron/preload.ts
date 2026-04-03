@@ -63,6 +63,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   channelTest: (channelId: string) => ipcRenderer.invoke('channel:test', channelId),
   channelReadConfig: (channelId: string) => ipcRenderer.invoke('channel:read-config', channelId),
   channelSetup: (channelId: string) => ipcRenderer.invoke('channel:setup', channelId),
+  channelPairingApprove: (channelId: string, pairingCode: string) => ipcRenderer.invoke('channel:pairing-approve', channelId, pairingCode),
+  channelPairingLatestCode: (channelId: string) => ipcRenderer.invoke('channel:pairing-latest-code', channelId),
   channelRemove: (channelId: string) => ipcRenderer.invoke('channel:remove', channelId),
   channelListConfigured: () => ipcRenderer.invoke('channel:list-configured'),
   channelListSupported: () => ipcRenderer.invoke('channel:list-supported'),
