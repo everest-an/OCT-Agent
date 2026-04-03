@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
-import { Search, RefreshCw, Loader2, AlertCircle, Zap, HardDrive, Cloud, ChevronDown, ChevronRight, Calendar, Play, Clock, MessageSquare, FileText, Share2 } from 'lucide-react';
+import { Search, RefreshCw, Loader2, AlertCircle, Zap, HardDrive, Cloud, ChevronDown, ChevronRight, Calendar, Play, Clock, FileText, Share2, SlidersHorizontal } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { parseMemoryContextResponse, type MemoryKnowledgeCard } from '../lib/memory-context';
 import { useExternalNavigator } from '../lib/useExternalNavigator';
@@ -135,11 +135,11 @@ function parseMcpResponse(result: any): { cards: KnowledgeCard[]; errorKey?: str
   }
 }
 
-function MemoryLayerInfo() {
+function MemoryLayerInfo({ className = '' }: { className?: string }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="mb-4">
+    <div className={className}>
       <button
         onClick={() => setExpanded(!expanded)}
         className="flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-slate-300 transition-colors"
@@ -171,7 +171,7 @@ function MemoryLayerInfo() {
 
 const KnowledgeGraph = lazy(() => import('../components/memory/KnowledgeGraph'));
 
-type TabView = 'timeline' | 'knowledge' | 'graph';
+type TabView = 'timeline' | 'knowledge' | 'graph' | 'settings';
 
 /** Highlight matching search terms in text */
 function HighlightText({ text, query }: { text: string; query: string }) {
@@ -457,6 +457,9 @@ export default function Memory() {
       setSearchResults(null);
       return;
     }
+    if (activeTab !== 'timeline' && activeTab !== 'knowledge') {
+      return;
+    }
     setSearching(true);
     if (api) {
       try {
@@ -518,6 +521,59 @@ export default function Memory() {
     if (sourceView === 'dev') return e.source === 'mcp';
     return true;
   }).length;
+  const showSearchControls = activeTab === 'timeline' || activeTab === 'knowledge';
+  const memoryTabItems: Array<{
+    id: TabView;
+    label: string;
+    hint: string;
+    icon: typeof Clock;
+    count?: number;
+  }> = [
+    {
+      id: 'timeline',
+      label: t('memory.timeline'),
+      hint: t('memory.timelineHint', 'Sessions and raw events'),
+      icon: Clock,
+      count: daemonHealth?.stats?.totalMemories,
+    },
+    {
+      id: 'knowledge',
+      label: t('memory.knowledgeCards'),
+      hint: t('memory.knowledgeHint', 'Durable cards and signals'),
+      icon: FileText,
+      count: cards.length,
+    },
+    {
+      id: 'graph',
+      label: t('memory.graph', 'Graph'),
+      hint: t('memory.graphHint', 'Relationships across memories'),
+      icon: Share2,
+    },
+    {
+      id: 'settings',
+      label: t('memory.settingsTab', 'Settings'),
+      hint: t('memory.settingsTabHint', 'Capture, sync, privacy'),
+      icon: SlidersHorizontal,
+    },
+  ];
+  const switchTab = (tab: TabView) => {
+    setActiveTab(tab);
+    setSearchQuery('');
+    setSearchResults(null);
+    if (tab !== 'timeline') {
+      setEvents(fullEvents);
+      setSelectedEventType('all');
+    }
+    if (tab !== 'knowledge') {
+      setSelectedCategory('all');
+    }
+  };
+  const activeModeText = config.memoryMode === 'cloud'
+    ? t('settings.memory.cloud', 'Cloud')
+    : t('settings.memory.local', 'Local');
+  const cloudStateText = cloudMode === 'hybrid' || cloudMode === 'cloud'
+    ? t('memory.settings.cloudConnected', 'Connected')
+    : t('memory.settings.cloudDisconnected', 'Local only');
   const statsText = daemonHealth?.stats
     ? t('memory.stats', '{memories} memories, {knowledge} cards, {sessions} sessions')
         .replace('{memories}', String(sourceView === 'all' ? daemonHealth.stats.totalMemories : filteredEventCount))
@@ -548,71 +604,55 @@ export default function Memory() {
           </button>
         </div>
 
-        {/* Tabs: Timeline / Knowledge Cards */}
-        <div className="flex gap-1 mb-3 p-0.5 bg-slate-800/50 rounded-lg w-fit">
-          <button
-            onClick={() => {
-              setActiveTab('timeline');
-              setSearchQuery('');
-              setSearchResults(null);
-              setEvents(fullEvents);
-              setSelectedEventType('all');
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-colors ${
-              activeTab === 'timeline' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Clock size={12} />
-            {t('memory.timeline')}
-            {daemonHealth?.stats && <span className="text-[10px] opacity-70">({daemonHealth.stats.totalMemories})</span>}
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('knowledge');
-              setSearchQuery('');
-              setSearchResults(null);
-              setEvents(fullEvents);
-              setSelectedEventType('all');
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-colors ${
-              activeTab === 'knowledge' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <FileText size={12} />
-            {t('memory.knowledgeCards')}
-            {cards.length > 0 && <span className="text-[10px] opacity-70">({cards.length})</span>}
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('graph');
-              setSearchQuery('');
-              setSearchResults(null);
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-colors ${
-              activeTab === 'graph' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Share2 size={12} />
-            {t('memory.graph', 'Graph')}
-          </button>
+        <div className="flex flex-wrap gap-2">
+          {memoryTabItems.map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => switchTab(tab.id)}
+                className={`group inline-flex min-w-[168px] items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-left transition-all ${
+                  active
+                    ? 'border-brand-500/60 bg-brand-600/12 shadow-[0_0_0_1px_rgba(59,130,246,0.12)]'
+                    : 'border-slate-700/60 bg-slate-900/30 hover:border-slate-600/80 hover:bg-slate-800/45'
+                }`}
+              >
+                <div className={`flex h-9 w-9 flex-none items-center justify-center rounded-xl ${active ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-300 group-hover:bg-slate-700'}`}>
+                    <Icon size={16} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <div className="truncate text-sm font-medium text-slate-100">{tab.label}</div>
+                    {typeof tab.count === 'number' && (
+                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${active ? 'bg-brand-500/20 text-brand-200' : 'bg-slate-800 text-slate-400'}`}>
+                        {tab.count}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-0.5 truncate text-xs text-slate-500">{tab.hint}</div>
+                </div>
+              </button>
+            );
+          })}
         </div>
 
-        {/* Search */}
-        <div className="relative mb-3">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-          <input
-            value={searchQuery}
-            onChange={(e) => { setSearchQuery(e.target.value); if (!e.target.value) setSearchResults(null); }}
-            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-            placeholder={t('memory.searchHint')}
-            className="w-full pl-10 pr-4 py-2.5 bg-slate-800 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50"
-          />
-          {searching && <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-brand-400" />}
-        </div>
+        {showSearchControls && (
+          <div className="relative mt-4">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); if (!e.target.value) setSearchResults(null); }}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              placeholder={t('memory.searchHint')}
+              className="w-full rounded-2xl border border-slate-700/60 bg-slate-900/50 py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+            />
+            {searching && <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-brand-400" />}
+          </div>
+        )}
 
-        {/* Category filter — only for knowledge tab */}
         {activeTab === 'knowledge' && (
-          <div className="flex gap-2 flex-wrap">
+          <div className="mt-3 flex gap-2 flex-wrap">
             <button
               onClick={() => { setSelectedCategory('all'); setSearchResults(null); }}
               className={`px-3 py-1 text-xs rounded-lg transition-colors ${
@@ -712,28 +752,6 @@ export default function Memory() {
                 </div>
               </div>
             )}
-
-            {/* Memory Architecture Info */}
-            <MemoryLayerInfo />
-
-            <MemorySettingsPanel
-              t={t}
-              config={config}
-              cloudMode={cloudMode}
-              onToggle={toggleMemoryOption}
-              onRecallLimitChange={setRecallLimit}
-              onSelectMode={selectMemoryMode}
-              onCloudConnect={openCloudAuth}
-              onCloudDisconnect={disconnectCloud}
-              onToggleSource={setBlockedSourceAllowed}
-              onClearAll={() => {
-                void clearAllMemories(
-                  t('settings.privacy.clearConfirm', 'Delete ALL local memories? This cannot be undone.'),
-                  t('settings.privacy.cleared', 'All knowledge cards deleted.'),
-                  t('settings.privacy.clearFailed', 'Failed to clear memories. Is the daemon running?'),
-                );
-              }}
-            />
 
             {/* Perception Signals */}
             {signals.length > 0 && activeTab === 'knowledge' && (
@@ -1020,6 +1038,57 @@ export default function Memory() {
                     height={graphSize.height}
                   />
                 </Suspense>
+              </div>
+            )}
+
+            {activeTab === 'settings' && (
+              <div className="space-y-4">
+                <div className="rounded-[24px] border border-slate-700/60 bg-slate-900/55 p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <div className="text-xs uppercase tracking-[0.2em] text-slate-500">{t('memory.settingsTab', 'Settings')}</div>
+                      <h2 className="mt-2 text-lg font-semibold text-slate-100">{t('memory.settings.heroTitle', 'Tune how memory behaves')}</h2>
+                      <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+                        {t('memory.settings.heroDesc', 'Keep capture, sync, and privacy controls separate from the timeline so each memory pane stays focused.')}
+                      </p>
+                    </div>
+                    <div className="grid min-w-[220px] gap-2 sm:grid-cols-3">
+                      <div className="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{t('memory.settings.activeMode', 'Active mode')}</div>
+                        <div className="mt-1 text-sm font-medium text-slate-100">{activeModeText}</div>
+                      </div>
+                      <div className="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{t('settings.memory.recallCount')}</div>
+                        <div className="mt-1 text-sm font-medium text-slate-100">{config.recallLimit}</div>
+                      </div>
+                      <div className="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{t('memory.settings.cloudState', 'Cloud state')}</div>
+                        <div className="mt-1 text-sm font-medium text-slate-100">{cloudStateText}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <MemoryLayerInfo className="mt-4" />
+                </div>
+
+                <MemorySettingsPanel
+                  t={t}
+                  config={config}
+                  cloudMode={cloudMode}
+                  onToggle={toggleMemoryOption}
+                  onRecallLimitChange={setRecallLimit}
+                  onSelectMode={selectMemoryMode}
+                  onCloudConnect={openCloudAuth}
+                  onCloudDisconnect={disconnectCloud}
+                  onToggleSource={setBlockedSourceAllowed}
+                  onClearAll={() => {
+                    void clearAllMemories(
+                      t('settings.privacy.clearConfirm', 'Delete ALL local memories? This cannot be undone.'),
+                      t('settings.privacy.cleared', 'All knowledge cards deleted.'),
+                      t('settings.privacy.clearFailed', 'Failed to clear memories. Is the daemon running?'),
+                    );
+                  }}
+                />
               </div>
             )}
           </>

@@ -61,31 +61,38 @@ describe('Memory Page', () => {
     mockDaemonConnected();
     await act(async () => { render(<Memory />); });
     // Switch to knowledge tab
-    await waitFor(() => expect(screen.getByRole('button', { name: /^Knowledge Cards/ })).toBeInTheDocument());
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Knowledge Cards/ })); });
+    await waitFor(() => expect(screen.getByText('Knowledge Cards')).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText('Knowledge Cards')); });
     expect(screen.getByRole('button', { name: /^All/ })).toBeInTheDocument();
   });
 
-  it('renders moved memory settings on memory page when connected', async () => {
+  it('renders moved memory settings on dedicated settings tab when connected', async () => {
     mockDaemonConnected();
     await act(async () => { render(<Memory />); });
-    await waitFor(() => expect(screen.getByText('Memory Settings')).toBeInTheDocument());
-    expect(screen.getByText('Auto Capture')).toBeInTheDocument();
-    expect(screen.getByText('Auto Recall')).toBeInTheDocument();
-    expect(screen.getByText('Recall Count')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Settings')).toBeInTheDocument());
+    expect(screen.queryByText('Capture & Recall')).not.toBeInTheDocument();
+    await act(async () => { fireEvent.click(screen.getByText('Settings')); });
+    await waitFor(() => expect(screen.getByText('Capture & Recall')).toBeInTheDocument());
+    expect(screen.getAllByText('Auto Capture').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Auto Recall').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Recall Count').length).toBeGreaterThan(0);
   });
 
   it('renders Memory Architecture info toggle when connected', async () => {
     mockDaemonConnected();
     await act(async () => { render(<Memory />); });
-    await waitFor(() => expect(screen.getByText('Memory Architecture')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Settings')).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText('Settings')); });
+    await waitFor(() => expect(screen.getAllByText('Memory Architecture').length).toBeGreaterThan(0));
   });
 
   it('expands Memory Architecture details on click', async () => {
     mockDaemonConnected();
     await act(async () => { render(<Memory />); });
-    await waitFor(() => expect(screen.getByText('Memory Architecture')).toBeInTheDocument());
-    const toggle = screen.getByText('Memory Architecture');
+    await waitFor(() => expect(screen.getByText('Settings')).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText('Settings')); });
+    await waitFor(() => expect(screen.getAllByText('Memory Architecture').length).toBeGreaterThan(0));
+    const toggle = screen.getByRole('button', { name: /Memory Architecture/i });
     await act(async () => { fireEvent.click(toggle); });
     expect(screen.getByText('Awareness Memory')).toBeInTheDocument();
     expect(screen.getByText('OpenClaw Local')).toBeInTheDocument();

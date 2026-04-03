@@ -1,5 +1,5 @@
-import { Cloud, ExternalLink, Shield, SlidersHorizontal, Trash2 } from 'lucide-react';
-import { SettingsRow, SettingsSection, SettingsToggle } from '../settings/SettingsPrimitives';
+import { Cloud, ExternalLink, HardDrive, Shield, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { SettingsToggle } from '../settings/SettingsPrimitives';
 
 type TFunction = (key: string, fallback?: string) => string;
 
@@ -35,98 +35,182 @@ export function MemorySettingsPanel({
     { id: 'openclaw-wechat', label: 'WeChat', emoji: '💚' },
     { id: 'mcp', label: t('settings.privacy.devTools', 'Dev Tools (Claude Code / IDE)'), emoji: '🛠️' },
   ];
+  const blockedSources = config.memoryBlockedSources || [];
+  const allowedSourceCount = sourceItems.filter(({ id }) => !blockedSources.includes(id)).length;
+  const memoryMode = config.memoryMode === 'cloud'
+    ? t('settings.memory.cloud', 'Cloud')
+    : t('settings.memory.local', 'Local');
+  const cloudConnected = cloudMode === 'hybrid' || cloudMode === 'cloud';
+  const summaryClass = 'rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4';
+  const sectionClass = 'rounded-[24px] border border-slate-700/60 bg-slate-900/55 p-5';
+  const rowClass = 'flex items-center justify-between gap-4 rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3.5';
 
   return (
-    <div className="space-y-3 mb-4">
-      <SettingsSection title={`${t('memory.settings.title', 'Memory Settings')}`}>
-
-        <SettingsRow label={t('settings.memory.autoCapture')} desc={t('settings.memory.autoCapture.desc')}>
-          <SettingsToggle checked={config.autoCapture} onChange={(value) => onToggle('autoCapture', value)} />
-        </SettingsRow>
-
-        <SettingsRow label={t('settings.memory.autoRecall')} desc={t('settings.memory.autoRecall.desc')}>
-          <SettingsToggle checked={config.autoRecall} onChange={(value) => onToggle('autoRecall', value)} />
-        </SettingsRow>
-
-        <SettingsRow label={t('settings.memory.recallCount')} desc={t('settings.memory.recallCount.desc')}>
-          <div className="flex items-center gap-3">
-            <input
-              type="range"
-              min={1}
-              max={20}
-              value={config.recallLimit}
-              onChange={(event) => onRecallLimitChange(parseInt(event.target.value, 10))}
-              className="w-24 accent-brand-500"
-            />
-            <span className="text-sm text-slate-300 w-6 text-right">{config.recallLimit}</span>
-          </div>
-        </SettingsRow>
-
-        <SettingsRow label={t('settings.memory.storage')} desc={t('settings.memory.storage.desc')}>
-          <div className="flex bg-slate-700 rounded-lg overflow-hidden">
-            {(['local', 'cloud'] as const).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => onSelectMode(mode)}
-                className={`px-3 py-1.5 text-xs transition-colors ${config.memoryMode === mode ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                {t(`settings.memory.${mode}`)}
-              </button>
-            ))}
-          </div>
-        </SettingsRow>
-
-        <SettingsRow
-          label={t('memory.settings.cloudStatus', 'Cloud Sync')}
-          desc={t('memory.settings.cloudStatus.desc', 'Connect Awareness Cloud without leaving the Memory page.')}
-        >
-          {cloudMode === 'hybrid' || cloudMode === 'cloud' ? (
-            <div className="flex items-center gap-2">
-              <span className="flex items-center gap-1.5 text-xs text-emerald-400">
-                <Cloud size={14} /> {t('settings.memory.cloud.connected')}
-              </span>
-              <button
-                onClick={onCloudDisconnect}
-                className="text-xs text-red-400/70 hover:text-red-400 px-2 py-1 rounded hover:bg-red-600/10 transition-colors"
-              >
-                {t('settings.memory.cloud.disconnect')}
-              </button>
+    <div className="space-y-4">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+        <section className={sectionClass}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-medium text-slate-100">
+                <SlidersHorizontal size={16} className="text-brand-300" />
+                {t('memory.settings.automationCard', 'Capture & Recall')}
+              </div>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                {t('memory.settings.automationCard.desc', 'These controls change what gets remembered automatically and how much memory is pulled into each conversation.')}
+              </p>
             </div>
-          ) : (
-            <button
-              onClick={onCloudConnect}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-brand-600 hover:bg-brand-500 text-white rounded-lg transition-colors"
-            >
-              <ExternalLink size={12} /> {t('settings.memory.cloud.connect')}
-            </button>
-          )}
-        </SettingsRow>
-      </SettingsSection>
+            <span className="rounded-full bg-slate-800 px-3 py-1 text-[11px] font-medium text-slate-300">{memoryMode}</span>
+          </div>
 
-      <SettingsSection title={`${t('settings.privacy', 'Memory Privacy')}`}>
-        <div className="px-4 pb-3 text-xs text-slate-500">
-          {t('settings.privacy.desc', 'Choose which sources are allowed to save conversations to memory.')}
+          <div className="mt-5 space-y-3">
+            <div className={rowClass}>
+              <div>
+                <div className="text-sm font-medium text-slate-100">{t('settings.memory.autoCapture')}</div>
+                <div className="mt-1 text-xs text-slate-500">{t('settings.memory.autoCapture.desc')}</div>
+              </div>
+              <SettingsToggle checked={config.autoCapture} onChange={(value) => onToggle('autoCapture', value)} />
+            </div>
+
+            <div className={rowClass}>
+              <div>
+                <div className="text-sm font-medium text-slate-100">{t('settings.memory.autoRecall')}</div>
+                <div className="mt-1 text-xs text-slate-500">{t('settings.memory.autoRecall.desc')}</div>
+              </div>
+              <SettingsToggle checked={config.autoRecall} onChange={(value) => onToggle('autoRecall', value)} />
+            </div>
+
+            <div className={summaryClass}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-slate-100">{t('settings.memory.recallCount')}</div>
+                  <div className="mt-1 text-xs text-slate-500">{t('settings.memory.recallCount.desc')}</div>
+                </div>
+                <span className="rounded-full bg-brand-600/15 px-3 py-1 text-xs font-medium text-brand-200">{config.recallLimit}</span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={20}
+                value={config.recallLimit}
+                onChange={(event) => onRecallLimitChange(parseInt(event.target.value, 10))}
+                className="mt-4 w-full accent-brand-500"
+              />
+            </div>
+          </div>
+        </section>
+
+        <section className={sectionClass}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-medium text-slate-100">
+                {cloudConnected ? <Cloud size={16} className="text-sky-300" /> : <HardDrive size={16} className="text-slate-300" />}
+                {t('memory.settings.storageCard', 'Storage & Sync')}
+              </div>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                {t('memory.settings.storageCard.desc', 'Choose whether this desktop session stays local-first or reaches out to Awareness Cloud for shared memory.')}
+              </p>
+            </div>
+            <span className={`rounded-full px-3 py-1 text-[11px] font-medium ${cloudConnected ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-800 text-slate-300'}`}>
+              {cloudConnected ? t('memory.settings.cloudConnected', 'Connected') : t('memory.settings.cloudDisconnected', 'Local only')}
+            </span>
+          </div>
+
+          <div className={`mt-5 ${summaryClass}`}>
+            <div className="text-sm font-medium text-slate-100">{t('settings.memory.storage')}</div>
+            <div className="mt-1 text-xs text-slate-500">{t('settings.memory.storage.desc')}</div>
+            <div className="mt-4 inline-flex rounded-2xl border border-slate-700 bg-slate-900/80 p-1">
+              {(['local', 'cloud'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => onSelectMode(mode)}
+                  className={`rounded-xl px-4 py-2 text-xs font-medium transition-colors ${config.memoryMode === mode ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  {t(`settings.memory.${mode}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className={`mt-3 ${summaryClass}`}>
+            <div className="text-sm font-medium text-slate-100">{t('memory.settings.cloudStatus', 'Cloud Sync')}</div>
+            <div className="mt-1 text-xs text-slate-500">{t('memory.settings.cloudStatus.desc', 'Connect Awareness Cloud without leaving the Memory page.')}</div>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {cloudConnected ? (
+                <>
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-300">
+                    <Cloud size={12} /> {t('settings.memory.cloud.connected')}
+                  </span>
+                  <button
+                    onClick={onCloudDisconnect}
+                    className="rounded-lg border border-red-500/20 px-3 py-1.5 text-xs text-red-300 transition-colors hover:bg-red-600/10"
+                  >
+                    {t('settings.memory.cloud.disconnect')}
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={onCloudConnect}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand-500"
+                >
+                  <ExternalLink size={12} /> {t('settings.memory.cloud.connect')}
+                </button>
+              )}
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section className={sectionClass}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-medium text-slate-100">
+              <Shield size={16} className="text-sky-300" />
+              {t('memory.settings.privacyCard', 'Privacy by source')}
+            </div>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              {t('memory.settings.privacyCard.desc', 'Decide which hosts are allowed to write into durable memory. This keeps product memory separate from noise.')}
+            </p>
+          </div>
+          <span className="rounded-full bg-slate-800 px-3 py-1 text-[11px] font-medium text-slate-300">
+            {allowedSourceCount}/{sourceItems.length} {t('memory.settings.sourceAllowance', 'sources allowed')}
+          </span>
         </div>
 
-        {sourceItems.map(({ id, label, emoji }) => {
-          const isAllowed = !(config.memoryBlockedSources || []).includes(id);
-          return (
-            <SettingsRow key={id} label={`${emoji} ${label}`}>
-              <SettingsToggle checked={isAllowed} onChange={(value) => onToggleSource(id, value)} />
-            </SettingsRow>
-          );
-        })}
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {sourceItems.map(({ id, label, emoji }) => {
+            const isAllowed = !blockedSources.includes(id);
+            return (
+              <div key={id} className="flex items-center justify-between rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4">
+                <div className="min-w-0 pr-3">
+                  <div className="text-sm font-medium text-slate-100">{emoji} {label}</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {isAllowed ? t('memory.settings.sourceAllowed', 'Allowed to write memory') : t('memory.settings.sourceBlocked', 'Blocked from writing memory')}
+                  </div>
+                </div>
+                <SettingsToggle checked={isAllowed} onChange={(value) => onToggleSource(id, value)} />
+              </div>
+            );
+          })}
+        </div>
+      </section>
 
-        <div className="p-4">
+      <section className="rounded-[24px] border border-red-500/20 bg-red-950/20 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-medium text-red-200">{t('memory.settings.dangerZone', 'Danger zone')}</div>
+            <p className="mt-2 text-sm leading-6 text-red-100/70">
+              {t('memory.settings.dangerZone.desc', 'Delete local knowledge cards only when you want to reset this machine’s durable memory state.')}
+            </p>
+          </div>
           <button
             onClick={onClearAll}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-600/10 rounded-lg transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-red-500/30 px-3 py-2 text-xs font-medium text-red-200 transition-colors hover:bg-red-600/10"
           >
             <Trash2 size={12} />
             {t('settings.privacy.clearAll', 'Delete All Knowledge Cards')}
           </button>
         </div>
-      </SettingsSection>
+      </section>
     </div>
   );
 }
