@@ -18,6 +18,10 @@ import {
 
 const OPENCLAW_INSTALL_TIMEOUT_MS = 300000;
 
+// Cache for channel-bindings check to avoid slow CLI calls on every startup
+let _lastBindingsCheckPass: number = 0;
+const BINDINGS_CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
+
 // --- Types ---
 
 export type CheckStatus = 'pass' | 'warn' | 'fail' | 'skipped';
@@ -219,7 +223,7 @@ async function getUnboundChannels(ctx: Ctx): Promise<string[] | null> {
   const enabledChannels = getEnabledChannels(ctx.config);
   if (enabledChannels.length === 0) return [];
 
-  const output = await ctx.deps.shellExec('openclaw agents bindings --json 2>/dev/null', 10000);
+  const output = await ctx.deps.shellExec('openclaw agents bindings --json 2>/dev/null', 30000);
   const parsed = parseBindingsOutput(output);
   if (!parsed.ok) return null;
   const bindings = parsed.bindings;
@@ -609,6 +613,11 @@ async function checkChannelBindings(ctx: Ctx): Promise<CheckResult> {
   const enabledChannels = getEnabledChannels(ctx.config);
   if (enabledChannels.length === 0) return { id: 'channel-bindings', label: 'Channel routing', status: 'pass', message: 'No channels configured', fixable: 'none' };
 
+  // Skip expensive CLI check if we verified recently
+  if (Date.now() - _lastBindingsCheckPass < BINDINGS_CACHE_TTL_MS) {
+    return { id: 'channel-bindings', label: 'Channel routing', status: 'pass', message: 'All channels routed (cached)', fixable: 'none' };
+  }
+
   try {
     const unbound = await getUnboundChannels(ctx);
     if (unbound === null) {
@@ -635,6 +644,7 @@ async function checkChannelBindings(ctx: Ctx): Promise<CheckResult> {
         detail: unbound.join(', ') };
     }
 
+    _lastBindingsCheckPass = Date.now();
     return { id: 'channel-bindings', label: 'Channel routing', status: 'pass', message: 'All channels routed', fixable: 'none' };
   } catch {
     return {
