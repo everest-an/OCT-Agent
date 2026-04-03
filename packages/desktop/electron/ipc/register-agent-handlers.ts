@@ -101,6 +101,7 @@ export function registerAgentHandlers(deps: {
 
   ipcMain.handle('agents:add', async (_e: any, name: string, model?: string, systemPrompt?: string) => {
     try {
+      // Allow Unicode display names (Chinese, Japanese, etc.) — only strip shell-unsafe chars
       const displayName = name.replace(/["\\\n\r]/g, '').trim();
       if (!displayName) return { success: false, error: 'Invalid agent name' };
       await deps.ensureGatewayRunning();
@@ -108,13 +109,15 @@ export function registerAgentHandlers(deps: {
       const baseAgentsDir = path.join(deps.home, '.openclaw', 'agents');
       fs.mkdirSync(baseWsDir, { recursive: true });
       fs.mkdirSync(baseAgentsDir, { recursive: true });
+      // Slug must be ASCII for filesystem safety
       const slug = displayName.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || `agent-${Date.now()}`;
       const wsDir = path.join(baseWsDir, slug);
       fs.mkdirSync(wsDir, { recursive: true });
       const flags = ['--non-interactive', `--workspace "${wsDir}"`];
       const safeModel = model ? model.replace(/[^a-zA-Z0-9/_:.-]/g, '') : '';
       if (safeModel) flags.push(`--model "${safeModel}"`);
-      await deps.runAsync(`openclaw agents add "${displayName}" ${flags.join(' ')}`, 15000);
+      // OpenClaw loads all plugins on every CLI invocation (15-20s), so 45s timeout is needed
+      await deps.runAsync(`openclaw agents add "${displayName}" ${flags.join(' ')}`, 45000);
       if (systemPrompt) {
         const agentDir = path.join(baseAgentsDir, slug, 'agent');
         fs.mkdirSync(agentDir, { recursive: true });
@@ -130,7 +133,7 @@ export function registerAgentHandlers(deps: {
   ipcMain.handle('agents:delete', async (_e: any, agentId: string) => {
     if (agentId === 'main') return { success: false, error: 'Cannot delete default agent' };
     try {
-      const output = await deps.runAsync(`openclaw agents delete "${agentId.replace(/"/g, '\\"')}" --force --json 2>&1`, 10000);
+      const output = await deps.runAsync(`openclaw agents delete "${agentId.replace(/"/g, '\\"')}" --force --json 2>&1`, 30000);
       return { success: true, output };
     } catch (err: any) {
       return { success: false, error: err.message?.slice(0, 200) };
@@ -145,7 +148,7 @@ export function registerAgentHandlers(deps: {
       if (avatar) flags.push(`--avatar "${avatar.replace(/"/g, '\\"')}"`);
       if (theme) flags.push(`--theme "${theme}"`);
       if (flags.length === 0) return { success: false, error: 'No changes' };
-      await deps.runAsync(`openclaw agents set-identity --agent "${agentId}" ${flags.join(' ')}`, 10000);
+      await deps.runAsync(`openclaw agents set-identity --agent "${agentId}" ${flags.join(' ')}`, 30000);
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message?.slice(0, 200) };
@@ -154,7 +157,7 @@ export function registerAgentHandlers(deps: {
 
   ipcMain.handle('agents:bind', async (_e: any, agentId: string, binding: string) => {
     try {
-      await deps.runAsync(`openclaw agents bind --agent "${agentId}" --bind "${binding.replace(/"/g, '\\"')}"`, 10000);
+      await deps.runAsync(`openclaw agents bind --agent "${agentId}" --bind "${binding.replace(/"/g, '\\"')}"`, 30000);
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message?.slice(0, 200) };
@@ -163,7 +166,7 @@ export function registerAgentHandlers(deps: {
 
   ipcMain.handle('agents:unbind', async (_e: any, agentId: string, binding: string) => {
     try {
-      await deps.runAsync(`openclaw agents unbind --agent "${agentId}" --bind "${binding.replace(/"/g, '\\"')}"`, 10000);
+      await deps.runAsync(`openclaw agents unbind --agent "${agentId}" --bind "${binding.replace(/"/g, '\\"')}"`, 30000);
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message?.slice(0, 200) };

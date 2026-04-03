@@ -210,6 +210,17 @@ export function registerSkillHandlers(deps: {
     }
   });
 
+  // Fetch detailed local skill info including install specs from OpenClaw CLI
+  ipcMain.handle('skill:local-info', async (_e, name: string) => {
+    try {
+      const raw = await deps.runAsync(`openclaw skills info ${name} --json`, 30000);
+      const parsed = JSON.parse(extractJsonPayload(raw));
+      return { success: true, info: parsed };
+    } catch (err: any) {
+      return { success: false, error: err.message?.slice(0, 300) };
+    }
+  });
+
   ipcMain.handle('skill:detail', async (_e, slug: string) => {
     try {
       const res = await fetchJson(`${clawhubApi}/skills/${encodeURIComponent(slug)}`);
@@ -252,17 +263,8 @@ export function registerSkillHandlers(deps: {
     }
   });
 
-  ipcMain.handle('skill:local-info', async (_e, name: string) => {
-    try {
-      const raw = await deps.runAsync(`openclaw skills info ${name} --json`, 30000);
-      const parsed = JSON.parse(extractJsonPayload(raw));
-      return { success: true, info: parsed };
-    } catch (err: any) {
-      return { success: false, error: err.message?.slice(0, 300) };
-    }
-  });
-
-  // Backward-compatible stub: the desktop now shows install guidance instead of auto-running package managers.
+  // Install deps is kept for backward compat but no longer auto-executes brew/npm.
+  // Instead, the frontend shows install guidance from openclaw skills info --json.
   ipcMain.handle('skill:install-deps', async (_e, _installSpecs: unknown) => {
     return { success: false, error: 'Deprecated: use skill:local-info to get install instructions' };
   });

@@ -251,6 +251,8 @@ export default function Skills() {
     setInstallResult(null);
     setDetailSkill(localSkill ? buildLocalDetail(localSkill) : null);
     setConfigDirty(false);
+
+    // Fetch ClawHub detail + config + local info (for install specs) in parallel
     const [detailRes, configRes, localInfoRes] = await Promise.all([
       api.skillDetail(slug),
       api.skillGetConfig?.(slug).catch(() => ({ success: false, config: {} })),
@@ -276,6 +278,7 @@ export default function Skills() {
         }));
       }
     }
+    // Merge install specs from openclaw skills info --json
     if (localInfoRes?.success && localInfoRes.info?.install) {
       setDetailSkill(prev => prev ? {
         ...prev,
@@ -876,6 +879,7 @@ export default function Skills() {
                     <Check size={12} /> {t('skills.status.ready', 'Ready')}
                   </span>
                 ) : detailSkill.bundled && !detailSkill.eligible ? (
+                  /* Built-in skill needs setup — show install guidance */
                   <div className="flex items-center gap-2 w-full">
                     <div className="flex-1 space-y-1">
                       {(detailSkill.install && detailSkill.install.length > 0) ? (

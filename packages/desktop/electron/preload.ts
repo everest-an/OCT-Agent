@@ -10,6 +10,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   checkUpdates: () => ipcRenderer.invoke('app:check-updates'),
   upgradeComponent: (component: string) => ipcRenderer.invoke('app:upgrade-component', component),
+  onUpgradeProgress: (callback: (data: { component: string; phase: string; status: string; detail?: string; progressFraction?: number }) => void) => {
+    const listener = (_e: any, data: any) => callback(data);
+    ipcRenderer.on('app:upgrade-progress', listener);
+    return () => ipcRenderer.removeListener('app:upgrade-progress', listener);
+  },
 
   // Setup wizard
   detectEnvironment: () => ipcRenderer.invoke('setup:detect-environment'),

@@ -9,10 +9,42 @@ export function registerAppRuntimeHandlers(deps: {
   safeShellExecAsync: (cmd: string, timeoutMs?: number) => Promise<string | null>;
   getLocalDaemonHealth: (timeoutMs?: number) => Promise<any | null>;
   runAsync: (cmd: string, timeoutMs?: number) => Promise<string>;
+  runAsyncWithProgress: (cmd: string, timeoutMs: number, onLine: (line: string, stream: 'stdout' | 'stderr') => void) => Promise<string>;
   getBundledNpmBin: (binName: 'npx' | 'npm') => string | null;
   shutdownLocalDaemon: (timeoutMs?: number) => Promise<boolean>;
   clearAwarenessLocalNpxCache: (homedir: string) => void;
+  getMainWindow: () => any | null;
 }) {
+  // Upgrade progress helper — pushes phase info to renderer + taskbar progress
+  let lastDetailTs = 0;
+  function sendUpgradeProgress(data: {
+    component: string;
+    phase: string;
+    status: 'running' | 'done' | 'error' | 'skipped';
+    detail?: string;
+    progressFraction?: number;
+  }) {
+    // Throttle detail-only updates to avoid flooding renderer
+    if (data.detail && data.status === 'running') {
+      const now = Date.now();
+      if (now - lastDetailTs < 200) return;
+      lastDetailTs = now;
+    }
+    const win = deps.getMainWindow();
+    if (!win || win.isDestroyed()) return;
+    win.webContents.send('app:upgrade-progress', data);
+    // Taskbar / Dock progress bar
+    if (typeof data.progressFraction === 'number') {
+      win.setProgressBar(data.progressFraction);
+    } else if (data.status === 'running') {
+      win.setProgressBar(2); // >1 = indeterminate
+    }
+    if (data.status === 'done' || data.status === 'error') {
+      if (data.phase === 'complete' || data.phase === 'failed') {
+        win.setProgressBar(-1); // clear
+      }
+    }
+  }
   ipcMain.handle('app:get-platform', () => process.platform);
 
   ipcMain.handle('app:open-external', (_e: any, url: string) => {
@@ -112,24 +144,37 @@ export function registerAppRuntimeHandlers(deps: {
   });
 
   ipcMain.handle('app:upgrade-component', async (_e: any, component: string) => {
+    const progress = (phase: string, status: 'running' | 'done' | 'error' | 'skipped', detail?: string, progressFraction?: number) => {
+      sendUpgradeProgress({ component, phase, status, detail, progressFraction });
+    };
+
     try {
       if (component === 'openclaw') {
+        progress('openclaw:check-version', 'running');
         const preVer = await deps.safeShellExecAsync('openclaw --version', 5000);
         const preMatch = preVer?.match(/(\d+\.\d+\.\d+)/);
         const preSemver = preMatch ? preMatch[1] : null;
+        progress('openclaw:check-version', 'done', preSemver || undefined);
 
         let upgraded = false;
 
         // Tier 1: openclaw update (native self-update)
         if (preVer) {
+          progress('openclaw:self-update', 'running');
           try {
-            await deps.runAsync('openclaw update --yes --no-restart 2>&1', 180000);
+            await deps.runAsyncWithProgress('openclaw update --yes --no-restart 2>&1', 180000, (line) => {
+              progress('openclaw:self-update', 'running', line.slice(0, 120));
+            });
             upgraded = true;
-          } catch {}
+            progress('openclaw:self-update', 'done');
+          } catch {
+            progress('openclaw:self-update', 'skipped');
+          }
         }
 
         // Tier 2: npm install -g openclaw@latest (use bundled npm if available)
         if (!upgraded) {
+          progress('openclaw:npm-install', 'running');
           const npmCli = deps.getBundledNpmBin('npm');
           const registries = ['', '--registry=https://registry.npmmirror.com'];
           for (const reg of registries) {
@@ -137,15 +182,20 @@ export function registerAppRuntimeHandlers(deps: {
               const cmd = npmCli
                 ? `"${process.execPath}" "${npmCli}" install -g openclaw@latest ${reg}`.trim()
                 : `npm install -g openclaw@latest ${reg}`.trim();
-              await deps.runAsync(cmd, OPENCLAW_INSTALL_TIMEOUT_MS);
+              await deps.runAsyncWithProgress(cmd, OPENCLAW_INSTALL_TIMEOUT_MS, (line) => {
+                progress('openclaw:npm-install', 'running', line.slice(0, 120));
+              });
               upgraded = true;
+              progress('openclaw:npm-install', 'done');
               break;
             } catch {}
           }
+          if (!upgraded) progress('openclaw:npm-install', 'skipped');
         }
 
         // Tier 3: official install script
         if (!upgraded) {
+          progress('openclaw:install-script', 'running');
           try {
             if (process.platform === 'win32') {
               await deps.runAsync('powershell -Command "irm https://openclaw.ai/install.ps1 | iex"', OPENCLAW_INSTALL_TIMEOUT_MS);
@@ -153,35 +203,45 @@ export function registerAppRuntimeHandlers(deps: {
               await deps.runAsync('curl -fsSL https://openclaw.ai/install.sh | bash', OPENCLAW_INSTALL_TIMEOUT_MS);
             }
             upgraded = true;
-          } catch {}
+            progress('openclaw:install-script', 'done');
+          } catch {
+            progress('openclaw:install-script', 'skipped');
+          }
         }
 
         if (!upgraded) {
+          progress('failed', 'error');
           return {
             success: false,
             error: 'OpenClaw upgrade failed. Check your network connection and try again.\nYou can also try in terminal: npm install -g openclaw@latest',
           };
         }
 
+        progress('openclaw:verify', 'running');
         const newVer = await deps.safeShellExecAsync('openclaw --version');
         const vMatch = newVer?.match(/(\d+\.\d+\.\d+)/);
         const newSemver = vMatch ? vMatch[1] : newVer?.trim();
 
         if (!newSemver) {
+          progress('openclaw:verify', 'error');
           return {
             success: false,
             error: `Upgrade may have failed — openclaw not responding after install. Previous version: ${preSemver || 'unknown'}`,
           };
         }
 
+        progress('openclaw:verify', 'done', newSemver);
+        progress('complete', 'done');
         return { success: true, version: newSemver, previousVersion: preSemver };
       } else if (component === 'plugin') {
+        progress('plugin:cleanup', 'running');
         const extDir = path.join(deps.home, '.openclaw', 'extensions', 'openclaw-memory');
         if (fs.existsSync(extDir)) {
           fs.rmSync(extDir, { recursive: true, force: true });
         }
         const extensionsDir = path.join(deps.home, '.openclaw', 'extensions');
         fs.mkdirSync(extensionsDir, { recursive: true });
+        progress('plugin:cleanup', 'done');
 
         const nullDev = process.platform === 'win32' ? 'NUL' : '/dev/null';
         const pluginRegistries = ['', '--registry=https://registry.npmmirror.com'];
@@ -211,37 +271,64 @@ export function registerAppRuntimeHandlers(deps: {
 
         for (const regFlag of pluginRegistries) {
           try {
+            progress('plugin:npm-pack', 'running');
             const packOut = await deps.runAsync(`cd "${extensionsDir}" && npm pack @awareness-sdk/openclaw-memory@latest ${regFlag} 2>${nullDev}`, 120000);
             const tgzName = packOut.trim().split('\n').pop()?.trim() || '';
             if (!tgzName || !tgzName.endsWith('.tgz')) {
               throw new Error('npm pack did not produce a tarball');
             }
+            progress('plugin:npm-pack', 'done');
+
+            progress('plugin:extract', 'running');
             const tgzPath = path.join(extensionsDir, tgzName);
             if (fs.existsSync(extDir)) fs.rmSync(extDir, { recursive: true, force: true });
             fs.mkdirSync(extDir, { recursive: true });
             await deps.runAsync(`tar -xzf "${tgzPath}" -C "${extDir}" --strip-components=1`, 30000);
             try { fs.unlinkSync(tgzPath); } catch {}
-            await deps.runAsync(`cd "${extDir}" && npm install --omit=dev --no-audit --no-fund`, 300000);
+            progress('plugin:extract', 'done');
 
+            progress('plugin:npm-install', 'running');
+            await deps.runAsyncWithProgress(`cd "${extDir}" && npm install --omit=dev --no-audit --no-fund`, 300000, (line) => {
+              progress('plugin:npm-install', 'running', line.slice(0, 120));
+            });
+            progress('plugin:npm-install', 'done');
+
+            progress('plugin:finalize', 'running');
             const newVer = finalizePluginUpgrade(extDir);
+            progress('plugin:finalize', 'done', newVer);
+            progress('complete', 'done');
             return { success: true, version: newVer, method: regFlag ? 'npm-direct-mirror' : 'npm-direct' };
           } catch {}
         }
 
+        progress('plugin:fallback-openclaw', 'running');
         try {
-          await deps.runAsync(`cd "${deps.home}" && openclaw plugins install @awareness-sdk/openclaw-memory`, 120000);
+          await deps.runAsyncWithProgress(`cd "${deps.home}" && openclaw plugins install @awareness-sdk/openclaw-memory`, 120000, (line) => {
+            progress('plugin:fallback-openclaw', 'running', line.slice(0, 120));
+          });
           const newVer = finalizePluginUpgrade(extDir);
+          progress('plugin:fallback-openclaw', 'done');
+          progress('complete', 'done');
           return { success: true, version: newVer, method: 'openclaw-plugin' };
-        } catch {}
+        } catch {
+          progress('plugin:fallback-openclaw', 'skipped');
+        }
 
+        progress('plugin:fallback-clawhub', 'running');
         try {
-          await deps.runAsync(`cd "${deps.home}" && npx -y clawhub@latest install awareness-memory --force`, 120000);
+          await deps.runAsyncWithProgress(`cd "${deps.home}" && npx -y clawhub@latest install awareness-memory --force`, 120000, (line) => {
+            progress('plugin:fallback-clawhub', 'running', line.slice(0, 120));
+          });
           const newVer = finalizePluginUpgrade(extDir);
+          progress('plugin:fallback-clawhub', 'done');
+          progress('complete', 'done');
           return { success: true, version: newVer, method: 'clawhub' };
         } catch (e: any) {
+          progress('failed', 'error');
           throw new Error(`Plugin upgrade failed: ${e.message?.slice(0, 200)}`);
         }
       } else if (component === 'daemon') {
+        progress('daemon:shutdown', 'running');
         await deps.shutdownLocalDaemon(3000);
 
         for (let w = 0; w < 6; w++) {
@@ -252,21 +339,38 @@ export function registerAppRuntimeHandlers(deps: {
           }
           await new Promise(r => setTimeout(r, 500));
         }
+        progress('daemon:shutdown', 'done');
 
+        progress('daemon:clear-cache', 'running');
         deps.clearAwarenessLocalNpxCache(deps.home);
+        progress('daemon:clear-cache', 'done');
 
-        await deps.runAsync(`npx -y @awareness-sdk/local@latest start --port 37800 --project "${path.join(deps.home, '.openclaw')}" --background`, 60000);
+        progress('daemon:start', 'running');
+        await deps.runAsyncWithProgress(
+          `npx -y @awareness-sdk/local@latest start --port 37800 --project "${path.join(deps.home, '.openclaw')}" --background`,
+          60000,
+          (line) => { progress('daemon:start', 'running', line.slice(0, 120)); },
+        );
+        progress('daemon:start', 'done');
+
         for (let i = 0; i < 12; i++) {
+          progress('daemon:health-check', 'running', `${i + 1}/12`, (i + 1) / 12);
           const delay = i < 3 ? 1000 : i < 6 ? 2000 : 3000;
           await new Promise(r => setTimeout(r, delay));
           const health = await deps.getLocalDaemonHealth(3000);
-          if (health?.version) return { success: true, version: health.version };
+          if (health?.version) {
+            progress('daemon:health-check', 'done', health.version, 1);
+            progress('complete', 'done');
+            return { success: true, version: health.version };
+          }
         }
+        progress('complete', 'done');
         return { success: true, version: 'latest' };
       }
       return { success: false, error: 'Unknown component' };
     } catch (err: any) {
       console.error(`[upgrade] ${component} failed:`, err.message);
+      progress('failed', 'error', (err.message || '').slice(0, 120));
       const msg = err.message || '';
       if (msg.includes('EACCES') || msg.includes('permission denied') || msg.includes('Permission denied')) {
         return {

@@ -80,6 +80,7 @@ const {
   resolveBundledCache,
   run,
   runAsync,
+  runAsyncWithProgress,
   runSpawn,
   safeShellExec,
   safeShellExecAsync,
@@ -775,9 +776,11 @@ registerAppRuntimeHandlers({
   safeShellExecAsync,
   getLocalDaemonHealth,
   runAsync,
+  runAsyncWithProgress,
   getBundledNpmBin,
   shutdownLocalDaemon,
   clearAwarenessLocalNpxCache,
+  getMainWindow: () => mainWindow,
 });
 registerChatHandlers({
   sendToRenderer: (channel, payload) => {

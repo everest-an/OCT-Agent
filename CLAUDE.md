@@ -334,6 +334,14 @@ AwarenessClaw/
 - 前端 `npx tsc --noEmit` 通过不代表 Electron 端也通过！打包前必须确认 `npm run build` 也能通过
 - 踩坑：编辑 `main.ts` 时多了一个 `});` 闭合括号，前端编译没报错但 electron 编译失败
 
+### OpenClaw CLI 超时规则（必读，反复踩坑）
+- **问题**：OpenClaw 每次 CLI 命令（`agents add`、`agents delete`、`agents bind` 等）都重新加载所有已安装插件（feishu、awareness-memory、device-pair 等），耗时 **15-30 秒**（低配机器或插件多的环境可能更长）
+- **活动超时机制（idle timeout）**：`runAsync` 和 `runAsyncWithProgress` 已改为活动超时 — 每次 stdout/stderr 有输出就重置计时器。只有连续 N 秒无任何输出才判定超时。这样即使 OpenClaw 加载 50 个插件花 2 分钟，只要还在输出 `[plugins] Registered xxx` 就不会超时
+- **超时参数的含义**：`runAsync(cmd, 30000)` = 30 秒内无任何输出才超时（不是总耗时 30 秒）
+- **推荐超时值**：`agents:add` = 45s idle，`agents:delete/set-identity/bind/unbind` = 30s idle，`agents:list` = 15s idle（只读操作较快）
+- **前端必须有状态提示**：长时间操作必须向用户实时显示当前步骤（"正在加载插件..."、"正在创建工作区..."），不能只显示一个 spinner 什么也不说
+- **友好的超时错误提示**：如果超时了，不要显示原始的 "Command timed out"，而是告诉用户"OpenClaw 正在加载插件，请重试"
+
 ### Gateway 命令踩坑
 - **正确命令**：`openclaw gateway start/stop/status/restart`
 - **错误命令**：`openclaw up`（不存在）、`openclaw status`（加载全部插件 = 15s+，5s 超时必失败）
@@ -409,6 +417,21 @@ AwarenessClaw/
 - `src/lib/channel-registry.ts` — re-export 给前端 React 组件用
 - `src/components/ChannelIcon.tsx` — 12 个品牌 SVG + 动态首字母 fallback
 - `src/pages/Channels.tsx` — `DynamicConfigForm` 组件从注册表 configFields 渲染表单
+
+### 升级流程超时与进度反馈（深度踩坑）
+- **问题**：升级流程（OpenClaw + Plugin + Daemon）最长可达 10+ 分钟（npm install 依赖 300s 超时 + 多层降级），前端只有一个 spinner，用户完全不知道进度
+- **npm install 是黑盒**：npm 在非 TTY（spawn pipe）模式下不输出进度条，stdout 在命令完成后才一次性返回。`--loglevel verbose` 输出太嘈杂且不同 npm 版本格式不一，不推荐
+- **超时 = 浪费已完成工作**：如果 npm install 在第 301 秒超时，前面已安装的 80% 依赖全部浪费（因为升级开始时 `rmSync` 了旧目录）
+- **解决方案**：
+  1. `runAsyncWithProgress(cmd, timeout, onLine)` — 带逐行 stdout/stderr 回调的 spawn 变体，不改动 `runAsync` 本身
+  2. `sendUpgradeProgress()` — 主进程通过 `BrowserWindow.webContents.send('app:upgrade-progress')` 实时推送阶段信息到渲染进程
+  3. `BrowserWindow.setProgressBar()` — 任务栏/Dock 进度条（>1 = 不确定，0-1 = 确定，-1 = 清除）
+  4. 200ms 节流 — 防止 npm 输出行刷爆渲染进程
+- **规则**：
+  - 长时间命令（>30s）必须使用 `runAsyncWithProgress` 并推送阶段进度，不能让用户看着空白 spinner
+  - IPC 进度推送用 `webContents.send`（单向推送），不能放在 `ipcMain.handle` 返回值里
+  - 确定进度（如 daemon 健康检查 i/12）传 `progressFraction: 0-1`，不确定进度不传该字段
+  - 复用已有模式：`skill:install-progress`（register-skill-handlers.ts）和 `app:startup-status`
 
 ### Electron dev 模式踩坑（monorepo）
 - **问题**：`./node_modules/.bin/electron .` 在 monorepo 中找不到 electron 二进制（被 hoist 到根 node_modules）

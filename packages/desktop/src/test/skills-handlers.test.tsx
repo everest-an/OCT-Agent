@@ -61,7 +61,6 @@ describe('Skills — Install Deps for built-in skills', () => {
     await waitFor(() => {
       expect(screen.getByText('apple-notes')).toBeInTheDocument();
     });
-    // Should show "Needs Setup" status
     const badges = screen.getAllByText('Needs Setup');
     expect(badges.length).toBeGreaterThan(0);
   });

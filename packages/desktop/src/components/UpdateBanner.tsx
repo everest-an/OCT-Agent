@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, Download, ArrowRight, Loader2, Check, AlertCircle } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { useAppConfig } from '../lib/store';
@@ -23,6 +23,12 @@ export default function UpdateBanner() {
   const [upgrading, setUpgrading] = useState<string | null>(null);
   const [upgradeResults, setUpgradeResults] = useState<Record<string, { success: boolean; error?: string }>>({});
 
+  // Upgrade progress state
+  const [upgradePhase, setUpgradePhase] = useState<string | null>(null);
+  const [phaseDetail, setPhaseDetail] = useState<string>('');
+  const [phaseFraction, setPhaseFraction] = useState<number | null>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     // Don't check if auto-update is disabled in settings
     if (config.autoUpdate === false) return;
@@ -37,6 +43,27 @@ export default function UpdateBanner() {
 
     checkForUpdates();
   }, [config.autoUpdate]);
+
+  // Subscribe to upgrade progress events while upgrading
+  useEffect(() => {
+    if (!window.electronAPI || !upgrading) {
+      // Reset progress state when not upgrading
+      setUpgradePhase(null);
+      setPhaseDetail('');
+      setPhaseFraction(null);
+      return;
+    }
+    const cleanup = (window.electronAPI as any).onUpgradeProgress?.(
+      (data: { component: string; phase: string; status: string; detail?: string; progressFraction?: number }) => {
+        setUpgradePhase(data.phase);
+        if (data.detail) setPhaseDetail(data.detail);
+        if (typeof data.progressFraction === 'number') setPhaseFraction(data.progressFraction);
+        else setPhaseFraction(null);
+      }
+    );
+    cleanupRef.current = cleanup || null;
+    return () => { cleanupRef.current?.(); cleanupRef.current = null; };
+  }, [upgrading]);
 
   const checkForUpdates = async () => {
     if (!window.electronAPI) return;
@@ -129,6 +156,14 @@ export default function UpdateBanner() {
 
   const allUpgraded = updates.length > 0 && updates.every(u => upgradeResults[u.component]?.success === true);
 
+  // Get translated phase label
+  const getPhaseLabel = (phase: string | null): string => {
+    if (!phase) return '';
+    const key = `upgrade.phase.${phase}`;
+    const translated = t(key);
+    return translated !== key ? translated : phase;
+  };
+
   // Don't render if no updates or dismissed
   if (updates.length === 0 || dismissed) return null;
 
@@ -174,22 +209,50 @@ export default function UpdateBanner() {
 
               <div className="space-y-2">
                 {updates.map((u, i) => (
-                  <div key={i} className="flex items-center justify-between p-3 bg-slate-800 rounded-xl">
-                    <div className="flex items-center gap-2">
-                      {upgrading === u.component ? (
-                        <Loader2 size={14} className="animate-spin text-brand-400" />
-                      ) : upgradeResults[u.component]?.success === true ? (
-                        <Check size={14} className="text-emerald-400" />
-                      ) : upgradeResults[u.component]?.success === false ? (
-                        <AlertCircle size={14} className="text-red-400" />
-                      ) : (
-                        <span className="inline-block w-3.5 h-3.5 rounded-full bg-slate-600" />
-                      )}
-                      <span className="text-sm">{u.label}</span>
+                  <div key={i} className="p-3 bg-slate-800 rounded-xl">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {upgrading === u.component ? (
+                          <Loader2 size={14} className="animate-spin text-brand-400" />
+                        ) : upgradeResults[u.component]?.success === true ? (
+                          <Check size={14} className="text-emerald-400" />
+                        ) : upgradeResults[u.component]?.success === false ? (
+                          <AlertCircle size={14} className="text-red-400" />
+                        ) : (
+                          <span className="inline-block w-3.5 h-3.5 rounded-full bg-slate-600" />
+                        )}
+                        <span className="text-sm">{u.label}</span>
+                      </div>
+                      <span className="text-xs text-slate-400">
+                        {u.currentVersion} <ArrowRight size={10} className="inline" /> <span className="text-brand-400">{u.latestVersion}</span>
+                      </span>
                     </div>
-                    <span className="text-xs text-slate-400">
-                      {u.currentVersion} <ArrowRight size={10} className="inline" /> <span className="text-brand-400">{u.latestVersion}</span>
-                    </span>
+
+                    {/* Progress detail for active component */}
+                    {upgrading === u.component && upgradePhase && (
+                      <div className="mt-2 space-y-1.5">
+                        <div className="text-xs text-slate-300">
+                          {getPhaseLabel(upgradePhase)}
+                        </div>
+                        {/* Progress bar */}
+                        <div className="h-1 bg-slate-700 rounded-full overflow-hidden">
+                          {phaseFraction !== null ? (
+                            <div
+                              className="h-full bg-brand-500 rounded-full transition-all duration-300 ease-out"
+                              style={{ width: `${Math.round(phaseFraction * 100)}%` }}
+                            />
+                          ) : (
+                            <div className="h-full w-2/5 bg-brand-500 rounded-full animate-[indeterminate_1.5s_ease-in-out_infinite]" />
+                          )}
+                        </div>
+                        {/* npm output line */}
+                        {phaseDetail && (
+                          <div className="text-[10px] text-slate-500 truncate font-mono leading-tight">
+                            {phaseDetail}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -253,6 +316,15 @@ export default function UpdateBanner() {
           </div>
         </div>
       )}
+
+      {/* Indeterminate progress bar animation */}
+      <style>{`
+        @keyframes indeterminate {
+          0% { transform: translateX(-100%); }
+          50% { transform: translateX(150%); }
+          100% { transform: translateX(300%); }
+        }
+      `}</style>
     </>
   );
 }

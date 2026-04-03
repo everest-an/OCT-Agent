@@ -301,7 +301,68 @@ export function createShellUtils(options: { home: string; app: any }) {
     });
   }
 
+  /**
+   * Run a shell command asynchronously with activity-based timeout.
+   * The timer resets every time stdout/stderr produces output.
+   * This handles OpenClaw's slow plugin loading (15-30s) gracefully —
+   * as long as it keeps printing "[plugins] Registered xxx", it won't timeout.
+   * Only if nothing happens for `timeoutMs` does it abort.
+   */
   function runAsync(cmd: string, timeoutMs = 180000): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const enhancedPath = getEnhancedPath();
+      const rewriteNpx = (command: string) => {
+        if (!command.trim().startsWith('npx ')) return command;
+        const npxCli = getBundledNpmBin('npx');
+        if (!npxCli) return command;
+        const rest = command.trim().slice(4);
+        return `${process.execPath} "${npxCli}" ${rest}`;
+      };
+      buildOpenClawShellFallbackAsync().then((fallback) => {
+        const rewrittenCommand = rewriteOpenClawShellCommand(cmd, fallback);
+        const shellCmdRaw = process.platform === 'win32' ? wrapWindowsCommand(rewrittenCommand) : `export PATH="${enhancedPath}"; ${rewrittenCommand}`;
+        const shellCmd = rewriteNpx(shellCmdRaw);
+        const child = process.platform === 'win32'
+          ? spawn(shellCmd, [], { shell: 'cmd.exe', env: { ...process.env, PATH: enhancedPath, NO_COLOR: '1', FORCE_COLOR: '0' }, stdio: 'pipe' })
+          : spawn('/bin/bash', ['--norc', '--noprofile', '-c', shellCmd], { env: { ...process.env, PATH: enhancedPath }, stdio: 'pipe' });
+        let stdout = '';
+        let stderr = '';
+        let settled = false;
+
+        // Activity-based timeout: reset on every stdout/stderr output
+        let timer = setTimeout(() => {
+          if (!settled) { settled = true; child.kill(); reject(new Error('Command timed out')); }
+        }, timeoutMs);
+        const resetTimer = () => {
+          clearTimeout(timer);
+          timer = setTimeout(() => {
+            if (!settled) { settled = true; child.kill(); reject(new Error('Command timed out')); }
+          }, timeoutMs);
+        };
+
+        child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); resetTimer(); });
+        child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); resetTimer(); });
+        child.on('close', (code: number | null) => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            if (code === 0) resolve(stdout.trim());
+            else reject(new Error(stderr.trim() || stdout.trim().slice(-500) || `Exit code ${code}`));
+          }
+        });
+        child.on('error', (err: Error) => {
+          if (!settled) { settled = true; clearTimeout(timer); reject(err); }
+        });
+      }).catch(reject);
+    });
+  }
+
+  /** Same as runAsync but with per-line progress callback. Activity-based timeout. */
+  function runAsyncWithProgress(
+    cmd: string,
+    timeoutMs: number,
+    onLine: (line: string, stream: 'stdout' | 'stderr') => void,
+  ): Promise<string> {
     return new Promise((resolve, reject) => {
       const enhancedPath = getEnhancedPath();
       const rewriteNpx = (command: string) => {
@@ -321,12 +382,43 @@ export function createShellUtils(options: { home: string; app: any }) {
           : spawn('/bin/bash', ['--norc', '--noprofile', '-c', shellCmd], { env: { ...process.env, PATH: enhancedPath }, stdio: 'pipe' });
         let stdout = '';
         let stderr = '';
+        let stdoutBuf = '';
+        let stderrBuf = '';
         let settled = false;
-        const timer = setTimeout(() => {
+
+        // Activity-based timeout: reset on every output
+        let timer = setTimeout(() => {
           if (!settled) { settled = true; child.kill(); reject(new Error('Command timed out')); }
         }, timeoutMs);
-        child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
-        child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+        const resetTimer = () => {
+          clearTimeout(timer);
+          timer = setTimeout(() => {
+            if (!settled) { settled = true; child.kill(); reject(new Error('Command timed out')); }
+          }, timeoutMs);
+        };
+
+        child.stdout?.on('data', (d: Buffer) => {
+          const text = d.toString();
+          stdout += text;
+          stdoutBuf += text;
+          resetTimer();
+          const lines = stdoutBuf.split('\n');
+          stdoutBuf = lines.pop() || '';
+          for (const line of lines) {
+            if (line.trim()) onLine(line, 'stdout');
+          }
+        });
+        child.stderr?.on('data', (d: Buffer) => {
+          const text = d.toString();
+          stderr += text;
+          stderrBuf += text;
+          resetTimer();
+          const lines = stderrBuf.split('\n');
+          stderrBuf = lines.pop() || '';
+          for (const line of lines) {
+            if (line.trim()) onLine(line, 'stderr');
+          }
+        });
         child.on('close', (code: number | null) => {
           if (!settled) {
             settled = true;
@@ -353,6 +445,7 @@ export function createShellUtils(options: { home: string; app: any }) {
     resolveBundledCache,
     run,
     runAsync,
+    runAsyncWithProgress,
     runSpawn,
     safeShellExec,
     safeShellExecAsync,
