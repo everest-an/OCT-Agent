@@ -852,6 +852,7 @@ registerChannelSetupHandlers({
   safeShellExecAsync,
   readShellOutputAsync,
   channelLoginWithQR,
+  ensureLocalDaemonReadyForRuntime: () => ensureLocalDaemonReadyForRuntime(),
 });
 registerCronHandlers({
   safeShellExecAsync,

@@ -8,6 +8,7 @@ export function registerChannelSetupHandlers(deps: {
   safeShellExecAsync: (cmd: string, timeoutMs?: number) => Promise<string | null>;
   readShellOutputAsync: (cmd: string, timeoutMs?: number) => Promise<string | null>;
   channelLoginWithQR: (loginCmd: string, timeoutMs?: number) => Promise<{ success: boolean; output?: string; error?: string }>;
+  ensureLocalDaemonReadyForRuntime?: () => Promise<boolean>;
 }) {
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -116,6 +117,22 @@ export function registerChannelSetupHandlers(deps: {
 
     if (setupFlow === 'add-then-login') {
       try { await deps.runAsync(`openclaw channels add --channel ${openclawId} 2>&1`, 15000); } catch {}
+    }
+
+    if (process.platform === 'win32' && setupFlow !== 'add-only' && deps.ensureLocalDaemonReadyForRuntime) {
+      sendStatus('channels.status.startingMemory');
+      let daemonReady = await deps.ensureLocalDaemonReadyForRuntime();
+      if (!daemonReady) {
+        await sleep(1500);
+        sendStatus('channels.status.startingMemory');
+        daemonReady = await deps.ensureLocalDaemonReadyForRuntime();
+      }
+      if (!daemonReady) {
+        return {
+          success: false,
+          error: 'Local memory service is still starting. Please wait a few seconds, then retry WeChat connection.',
+        };
+      }
     }
 
     sendStatus(`channels.status.connecting::${channelLabel}`);

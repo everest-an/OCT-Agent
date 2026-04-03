@@ -24,6 +24,18 @@
 
 ## P2 — 核心功能
 
+### P2.7 — 兼容性架构治理（规划中）
+- [ ] 建立统一执行层（ProcessRunner + CommandResolver + EnvProvider），收敛所有 shell/spawn 路径，禁止新增分散执行入口
+- [ ] 建立 Capability Snapshot（CLI 参数、channel 枚举、plugin 形态）并在启动时落盘，频道流程仅依赖快照能力判断
+- [ ] 建立 GatewaySupervisor + LocalDaemonSupervisor，把主进程内分散的预热/修复逻辑收敛为统一状态机
+- [ ] 将 channel 一键连接重构为显式状态机（preflight/install/login/bind/confirm/recover），失败优先自动补救再报错
+- [ ] 建立统一错误码与用户文案映射，替换当前零散字符串匹配；前端接入一键修复动作
+- [ ] 增加三端 Smoke Matrix（Windows/macOS/Linux）并接入发版门禁，未全绿禁止发布
+- [ ] 增加 OpenClaw latest nightly 兼容流水线，自动输出能力差异报告并创建修复任务
+- [ ] 建立诊断包导出（traceId + capability snapshot + 最近日志 + 环境信息）用于快速归因
+- [ ] 设定兼容性 KPI：频道首连成功率、自动修复成功率、用户可感知等待时长，并在 Dashboard 持续观测
+- [ ] 按 docs/structures.md 红线推进主进程拆分，优先低风险抽离，不在同一 PR 混合行为改动和重构
+
 ### 聊天（最高优先级）
 - [x] 聊天气泡 UI（用户蓝色/AI 深色）
 - [x] 后端接通 `openclaw agent --local --session-id ... -m ...`
