@@ -410,6 +410,21 @@ AwarenessClaw/
 - `src/components/ChannelIcon.tsx` — 12 个品牌 SVG + 动态首字母 fallback
 - `src/pages/Channels.tsx` — `DynamicConfigForm` 组件从注册表 configFields 渲染表单
 
+### 升级流程超时与进度反馈（深度踩坑）
+- **问题**：升级流程（OpenClaw + Plugin + Daemon）最长可达 10+ 分钟（npm install 依赖 300s 超时 + 多层降级），前端只有一个 spinner，用户完全不知道进度
+- **npm install 是黑盒**：npm 在非 TTY（spawn pipe）模式下不输出进度条，stdout 在命令完成后才一次性返回。`--loglevel verbose` 输出太嘈杂且不同 npm 版本格式不一，不推荐
+- **超时 = 浪费已完成工作**：如果 npm install 在第 301 秒超时，前面已安装的 80% 依赖全部浪费（因为升级开始时 `rmSync` 了旧目录）
+- **解决方案**：
+  1. `runAsyncWithProgress(cmd, timeout, onLine)` — 带逐行 stdout/stderr 回调的 spawn 变体，不改动 `runAsync` 本身
+  2. `sendUpgradeProgress()` — 主进程通过 `BrowserWindow.webContents.send('app:upgrade-progress')` 实时推送阶段信息到渲染进程
+  3. `BrowserWindow.setProgressBar()` — 任务栏/Dock 进度条（>1 = 不确定，0-1 = 确定，-1 = 清除）
+  4. 200ms 节流 — 防止 npm 输出行刷爆渲染进程
+- **规则**：
+  - 长时间命令（>30s）必须使用 `runAsyncWithProgress` 并推送阶段进度，不能让用户看着空白 spinner
+  - IPC 进度推送用 `webContents.send`（单向推送），不能放在 `ipcMain.handle` 返回值里
+  - 确定进度（如 daemon 健康检查 i/12）传 `progressFraction: 0-1`，不确定进度不传该字段
+  - 复用已有模式：`skill:install-progress`（register-skill-handlers.ts）和 `app:startup-status`
+
 ### Electron dev 模式踩坑（monorepo）
 - **问题**：`./node_modules/.bin/electron .` 在 monorepo 中找不到 electron 二进制（被 hoist 到根 node_modules）
 - **`require('electron')` 返回字符串**：在非 Electron 进程中 `require('electron')` 返回的是 electron 可执行文件的路径字符串，不是 API 对象
