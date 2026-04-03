@@ -376,9 +376,26 @@ export function registerSkillHandlers(deps: {
         report = await loadOfficialSkillStatus(deps.runAsync);
       }
 
-      // Patch missing.bins using our verified-bins persistence.
-      // OpenClaw checks binaries with limited PATH; we use enhanced PATH.
+      // OpenClaw checks binaries with its own limited PATH and may report false negatives.
+      // We re-check every missing binary using our enhanced PATH (covers Homebrew, npm-global,
+      // nvm, fnm, Windows AppData, etc.) and patch the results.
       const verifiedBins = loadVerifiedBins(deps.home);
+      const allMissingBins = new Set<string>();
+      for (const skill of report.skills) {
+        for (const bin of skill.missing?.bins || []) allMissingBins.add(bin);
+      }
+      // Live-check all missing binaries via enhanced PATH
+      for (const bin of allMissingBins) {
+        if (verifiedBins[bin]) continue; // already verified
+        try {
+          const probe = process.platform === 'win32' ? 'where' : 'which';
+          await deps.runSpawnAsync(probe, [bin], 3000);
+          verifiedBins[bin] = { verifiedAt: Date.now() };
+        } catch {} // genuinely missing
+      }
+      if (Object.keys(verifiedBins).length > 0) {
+        saveVerifiedBins(deps.home, verifiedBins);
+      }
       report.skills = patchMissingBins(report.skills, verifiedBins);
 
       return {

@@ -51,7 +51,7 @@ export interface ElectronAPI {
   skillDetail?: (slug: string) => Promise<{ success: boolean; skill?: unknown; error?: string }>;
   skillInstall?: (slug: string) => Promise<{ success: boolean; error?: string }>;
   skillUninstall?: (slug: string) => Promise<{ success: boolean; error?: string }>;
-  skillInstallDeps?: (installSpecs: Array<{ id: string; kind: string; label: string; bins: string[]; package?: string }>) => Promise<{ success: boolean; error?: string }>;
+  skillInstallDeps?: (installSpecs: Array<{ id: string; kind: string; label: string; bins: string[]; package?: string; formula?: string; module?: string }>, skillName?: string) => Promise<{ success: boolean; error?: string; verified?: string[]; unverified?: string[] }>;
   skillLocalInfo?: (name: string) => Promise<{ success: boolean; info?: { install?: Array<{ id: string; kind: string; label: string; bins: string[]; package?: string }>; homepage?: string }; error?: string }>;
   skillGetConfig?: (slug: string) => Promise<{ success: boolean; config?: Record<string, string>; enabled?: boolean; apiKey?: string; env?: Record<string, string>; error?: string }>;
   skillSaveConfig?: (slug: string, config: Record<string, unknown>) => Promise<{ success: boolean; error?: string }>;
