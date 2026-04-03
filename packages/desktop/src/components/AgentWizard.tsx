@@ -156,11 +156,10 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
       // 1. Create agent via IPC (calls openclaw agents add — loads all plugins, can take 15-30s)
       setSavingStatus(t('agentWizard.status.creating', 'Creating agent (loading plugins)...'));
       const result = await api.agentsAdd(finalName, modelId, soulContent);
-      if (!result.success) {
+      const alreadyExists = !result.success && /already exists|duplicate/i.test(result.error || '');
+      if (!result.success && !alreadyExists) {
         const errMsg = result.error || '';
-        if (/already exists|duplicate/i.test(errMsg)) {
-          setError(t('agentWizard.error.duplicate', 'Agent "{name}" already exists.').replace('{name}', finalName));
-        } else if (/permission|access|denied/i.test(errMsg)) {
+        if (/permission|access|denied/i.test(errMsg)) {
           setError(t('agentWizard.error.permission', 'Permission denied. Check system permissions.'));
         } else if (/timed? ?out/i.test(errMsg)) {
           setError(t('agentWizard.error.timeout', 'OpenClaw is loading plugins — this can take up to 30s. Please try again.'));
@@ -171,6 +170,8 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
         setSavingStatus('');
         return;
       }
+      // If agent already exists (e.g. previous attempt partially succeeded),
+      // continue with identity/files/binding instead of failing.
 
       // 2. Set identity (name + emoji)
       setSavingStatus(t('agentWizard.status.identity', 'Setting identity...'));

@@ -161,33 +161,50 @@ describe('AgentWizard', () => {
     });
   });
 
-  it('shows error when agent creation fails', async () => {
+  it('shows error when agent creation fails with real error', async () => {
     const api = window.electronAPI as any;
-    api.agentsAdd = vi.fn().mockResolvedValue({ success: false, error: 'Agent "test" already exists' });
+    api.agentsAdd = vi.fn().mockResolvedValue({ success: false, error: 'Permission denied' });
 
     await act(async () => {
       render(<AgentWizard onComplete={vi.fn()} onCancel={vi.fn()} />);
     });
 
-    // Enter name and go through all steps
     const inputs = screen.getAllByRole('textbox');
     const nameInput = inputs.find(input => (input as HTMLInputElement).placeholder?.includes('Research'));
     await act(async () => {
       fireEvent.change(nameInput!, { target: { value: 'test' } });
       fireEvent.click(screen.getByRole('button', { name: /next/i }));
     });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /next/i }));
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /next/i }));
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /create agent/i }));
-    });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /next/i })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /next/i })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /create agent/i })); });
 
     await waitFor(() => {
-      expect(screen.getByText(/already exists/i)).toBeTruthy();
+      expect(screen.getByText(/permission denied/i)).toBeTruthy();
+    });
+  });
+
+  it('continues setup when agent already exists from previous attempt', async () => {
+    const onComplete = vi.fn();
+    const api = window.electronAPI as any;
+    api.agentsAdd = vi.fn().mockResolvedValue({ success: false, error: 'Agent "test" already exists' });
+
+    await act(async () => {
+      render(<AgentWizard onComplete={onComplete} onCancel={vi.fn()} />);
+    });
+
+    const inputs = screen.getAllByRole('textbox');
+    const nameInput = inputs.find(input => (input as HTMLInputElement).placeholder?.includes('Research'));
+    await act(async () => {
+      fireEvent.change(nameInput!, { target: { value: 'test' } });
+      fireEvent.click(screen.getByRole('button', { name: /next/i }));
+    });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /next/i })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /next/i })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /create agent/i })); });
+
+    await waitFor(() => {
+      expect(onComplete).toHaveBeenCalled();
     });
   });
 
