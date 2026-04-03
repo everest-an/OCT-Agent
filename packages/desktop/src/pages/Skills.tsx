@@ -777,7 +777,7 @@ export default function Skills() {
                   </div>
                 )}
 
-                {(installedSlugs.has(detailSkill.slug) || detailSkill.primaryEnv || detailSkill.missing?.env?.length || detailSkill.missing?.config?.length) && (
+                {(installedSlugs.has(detailSkill.slug) || !!detailSkill.primaryEnv || (detailSkill.missing?.env?.length ?? 0) > 0 || (detailSkill.missing?.config?.length ?? 0) > 0) && (
                   <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
                     <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">{t('skills.configuration', 'Configuration')}</h4>
                     {Object.keys(skillConfig).length === 0 ? (
@@ -848,20 +848,32 @@ export default function Skills() {
                   <span className="flex items-center gap-1 text-xs text-emerald-400 mr-auto">
                     <Check size={12} /> {t('skills.status.ready', 'Ready')}
                   </span>
-                ) : detailSkill.install && detailSkill.install.length > 0 && detailSkill.missing?.bins?.length ? (
-                  /* Built-in skill with missing binaries and install specs — install deps */
+                ) : detailSkill.bundled && (detailSkill.missing?.bins?.length ?? 0) > 0 ? (
+                  /* Built-in skill with missing binaries — install deps via brew/npm */
                   <button
-                    onClick={async () => { await handleInstallDeps(detailSkill.install!); setDetailSkill(null); }}
+                    onClick={async () => {
+                      // Use install specs if available, otherwise generate from missing bins
+                      const specs: InstallSpec[] = detailSkill.install && detailSkill.install.length > 0
+                        ? detailSkill.install
+                        : (detailSkill.missing?.bins || []).map(bin => ({
+                            id: `brew-${bin}`,
+                            kind: 'brew',
+                            label: `brew install ${bin}`,
+                            bins: [bin],
+                          }));
+                      await handleInstallDeps(specs);
+                      setDetailSkill(null);
+                    }}
                     disabled={!!actionSlug}
                     className="flex items-center gap-1 px-5 py-2 text-sm bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 text-white rounded-xl transition-colors"
                   >
                     {actionSlug ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                     {actionSlug ? t('skills.installing') : t('skills.installDeps', 'Install Dependencies')}
                   </button>
-                ) : detailSkill.bundled ? (
-                  /* Built-in skill without install specs — show guidance */
+                ) : detailSkill.bundled && (detailSkill.missing?.env?.length ?? 0) > 0 ? (
+                  /* Built-in skill missing env vars — show guidance */
                   <p className="text-xs text-slate-500 mr-auto">
-                    {t('skills.builtinNeedsSetup', 'This built-in skill needs external tools. Check the missing items above.')}
+                    {t('skills.builtinNeedsEnv', 'This skill needs environment variables configured. Set them in the Configuration section above.')}
                   </p>
                 ) : installedSlugs.has(detailSkill.slug) ? (
                   /* ClawHub installed skill — show uninstall */

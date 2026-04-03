@@ -26,10 +26,9 @@ describe('Skills — Install Deps for built-in skills', () => {
             eligible: false,
             disabled: false,
             blockedByAllowlist: false,
-            missing: { bins: ['memo'] },
-            install: [
-              { id: 'brew-memo', kind: 'brew', label: 'Install via Homebrew', bins: ['memo'] },
-            ],
+            missing: { bins: ['memo'], anyBins: [], env: [], config: [], os: [] },
+            // openclaw skills list --json does NOT return install specs;
+            // the UI auto-generates brew install from missing.bins
           },
           {
             name: 'coding-agent',
@@ -94,8 +93,9 @@ describe('Skills — Install Deps for built-in skills', () => {
       fireEvent.click(screen.getByText('Install Dependencies'));
     });
 
+    // Auto-generated from missing.bins since openclaw doesn't provide install specs
     expect(api.skillInstallDeps).toHaveBeenCalledWith([
-      { id: 'brew-memo', kind: 'brew', label: 'Install via Homebrew', bins: ['memo'] },
+      { id: 'brew-memo', kind: 'brew', label: 'brew install memo', bins: ['memo'] },
     ]);
   });
 
