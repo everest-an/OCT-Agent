@@ -828,11 +828,6 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
   useEffect(() => {
     if (!isActive) return;
     messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
-    if (agentStatus === 'idle') {
-      // Small delay so the hidden→visible transition completes first
-      const t = setTimeout(() => textareaRef.current?.focus(), 50);
-      return () => clearTimeout(t);
-    }
     // Refresh agents list — user may have created/deleted agents on the Agents page
     const api = window.electronAPI as any;
     api?.agentsList?.().then((res: any) => {
@@ -842,6 +837,11 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
         })));
       }
     }).catch(() => {});
+    if (agentStatus === 'idle') {
+      // Small delay so the hidden→visible transition completes first
+      const t = setTimeout(() => textareaRef.current?.focus(), 50);
+      return () => clearTimeout(t);
+    }
   }, [isActive]);
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
