@@ -6,6 +6,60 @@ import { ipcMain, BrowserWindow } from 'electron';
 
 const ANSI_REGEX = new RegExp(String.raw`\u001b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])`, 'g');
 
+// --- Verified bins persistence ---
+// OpenClaw's `openclaw skills list --json` checks binaries via `which` in a limited PATH.
+// After we install a binary (e.g., `brew install op`), it may still report "missing" because
+// Electron's spawned process PATH doesn't include all install locations.
+// We maintain a verified-bins file to remember binaries we've confirmed exist via enhanced PATH.
+// See: https://github.com/openclaw/openclaw/issues/6152
+type VerifiedBinsData = Record<string, { verifiedAt: number; path?: string }>;
+
+function getVerifiedBinsPath(home: string): string {
+  return path.join(home, '.awareness', 'verified-bins.json');
+}
+
+function loadVerifiedBins(home: string): VerifiedBinsData {
+  try {
+    const filePath = getVerifiedBinsPath(home);
+    if (fs.existsSync(filePath)) {
+      return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    }
+  } catch {}
+  return {};
+}
+
+function saveVerifiedBins(home: string, data: VerifiedBinsData): void {
+  try {
+    const filePath = getVerifiedBinsPath(home);
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.warn('[skill] Failed to save verified-bins:', err);
+  }
+}
+
+function patchMissingBins(skills: LocalSkillStatus[], verifiedBins: VerifiedBinsData): LocalSkillStatus[] {
+  if (Object.keys(verifiedBins).length === 0) return skills;
+  return skills.map((skill) => {
+    if (!skill.missing?.bins || skill.missing.bins.length === 0) return skill;
+    const stillMissing = skill.missing.bins.filter((bin) => !verifiedBins[bin]);
+    if (stillMissing.length === skill.missing.bins.length) return skill;
+    const patched = { ...skill, missing: { ...skill.missing, bins: stillMissing } };
+    // If no missing items left at all, mark as eligible
+    const hasAnyMissing = (patched.missing.bins?.length || 0) > 0
+      || (patched.missing.anyBins?.length || 0) > 0
+      || (patched.missing.env?.length || 0) > 0
+      || (patched.missing.config?.length || 0) > 0
+      || (patched.missing.os?.length || 0) > 0;
+    if (!hasAnyMissing) {
+      patched.eligible = true;
+      patched.missing = undefined;
+    }
+    return patched;
+  });
+}
+
 type LocalSkillStatus = {
   name: string;
   description: string;
@@ -276,6 +330,12 @@ export function registerSkillHandlers(deps: {
       } else {
         report = await loadOfficialSkillStatus(deps.runAsync);
       }
+
+      // Patch missing.bins using our verified-bins persistence.
+      // OpenClaw checks binaries with limited PATH; we use enhanced PATH.
+      const verifiedBins = loadVerifiedBins(deps.home);
+      report.skills = patchMissingBins(report.skills, verifiedBins);
+
       return {
         success: true,
         report,
@@ -458,8 +518,31 @@ export function registerSkillHandlers(deps: {
       };
     }
 
+    // After successful install, verify target binaries exist via enhanced PATH
+    // and persist them so `skill:list-installed` can patch OpenClaw's false negatives.
     sendProgress('verifying', 'dependencies installed');
-    return { success: true, installed };
+    const verifiedBins = loadVerifiedBins(deps.home);
+    let verifiedCount = 0;
+    for (const spec of specs) {
+      const targetBins = spec.bins || [];
+      for (const bin of targetBins) {
+        if (await isCommandAvailable(bin)) {
+          // Find the actual path for diagnostics (best-effort)
+          let binPath: string | undefined;
+          try {
+            const probe = process.platform === 'win32' ? 'where' : 'which';
+            binPath = (await deps.runSpawnAsync(probe, [bin], 5000)).split(/\r?\n/)[0]?.trim();
+          } catch {}
+          verifiedBins[bin] = { verifiedAt: Date.now(), path: binPath };
+          verifiedCount++;
+        }
+      }
+    }
+    if (verifiedCount > 0) {
+      saveVerifiedBins(deps.home, verifiedBins);
+    }
+
+    return { success: true, installed, verified: verifiedCount };
   });
 
   ipcMain.handle('skill:get-config', async (_e, slug: string) => {

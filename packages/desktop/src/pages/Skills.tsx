@@ -277,7 +277,13 @@ export default function Skills() {
       const listRes = await api.skillListInstalled();
       if (listRes?.success) {
         setInstalled(listRes.skills || {});
-        setLocalSkills(Array.isArray(listRes.report?.skills) ? listRes.report.skills : []);
+        const updatedSkills = Array.isArray(listRes.report?.skills) ? listRes.report.skills : [];
+        setLocalSkills(updatedSkills);
+        // Sync detailSkill with patched data so the modal shows updated status
+        const updated = updatedSkills.find((s: LocalSkillStatus) => s.name === skill.name || s.skillKey === skill.slug);
+        if (updated) {
+          setDetailSkill(prev => prev ? { ...prev, eligible: updated.eligible, missing: updated.missing } : prev);
+        }
       }
     } else {
       const msg = res?.error || t('skills.installDepsFailed', 'Dependency install failed');
