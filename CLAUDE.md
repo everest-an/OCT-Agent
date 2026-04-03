@@ -349,6 +349,15 @@ AwarenessClaw/
 - Gateway 操作超时至少 15s（插件多的环境加载慢）
 - `openclaw gateway start` 如果已在运行会报错，需要检查 status 判断"already running"
 
+### 聊天 No response 防回归规则（2026-04-03）
+- **问题背景**：Gateway 暂时不可用（如 pairing required）时会走 CLI fallback；如果 fallback prompt 被运行时元数据包裹后触发空回复，前端会落成 "No response"
+- **产品规则 1（成功率优先）**：任何涉及 `chat:send`、Gateway preflight、CLI fallback 的改动，必须证明失败场景下不降低用户成功率
+- **产品规则 2（禁止直接空回复）**：CLI 退出码为 0 但首轮文本为空时，必须至少执行一次自动补救（例如 raw user message retry）；补救后仍空才允许展示 "No response"
+- **产品规则 3（高风险文件必测）**：修改 `electron/ipc/register-chat-handlers.ts`、`electron/main.ts`、`electron/gateway-ws.ts` 时，必须运行聊天链路回归测试（至少覆盖 Gateway 正常、Gateway 不可用 fallback、fallback 空回复补救）
+- **产品规则 4（Windows 必测）**：在 Windows 上必须验证 `spawn(..., { shell: 'cmd.exe' })` 的 stdout/stderr 混合输出场景，确保不会出现“进程成功但前端空回复”
+- **产品规则 5（诊断可观测）**：出现空回复时必须输出结构化诊断字段（timeout/final/delta/retry），便于快速归因到 Gateway、CLI 或解析逻辑
+- **产品规则 6（提交说明）**：触及聊天链路的提交必须在说明中写清“影响哪条链路、失败时用户看到什么、如何避免 No response 回归”
+
 ### ASCII QR 码检测三大坑（WhatsApp/Signal，已修复）
 - **坑 1: QR 只发前 5 行**：`isQrLine()` 检测到 5 行时立即发送 `channel:qr-art`，但完整 QR 有 30 行 → 前端只显示一条矮长条。**修复**：用 300ms debounce timer，等所有 QR 行到齐后一次性发送
 - **坑 2: QR 永远不发送（原始 bug）**：原代码只在 `else` 分支（收到非 QR 行时）发送 QR 块，但 WhatsApp 输出完 QR 后进程挂起等待扫码，不再有新行 → `else` 永远不触发。**修复**：在 QR 行分支内用 setTimeout 延时发送

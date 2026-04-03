@@ -224,7 +224,14 @@ ${message}`;
       } catch (prepareErr: any) {
         console.warn('[chat] CLI fallback preparation failed:', prepareErr?.message || prepareErr);
       }
-      return chatSendViaCli(fullMessage, sid, options, send, deps);
+      const cliResult = await chatSendViaCli(fullMessage, sid, options, send, deps);
+      const needsRetry = cliResult?.success
+        && (!cliResult.text || /^(No response|No reply from agent\.?)+$/i.test(String(cliResult.text).trim()));
+      if (needsRetry && fullMessage !== message) {
+        console.warn('[chat] CLI fallback returned empty response with metadata prompt; retrying with raw user message');
+        return chatSendViaCli(message, sid, options, send, deps);
+      }
+      return cliResult;
     }
 
     let fullResponseText = '';
@@ -537,7 +544,14 @@ ${message}`;
         } catch (prepareErr: any) {
           console.warn('[chat] CLI fallback preparation failed:', prepareErr?.message || prepareErr);
         }
-        return chatSendViaCli(fullMessage, sid, options, send, deps);
+        const cliResult = await chatSendViaCli(fullMessage, sid, options, send, deps);
+        const needsRetry = cliResult?.success
+          && (!cliResult.text || /^(No response|No reply from agent\.?)+$/i.test(String(cliResult.text).trim()));
+        if (needsRetry && fullMessage !== message) {
+          console.warn('[chat] CLI fallback returned empty response with metadata prompt; retrying with raw user message');
+          return chatSendViaCli(message, sid, options, send, deps);
+        }
+        return cliResult;
       }
       return { success: false, text: '', error: errorMsg, sessionId: sid };
     }
@@ -557,7 +571,9 @@ async function chatSendViaCli(
   },
 ): Promise<any> {
   return new Promise((resolve) => {
-    let stdout = '';
+    const collectedLines: string[] = [];
+    let stdoutRemainder = '';
+    let stderrRemainder = '';
     const thinkingFlag = options?.thinkingLevel && options.thinkingLevel !== 'off'
       ? ` --thinking ${options.thinkingLevel}` : '';
     const agentFlag = options?.agentId && options.agentId !== 'main' ? ` --agent "${options.agentId}"` : '';
@@ -571,22 +587,64 @@ async function chatSendViaCli(
       ? spawnChatProcess(deps.wrapWindowsCommand(command), [], { cwd: options?.workspacePath || os.homedir(), shell: 'cmd.exe', env: { ...process.env, PATH: enhancedPath, NO_COLOR: '1', FORCE_COLOR: '0' } })
       : spawnChatProcess('/bin/bash', ['--norc', '--noprofile', '-c', `export PATH="${enhancedPath}"; ${command}`], { cwd: options?.workspacePath || os.homedir(), env: { ...process.env, PATH: enhancedPath } });
 
-    activeChatChild = child;
-    child.stdout?.on('data', (data: Buffer) => {
-      const chunk = deps.stripAnsi(data.toString()).replace(/\r/g, '');
-      stdout += chunk;
-      for (const line of chunk.split('\n')) {
+    const isNoiseLine = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return true;
+      if (trimmed.startsWith('[')) return true;
+      if (trimmed.startsWith('Config')) return true;
+      if (trimmed.startsWith('Registered')) return true;
+      if (trimmed.includes('plugin')) return true;
+      if (/^gateway connect failed:/i.test(trimmed)) return true;
+      if (/^Gateway agent failed; falling back to embedded:/i.test(trimmed)) return true;
+      if (/^Gateway target:/i.test(trimmed)) return true;
+      if (/^Source:/i.test(trimmed)) return true;
+      if (/^Bind:/i.test(trimmed)) return true;
+      if (/^Config:\s+/i.test(trimmed)) return true;
+      return false;
+    };
+
+    const flushChunk = (chunk: string, fromStderr: boolean) => {
+      const normalized = deps.stripAnsi(chunk).replace(/\r/g, '');
+      const current = fromStderr ? stderrRemainder : stdoutRemainder;
+      const merged = `${current}${normalized}`;
+      const lines = merged.split('\n');
+      const trailing = lines.pop() ?? '';
+      if (fromStderr) stderrRemainder = trailing;
+      else stdoutRemainder = trailing;
+
+      for (const line of lines) {
         const trimmed = line.trim();
-        if (trimmed && !trimmed.startsWith('[') && !trimmed.startsWith('Config') && !trimmed.startsWith('Registered') && !trimmed.includes('plugin')) {
+        if (!isNoiseLine(trimmed)) {
+          collectedLines.push(trimmed);
           send('chat:stream', `${trimmed}\n`);
         }
       }
+    };
+
+    const flushRemainder = (fromStderr: boolean) => {
+      const line = (fromStderr ? stderrRemainder : stdoutRemainder).trim();
+      if (fromStderr) stderrRemainder = '';
+      else stdoutRemainder = '';
+      if (!line) return;
+      if (!isNoiseLine(line)) {
+        collectedLines.push(line);
+        send('chat:stream', `${line}\n`);
+      }
+    };
+
+    activeChatChild = child;
+    child.stdout?.on('data', (data: Buffer) => {
+      flushChunk(data.toString(), false);
     });
-    child.stderr?.on('data', () => {});
+    child.stderr?.on('data', (data: Buffer) => {
+      flushChunk(data.toString(), true);
+    });
     child.on('exit', () => {
       activeChatChild = null;
+      flushRemainder(false);
+      flushRemainder(true);
       send('chat:stream-end', {});
-      const clean = stdout.split('\n').filter((line) => line.trim() && !line.trim().startsWith('[') && !line.includes('Config') && !line.includes('plugin')).join('\n').trim();
+      const clean = collectedLines.join('\n').trim();
       resolve({ success: true, text: clean || 'No response', sessionId: sid });
     });
     child.on('error', (err) => resolve({ success: false, error: String(err), sessionId: sid }));

@@ -27,6 +27,28 @@ function normalizeTelegramConfigInFile(config: any) {
   return config;
 }
 
+function formatChannelActionError(openclawId: string, action: 'install' | 'bind', rawError: string): string {
+  const message = (rawError || '').trim();
+
+  if (/spawn\s+npx\s+ENOENT/i.test(message)) {
+    return 'OpenClaw could not launch required helper tools (npx not found in runtime PATH). Please rerun Setup to repair the runtime, then retry channel setup.';
+  }
+
+  if (/Unknown channel/i.test(message)) {
+    return `OpenClaw does not recognize channel "${openclawId}" yet. Please reinstall the channel plugin and retry.`;
+  }
+
+  if (/plugin|install/i.test(message) && action === 'install') {
+    return `OpenClaw failed to install the plugin for "${openclawId}". ${message.slice(0, 220)}`;
+  }
+
+  if (action === 'bind') {
+    return `Channel "${openclawId}" was saved, but binding to the main agent failed. ${message.slice(0, 220)}`;
+  }
+
+  return message.slice(0, 300) || `OpenClaw ${action} failed for channel "${openclawId}".`;
+}
+
 function getManagedRuntimeDist(home: string): string | undefined {
   return [
     path.join(home, '.awareness-claw', 'openclaw-runtime', 'node_modules', 'openclaw', 'dist'),
@@ -156,8 +178,13 @@ export function registerChannelConfigHandlers(deps: {
       const pluginPkg = channelDef?.pluginPackage || `@openclaw/${openclawId}`;
       const saveStrategy = channelDef?.saveStrategy || 'cli';
       const configForCli = openclawId === 'telegram' ? coerceTelegramCliConfig(channelDef, config) : config;
+      let pluginInstallError: string | null = null;
 
-      try { await deps.runAsync(`openclaw plugins install "${pluginPkg}" 2>&1`, 60000); } catch {}
+      try {
+        await deps.runAsync(`openclaw plugins install "${pluginPkg}" 2>&1`, 60000);
+      } catch (err: any) {
+        pluginInstallError = err?.message || String(err);
+      }
 
       if (saveStrategy === 'json-direct') {
         const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
@@ -165,7 +192,7 @@ export function registerChannelConfigHandlers(deps: {
         try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
         if (!existing.channels) existing.channels = {};
         existing.channels[openclawId] = { ...existing.channels[openclawId], ...config, enabled: true };
-        migrateLegacyChannelConfig(existing);
+        normalizeTelegramConfigInFile(existing);
         fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
       } else {
         const cliFlags = channelDef ? deps.buildCLIFlags(channelDef, configForCli) : '';
@@ -187,13 +214,21 @@ export function registerChannelConfigHandlers(deps: {
         try {
           const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
           const existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-          migrateLegacyChannelConfig(existing);
+          normalizeTelegramConfigInFile(existing);
           fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
         } catch {}
       }
 
       try { await deps.runAsync('openclaw gateway restart 2>&1', 20000); } catch {}
-      try { await deps.runAsync(`openclaw agents bind --agent main --bind ${openclawId} 2>&1`, 10000); } catch {}
+
+      try {
+        await deps.runAsync(`openclaw agents bind --agent main --bind ${openclawId} 2>&1`, 10000);
+      } catch (bindErr: any) {
+        const bindMsg = bindErr?.message || String(bindErr);
+        const combined = pluginInstallError ? `${pluginInstallError}\n${bindMsg}` : bindMsg;
+        return { success: false, error: formatChannelActionError(openclawId, 'bind', combined) };
+      }
+
       return { success: true };
     } catch (err: any) {
       return { success: false, error: (err.message || String(err)).slice(0, 300) };
