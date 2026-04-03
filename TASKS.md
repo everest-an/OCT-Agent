@@ -30,6 +30,9 @@
 - [ ] 建立 GatewaySupervisor + LocalDaemonSupervisor，把主进程内分散的预热/修复逻辑收敛为统一状态机
 - [ ] 将 channel 一键连接重构为显式状态机（preflight/install/login/bind/confirm/recover），失败优先自动补救再报错
 - [ ] 建立统一错误码与用户文案映射，替换当前零散字符串匹配；前端接入一键修复动作
+- [ ] 建立“SDK 复用优先”门禁：新增能力默认复用 Awareness SDK，禁止复制主仓库已有实现
+- [ ] 建立“零命令行体验”门禁：用户可见错误必须非技术化 + 一键修复，禁止把终端命令作为主路径
+- [ ] 建立“记忆护城河”KPI 看板：记忆可用率、跨会话召回命中率、记忆驱动回复占比纳入每周评审
 - [ ] 增加三端 Smoke Matrix（Windows/macOS/Linux）并接入发版门禁，未全绿禁止发布
 - [ ] 增加 OpenClaw latest nightly 兼容流水线，自动输出能力差异报告并创建修复任务
 - [ ] 建立诊断包导出（traceId + capability snapshot + 最近日志 + 环境信息）用于快速归因
