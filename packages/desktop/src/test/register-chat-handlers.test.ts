@@ -217,12 +217,14 @@ describe('registerChatHandlers', () => {
     warnSpy.mockRestore();
   });
 
-  it('forwards non-main agent ids to the gateway chat.send call', async () => {
+  it('routes non-main agents via session key format agent:<id>:webchat:<sid>', async () => {
     const ws = new FakeGatewayClient();
+    // The session key for non-main agents is agent:<agentId>:webchat:<rawSid>
+    const expectedSid = 'agent:researcher:webchat:test-session';
     ws.chatSend = vi.fn(async () => {
       setTimeout(() => {
         ws.emit('event:chat', {
-          sessionKey: 'test-session',
+          sessionKey: expectedSid,
           state: 'final',
           message: {
             role: 'assistant',
@@ -248,12 +250,16 @@ describe('registerChatHandlers', () => {
     const handlers = getRegisteredHandlers();
     const result = await handlers['chat:send']({}, 'hello', 'test-session', { agentId: 'researcher' });
 
-    expect(result).toMatchObject({ success: true, text: 'agent specific reply', sessionId: 'test-session' });
+    expect(result).toMatchObject({ success: true, text: 'agent specific reply', sessionId: expectedSid });
+    // agentId is NOT passed as a param — routing is via the session key format
     expect(ws.chatSend).toHaveBeenCalledWith(
-      'test-session',
+      expectedSid,
       expect.stringContaining('hello'),
-      expect.objectContaining({ agentId: 'researcher', verbose: 'full' }),
+      expect.objectContaining({ verbose: 'full' }),
     );
+    // Verify agentId is NOT in chat.send params (Gateway rejects additionalProperties)
+    const callArgs = (ws.chatSend as any).mock.calls[0][2];
+    expect(callArgs).not.toHaveProperty('agentId');
   });
 
   it('requests verbose full so gateway tool events include real output details', async () => {

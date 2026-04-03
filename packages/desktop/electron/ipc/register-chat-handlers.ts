@@ -161,7 +161,14 @@ export function registerChatHandlers(deps: {
       deps.sendToRenderer(channel, payload);
     };
 
-    const sid = sessionId || `ac-${Date.now()}`;
+    // Agent routing is done via the session key format, not a separate agentId param.
+    // Gateway session keys: agent:<agentId>:main (operator), agent:<agentId>:webchat:<id> (desktop).
+    // When a non-main agent is selected, prefix the session key so Gateway routes to the right agent.
+    const agentId = options?.agentId || 'main';
+    const rawSid = sessionId || `ac-${Date.now()}`;
+    const sid = agentId !== 'main'
+      ? `agent:${agentId}:webchat:${rawSid}`
+      : rawSid;
 
     let fullMessage = message;
     const homeDir = os.homedir();
@@ -428,7 +435,6 @@ ${message}`;
         thinking: options?.thinkingLevel && options.thinkingLevel !== 'off' ? options.thinkingLevel : undefined,
         verbose: 'full',
         reasoning: options?.reasoningDisplay && options.reasoningDisplay !== 'off' ? options.reasoningDisplay : 'on',
-        agentId: options?.agentId && options.agentId !== 'main' ? options.agentId : undefined,
       });
 
       await chatDone;

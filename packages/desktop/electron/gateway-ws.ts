@@ -343,7 +343,6 @@ export class GatewayClient extends EventEmitter {
     verbose?: string;
     reasoning?: string;
     attachments?: any[];
-    agentId?: string;
   }): Promise<any> {
     await this.ensureWriteScopes();
 
@@ -362,8 +361,8 @@ export class GatewayClient extends EventEmitter {
     };
     if (options?.thinking) params.thinking = options.thinking;
     if (options?.attachments?.length) params.attachments = options.attachments;
-    if (options?.agentId) params.agentId = options.agentId;
-    // chat.send uses 120s timeout (agent may take a while with tool calls)
+    // NOTE: agent routing is done via the sessionKey format (agent:<agentId>:main),
+    // NOT via an agentId param — chat.send uses additionalProperties: false.
     return this.rpc('chat.send', params, 120000);
   }
 
