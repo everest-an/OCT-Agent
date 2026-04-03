@@ -75,8 +75,23 @@ function extractPrimaryBinary(command: string) {
   return (parts[idx] || '').replace(/["']/g, '');
 }
 
+// Allowlist of known safe package manager binaries for spec.command validation
+const ALLOWED_INSTALL_BINARIES = new Set([
+  'brew', 'apt-get', 'apt', 'dnf', 'yum', 'pacman', 'zypper',
+  'npm', 'pnpm', 'yarn', 'pip', 'pip3', 'cargo',
+  'winget', 'choco', 'scoop',
+  'sudo', 'doas',
+]);
+
 function buildInstallCommands(spec: SkillInstallSpec) {
   if (spec.command && spec.command.trim()) {
+    // SECURITY: Validate that spec.command only uses known package manager binaries.
+    // Third-party skills could set command to arbitrary shell commands (RCE risk).
+    const binary = extractPrimaryBinary(spec.command);
+    if (!binary || !ALLOWED_INSTALL_BINARIES.has(binary)) {
+      console.warn(`[skill:install-deps] Blocked unsafe spec.command with binary "${binary}": ${spec.command.slice(0, 100)}`);
+      return [];
+    }
     return [spec.command.trim()];
   }
 
@@ -118,7 +133,7 @@ function buildInstallCommands(spec: SkillInstallSpec) {
     case 'zypper':
       return linuxCommands;
     case 'npm':
-      return [`npm install -g ${pkg}`];
+      return [`npm install -g --ignore-scripts ${pkg}`];
     case 'pnpm':
       return [`pnpm add -g ${pkg}`];
     case 'yarn':
@@ -134,13 +149,13 @@ function buildInstallCommands(spec: SkillInstallSpec) {
           `winget install --id ${pkg} -e --accept-source-agreements --accept-package-agreements --disable-interactivity`,
           `choco install ${pkg} -y`,
           `scoop install ${pkg}`,
-          `npm install -g ${pkg}`,
+          `npm install -g --ignore-scripts ${pkg}`,
         ];
       }
       if (process.platform === 'darwin') {
-        return [`brew install ${pkg}`, `npm install -g ${pkg}`];
+        return [`brew install ${pkg}`, `npm install -g --ignore-scripts ${pkg}`];
       }
-      return [...linuxCommands, `npm install -g ${pkg}`];
+      return [...linuxCommands, `npm install -g --ignore-scripts ${pkg}`];
   }
 }
 
@@ -232,6 +247,7 @@ function fetchJson(url: string): Promise<any> {
 export function registerSkillHandlers(deps: {
   home: string;
   runAsync: (cmd: string, timeoutMs?: number) => Promise<string>;
+  runSpawnAsync: (cmd: string, args: string[], timeoutMs?: number) => Promise<string>;
   readShellOutputAsync: (cmd: string, timeoutMs?: number) => Promise<string | null>;
 }) {
   function sendProgress(stage: string, detail?: string) {
@@ -381,9 +397,11 @@ export function registerSkillHandlers(deps: {
 
     const isCommandAvailable = async (binary: string) => {
       if (!binary) return false;
-      const probe = process.platform === 'win32' ? `where ${binary}` : `command -v ${binary}`;
       try {
-        await deps.runAsync(probe, 5000);
+        // Use array args to prevent injection from binary name.
+        // 'which' is a real binary (/usr/bin/which), unlike 'command' which is a shell builtin.
+        const probe = process.platform === 'win32' ? 'where' : 'which';
+        await deps.runSpawnAsync(probe, [binary], 5000);
         return true;
       } catch {
         return false;

@@ -302,11 +302,53 @@ export function createShellUtils(options: { home: string; app: any }) {
   }
 
   /**
+   * Run a binary with array args (no shell interpretation) with activity-based timeout.
+   * This is the SAFE alternative to runAsync — use it whenever arguments contain
+   * user-controlled data (agent names, messages, skill specs) to prevent shell injection.
+   * On Windows, spawns the binary directly via CreateProcess (no cmd.exe).
+   */
+  function runSpawnAsync(cmd: string, args: string[], timeoutMs = 180000): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const child = runSpawn(cmd, args, { stdio: 'pipe' });
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+
+      let timer = setTimeout(() => {
+        if (!settled) { settled = true; child.kill(); reject(new Error('Command timed out')); }
+      }, timeoutMs);
+      const resetTimer = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          if (!settled) { settled = true; child.kill(); reject(new Error('Command timed out')); }
+        }, timeoutMs);
+      };
+
+      child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); resetTimer(); });
+      child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); resetTimer(); });
+      child.on('close', (code: number | null) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          if (code === 0) resolve(stdout.trim());
+          else reject(new Error(stderr.trim() || stdout.trim().slice(-500) || `Exit code ${code}`));
+        }
+      });
+      child.on('error', (err: Error) => {
+        if (!settled) { settled = true; clearTimeout(timer); reject(err); }
+      });
+    });
+  }
+
+  /**
    * Run a shell command asynchronously with activity-based timeout.
    * The timer resets every time stdout/stderr produces output.
    * This handles OpenClaw's slow plugin loading (15-30s) gracefully —
    * as long as it keeps printing "[plugins] Registered xxx", it won't timeout.
    * Only if nothing happens for `timeoutMs` does it abort.
+   *
+   * WARNING: Do NOT use this for user-controlled input (agent names, messages, etc.)
+   * Use runSpawnAsync instead to prevent shell injection.
    */
   function runAsync(cmd: string, timeoutMs = 180000): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -447,6 +489,7 @@ export function createShellUtils(options: { home: string; app: any }) {
     runAsync,
     runAsyncWithProgress,
     runSpawn,
+    runSpawnAsync,
     safeShellExec,
     safeShellExecAsync,
     stripAnsi,

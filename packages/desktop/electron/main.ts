@@ -82,6 +82,7 @@ const {
   runAsync,
   runAsyncWithProgress,
   runSpawn,
+  runSpawnAsync,
   safeShellExec,
   safeShellExecAsync,
   stripAnsi,
@@ -804,6 +805,7 @@ registerAgentHandlers({
   readShellOutputAsync,
   ensureGatewayRunning,
   runAsync,
+  runSpawnAsync,
 });
 registerChannelConfigHandlers({
   home: HOME,
@@ -858,6 +860,7 @@ registerOpenClawConfigHandlers({
 registerSkillHandlers({
   home: HOME,
   runAsync,
+  runSpawnAsync,
   readShellOutputAsync,
 });
 registerCloudWorkspaceHandlers({
