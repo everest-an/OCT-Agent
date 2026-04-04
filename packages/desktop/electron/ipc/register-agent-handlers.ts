@@ -149,8 +149,30 @@ export function registerAgentHandlers(deps: {
   ipcMain.handle('agents:delete', async (_e: any, agentId: string) => {
     if (agentId === 'main') return { success: false, error: 'Cannot delete default agent' };
     try {
-      const output = await deps.runSpawnAsync('openclaw', ['agents', 'delete', agentId, '--force', '--json'], 30000);
-      return { success: true, output };
+      // OpenClaw loads all plugins (15-20s), so 45s timeout is needed
+      try {
+        await deps.runSpawnAsync('openclaw', ['agents', 'delete', agentId, '--force'], 45000);
+      } catch (cliErr: any) {
+        // Agent may not be registered in OpenClaw (orphan from failed creation).
+        // Fall through to manual cleanup below.
+        const msg = cliErr?.message || '';
+        if (!/not found|does not exist/i.test(msg) && !/timed? ?out/i.test(msg)) {
+          throw cliErr;
+        }
+      }
+      // Manual cleanup of workspace + agent directories (handles orphan agents too)
+      const slug = toAgentSlug(agentId);
+      const dirsToClean = [
+        path.join(deps.home, '.openclaw', 'workspaces', slug),
+        path.join(deps.home, '.openclaw', `workspace-${slug}`),
+        path.join(deps.home, '.openclaw', 'agents', slug),
+      ];
+      for (const dir of dirsToClean) {
+        if (fs.existsSync(dir)) {
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
+      }
+      return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message?.slice(0, 200) };
     }

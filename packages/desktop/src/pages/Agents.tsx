@@ -93,12 +93,19 @@ export default function Agents() {
 
   useEffect(() => { loadAgents(); loadChannels(); }, []);
 
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const handleDelete = async (agentId: string) => {
     if (!window.electronAPI || agentId === 'main') return;
     if (!confirm(t('agents.deleteConfirm', 'Delete this agent? This will remove its workspace and all data.'))) return;
-    const result = await (window.electronAPI as any).agentsDelete(agentId);
-    if (result.success) loadAgents();
-    else setError(result.error || 'Delete failed');
+    setDeletingId(agentId);
+    setError(null);
+    try {
+      const result = await (window.electronAPI as any).agentsDelete(agentId);
+      if (result.success) loadAgents();
+      else setError(result.error || 'Delete failed');
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const handleSetIdentity = async (agentId: string) => {
@@ -295,7 +302,14 @@ export default function Agents() {
                       <button onClick={() => { setBindingAgentId(agent.id); setBindChannel(''); }}
                         className="p-1.5 text-slate-500 hover:text-emerald-400 rounded" title={t('agents.addBinding', 'Add binding')}><Link size={14} /></button>
                       {!agent.isDefault && (
-                        <button onClick={() => handleDelete(agent.id)} title={t('common.delete', 'Delete')} className="p-1.5 text-slate-500 hover:text-red-400 rounded"><Trash2 size={14} /></button>
+                        <button
+                          onClick={() => handleDelete(agent.id)}
+                          disabled={deletingId === agent.id}
+                          title={t('common.delete', 'Delete')}
+                          className="p-1.5 text-slate-500 hover:text-red-400 rounded disabled:opacity-50"
+                        >
+                          {deletingId === agent.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                        </button>
                       )}
                     </div>
                   </div>
