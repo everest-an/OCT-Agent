@@ -59,7 +59,6 @@ describe('openclaw capability schema helpers', () => {
                 search: {
                   type: 'object',
                   properties: {
-                    provider: { type: 'string' }, // no enum
                     provider: { type: 'string' },
                   },
                 },
