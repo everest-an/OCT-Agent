@@ -15,3 +15,4 @@ package-lock.json
 .awareness/
 packages/desktop/.awareness/
 packages/desktop/main.js
+packages/desktop/.tmp-source-map-index.json
