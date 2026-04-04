@@ -74,6 +74,10 @@ interface SkillDetail {
   primaryEnv?: string;
   missing?: LocalSkillStatus['missing'];
   install?: InstallSpec[];
+  // Dynamic OS compatibility from ClawHub metadata (null = cross-platform)
+  supportedOs?: string[] | null;
+  // ClawHub page URL (e.g., https://clawhub.ai/owner/slug)
+  clawhubUrl?: string | null;
 }
 
 const PAGE_SIZE = 20;
@@ -846,6 +850,23 @@ export default function Skills() {
                         {t('skills.openHomepage', 'Open homepage')}
                       </button>
                     )}
+                    {detailSkill.clawhubUrl && (
+                      <button
+                        onClick={() => { void openExternal(detailSkill.clawhubUrl || '', `skill-clawhub-${detailSkill.slug}`); }}
+                        disabled={isOpening(`skill-clawhub-${detailSkill.slug}`)}
+                        className="text-xs text-brand-300 hover:text-brand-200"
+                      >
+                        {t('skills.viewOnClawHub', 'View on ClawHub (install guide & docs)')}
+                      </button>
+                    )}
+                    {/* Dynamic OS compatibility from ClawHub metadata */}
+                    {detailSkill.supportedOs && detailSkill.supportedOs.length > 0 && (
+                      <p className={`text-xs ${detailSkill.supportedOs.includes(
+                        typeof window !== 'undefined' ? (navigator.platform?.startsWith('Win') ? 'win32' : navigator.platform?.startsWith('Mac') ? 'darwin' : 'linux') : 'darwin'
+                      ) ? 'text-emerald-400' : 'text-amber-300'}`}>
+                        {t('skills.platformSupport', 'Platform')}: {detailSkill.supportedOs.map(os => OS_LABELS[os] || os).join(', ')}
+                      </p>
+                    )}
                     {detailSkill.missing && summarizeMissing({
                       name: detailSkill.name || detailSkill.slug,
                       description: detailSkill.description || '',
@@ -1011,11 +1032,21 @@ export default function Skills() {
                   </div>
                   )
                 ) : installedSlugs.has(detailSkill.slug) ? (
-                  /* ClawHub installed skill — show uninstall */
+                  /* ClawHub installed skill — show usage guide + uninstall */
                   <>
                     <span className="flex items-center gap-1 text-xs text-emerald-400 mr-auto">
                       <Check size={12} /> {t('skills.installed')}
                     </span>
+                    {detailSkill.clawhubUrl && (
+                      <button
+                        onClick={() => { void openExternal(detailSkill.clawhubUrl || '', `skill-guide-${detailSkill.slug}`); }}
+                        disabled={isOpening(`skill-guide-${detailSkill.slug}`)}
+                        className="flex items-center gap-1 px-4 py-2 text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition-colors"
+                      >
+                        <ExternalLink size={14} />
+                        {t('skills.usageGuide', 'Usage Guide')}
+                      </button>
+                    )}
                     <button
                       onClick={async () => { await handleUninstall(detailSkill.slug); }}
                       disabled={actionSlug === detailSkill.slug}

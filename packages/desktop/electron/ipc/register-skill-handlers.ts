@@ -332,16 +332,22 @@ function mapClawHubListItem(item: any) {
 }
 
 function mapClawHubDetail(detail: any) {
+  const ownerHandle = detail?.owner?.handle || detail?.owner?.displayName || '';
+  const slug = detail?.skill?.slug || '';
   return {
-    slug: detail?.skill?.slug,
-    name: detail?.skill?.displayName || detail?.skill?.slug,
-    displayName: detail?.skill?.displayName || detail?.skill?.slug,
+    slug,
+    name: detail?.skill?.displayName || slug,
+    displayName: detail?.skill?.displayName || slug,
     description: detail?.skill?.summary || '',
     summary: detail?.skill?.summary || '',
-    owner: detail?.owner?.handle || detail?.owner?.displayName,
+    owner: ownerHandle,
     version: detail?.latestVersion?.version,
     readme: detail?.version?.readme || '',
     skillMd: detail?.version?.skillMd || '',
+    // OS compatibility from ClawHub metadata (dynamically parsed from SKILL.md)
+    supportedOs: Array.isArray(detail?.metadata?.os) ? detail.metadata.os as string[] : null,
+    // ClawHub page URL for install guide / usage docs
+    clawhubUrl: ownerHandle && slug ? `https://clawhub.ai/${ownerHandle}/${slug}` : null,
   };
 }
 
