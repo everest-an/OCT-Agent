@@ -285,6 +285,19 @@ export function createShellUtils(options: { home: string; app: any }) {
       }
     }
 
+    if (cmd === 'openclaw' && process.platform === 'win32') {
+      // On Windows, npm installs openclaw as a .cmd shim; spawn("openclaw") can fail
+      // with ENOENT in non-shell mode. Prefer direct Node + entrypoint execution.
+      const pkgDir = getOpenClawPackageDirSync();
+      const entryPath = pkgDir ? getOpenClawEntryPath(pkgDir) : null;
+      if (entryPath) {
+        return spawn(findNodeExecutable(), [entryPath, ...args], {
+          env: { ...process.env, PATH: getEnhancedPath() },
+          ...opts,
+        });
+      }
+    }
+
     if (cmd === 'openclaw') {
       const fallback = getOpenClawDirectSpawnSync();
       if (fallback) {
