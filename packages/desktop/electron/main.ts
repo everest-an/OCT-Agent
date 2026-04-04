@@ -49,7 +49,7 @@ import {
 import { createShellUtils } from './shell-utils';
 import { isGatewayRunningOutput } from './openclaw-config';
 import { getAgentWorkspaceDir } from './openclaw-config';
-import { hasExplicitExecApprovalConfig, writeExecApprovalSettings } from './openclaw-config';
+import { hasExplicitExecApprovalConfig, writeDesktopExecApprovalDefaults } from './openclaw-config';
 import { resolveDashboardUrl } from './openclaw-dashboard';
 import {
   applyDesktopAwarenessPluginConfig,
@@ -65,12 +65,6 @@ import {
 import { readJsonFileWithBom } from './json-file';
 
 const DESKTOP_LEGACY_HOST_EXEC_MIGRATION_ID = 'desktop-legacy-host-exec-defaults-2026-04-04';
-const DESKTOP_ONBOARDING_HOST_EXEC_DEFAULTS = {
-  security: 'full' as const,
-  ask: 'off' as const,
-  askFallback: 'full' as const,
-  autoAllowSkills: true,
-};
 
 let mainWindow: typeof BrowserWindow.prototype | null = null;
 let tray: typeof Tray.prototype | null = null;
@@ -253,7 +247,7 @@ function repairOpenClawConfigFile() {
     }
 
     if (shouldMarkLegacyHostExecMigration && !hasExplicitExecApprovalConfig(HOME)) {
-      writeExecApprovalSettings(HOME, DESKTOP_ONBOARDING_HOST_EXEC_DEFAULTS);
+      writeDesktopExecApprovalDefaults(HOME);
     }
 
     sanitizeAwarenessPluginConfig(current);

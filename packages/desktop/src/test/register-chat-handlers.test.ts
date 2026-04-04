@@ -218,6 +218,55 @@ describe('registerChatHandlers', () => {
     warnSpy.mockRestore();
   });
 
+  it('flags unverified local file-write success claims when gateway returns text without completed tools', async () => {
+    const ws = new FakeGatewayClient();
+    const callMcpStrict = vi.fn(async () => ({}));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: {
+            role: 'assistant',
+            content: 'I saved the file to E:\\新建文件夹2\\我是谁.txt',
+          },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    registerChatHandlers({
+      sendToRenderer: vi.fn(),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict,
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, '在 E:\\新建文件夹2 里写一个 txt 文件', 'test-session', {});
+
+    expect(result).toMatchObject({
+      success: true,
+      text: 'I saved the file to E:\\新建文件夹2\\我是谁.txt',
+      sessionId: 'test-session',
+      unverifiedLocalFileOperation: true,
+    });
+    expect(callMcpStrict).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Assistant claimed a local filesystem mutation succeeded without any completed tool result'),
+      expect.objectContaining({ sessionId: 'test-session' }),
+    );
+
+    warnSpy.mockRestore();
+  });
+
   it('routes non-main agents via session key format agent:<id>:webchat:<sid>', async () => {
     const ws = new FakeGatewayClient();
     // The session key for non-main agents is agent:<agentId>:webchat:<rawSid>
@@ -456,6 +505,43 @@ describe('registerChatHandlers', () => {
 
     fakeChild.emitOutput();
     await expect(pending).resolves.toMatchObject({ success: true, text: 'CLI fallback reply', sessionId: 'test-session' });
+  });
+
+  it('flags unverified local file-write success claims in CLI fallback output', async () => {
+    const fakeChild = createCliFallbackChild('Saved the file to E:\\新建文件夹2\\我是谁.txt');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    spawnMock.mockReturnValue(fakeChild as any);
+
+    registerChatHandlers({
+      sendToRenderer: vi.fn(),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: false, error: 'Gateway unavailable.' })),
+      getGatewayWs: vi.fn(),
+      getConnectedGatewayWs: vi.fn(() => null),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const pending = handlers['chat:send']({}, '在 E:\\新建文件夹2 里写一个 txt 文件', 'test-session', {});
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
+    fakeChild.emitOutput();
+    const result = await pending;
+
+    expect(result).toMatchObject({
+      success: true,
+      text: 'Saved the file to E:\\新建文件夹2\\我是谁.txt',
+      sessionId: 'test-session',
+      unverifiedLocalFileOperation: true,
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('CLI fallback produced an unverified local filesystem success claim'),
+      expect.objectContaining({ sessionId: 'test-session' }),
+    );
+
+    warnSpy.mockRestore();
   });
 
   it('forwards gateway agent tool events into chat status updates with tool output detail', async () => {

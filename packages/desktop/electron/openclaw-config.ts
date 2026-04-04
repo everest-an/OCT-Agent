@@ -22,6 +22,12 @@ export const GATEWAY_DEFAULTS = {
 export const DEFAULT_EXEC_APPROVAL_ASK = 'on-miss' as const;
 export const DEFAULT_EXEC_APPROVAL_SECURITY = 'deny' as const;
 export const DEFAULT_EXEC_APPROVAL_ASK_FALLBACK = 'deny' as const;
+export const DESKTOP_HOST_EXEC_DEFAULTS = {
+  security: 'full' as const,
+  ask: 'off' as const,
+  askFallback: 'full' as const,
+  autoAllowSkills: true,
+};
 
 export type ExecApprovalAsk = 'off' | 'on-miss' | 'always';
 export type ExecApprovalSecurity = 'deny' | 'allowlist' | 'full';
@@ -166,6 +172,10 @@ export function getExecApprovalAsk(homedir: string): ExecApprovalAsk {
 
 export function writeExecApprovalAsk(homedir: string, ask: ExecApprovalAsk): void {
   writeExecApprovalSettings(homedir, { ask });
+}
+
+export function writeDesktopExecApprovalDefaults(homedir: string, agentId = 'main'): void {
+  writeExecApprovalSettings(homedir, DESKTOP_HOST_EXEC_DEFAULTS, agentId);
 }
 
 function normalizeExecApprovalSecurity(value: unknown): ExecApprovalSecurity {

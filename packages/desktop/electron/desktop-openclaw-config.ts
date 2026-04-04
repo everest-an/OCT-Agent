@@ -4,7 +4,7 @@ import {
   GATEWAY_DEFAULTS,
   migrateLegacyChannelConfig,
   normalizePluginAllow,
-  writeExecApprovalAsk,
+  writeDesktopExecApprovalDefaults,
 } from './openclaw-config';
 
 const REDACTED_VALUE = '__REDACTED__';
@@ -251,7 +251,7 @@ export function persistDesktopAwarenessPluginConfig(
   applyDesktopAwarenessPluginConfig(config, options);
   sanitizeDesktopAwarenessPluginConfig(config, homedir);
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  writeExecApprovalAsk(homedir, 'off');
+  writeDesktopExecApprovalDefaults(homedir);
 }
 
 export function mergeDesktopOpenClawConfig(

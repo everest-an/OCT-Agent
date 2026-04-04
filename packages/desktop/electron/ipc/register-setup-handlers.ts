@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { ipcMain, shell } from 'electron';
-import { writeExecApprovalAsk } from '../openclaw-config';
+import { writeDesktopExecApprovalDefaults } from '../openclaw-config';
 
 const OPENCLAW_INSTALL_TIMEOUT_MS = 300000;
 const OPENCLAW_STATUS_PULSE_MS = 15000;
@@ -370,7 +370,7 @@ export function registerSetupHandlers(deps: {
         await deps.runAsync(`tar -xzf "${tgzPath}" -C "${extDir}" --strip-components=1`, 30000);
         try { fs.unlinkSync(tgzPath); } catch {}
         deps.persistAwarenessPluginConfig({ enableSlot: true });
-        writeExecApprovalAsk(deps.home, 'off');
+        writeDesktopExecApprovalDefaults(deps.home);
         npmDirectOk = true;
         return { success: true, method: regFlag ? 'npm-direct-mirror' : 'npm-direct' };
       } catch {}
@@ -381,7 +381,7 @@ export function registerSetupHandlers(deps: {
       try {
         await deps.runAsync(`cd "${deps.home}" && openclaw plugins install @awareness-sdk/openclaw-memory`, 60000);
         deps.persistAwarenessPluginConfig({ enableSlot: true });
-        writeExecApprovalAsk(deps.home, 'off');
+        writeDesktopExecApprovalDefaults(deps.home);
         return { success: true, method: 'openclaw-plugin' };
       } catch {}
     }
@@ -390,13 +390,13 @@ export function registerSetupHandlers(deps: {
       if (pluginTarball && npmCli) {
         await deps.runAsync(`cd "${deps.home}" && ${process.execPath} "${npmCli}" exec --yes ${pluginTarball} install awareness-memory --force`, 60000);
         deps.persistAwarenessPluginConfig({ enableSlot: true });
-        writeExecApprovalAsk(deps.home, 'off');
+        writeDesktopExecApprovalDefaults(deps.home);
         return { success: true, method: 'clawhub-offline' };
       }
 
       await deps.runAsync(`cd "${deps.home}" && npx -y clawhub@latest install awareness-memory --force`, 60000);
       deps.persistAwarenessPluginConfig({ enableSlot: true });
-      writeExecApprovalAsk(deps.home, 'off');
+      writeDesktopExecApprovalDefaults(deps.home);
       return { success: true, method: 'clawhub' };
     } catch {
       try {
@@ -410,7 +410,7 @@ export function registerSetupHandlers(deps: {
         deps.applyAwarenessPluginConfig(config, { enableSlot: false });
         deps.sanitizeAwarenessPluginConfig(config);
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-        writeExecApprovalAsk(deps.home, 'off');
+        writeDesktopExecApprovalDefaults(deps.home);
         return { success: true, method: 'config-only', note: 'Plugin config written, will install on first run' };
       } catch (err) {
         return { success: false, error: String(err) };
@@ -505,7 +505,7 @@ export function registerSetupHandlers(deps: {
 
     const merged = deps.mergeOpenClawConfig(existing, config as Record<string, any>);
     fs.writeFileSync(configPath, JSON.stringify(merged, null, 2));
-    writeExecApprovalAsk(deps.home, 'off');
+    writeDesktopExecApprovalDefaults(deps.home);
     return { success: true };
   });
 

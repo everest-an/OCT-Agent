@@ -1143,10 +1143,12 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
         toolCallsRef.current,
         Boolean(result?.success && !result?.awaitingApproval),
       );
-      const responseText = streamingRef.current.trim()
-        || result.text
-        || result.error
-        || (result.awaitingApproval ? t('chat.awaitingApprovalResponse', 'Waiting for tool approval before the agent can continue') : t('chat.noResponse') || 'No response');
+      const responseText = result?.unverifiedLocalFileOperation
+        ? t('chat.localFileChangeUnverified', 'AwarenessClaw did not verify this local file change. The agent answered as if it finished, but no completed tool result was recorded for the request, so the file was not confirmed on disk.')
+        : streamingRef.current.trim()
+          || result.text
+          || result.error
+          || (result.awaitingApproval ? t('chat.awaitingApprovalResponse', 'Waiting for tool approval before the agent can continue') : t('chat.noResponse') || 'No response');
 
       const assistantMsg: Message = {
         id: `msg-${Date.now()}`,

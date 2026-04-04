@@ -13,7 +13,7 @@ import {
   isGatewayRunningOutput,
   getGatewayPort,
   GATEWAY_DEFAULTS,
-  writeExecApprovalAsk,
+  writeDesktopExecApprovalDefaults,
 } from './openclaw-config';
 
 const OPENCLAW_INSTALL_TIMEOUT_MS = 300000;
@@ -118,7 +118,7 @@ function persistAwarenessPluginConfig(homedir: string) {
   }
 
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  writeExecApprovalAsk(homedir, 'off');
+  writeDesktopExecApprovalDefaults(homedir);
 }
 
 

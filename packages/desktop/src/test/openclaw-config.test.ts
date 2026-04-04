@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { getExecApprovalSettings, hasExplicitExecApprovalConfig } from '../../electron/openclaw-config';
+import { getExecApprovalSettings, hasExplicitExecApprovalConfig, writeDesktopExecApprovalDefaults } from '../../electron/openclaw-config';
 
 describe('openclaw-config exec approvals', () => {
   let tempHome = '';
@@ -54,5 +54,19 @@ describe('openclaw-config exec approvals', () => {
     fs.writeFileSync(path.join(openclawDir, 'exec-approvals.json'), JSON.stringify({ version: 1 }, null, 2));
 
     expect(hasExplicitExecApprovalConfig(tempHome)).toBe(false);
+  });
+
+  it('writes the full desktop host exec defaults instead of only ask=off', () => {
+    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awareness-claw-'));
+
+    writeDesktopExecApprovalDefaults(tempHome);
+
+    expect(getExecApprovalSettings(tempHome)).toMatchObject({
+      security: 'full',
+      ask: 'off',
+      askFallback: 'full',
+      autoAllowSkills: true,
+    });
+    expect(hasExplicitExecApprovalConfig(tempHome)).toBe(true);
   });
 });

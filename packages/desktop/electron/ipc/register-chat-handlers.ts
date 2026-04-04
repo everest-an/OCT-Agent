@@ -408,6 +408,35 @@ function getHostOsLabel(platform: NodeJS.Platform): string {
   return 'Linux';
 }
 
+function looksLikePathReference(text: string): boolean {
+  return /[a-zA-Z]:\\|\\\\|\/[A-Za-z0-9._-]|\.[A-Za-z0-9]{1,8}\b/.test(text);
+}
+
+function looksLikeFilesystemMutationRequest(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  const hasMutationVerb = /(create|write|save|edit|modify|update|append|rename|move|delete|remove|overwrite|mkdir|touch|生成|写入|保存|创建|新建|编辑|修改|更新|追加|重命名|移动|删除|移除|覆盖)/i.test(trimmed);
+  if (!hasMutationVerb) return false;
+
+  const hasFilesystemContext = /(file|folder|directory|path|txt|md|json|csv|docx?|log|文件|文件夹|目录|路径|文档|文本)/i.test(trimmed);
+  return hasFilesystemContext || looksLikePathReference(trimmed);
+}
+
+function looksLikeSuccessfulFilesystemMutationResponse(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (/(did not|didn't|unable|can't|cannot|could not|failed|not able|was not|were not|没能|无法|不能|失败|未能|未成功)/i.test(trimmed)) {
+    return false;
+  }
+
+  const hasSuccessVerb = /(saved|created|wrote|written|updated|edited|renamed|deleted|removed|moved|overwritten|placed|put|保存|创建|写入|写好|写好了|更新|修改|重命名|删除|移除|移动|放在|放到|已保存|已创建|已写入|已更新)/i.test(trimmed);
+  if (!hasSuccessVerb) return false;
+
+  const hasFilesystemContext = /(file|folder|directory|path|txt|md|json|csv|docx?|log|文件|文件夹|目录|路径|文档|文本)/i.test(trimmed);
+  return hasFilesystemContext || looksLikePathReference(trimmed);
+}
+
 export function registerChatHandlers(deps: {
   sendToRenderer: (channel: string, payload: any) => void;
   ensureGatewayRunning: () => Promise<{ ok: boolean; error?: string }>;
@@ -627,6 +656,7 @@ ${message}`;
       let sawAssistantTextDelta = false;
       let sawAssistantNonTextDelta = false;
       let sawToolBlocks = false;
+      let sawCompletedToolResult = false;
       let sawThinkingBlocks = false;
       let sawFinalState = false;
       let finalAssistantText = '';
@@ -661,6 +691,7 @@ ${message}`;
 
           if (block.type === 'tool_result') {
             sawToolBlocks = true;
+            sawCompletedToolResult = true;
             const toolId = block.tool_use_id || '';
             const toolName = toolNamesById.get(toolId) || block.name || 'tool';
             send('chat:event', {
@@ -710,6 +741,7 @@ ${message}`;
         if (sessionKey && sessionKey !== sid) return;
 
         if (normalizedAgentEvent.stream === 'tool') {
+          sawToolBlocks = true;
           const toolId = normalizedAgentEvent.toolCallId || '';
           const toolName = normalizedAgentEvent.toolName || (toolId ? toolNamesById.get(toolId) : undefined) || 'tool';
           if (toolId) toolNamesById.set(toolId, toolName);
@@ -751,6 +783,7 @@ ${message}`;
           }
 
           if (normalizedAgentEvent.phase === 'result') {
+            sawCompletedToolResult = true;
             send('chat:status', {
               type: 'tool_update',
               toolId,
@@ -908,6 +941,19 @@ ${message}`;
       if (agentToolEventHandler) ws.removeListener('event:agent:tool', agentToolEventHandler);
 
       const text = fullResponseText.trim() || finalAssistantText || '';
+      const shouldFlagUnverifiedLocalFileOperation = looksLikeFilesystemMutationRequest(message)
+        && looksLikeSuccessfulFilesystemMutationResponse(text)
+        && !pendingApprovalRequestId
+        && !sawCompletedToolResult;
+
+      if (shouldFlagUnverifiedLocalFileOperation) {
+        console.warn('[chat] Assistant claimed a local filesystem mutation succeeded without any completed tool result', {
+          sessionId: sid,
+          responsePreview: text.slice(0, 200),
+          sawToolBlocks,
+          sawCompletedToolResult,
+        });
+      }
       send('chat:stream-end', {});
 
       if (!text && !pendingApprovalRequestId) {
@@ -947,7 +993,7 @@ ${message}`;
         }
       };
 
-      if (text) {
+      if (text && !shouldFlagUnverifiedLocalFileOperation) {
         const memoryToolId = `memory-save-${Date.now()}`;
         send('chat:status', {
           type: 'tool_call',
@@ -1000,7 +1046,12 @@ ${message}`;
         };
       }
 
-      return { success: true, text: text || 'No response', sessionId: sid };
+      return {
+        success: true,
+        text: text || 'No response',
+        sessionId: sid,
+        unverifiedLocalFileOperation: shouldFlagUnverifiedLocalFileOperation || undefined,
+      };
     } catch (err: any) {
       if (ws) {
         if (chatEventHandler) ws.removeListener('event:chat', chatEventHandler);
@@ -1133,7 +1184,20 @@ async function chatSendViaCli(
       flushRemainder(true);
       send('chat:stream-end', {});
       const clean = collectedLines.join('\n').trim();
-      resolve({ success: true, text: clean || 'No response', sessionId: sid });
+      const shouldFlagUnverifiedLocalFileOperation = looksLikeFilesystemMutationRequest(requestMessage)
+        && looksLikeSuccessfulFilesystemMutationResponse(clean);
+      if (shouldFlagUnverifiedLocalFileOperation) {
+        console.warn('[chat] CLI fallback produced an unverified local filesystem success claim', {
+          sessionId: sid,
+          responsePreview: clean.slice(0, 200),
+        });
+      }
+      resolve({
+        success: true,
+        text: clean || 'No response',
+        sessionId: sid,
+        unverifiedLocalFileOperation: shouldFlagUnverifiedLocalFileOperation || undefined,
+      });
     });
     child.on('error', (err) => resolve({ success: false, error: String(err), sessionId: sid }));
     setTimeout(() => {

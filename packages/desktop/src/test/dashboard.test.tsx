@@ -139,6 +139,37 @@ describe('Dashboard (Chat)', () => {
     });
   });
 
+  it('replaces streamed local file success claims when the result is marked unverified', async () => {
+    let streamCallback: ((chunk: string) => void) | null = null;
+    const api = window.electronAPI as any;
+    api.onChatStream = (cb: any) => { streamCallback = cb; };
+    api.chatSend = vi.fn(async () => {
+      streamCallback?.('已保存到 E:\\新建文件夹2\\我是谁.txt');
+      return {
+        success: true,
+        text: '已保存到 E:\\新建文件夹2\\我是谁.txt',
+        sessionId: 'test-session',
+        unverifiedLocalFileOperation: true,
+      };
+    });
+
+    await act(async () => { render(<Dashboard />); });
+
+    const textarea = screen.getByPlaceholderText(/输入消息/) as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: '在 E:\\新建文件夹2 里写一个 txt 文件' } });
+    });
+
+    const buttons = screen.getAllByRole('button');
+    const sendBtn = buttons[buttons.length - 1];
+    await act(async () => { fireEvent.click(sendBtn); });
+
+    await waitFor(() => {
+      expect(screen.getByText(/AwarenessClaw 没有验证这次本地文件修改/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/已保存到 E:\\新建文件夹2\\我是谁.txt/)).not.toBeInTheDocument();
+  });
+
   it('passes the selected project folder to chatSend', async () => {
     const api = window.electronAPI as any;
     api.selectDirectory = vi.fn().mockResolvedValue({ directoryPath: 'E:\\Projects\\DemoApp' });

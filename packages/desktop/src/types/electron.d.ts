@@ -19,7 +19,7 @@ export interface ElectronAPI {
   onSetupDaemonStatus?: (callback: (status: { key: string; detail?: string }) => void) => (() => void);
   saveConfig: (config: Record<string, unknown>) => Promise<{ success: boolean }>;
   openAuthUrl: (url: string) => Promise<void>;
-  chatSend?: (message: string, sessionId?: string, options?: { thinkingLevel?: string; model?: string; files?: string[]; workspacePath?: string; agentId?: string }) => Promise<{ success: boolean; text?: string; error?: string; sessionId?: string; awaitingApproval?: boolean; approvalRequestId?: string; approvalCommand?: string; approvalDetail?: string }>;
+  chatSend?: (message: string, sessionId?: string, options?: { thinkingLevel?: string; model?: string; files?: string[]; workspacePath?: string; agentId?: string }) => Promise<{ success: boolean; text?: string; error?: string; sessionId?: string; awaitingApproval?: boolean; approvalRequestId?: string; approvalCommand?: string; approvalDetail?: string; unverifiedLocalFileOperation?: boolean }>;
   chatAbort?: (sessionId?: string) => Promise<{ success: boolean; error?: string }>;
   chatLoadHistory?: (sessionId: string) => Promise<{ success: boolean; messages?: unknown[]; error?: string }>;
   chatApprove?: (sessionId: string, approvalRequestId: string) => Promise<{ success: boolean; command?: string; error?: string }>;
