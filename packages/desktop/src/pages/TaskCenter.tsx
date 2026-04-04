@@ -151,7 +151,7 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: any) =>
   // Listen for sub-agent status updates from Gateway
   useEffect(() => {
     const unsub = window.electronAPI?.onTaskStatusUpdate?.((data) => {
-      if (!data?.runId) return;
+      if (!data) return;
 
       const eventMap: Record<string, 'started' | 'completed' | 'failed' | 'timeout'> = {
         'agent.started': 'started',
@@ -163,12 +163,43 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: any) =>
       const mapped = eventMap[data.event];
       if (!mapped) return;
 
-      // Check if status indicates failure
       const finalEvent = data.status === 'failed' ? 'failed'
         : data.status === 'timeout' ? 'timeout'
         : mapped;
 
-      setTasks((prev) => applySubAgentEvent(prev, data.runId, finalEvent, data.result || undefined));
+      setTasks((prev) => {
+        // 1. Try matching by runId
+        let updated = data.runId ? applySubAgentEvent(prev, data.runId, finalEvent, data.result || undefined) : prev;
+        if (updated !== prev) return updated;
+
+        // 2. Try matching by sessionKey
+        if (data.sessionKey) {
+          const matchIdx = prev.findIndex((t) =>
+            (t.status === 'running' || t.status === 'queued') && t.sessionKey === data.sessionKey
+          );
+          if (matchIdx >= 0) {
+            return updateTask(prev, prev[matchIdx].id, {
+              status: finalEvent === 'completed' ? 'done' : finalEvent === 'started' ? 'running' : 'failed',
+              ...(finalEvent !== 'started' ? { completedAt: new Date().toISOString() } : {}),
+              ...(data.result ? (finalEvent === 'completed' ? { result: data.result } : { error: data.result }) : {}),
+            });
+          }
+        }
+
+        // 3. Fallback: if agent.finished and we have exactly 1 running task, it's likely that one
+        if (finalEvent === 'completed' || finalEvent === 'failed' || finalEvent === 'timeout') {
+          const runningTasks = prev.filter((t) => t.status === 'running' || t.status === 'queued');
+          if (runningTasks.length === 1) {
+            return updateTask(prev, runningTasks[0].id, {
+              status: finalEvent === 'completed' ? 'done' : 'failed',
+              completedAt: new Date().toISOString(),
+              ...(data.result ? (finalEvent === 'completed' ? { result: data.result } : { error: data.result }) : {}),
+            });
+          }
+        }
+
+        return prev;
+      });
     });
     return unsub;
   }, []);

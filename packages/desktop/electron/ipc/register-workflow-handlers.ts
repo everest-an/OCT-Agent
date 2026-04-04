@@ -394,12 +394,13 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
       steps: Array<{ id: string; type: string; approval?: boolean }>;
     }> = [];
 
-    // Builtin templates (shipped with the app)
-    // Try multiple possible paths (dev vs packaged)
+    // Builtin templates — try multiple paths (dev / packaged / asar)
     const possibleBuiltinDirs = [
-      path.join(__dirname, '..', 'workflows'),
-      path.join(__dirname, '..', '..', 'workflows'),
-      path.join(__dirname, 'workflows'),
+      path.join(__dirname, '..', 'workflows'),           // dev: dist-electron/../workflows
+      path.join(__dirname, '..', '..', 'workflows'),     // packaged: app.asar/dist-electron/../../workflows
+      path.join(__dirname, 'workflows'),                  // adjacent
+      path.join(process.resourcesPath || '', 'workflows'), // Electron resources dir
+      path.join(home, '.openclaw', 'awarenessclaw', 'builtin-workflows'), // user-level copy
     ];
     for (const builtinDir of possibleBuiltinDirs) {
       if (!fs.existsSync(builtinDir)) continue;

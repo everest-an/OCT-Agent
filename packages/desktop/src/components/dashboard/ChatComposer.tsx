@@ -151,6 +151,48 @@ export function ChatComposer({
       <div className="px-4 py-3">
         <div className="max-w-3xl mx-auto">
           <div className="relative bg-slate-800 rounded-2xl border border-slate-700/60 focus-within:border-brand-500/50 focus-within:ring-1 focus-within:ring-brand-500/20 transition-all">
+            {/* @agent mention autocomplete popup */}
+            {(() => {
+              // Detect if user just typed @ at the start or after a space
+              const mentionMatch = input.match(/(?:^|\s)@(\S*)$/);
+              const showMentionPopup = mentionMatch && agents.length > 1;
+              const mentionFilter = mentionMatch?.[1]?.toLowerCase() || '';
+              const filteredAgents = showMentionPopup
+                ? agents.filter((a) => a.id !== 'main' && (!mentionFilter || a.id.toLowerCase().includes(mentionFilter) || a.name.toLowerCase().includes(mentionFilter)))
+                : [];
+
+              if (filteredAgents.length === 0) return null;
+
+              return (
+                <div className="absolute bottom-full left-4 mb-1 w-56 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden z-20 animate-in fade-in slide-in-from-bottom-2">
+                  <div className="px-3 py-1.5 text-[10px] text-slate-500 border-b border-slate-800">
+                    {t('chat.mention.hint', 'Type @agent to delegate a task')}
+                  </div>
+                  {filteredAgents.map((agent) => (
+                    <button
+                      key={agent.id}
+                      onClick={() => {
+                        // Replace the @partial with @agentId + space
+                        const newInput = input.replace(/(?:^|\s)@\S*$/, (match) => {
+                          const prefix = match.startsWith(' ') ? ' ' : '';
+                          return `${prefix}@${agent.id} `;
+                        });
+                        onInputChange(newInput);
+                        textareaRef.current?.focus();
+                      }}
+                      className="w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-800 transition-colors text-left"
+                    >
+                      <span className="text-base">{agent.emoji || '🤖'}</span>
+                      <div>
+                        <span className="text-xs text-slate-200 font-medium">{agent.name}</span>
+                        <span className="text-[10px] text-slate-500 ml-1.5">@{agent.id}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
+
             <textarea
               ref={textareaRef}
               value={input}

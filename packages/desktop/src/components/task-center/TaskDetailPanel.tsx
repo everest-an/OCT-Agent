@@ -3,7 +3,9 @@
  */
 
 import { useState, useEffect } from 'react';
-import { X, Loader2, Clock, Bot, AlertTriangle, CheckCircle2, RotateCw } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { X, Loader2, Clock, Bot, AlertTriangle, CheckCircle2, RotateCw, ChevronDown } from 'lucide-react';
 import type { Task } from '../../lib/task-store';
 
 interface TaskDetailPanelProps {
@@ -12,6 +14,38 @@ interface TaskDetailPanelProps {
   onClose: () => void;
   onRetry?: () => void;
   onCancel?: () => void;
+}
+
+/**
+ * Extract readable text from OpenClaw message content.
+ * content can be: string, or array of {type:"text",text:"..."} blocks.
+ * Filters out internal context markers (<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>).
+ */
+function extractMessageText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((block: any) => {
+      if (typeof block === 'string') return block;
+      if (block?.type === 'text' && typeof block.text === 'string') return block.text;
+      if (block?.type === 'thinking' && typeof block.thinking === 'string') return `> *Thinking: ${block.thinking}*`;
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n')
+    // Filter internal context noise
+    .replace(/<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>[\s\S]*?(?:<<<END_OPENCLAW_INTERNAL_CONTEXT>>>|$)/g, '')
+    .replace(/\[Internal task completion event\][\s\S]*?(?=\n\n|\n[A-Z]|$)/g, '')
+    .trim();
+}
+
+/** Check if message is internal OpenClaw plumbing (not user-visible). */
+function isInternalMessage(msg: any): boolean {
+  const text = extractMessageText(msg.content);
+  if (!text) return true;
+  if (text.startsWith('<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>')) return true;
+  if (text.includes('[Internal task completion event]') && text.length < 200) return true;
+  return false;
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
@@ -162,25 +196,29 @@ export default function TaskDetailPanel({ t, task, onClose, onRetry, onCancel }:
 
         {history && history.length > 0 && (
           <div className="space-y-2">
-            {history.map((msg: any, i: number) => (
-              <div key={i} className={`rounded-lg px-3 py-2 text-xs ${
-                msg.role === 'user' ? 'bg-sky-950/20 border border-sky-900/30' : 'bg-slate-800/50 border border-slate-700/30'
-              }`}>
-                <div className="flex items-center gap-1.5 mb-1">
-                  {msg.role === 'user' ? (
-                    <span className="text-[10px] text-sky-400 font-medium">User</span>
-                  ) : (
-                    <Bot size={10} className="text-slate-400" />
-                  )}
-                  <span className="text-[10px] text-slate-500 font-medium">
-                    {msg.role === 'assistant' ? 'Agent' : ''}
-                  </span>
+            {history.filter((msg: any) => !isInternalMessage(msg)).map((msg: any, i: number) => {
+              const text = extractMessageText(msg.content);
+              if (!text) return null;
+              return (
+                <div key={i} className={`rounded-lg px-3 py-2.5 text-xs ${
+                  msg.role === 'user' ? 'bg-sky-950/20 border border-sky-900/30' : 'bg-slate-800/50 border border-slate-700/30'
+                }`}>
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    {msg.role === 'user' ? (
+                      <span className="text-[10px] text-sky-400 font-medium">User</span>
+                    ) : (
+                      <Bot size={10} className="text-slate-400" />
+                    )}
+                    <span className="text-[10px] text-slate-500 font-medium">
+                      {msg.role === 'assistant' ? 'Agent' : ''}
+                    </span>
+                  </div>
+                  <div className="text-slate-300 text-xs leading-relaxed prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:my-1 prose-code:text-sky-300">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+                  </div>
                 </div>
-                <p className="text-slate-300 whitespace-pre-wrap line-clamp-6">
-                  {typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)}
-                </p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
