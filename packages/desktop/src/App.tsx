@@ -22,6 +22,7 @@ function estimateStartupProgress(message: string) {
   const text = message.toLowerCase();
   if (text.includes('checking')) return 10;
   if (text.includes('repairing')) return 45;
+  if (text.includes('gateway access')) return 96;
   if (text.includes('everything looks good')) return 85;
   if (text.includes('finalizing')) return 92;
   return 18;
@@ -37,6 +38,9 @@ function translateStartupMessage(message: string, t: (key: string, fallback?: st
     'Everything looks good. Finalizing startup...': 'startup.everythingLooksGood',
     'Finalizing startup...': 'startup.finalizing',
     'Local service is still warming up...': 'startup.localServiceWarming',
+    'Preparing local Gateway access...': 'startup.preparingGatewayAccess',
+    'Approving local Gateway device access...': 'startup.approvingGatewayAccess',
+    'Local Gateway access is ready.': 'startup.gatewayAccessReady',
   };
 
   const mappedKey = exactMap[message];
@@ -110,12 +114,11 @@ export default function App() {
     setStartupProgress(10);
 
     const recentSetupCompletedAt = Number(localStorage.getItem(SETUP_COMPLETED_AT_KEY) || '0');
-    if (recentSetupCompletedAt > 0 && Date.now() - recentSetupCompletedAt < POST_SETUP_RUNTIME_GRACE_MS) {
-      localStorage.removeItem(SETUP_COMPLETED_AT_KEY);
+    const recentlyCompletedSetup = recentSetupCompletedAt > 0
+      && Date.now() - recentSetupCompletedAt < POST_SETUP_RUNTIME_GRACE_MS;
+    if (recentlyCompletedSetup) {
       setStartupMessage('Finishing setup...');
-      setStartupProgress(100);
-      setRuntimeReady(true);
-      return;
+      setStartupProgress(18);
     }
 
     const ensureRuntime = async () => {
@@ -144,6 +147,7 @@ export default function App() {
       }
 
       if (!cancelled) {
+        localStorage.removeItem(SETUP_COMPLETED_AT_KEY);
         setStartupMessage('Startup complete');
         setStartupProgress(100);
         setRuntimeReady(true);

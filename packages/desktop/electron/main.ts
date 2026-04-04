@@ -696,7 +696,7 @@ function discoverOpenClawChannels(): void {
  * Get or create a persistent Gateway WS client for channel session queries.
  * Lazy-connects on first use, auto-reconnects on disconnect.
  */
-async function getGatewayWs(): Promise<GatewayClient> {
+async function getGatewayWs(options?: { onPairingRepairStart?: () => void; onPairingRepair?: () => void }): Promise<GatewayClient> {
   if (!gatewayWsClient) {
     gatewayWsClient = new GatewayClient();
 
@@ -718,6 +718,8 @@ async function getGatewayWs(): Promise<GatewayClient> {
       const message = err?.message || '';
       if (!/pairing required/i.test(message)) throw err;
 
+      options?.onPairingRepairStart?.();
+
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('chat:status', {
           type: 'gateway',
@@ -730,10 +732,37 @@ async function getGatewayWs(): Promise<GatewayClient> {
         throw err;
       }
 
+      options?.onPairingRepair?.();
       await gatewayWsClient.connect();
     }
   }
   return gatewayWsClient;
+}
+
+async function ensureGatewayAccessForStartup(
+  sendStatus: (message: string, progress: number) => void,
+): Promise<{ ok: boolean; repaired?: boolean; message?: string; error?: string }> {
+  let repaired = false;
+
+  try {
+    await getGatewayWs({
+      onPairingRepairStart: () => sendStatus('Approving local Gateway device access...', 97),
+      onPairingRepair: () => { repaired = true; },
+    });
+
+    return {
+      ok: true,
+      repaired,
+      message: repaired ? 'Local Gateway access was approved automatically.' : 'Local Gateway access is ready.',
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      error: repaired
+        ? 'Local Gateway access was approved, but reconnect is still finishing. The app will retry automatically when you open chat.'
+        : (err?.message || 'Could not prepare local Gateway access automatically.'),
+    };
+  }
 }
 
 /** Channel icon lookup for known channels. */
@@ -993,6 +1022,7 @@ registerRuntimeHealthHandlers({
   sendSetupDaemonStatus,
   sleep,
   recentDaemonStartup: () => !!daemonStartupPromise || (Date.now() - daemonStartupLastKickoff < 180000),
+  ensureGatewayAccess: ensureGatewayAccessForStartup,
   getMainWindow: () => mainWindow,
 });
 

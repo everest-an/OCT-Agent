@@ -113,6 +113,7 @@
 - [x] **Windows Chat `pairing required` 修复**：桌面端 Gateway WebSocket 改为使用 OpenClaw control UI 客户端标识和 loopback Origin；若命中本地 scope upgrade 配对请求，主进程自动执行 `openclaw devices approve --latest` 后重连，避免用户手动修复（2026-04-03）
 - [x] **Windows 本地 daemon 启动兜底修复**：桌面端改用 `npx.cmd` 并在缺失时回退到 bundled npm CLI，避免 Electron 里用 bare `npx` 触发 `ENOENT` 导致聊天前本地服务拉不起来（2026-04-03）
 - [x] **Windows Gateway token_missing 修复（BOM 容错）**：openclaw.json 带 UTF-8 BOM 时，桌面端读取配置会 JSON.parse 失败导致 token 丢失；主进程改为 BOM 容错 JSON 读取，Gateway WS 握手恢复带 token 鉴权（2026-04-03）
+- [x] **重装后首启运行时预检收口**：首启/重装后不再跳过 startupEnsureRuntime；启动阶段会继续收敛 OpenClaw/Gateway/本地设备授权，避免把 `ENOENT` / `pairing required` 留到用户第一条聊天消息里（2026-04-05）
 
 ---
 

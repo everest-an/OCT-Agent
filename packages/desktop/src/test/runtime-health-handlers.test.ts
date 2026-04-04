@@ -55,6 +55,7 @@ describe('registerRuntimeHealthHandlers', () => {
       sendSetupDaemonStatus: vi.fn(),
       sleep: vi.fn(async () => undefined),
       recentDaemonStartup: () => false,
+      ensureGatewayAccess: vi.fn(async () => ({ ok: true })),
       getMainWindow: () => ({ isDestroyed: () => false, webContents: { send } }),
     });
 
@@ -63,5 +64,48 @@ describe('registerRuntimeHealthHandlers', () => {
 
     expect(result).toMatchObject({ ok: true, needsSetup: false });
     expect(runFix.mock.calls.map(([checkId]) => checkId)).toEqual(['daemon-running', 'gateway-running']);
+  });
+
+  it('prepares gateway access during startup when the gateway is already healthy', async () => {
+    const runChecks = vi.fn()
+      .mockResolvedValueOnce({
+        checks: [
+          { id: 'daemon-running', label: 'Local Daemon', status: 'pass', fixable: 'none', message: 'Running' },
+          { id: 'gateway-running', label: 'Gateway', status: 'pass', fixable: 'none', message: 'Running' },
+          { id: 'plugin-installed', label: 'Awareness plugin', status: 'pass', fixable: 'none', message: 'Installed' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        checks: [
+          { id: 'daemon-running', label: 'Local Daemon', status: 'pass', fixable: 'none', message: 'Running' },
+          { id: 'gateway-running', label: 'Gateway', status: 'pass', fixable: 'none', message: 'Running' },
+          { id: 'plugin-installed', label: 'Awareness plugin', status: 'pass', fixable: 'none', message: 'Installed' },
+        ],
+      });
+    const ensureGatewayAccess = vi.fn(async () => ({ ok: true, repaired: true, message: 'Local Gateway access was approved automatically.' }));
+
+    registerRuntimeHealthHandlers({
+      home: 'C:/Users/test',
+      app: {},
+      dirname: 'C:/test',
+      safeShellExec: vi.fn(() => null),
+      safeShellExecAsync: vi.fn(async () => null),
+      doctor: { runChecks, runFix: vi.fn() },
+      computeSha256: vi.fn(() => 'hash'),
+      checkDaemonHealth: vi.fn(async () => true),
+      waitForLocalDaemonReady: vi.fn(async () => true),
+      sendSetupDaemonStatus: vi.fn(),
+      sleep: vi.fn(async () => undefined),
+      recentDaemonStartup: () => false,
+      ensureGatewayAccess,
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: vi.fn() } }),
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['app:startup-ensure-runtime']();
+
+    expect(ensureGatewayAccess).toHaveBeenCalledTimes(1);
+    expect(result.fixed).toContain('Local Gateway access was approved automatically.');
+    expect(result).toMatchObject({ ok: true, needsSetup: false });
   });
 });

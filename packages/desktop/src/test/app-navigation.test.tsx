@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import App from '../App';
 
@@ -33,6 +33,22 @@ describe('App navigation', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /Models/i })).toBeInTheDocument();
+    });
+  });
+
+  it('still runs startup runtime checks immediately after setup completes', async () => {
+    const startupEnsureRuntime = vi.fn().mockResolvedValue({ ok: true, fixed: [], warnings: [] });
+    Object.assign(window.electronAPI || {}, { startupEnsureRuntime });
+    localStorage.setItem('awareness-claw-setup-completed-at', String(Date.now()));
+
+    await act(async () => { render(<App />); });
+
+    await waitFor(() => {
+      expect(startupEnsureRuntime).toHaveBeenCalledTimes(1);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Chat/i })).toBeInTheDocument();
     });
   });
 });

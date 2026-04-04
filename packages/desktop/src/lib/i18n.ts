@@ -82,6 +82,9 @@ const en: Record<string, string> = {
   'startup.repairingCheck': 'Repairing {0}...',
   'startup.finalizing': 'Finalizing startup...',
   'startup.localServiceWarming': 'Local service is still warming up...',
+  'startup.preparingGatewayAccess': 'Preparing local Gateway access...',
+  'startup.approvingGatewayAccess': 'Approving local Gateway device access...',
+  'startup.gatewayAccessReady': 'Local Gateway access is ready.',
 
   // Chat
   'chat.newSession': 'New Chat',
@@ -1214,6 +1217,9 @@ const zh: Record<string, string> = {
   'startup.repairingCheck': '正在修复 {0}...',
   'startup.finalizing': '正在完成启动...',
   'startup.localServiceWarming': '本地服务仍在预热中...',
+  'startup.preparingGatewayAccess': '正在准备本地 Gateway 访问...',
+  'startup.approvingGatewayAccess': '正在批准本机 Gateway 访问权限...',
+  'startup.gatewayAccessReady': '本地 Gateway 访问已就绪。',
   // Sidebar
   'nav.chat': '聊天',
   'nav.memory': '记忆',

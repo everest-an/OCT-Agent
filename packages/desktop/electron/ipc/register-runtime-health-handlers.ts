@@ -59,6 +59,7 @@ export function registerRuntimeHealthHandlers(deps: {
   sendSetupDaemonStatus: (key: string, detail?: string) => void;
   sleep: (ms: number) => Promise<void>;
   recentDaemonStartup: () => boolean;
+  ensureGatewayAccess?: (sendStatus: (message: string, progress: number) => void) => Promise<{ ok: boolean; repaired?: boolean; message?: string; error?: string }>;
   getMainWindow: () => any;
 }) {
   const startupRepairPriority = new Map([
@@ -365,6 +366,21 @@ export function registerRuntimeHealthHandlers(deps: {
     const residualWarnings = finalReport.checks
       .filter((check: any) => check.status === 'warn')
       .map((check: any) => check.message);
+
+    const gatewayRunning = finalReport.checks.find((check: any) => check.id === 'gateway-running' && check.status === 'pass');
+    if (!blocking && gatewayRunning && deps.ensureGatewayAccess) {
+      sendStartupStatus('Preparing local Gateway access...', 96);
+      try {
+        const gatewayAccess = await deps.ensureGatewayAccess(sendStartupStatus);
+        if (gatewayAccess.ok) {
+          if (gatewayAccess.repaired && gatewayAccess.message) fixed.push(gatewayAccess.message);
+        } else if (gatewayAccess.error) {
+          warnings.push(gatewayAccess.error);
+        }
+      } catch (error: any) {
+        warnings.push(error?.message || 'Could not prepare local Gateway access automatically.');
+      }
+    }
 
     return {
       ok: !blocking,
