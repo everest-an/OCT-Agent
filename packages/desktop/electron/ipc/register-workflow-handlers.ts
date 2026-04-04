@@ -177,17 +177,52 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
     return { success: true, gatewayRestarted, config: readSubagentConfig(home) };
   });
 
-  /** Check if Lobster plugin is installed. */
+  /** Check if Lobster plugin is installed. Fast file check first, CLI fallback. */
   ipcMain.handle('workflow:check-lobster', async () => {
-    // Cross-platform: openclaw plugins list works on all platforms
-    const output = await safeShellExecAsync('openclaw plugins list 2>&1', 15000);
-    if (!output) return { installed: false, enabled: false, error: 'Could not check plugins' };
+    // 1. Fast: check common file paths (no CLI overhead)
+    const possiblePaths = [
+      path.join(home, '.npm-global', 'lib', 'node_modules', 'openclaw', 'dist', 'extensions', 'lobster', 'index.js'),
+      path.join(home, '.openclaw', 'extensions', 'lobster', 'index.js'),
+      path.join(home, '.openclaw', 'extensions', 'lobster', 'index.ts'),
+      // Windows: %APPDATA%/npm/node_modules/openclaw/dist/extensions/lobster/index.js
+      path.join(process.env.APPDATA || '', 'npm', 'node_modules', 'openclaw', 'dist', 'extensions', 'lobster', 'index.js'),
+    ];
+    for (const p of possiblePaths) {
+      if (p && fs.existsSync(p)) {
+        return { installed: true, enabled: true };
+      }
+    }
 
-    const lines = output.toLowerCase();
-    const hasLobster = lines.includes('lobster');
-    // "lobster" + "loaded" or "enabled" on same line
-    const isEnabled = hasLobster && (lines.includes('loaded') || lines.includes('enabled'));
-    return { installed: hasLobster, enabled: isEnabled };
+    // 2. Try finding openclaw install path dynamically
+    try {
+      const whichOutput = await safeShellExecAsync(
+        process.platform === 'win32' ? 'where openclaw 2>nul' : 'which openclaw 2>/dev/null',
+        5000,
+      );
+      if (whichOutput) {
+        const openclawBin = whichOutput.trim().split('\n')[0];
+        // Resolve symlinks to find actual install dir
+        const resolved = fs.realpathSync(openclawBin);
+        const distDir = path.dirname(path.dirname(resolved)); // up from bin/openclaw
+        const lobsterPath = path.join(distDir, 'extensions', 'lobster', 'index.js');
+        if (fs.existsSync(lobsterPath)) {
+          return { installed: true, enabled: true };
+        }
+      }
+    } catch { /* fallback to CLI */ }
+
+    // 3. Slowest: CLI check (15s+ due to plugin loading)
+    try {
+      const output = await safeShellExecAsync('openclaw plugins list 2>&1', 20000);
+      if (output) {
+        const lower = output.toLowerCase();
+        const hasLobster = lower.includes('lobster');
+        const isEnabled = hasLobster && (lower.includes('loaded') || lower.includes('enabled'));
+        return { installed: hasLobster, enabled: isEnabled };
+      }
+    } catch { /* timeout or error */ }
+
+    return { installed: false, enabled: false };
   });
 
   /** Install Lobster plugin. Returns detailed status for UI feedback. */

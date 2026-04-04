@@ -4,7 +4,7 @@
  */
 
 import { useState } from 'react';
-import { Zap, ChevronRight, FileText } from 'lucide-react';
+import { Zap, ChevronRight, FileText, Loader2 } from 'lucide-react';
 
 interface WorkflowInfo {
   id: string;
@@ -75,16 +75,22 @@ export default function WorkflowList({
   if (!lobsterInstalled) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-center space-y-3 max-w-sm">
+        <div className="text-center space-y-4 max-w-sm">
           <div className="text-3xl">🦞</div>
           <p className="text-sm text-slate-400">{t('taskCenter.lobster.notInstalled')}</p>
           <button
             onClick={onInstallLobster}
             disabled={lobsterInstalling}
-            className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium transition-colors disabled:opacity-50"
+            className="px-5 py-2.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2 mx-auto"
           >
+            {lobsterInstalling && <Loader2 size={14} className="animate-spin" />}
             {lobsterInstalling ? t('taskCenter.lobster.installing') : t('taskCenter.lobster.install')}
           </button>
+          {lobsterInstalling && (
+            <p className="text-xs text-slate-500 animate-pulse">
+              {t('taskCenter.lobster.installHint', 'This may take a minute. OpenClaw is loading plugins...')}
+            </p>
+          )}
         </div>
       </div>
     );

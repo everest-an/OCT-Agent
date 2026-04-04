@@ -698,6 +698,47 @@ describe('Dashboard (Chat)', () => {
     });
   });
 
+  it('stops the live streaming cursor and trace spinner after stream end arrives', async () => {
+    let streamCallback: ((chunk: string) => void) | null = null;
+    let streamEndCallback: (() => void) | null = null;
+    let resolveChat: ((value: any) => void) | null = null;
+    const api = window.electronAPI as any;
+    api.onChatStream = (cb: any) => { streamCallback = cb; };
+    api.onChatStreamEnd = (cb: any) => { streamEndCallback = cb; };
+    api.chatSend = vi.fn(() => new Promise((resolve) => {
+      resolveChat = resolve;
+    }));
+
+    await act(async () => { render(<Dashboard />); });
+
+    const textarea = screen.getByPlaceholderText(/输入消息/) as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'stream then finish' } });
+    });
+
+    const buttons = screen.getAllByRole('button');
+    const sendBtn = buttons[buttons.length - 1];
+    await act(async () => { fireEvent.click(sendBtn); });
+
+    await act(async () => {
+      streamCallback?.('partial answer');
+    });
+
+    expect(screen.getByText('▊')).toBeInTheDocument();
+    expect(screen.getAllByText(/Assistant streaming|流式输出/).length).toBeGreaterThan(0);
+
+    await act(async () => {
+      streamEndCallback?.();
+    });
+
+    expect(screen.queryByText('▊')).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Assistant stream complete|流已完成/).length).toBeGreaterThan(0);
+
+    await act(async () => {
+      resolveChat?.({ success: true, text: 'partial answer', sessionId: 'test-session' });
+    });
+  });
+
   it('collapses repeated generating status updates into a single trace entry', async () => {
     let statusCallback: ((status: any) => void) | null = null;
     const api = window.electronAPI as any;

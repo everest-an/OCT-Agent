@@ -768,6 +768,65 @@ describe('registerChatHandlers', () => {
     );
   });
 
+  it('forwards structured tool and thinking blocks that only appear in the final chat event', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', thinking: 'search first, summarize after' },
+              { type: 'tool_use', id: 'tool-final', name: 'tavily_search', input: { query: 'today news' } },
+              { type: 'tool_result', tool_use_id: 'tool-final', content: [{ type: 'text', text: 'news result block' }] },
+              { type: 'text', text: 'done' },
+            ],
+          },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    const sendToRenderer = vi.fn();
+
+    registerChatHandlers({
+      sendToRenderer,
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, 'hello', 'test-session', {});
+
+    expect(result).toMatchObject({ success: true, text: 'done', sessionId: 'test-session' });
+    expect(sendToRenderer).toHaveBeenCalledWith('chat:thinking', 'search first, summarize after');
+    expect(sendToRenderer).toHaveBeenCalledWith(
+      'chat:event',
+      expect.objectContaining({
+        stream: 'tool',
+        phase: 'start',
+        toolCallId: 'tool-final',
+        toolName: 'tavily_search',
+      }),
+    );
+    expect(sendToRenderer).toHaveBeenCalledWith(
+      'chat:status',
+      expect.objectContaining({
+        type: 'tool_update',
+        toolId: 'tool-final',
+        detail: expect.stringContaining('news result block'),
+      }),
+    );
+  });
+
   it('normalizes real event:agent payloads with tool.call and tool.output into chat events', async () => {
     const ws = new FakeGatewayClient();
     ws.chatSend = vi.fn(async () => {

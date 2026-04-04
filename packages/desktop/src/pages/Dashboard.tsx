@@ -441,6 +441,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
   const [activeToolCalls, setActiveToolCalls] = useState<ToolCallInfo[]>([]);
   const toolCallsRef = useRef<ToolCallInfo[]>([]);
   const [streamingContent, setStreamingContent] = useState('');
+  const [streamClosed, setStreamClosed] = useState(false);
   const streamingRef = useRef('');
   const streamChunkCountRef = useRef(0);
   const activeRunRef = useRef(false);
@@ -645,6 +646,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
     // Stream text chunks from agent response
     api.onChatStream?.((chunk: string) => {
       if (!activeRunRef.current) return;
+      setStreamClosed(false);
       streamingRef.current += chunk;
       streamChunkCountRef.current += 1;
       setStreamingContent(streamingRef.current);
@@ -659,6 +661,20 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
           .replace('{1}', String(streamingRef.current.length)),
         mergeKey: 'live-stream',
       });
+    });
+
+    api.onChatStreamEnd?.(() => {
+      if (!activeRunRef.current) return;
+      setStreamClosed(true);
+      recordTraceEvent({
+        kind: 'status',
+        label: t('chat.trace.streamComplete', 'Assistant stream complete'),
+        detail: t('chat.trace.streamingDetail', '{0} chunk(s), {1} chars received')
+          .replace('{0}', String(streamChunkCountRef.current))
+          .replace('{1}', String(streamingRef.current.length)),
+        mergeKey: 'live-stream',
+      });
+      setAgentStatus((current) => current === 'generating' ? 'thinking' : current);
     });
 
     // Status events (agent lifecycle + tool calls + gateway auto-start)
@@ -1118,6 +1134,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
     streamingRef.current = '';
     streamChunkCountRef.current = 0;
     setStreamingContent('');
+    setStreamClosed(false);
     thinkingRef.current = '';
     setThinkingContent('');
     traceEventsRef.current = [];
@@ -1172,6 +1189,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
       setActiveToolCalls([]);
       streamingRef.current = '';
       setStreamingContent('');
+      setStreamClosed(true);
       thinkingRef.current = '';
       setThinkingContent('');
       traceEventsRef.current = [];
@@ -1303,6 +1321,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
     if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
     traceEventsRef.current = [];
     setTraceEvents([]);
+    setStreamClosed(true);
     setAgentStatus('idle');
   }, [activeSessionId]);
 
@@ -1397,9 +1416,9 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
       }}>
         {content}
       </ReactMarkdown>
-      <span className="animate-pulse text-brand-400 ml-0.5">▊</span>
+      {!streamClosed && <span className="animate-pulse text-brand-400 ml-0.5">▊</span>}
     </div>
-  ), []);
+  ), [streamClosed]);
 
   return (
     <div className="h-full flex relative"

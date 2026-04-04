@@ -112,14 +112,28 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: any) =>
     check();
   }, []);
 
-  // Load workflow templates + Lobster status
+  // Load workflow templates + Lobster status (with localStorage cache)
   useEffect(() => {
     window.electronAPI?.workflowList?.().then((result: any) => {
       setWorkflows(result?.workflows || []);
     }).catch(() => {});
 
+    // Check localStorage cache first for instant UI (avoid slow CLI on every visit)
+    const cachedLobster = localStorage.getItem('awareness-claw-lobster-installed');
+    if (cachedLobster === 'true') {
+      setLobsterStatus({ checked: true, installed: true, enabled: true });
+    }
+
+    // Then verify in background (updates cache if changed)
     window.electronAPI?.workflowCheckLobster?.().then((result: any) => {
-      setLobsterStatus({ checked: true, installed: result?.installed ?? false, enabled: result?.enabled ?? false });
+      const installed = result?.installed ?? false;
+      const enabled = result?.enabled ?? false;
+      setLobsterStatus({ checked: true, installed, enabled });
+      if (installed) {
+        localStorage.setItem('awareness-claw-lobster-installed', 'true');
+      } else {
+        localStorage.removeItem('awareness-claw-lobster-installed');
+      }
     }).catch(() => {
       setLobsterStatus((s) => ({ ...s, checked: true }));
     });
@@ -323,6 +337,7 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: any) =>
       const result = await window.electronAPI?.workflowInstallLobster?.();
       if (result?.success) {
         setLobsterStatus({ checked: true, installed: true, enabled: true });
+        localStorage.setItem('awareness-claw-lobster-installed', 'true');
         const wfResult = await window.electronAPI?.workflowList?.();
         setWorkflows(wfResult?.workflows || []);
         setStatusMessage({ type: 'success', text: t('taskCenter.lobster.installed', 'Lobster workflow engine installed successfully!') });

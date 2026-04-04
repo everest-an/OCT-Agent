@@ -625,6 +625,76 @@ ${message}`;
       let finalAssistantText = '';
       let finalAssistantContentTypes: string[] = [];
 
+      const processAssistantContentBlocks = (blocks: any[]) => {
+        for (const block of blocks) {
+          if (block.type === 'tool_use') {
+            sawToolBlocks = true;
+            const toolId = block.id || `tc-${Date.now()}`;
+            toolNamesById.set(toolId, block.name || 'tool');
+            send('chat:event', {
+              stream: 'tool',
+              phase: 'start',
+              toolCallId: toolId,
+              toolName: block.name || 'tool',
+              args: extractToolArgs(block),
+              raw: block,
+            });
+            if (!seenToolIds.has(toolId)) {
+              seenToolIds.add(toolId);
+              send('chat:status', {
+                type: 'tool_call',
+                tool: block.name || 'tool',
+                toolStatus: 'running',
+                toolId,
+                detail: extractToolDetail(extractToolArgs(block)),
+              });
+            }
+            continue;
+          }
+
+          if (block.type === 'tool_result') {
+            sawToolBlocks = true;
+            const toolId = block.tool_use_id || '';
+            const toolName = toolNamesById.get(toolId) || block.name || 'tool';
+            send('chat:event', {
+              stream: 'tool',
+              phase: 'result',
+              toolCallId: toolId,
+              toolName,
+              result: block.content ?? block.result ?? block,
+              isError: Boolean(block.is_error || block.isError),
+              raw: block,
+            });
+            if (toolId && !completedToolIds.has(toolId)) {
+              completedToolIds.add(toolId);
+              send('chat:status', {
+                type: 'tool_update',
+                toolId,
+                toolStatus: block.is_error || block.isError ? 'failed' : 'completed',
+                detail: extractToolOutput(block),
+              });
+            }
+            continue;
+          }
+
+          if (block.type === 'thinking' || block.type === 'reasoning') {
+            sawThinkingBlocks = true;
+            const text = block.thinking || block.reasoning || block.text || '';
+            if (text && text !== lastThinkingText) {
+              lastThinkingText = text;
+              send('chat:event', {
+                stream: 'assistant',
+                phase: 'thinking',
+                thinking: text,
+                raw: block,
+              });
+              send('chat:status', { type: 'thinking' });
+              send('chat:thinking', text);
+            }
+          }
+        }
+      };
+
       const handleNormalizedAgentEvent = (eventName: string, payload: any) => {
         const normalizedAgentEvent = normalizeAgentGatewayEvent(eventName, payload);
         if (!normalizedAgentEvent) return;
@@ -781,58 +851,7 @@ ${message}`;
             send('chat:status', { type: 'generating' });
           }
 
-          if (Array.isArray(msg.content)) {
-            for (const block of msg.content) {
-              if (block.type === 'tool_use') {
-                sawToolBlocks = true;
-                const toolId = block.id || `tc-${Date.now()}`;
-                toolNamesById.set(toolId, block.name || 'tool');
-                send('chat:event', {
-                  stream: 'tool',
-                  phase: 'start',
-                  toolCallId: toolId,
-                  toolName: block.name || 'tool',
-                  args: extractToolArgs(block),
-                  raw: block,
-                });
-                if (!seenToolIds.has(toolId)) {
-                  seenToolIds.add(toolId);
-                  send('chat:status', { type: 'tool_call', tool: block.name || 'tool', toolStatus: 'running', toolId });
-                }
-              } else if (block.type === 'tool_result') {
-                sawToolBlocks = true;
-                const toolId = block.tool_use_id || '';
-                const toolName = toolNamesById.get(toolId) || block.name || 'tool';
-                send('chat:event', {
-                  stream: 'tool',
-                  phase: 'result',
-                  toolCallId: toolId,
-                  toolName,
-                  result: block.content ?? block.result ?? block,
-                  isError: Boolean(block.is_error || block.isError),
-                  raw: block,
-                });
-                if (toolId && !completedToolIds.has(toolId)) {
-                  completedToolIds.add(toolId);
-                  send('chat:status', { type: 'tool_update', toolId, toolStatus: 'completed' });
-                }
-              } else if (block.type === 'thinking' || block.type === 'reasoning') {
-                sawThinkingBlocks = true;
-                const text = block.thinking || block.reasoning || block.text || '';
-                if (text && text !== lastThinkingText) {
-                  lastThinkingText = text;
-                  send('chat:event', {
-                    stream: 'assistant',
-                    phase: 'thinking',
-                    thinking: text,
-                    raw: block,
-                  });
-                  send('chat:status', { type: 'thinking' });
-                  send('chat:thinking', text);
-                }
-              }
-            }
-          }
+          if (Array.isArray(msg.content)) processAssistantContentBlocks(msg.content);
 
           if (typeof msg.content === 'string' && msg.content.startsWith('Reasoning:')) {
             const reasoningText = msg.content.replace(/^Reasoning:\s*/, '');
@@ -849,6 +868,7 @@ ${message}`;
             finalAssistantText = extractAssistantText(msg).trim();
             if (Array.isArray(msg.content)) {
               finalAssistantContentTypes = msg.content.map((contentBlock: any) => String(contentBlock?.type || typeof contentBlock));
+              processAssistantContentBlocks(msg.content);
             } else if (typeof msg.content === 'string') {
               finalAssistantContentTypes = ['string'];
             }

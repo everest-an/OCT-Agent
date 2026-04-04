@@ -322,9 +322,7 @@ export function ChatTracePanel({
                 <Brain size={11} />
                 <span>{t('thinking.label', 'Thinking process')}</span>
               </div>
-              <div className="mt-1 text-[11px] text-slate-400 whitespace-pre-wrap leading-relaxed rounded-lg bg-slate-900/50 px-3 py-2 border border-slate-800/80">
-                {thinking}
-              </div>
+              <CollapsiblePre content={thinking || ''} maxLines={10} />
             </div>
           )}
 
