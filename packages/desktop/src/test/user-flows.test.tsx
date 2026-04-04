@@ -65,10 +65,12 @@ describe('Multi-Agent Management (user flows)', () => {
     expect(createBtn).toBeTruthy();
     await act(async () => { fireEvent.click(createBtn!); });
 
-    // Now it's a single-step wizard: name + emoji → Create & Start Chat
+    // Step 0: name + emoji
     const nameInput = screen.getByPlaceholderText(/Research/i);
     await act(async () => { fireEvent.change(nameInput, { target: { value: 'SalesBot' } }); });
-    // Click create button
+    // Next → Step 1 (channels)
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /next/i })); });
+    // Click create button on step 1
     const finishBtn = screen.getByTestId('agent-create-btn');
     await act(async () => { fireEvent.click(finishBtn); });
 
