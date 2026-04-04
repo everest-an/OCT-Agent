@@ -8,6 +8,7 @@
 import fs from 'fs';
 import path from 'path';
 import http from 'http';
+import dns from 'dns';
 import {
   normalizePluginAllow,
   isGatewayRunningOutput,
@@ -17,6 +18,7 @@ import {
 } from './openclaw-config';
 
 const OPENCLAW_INSTALL_TIMEOUT_MS = 300000;
+const WEB_DNS_CANARY_DOMAINS = ['example.com', 'openclaw.ai'];
 
 // Cache for channel-bindings check to avoid slow CLI calls on every startup
 let _lastBindingsCheckPass: number = 0;
@@ -198,6 +200,61 @@ function parseBindingsOutput(output: string | null): { ok: boolean; bindings: an
     return { ok: true, bindings: [] };
   } catch {
     return { ok: false, bindings: [] };
+  }
+}
+
+function parseIpv4Address(ip: string): number[] | null {
+  const parts = ip.trim().split('.');
+  if (parts.length !== 4) return null;
+  const bytes = parts.map((part) => Number(part));
+  if (bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) return null;
+  return bytes;
+}
+
+function isSpecialUseIpv4(ip: string): boolean {
+  const bytes = parseIpv4Address(ip);
+  if (!bytes) return false;
+  const [a, b] = bytes;
+
+  if (a === 0) return true; // 0.0.0.0/8
+  if (a === 10) return true; // 10.0.0.0/8
+  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10
+  if (a === 127) return true; // 127.0.0.0/8
+  if (a === 169 && b === 254) return true; // 169.254.0.0/16
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+  if (a === 192 && b === 168) return true; // 192.168.0.0/16
+  if (a === 198 && (b === 18 || b === 19)) return true; // 198.18.0.0/15 benchmarking
+  if (a === 224 || a >= 240) return true; // multicast/reserved
+
+  return false;
+}
+
+function isSpecialUseIpv6(ip: string): boolean {
+  const normalized = ip.trim().toLowerCase();
+  if (!normalized.includes(':')) return false;
+
+  if (normalized === '::' || normalized === '::1') return true;
+
+  const firstHextetRaw = normalized.split(':')[0] || '0';
+  const firstHextet = Number.parseInt(firstHextetRaw, 16);
+  if (!Number.isFinite(firstHextet)) return false;
+
+  if (firstHextet >= 0xfc00 && firstHextet <= 0xfdff) return true; // ULA fc00::/7
+  if (firstHextet >= 0xfe80 && firstHextet <= 0xfebf) return true; // link-local fe80::/10
+
+  return false;
+}
+
+function isSpecialUseIpAddress(ip: string): boolean {
+  return isSpecialUseIpv4(ip) || isSpecialUseIpv6(ip);
+}
+
+async function resolveDomainAddresses(domain: string): Promise<string[]> {
+  try {
+    const records = await dns.promises.lookup(domain, { all: true, verbatim: true });
+    return Array.from(new Set(records.map((record) => record.address).filter(Boolean)));
+  } catch {
+    return [];
   }
 }
 
@@ -819,6 +876,39 @@ async function checkNpmPrefixWritable(ctx: Ctx): Promise<CheckResult> {
   }
 }
 
+async function checkWebDnsCompatibility(_ctx: Ctx): Promise<CheckResult> {
+  const suspiciousMappings: string[] = [];
+
+  for (const domain of WEB_DNS_CANARY_DOMAINS) {
+    const addresses = await resolveDomainAddresses(domain);
+    if (addresses.length === 0) continue;
+    const specialUse = addresses.filter(isSpecialUseIpAddress);
+    if (specialUse.length > 0) {
+      suspiciousMappings.push(`${domain} -> ${specialUse.join(', ')}`);
+    }
+  }
+
+  if (suspiciousMappings.length > 0) {
+    return {
+      id: 'web-dns-compat',
+      label: 'Web tools network compatibility',
+      status: 'warn',
+      message: 'Public domains resolved to special-use IP ranges (VPN/DNS compatibility risk)',
+      fixable: 'manual',
+      fixDescription: 'In your VPN/proxy app, disable full DNS hijack or enable split DNS for public websites, then click Re-check.',
+      detail: suspiciousMappings.join('; '),
+    };
+  }
+
+  return {
+    id: 'web-dns-compat',
+    label: 'Web tools network compatibility',
+    status: 'pass',
+    message: 'Public DNS resolution looks normal',
+    fixable: 'none',
+  };
+}
+
 // --- Check registry ---
 
 const CHECK_REGISTRY: Record<string, { check: (ctx: Ctx) => Promise<CheckResult>; fix?: (ctx: Ctx) => Promise<FixResult> }> = {
@@ -829,6 +919,7 @@ const CHECK_REGISTRY: Record<string, { check: (ctx: Ctx) => Promise<CheckResult>
   'openclaw-conflicts': { check: checkMultiVersionConflicts },
   'launchagent-path': { check: checkLaunchAgentPath, fix: fixLaunchAgentPath },
   'gateway-running': { check: checkGatewayRunning, fix: fixGatewayStart },
+  'web-dns-compat': { check: checkWebDnsCompatibility },
   'plugin-installed': { check: checkPluginInstalled, fix: fixPluginInstall },
   'daemon-running': { check: checkDaemonRunning, fix: fixDaemonStart },
   'channel-bindings': { check: checkChannelBindings, fix: fixChannelBindings },
@@ -839,6 +930,7 @@ const CHECK_REGISTRY: Record<string, { check: (ctx: Ctx) => Promise<CheckResult>
 const CHECK_ORDER = [
   'node-installed', 'openclaw-installed', 'openclaw-command-health', 'openclaw-version', 'openclaw-conflicts',
   'launchagent-path', 'gateway-running', 'plugin-installed', 'daemon-running',
+  'web-dns-compat',
   'channel-bindings', 'config-permissions', 'npm-prefix-writable',
 ];
 

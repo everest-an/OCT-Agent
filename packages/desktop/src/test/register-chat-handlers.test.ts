@@ -267,6 +267,64 @@ describe('registerChatHandlers', () => {
     warnSpy.mockRestore();
   });
 
+  it('silently retries with CLI compatibility fallback when gateway reports special-use IP web blocking', async () => {
+    const ws = new FakeGatewayClient();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fallbackChild = createCliFallbackChild('Fetched via exec fallback successfully');
+    const runSpawn = vi.fn(() => {
+      setTimeout(() => fallbackChild.emitOutput(), 0);
+      return fallbackChild as any;
+    });
+
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: {
+            role: 'assistant',
+            content: 'The web_fetch tool is unavailable or denied because the URL resolves to a private/internal/special-use IP address.',
+          },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    registerChatHandlers({
+      sendToRenderer: vi.fn(),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      runSpawn,
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, '请抓取 https://example.com 的标题', 'test-session', {});
+
+    expect(result).toMatchObject({
+      success: true,
+      text: 'Fetched via exec fallback successfully',
+      sessionId: 'test-session',
+      preferResultText: true,
+    });
+    expect(runSpawn).toHaveBeenCalledTimes(1);
+    const [, retryArgs] = runSpawn.mock.calls[0] as [string, string[], Record<string, unknown>];
+    const retryMessage = retryArgs[retryArgs.indexOf('-m') + 1] || '';
+    expect(retryMessage).toContain('On Windows, prefer Invoke-WebRequest with -UseBasicParsing.');
+    expect(retryMessage).toContain('Target public URL: https://example.com');
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Web tool response indicates VPN/DNS special-use IP compatibility issue'),
+      expect.objectContaining({ sessionId: 'test-session' }),
+    );
+
+    warnSpy.mockRestore();
+  });
+
   it('routes non-main agents via session key format agent:<id>:webchat:<sid>', async () => {
     const ws = new FakeGatewayClient();
     // The session key for non-main agents is agent:<agentId>:webchat:<rawSid>
@@ -469,6 +527,11 @@ describe('registerChatHandlers', () => {
       expect.stringContaining('run a follow-up verification step'),
       expect.any(Object),
     );
+    expect(ws.chatSend).toHaveBeenCalledWith(
+      'test-session',
+      expect.stringContaining('[Web compatibility note]'),
+      expect.any(Object),
+    );
   });
 
   it('uses direct openclaw spawn args for CLI fallback when runSpawn is available', async () => {
@@ -538,6 +601,48 @@ describe('registerChatHandlers', () => {
     });
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('CLI fallback produced an unverified local filesystem success claim'),
+      expect.objectContaining({ sessionId: 'test-session' }),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('silently retries CLI fallback when first CLI response is blocked by special-use IP policy', async () => {
+    const fakeChildBlocked = createCliFallbackChild('The web_fetch tool is unavailable or denied because this URL resolves to a private/internal/special-use IP address.');
+    const fakeChildRecovered = createCliFallbackChild('Downloaded via exec after compatibility retry.');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    spawnMock
+      .mockReturnValueOnce(fakeChildBlocked as any)
+      .mockReturnValueOnce(fakeChildRecovered as any);
+
+    registerChatHandlers({
+      sendToRenderer: vi.fn(),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: false, error: 'Gateway unavailable.' })),
+      getGatewayWs: vi.fn(),
+      getConnectedGatewayWs: vi.fn(() => null),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const pending = handlers['chat:send']({}, '请抓取 https://example.com', 'test-session', {});
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
+    fakeChildBlocked.emitOutput();
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(2));
+    fakeChildRecovered.emitOutput();
+    const result = await pending;
+
+    expect(result).toMatchObject({
+      success: true,
+      text: 'Downloaded via exec after compatibility retry.',
+      sessionId: 'test-session',
+      preferResultText: true,
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('CLI fallback indicates VPN/DNS special-use IP compatibility issue'),
       expect.objectContaining({ sessionId: 'test-session' }),
     );
 

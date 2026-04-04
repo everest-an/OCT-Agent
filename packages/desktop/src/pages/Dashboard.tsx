@@ -1143,12 +1143,18 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
         toolCallsRef.current,
         Boolean(result?.success && !result?.awaitingApproval),
       );
+      const fallbackNoResponseText = result.awaitingApproval
+        ? t('chat.awaitingApprovalResponse', 'Waiting for tool approval before the agent can continue')
+        : t('chat.noResponse') || 'No response';
+      const baseResponseText = result?.preferResultText
+        ? (result.text || streamingRef.current.trim() || result.error || fallbackNoResponseText)
+        : (streamingRef.current.trim() || result.text || result.error || fallbackNoResponseText);
+      const vpnDnsWarningText = result?.vpnDnsCompatibilityIssue
+        ? t('chat.vpnDnsCompatibilityWarning', 'Detected a VPN/DNS compatibility issue: public websites were resolved to special-use IP ranges, so web_fetch/browser may be blocked. In your VPN or proxy app, disable full DNS hijack or enable split DNS for public websites, then retry. Temporary workaround: use web_search plus exec-based download commands.')
+        : '';
       const responseText = result?.unverifiedLocalFileOperation
         ? t('chat.localFileChangeUnverified', 'AwarenessClaw did not verify this local file change. The agent answered as if it finished, but no completed tool result was recorded for the request, so the file was not confirmed on disk.')
-        : streamingRef.current.trim()
-          || result.text
-          || result.error
-          || (result.awaitingApproval ? t('chat.awaitingApprovalResponse', 'Waiting for tool approval before the agent can continue') : t('chat.noResponse') || 'No response');
+        : (vpnDnsWarningText ? `${baseResponseText}\n\n${vpnDnsWarningText}` : baseResponseText);
 
       const assistantMsg: Message = {
         id: `msg-${Date.now()}`,

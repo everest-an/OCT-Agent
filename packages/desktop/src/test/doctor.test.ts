@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import dns from 'dns';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createDoctor } from '../../electron/doctor';
@@ -43,9 +44,56 @@ function createDoctorWithMocks(home: string, overrides?: {
 
 describe('doctor', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     while (tempDirs.length > 0) {
       fs.rmSync(tempDirs.pop()!, { recursive: true, force: true });
     }
+  });
+
+  it('warns when public canary domains resolve to special-use ranges', async () => {
+    const home = createTempHome();
+    vi.spyOn(dns.promises, 'lookup').mockImplementation(async (hostname: string, _options: any) => {
+      if (hostname === 'example.com') {
+        return [{ address: '198.18.0.11', family: 4 }] as any;
+      }
+      if (hostname === 'openclaw.ai') {
+        return [{ address: '198.18.0.21', family: 4 }] as any;
+      }
+      return [{ address: '93.184.216.34', family: 4 }] as any;
+    });
+
+    const { doctor } = createDoctorWithMocks(home);
+    const report = await doctor.runChecks(['web-dns-compat']);
+
+    expect(report.checks[0]).toMatchObject({
+      id: 'web-dns-compat',
+      status: 'warn',
+      fixable: 'manual',
+    });
+    expect(report.checks[0].message).toContain('special-use IP ranges');
+    expect(report.checks[0].detail).toContain('example.com -> 198.18.0.11');
+  });
+
+  it('passes web DNS compatibility check when canary domains resolve to public IPs', async () => {
+    const home = createTempHome();
+    vi.spyOn(dns.promises, 'lookup').mockImplementation(async (hostname: string, _options: any) => {
+      if (hostname === 'example.com') {
+        return [{ address: '93.184.216.34', family: 4 }] as any;
+      }
+      if (hostname === 'openclaw.ai') {
+        return [{ address: '104.26.14.0', family: 4 }] as any;
+      }
+      return [{ address: '1.1.1.1', family: 4 }] as any;
+    });
+
+    const { doctor } = createDoctorWithMocks(home);
+    const report = await doctor.runChecks(['web-dns-compat']);
+
+    expect(report.checks[0]).toMatchObject({
+      id: 'web-dns-compat',
+      status: 'pass',
+      fixable: 'none',
+    });
   });
 
   it('warns about duplicate command paths on macOS', async () => {

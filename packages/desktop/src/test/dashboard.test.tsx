@@ -170,6 +170,35 @@ describe('Dashboard (Chat)', () => {
     expect(screen.queryByText(/已保存到 E:\\新建文件夹2\\我是谁.txt/)).not.toBeInTheDocument();
   });
 
+  it('appends VPN/DNS compatibility guidance when chat result is flagged', async () => {
+    const api = window.electronAPI as any;
+    api.chatSend = vi.fn(async () => ({
+      success: true,
+      text: 'The web_fetch tool is unavailable or denied because this URL resolves to a private/internal/special-use IP address.',
+      sessionId: 'test-session',
+      vpnDnsCompatibilityIssue: true,
+    }));
+
+    await act(async () => { render(<Dashboard />); });
+
+    const textarea = screen.getByPlaceholderText(/输入消息/) as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: '抓取 https://example.com' } });
+    });
+
+    const buttons = screen.getAllByRole('button');
+    const sendBtn = buttons[buttons.length - 1];
+    await act(async () => { fireEvent.click(sendBtn); });
+
+    await waitFor(() => {
+      const sessions = JSON.parse(localStorage.getItem('awareness-claw-sessions') || '[]');
+      const msgs = sessions[0]?.messages || [];
+      const assistantMsg = msgs.find((m: any) => m.role === 'assistant');
+      expect(assistantMsg).toBeDefined();
+      expect(String(assistantMsg?.content || '')).toMatch(/VPN\s*\/?\s*DNS/i);
+    });
+  });
+
   it('passes the selected project folder to chatSend', async () => {
     const api = window.electronAPI as any;
     api.selectDirectory = vi.fn().mockResolvedValue({ directoryPath: 'E:\\Projects\\DemoApp' });

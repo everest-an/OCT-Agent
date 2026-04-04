@@ -437,6 +437,53 @@ function looksLikeSuccessfulFilesystemMutationResponse(text: string): boolean {
   return hasFilesystemContext || looksLikePathReference(trimmed);
 }
 
+function looksLikeWebOperationRequest(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return /(https?:\/\/|\bwww\.|\burl\b|\bwebsite\b|\bweb ?page\b|\bbrowser\b|\bbrowse\b|\bweb\b|\bsearch\b|\bfetch\b|\bdownload\b|网页|网站|浏览|搜索|抓取|下载)/i.test(trimmed);
+}
+
+function looksLikeSpecialUseIpWebBlock(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return /(private\s*[,/ ]\s*internal\s*[,/ ]\s*(or\s+)?special-use\s+ip|private\/internal\/special-use\s+ip|special-use\s+ip\s+address)/i.test(trimmed);
+}
+
+function extractFirstHttpUrl(text: string): string | null {
+  const match = text.match(/https?:\/\/[^\s)\]"'>]+/i);
+  return match?.[0] || null;
+}
+
+function hasMeaningfulAgentText(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (/^no response$/i.test(trimmed)) return false;
+  if (/^blocked$/i.test(trimmed)) return false;
+  return true;
+}
+
+function buildWebCompatibilityRetryPrompt(originalRequest: string, blockedResponse: string): string {
+  const targetUrl = extractFirstHttpUrl(originalRequest);
+  const urlHint = targetUrl ? `Target public URL: ${targetUrl}` : '';
+
+  return `[Automatic compatibility retry]
+Previous attempt was blocked because web_fetch/browser treated the resolved address as private/internal/special-use (common with VPN DNS hijack/split routing).
+
+Retry this request without using web_fetch or browser.
+- Use web_search for discovery when needed.
+- For public URL retrieval, use exec-based HTTP commands.
+- On Windows, prefer Invoke-WebRequest with -UseBasicParsing.
+- On macOS/Linux, prefer curl -L.
+- If the user requested download/save, verify file existence and size after writing.
+
+${urlHint}
+Original request:
+${originalRequest}
+
+Previous blocked response:
+${blockedResponse}`;
+}
+
 export function registerChatHandlers(deps: {
   sendToRenderer: (channel: string, payload: any) => void;
   ensureGatewayRunning: () => Promise<{ ok: boolean; error?: string }>;
@@ -561,6 +608,8 @@ export function registerChatHandlers(deps: {
 
   [Current host exec approvals] security=${hostApprovals.security}, ask=${hostApprovals.ask}, askFallback=${hostApprovals.askFallback}, autoAllowSkills=${hostApprovals.autoAllowSkills ? 'on' : 'off'}. This current host approval state is authoritative for this turn. If earlier conversation turns claimed local filesystem access was blocked by allowlist/privacy rules, do not blindly repeat that claim. Re-evaluate the request against the current approval state above and use tools when allowed.
 
+  [Web compatibility note] If web_fetch or browser reports private/internal/special-use IP blocking for a public HTTPS domain, treat it as a VPN/DNS compatibility issue instead of a final failure. Explain that compatibility issue briefly, then continue with a safe fallback flow (for example: use web_search for discovery and exec-based HTTP retrieval for the requested public URL when host approvals allow it).
+
   ${fullMessage}`;
     if (options?.files && options.files.length > 0) {
       const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'];
@@ -612,12 +661,26 @@ ${message}`;
       } catch (prepareErr: any) {
         console.warn('[chat] CLI fallback preparation failed:', prepareErr?.message || prepareErr);
       }
-      const cliResult = await chatSendViaCli(fullMessage, sid, options, send, deps);
+      const cliResult = await chatSendViaCliWithWebCompatibilityRetry({
+        requestMessage: fullMessage,
+        originalUserMessage: message,
+        sid,
+        options,
+        send,
+        deps,
+      });
       const needsRetry = cliResult?.success
         && (!cliResult.text || /^(No response|No reply from agent\.?)+$/i.test(String(cliResult.text).trim()));
       if (needsRetry && fullMessage !== message) {
         console.warn('[chat] CLI fallback returned empty response with metadata prompt; retrying with raw user message');
-        return chatSendViaCli(message, sid, options, send, deps);
+        return chatSendViaCliWithWebCompatibilityRetry({
+          requestMessage: message,
+          originalUserMessage: message,
+          sid,
+          options,
+          send,
+          deps,
+        });
       }
       return cliResult;
     }
@@ -940,23 +1003,72 @@ ${message}`;
       if (agentLifecycleEventHandler) ws.removeListener('event:agent:lifecycle', agentLifecycleEventHandler);
       if (agentToolEventHandler) ws.removeListener('event:agent:tool', agentToolEventHandler);
 
-      const text = fullResponseText.trim() || finalAssistantText || '';
-      const shouldFlagUnverifiedLocalFileOperation = looksLikeFilesystemMutationRequest(message)
-        && looksLikeSuccessfulFilesystemMutationResponse(text)
+      let finalText = fullResponseText.trim() || finalAssistantText || '';
+      let shouldFlagUnverifiedLocalFileOperation = looksLikeFilesystemMutationRequest(message)
+        && looksLikeSuccessfulFilesystemMutationResponse(finalText)
         && !pendingApprovalRequestId
         && !sawCompletedToolResult;
+      let shouldFlagVpnDnsCompatibilityIssue = looksLikeWebOperationRequest(message)
+        && looksLikeSpecialUseIpWebBlock(finalText);
+      let preferResultText = false;
+      let usedCliCompatibilityRetry = false;
 
       if (shouldFlagUnverifiedLocalFileOperation) {
         console.warn('[chat] Assistant claimed a local filesystem mutation succeeded without any completed tool result', {
           sessionId: sid,
-          responsePreview: text.slice(0, 200),
+          responsePreview: finalText.slice(0, 200),
           sawToolBlocks,
           sawCompletedToolResult,
         });
       }
-      send('chat:stream-end', {});
 
-      if (!text && !pendingApprovalRequestId) {
+      if (shouldFlagVpnDnsCompatibilityIssue) {
+        console.warn('[chat] Web tool response indicates VPN/DNS special-use IP compatibility issue', {
+          sessionId: sid,
+          responsePreview: finalText.slice(0, 200),
+        });
+
+        if (!pendingApprovalRequestId) {
+          send('chat:status', {
+            type: 'gateway',
+            message: 'Detected VPN/DNS compatibility mode. Retrying with exec-based web access...',
+          });
+          try {
+            await deps.prepareCliFallback?.();
+          } catch (prepareErr: any) {
+            console.warn('[chat] CLI compatibility retry preparation failed:', prepareErr?.message || prepareErr);
+          }
+
+          const retryPrompt = buildWebCompatibilityRetryPrompt(message, finalText);
+          const retryResult = await chatSendViaCli(retryPrompt, sid, options, send, deps);
+          usedCliCompatibilityRetry = true;
+
+          if (!retryResult?.success) {
+            send('chat:stream-end', {});
+          }
+
+          const retryText = String(retryResult?.text || '').trim();
+          if (retryResult?.success && hasMeaningfulAgentText(retryText)) {
+            finalText = retryText;
+            shouldFlagUnverifiedLocalFileOperation = Boolean(retryResult?.unverifiedLocalFileOperation);
+            shouldFlagVpnDnsCompatibilityIssue = Boolean(retryResult?.vpnDnsCompatibilityIssue);
+            preferResultText = true;
+
+            if (!shouldFlagVpnDnsCompatibilityIssue) {
+              send('chat:status', {
+                type: 'gateway',
+                message: 'Web compatibility fallback succeeded.',
+              });
+            }
+          }
+        }
+      }
+
+      if (!usedCliCompatibilityRetry) {
+        send('chat:stream-end', {});
+      }
+
+      if (!finalText && !pendingApprovalRequestId) {
         const diagnostic = {
           sessionId: sid,
           didTimeout,
@@ -993,7 +1105,7 @@ ${message}`;
         }
       };
 
-      if (text && !shouldFlagUnverifiedLocalFileOperation) {
+      if (finalText && !shouldFlagUnverifiedLocalFileOperation) {
         const memoryToolId = `memory-save-${Date.now()}`;
         send('chat:status', {
           type: 'tool_call',
@@ -1005,7 +1117,7 @@ ${message}`;
 
         deps.callMcpStrict('awareness_record', {
           action: 'remember',
-          content: `Request: ${message}\nResult: ${text}`,
+          content: `Request: ${message}\nResult: ${finalText}`,
           event_type: 'turn_brief',
           source: 'desktop',
         }).then((result) => {
@@ -1034,7 +1146,7 @@ ${message}`;
         });
       }
 
-      if (!text && pendingApprovalRequestId) {
+      if (!finalText && pendingApprovalRequestId) {
         return {
           success: true,
           text: '',
@@ -1048,9 +1160,11 @@ ${message}`;
 
       return {
         success: true,
-        text: text || 'No response',
+        text: finalText || 'No response',
         sessionId: sid,
         unverifiedLocalFileOperation: shouldFlagUnverifiedLocalFileOperation || undefined,
+        vpnDnsCompatibilityIssue: shouldFlagVpnDnsCompatibilityIssue || undefined,
+        preferResultText: preferResultText || undefined,
       };
     } catch (err: any) {
       if (ws) {
@@ -1070,18 +1184,78 @@ ${message}`;
         } catch (prepareErr: any) {
           console.warn('[chat] CLI fallback preparation failed:', prepareErr?.message || prepareErr);
         }
-        const cliResult = await chatSendViaCli(fullMessage, sid, options, send, deps);
+        const cliResult = await chatSendViaCliWithWebCompatibilityRetry({
+          requestMessage: fullMessage,
+          originalUserMessage: message,
+          sid,
+          options,
+          send,
+          deps,
+        });
         const needsRetry = cliResult?.success
           && (!cliResult.text || /^(No response|No reply from agent\.?)+$/i.test(String(cliResult.text).trim()));
         if (needsRetry && fullMessage !== message) {
           console.warn('[chat] CLI fallback returned empty response with metadata prompt; retrying with raw user message');
-          return chatSendViaCli(message, sid, options, send, deps);
+          return chatSendViaCliWithWebCompatibilityRetry({
+            requestMessage: message,
+            originalUserMessage: message,
+            sid,
+            options,
+            send,
+            deps,
+          });
         }
         return cliResult;
       }
       return { success: false, text: '', error: errorMsg, sessionId: sid };
     }
   });
+}
+
+async function chatSendViaCliWithWebCompatibilityRetry(params: {
+  requestMessage: string;
+  originalUserMessage: string;
+  sid: string;
+  options: ChatSendOptions | undefined;
+  send: (channel: string, payload: any) => void;
+  deps: {
+    getEnhancedPath: () => string;
+    runSpawn?: (cmd: string, args: string[], opts?: Record<string, unknown>) => ReturnType<typeof spawn>;
+    wrapWindowsCommand: (command: string) => string;
+    stripAnsi: (output: string) => string;
+    spawnChatProcess?: typeof spawn;
+  };
+}): Promise<any> {
+  const { requestMessage, originalUserMessage, sid, options, send, deps } = params;
+  const first = await chatSendViaCli(requestMessage, sid, options, send, deps);
+
+  if (!first?.vpnDnsCompatibilityIssue) {
+    return first;
+  }
+
+  send('chat:status', {
+    type: 'gateway',
+    message: 'Detected VPN/DNS compatibility mode. Retrying with exec-based web access...',
+  });
+
+  const retryPrompt = buildWebCompatibilityRetryPrompt(
+    originalUserMessage || requestMessage,
+    String(first?.text || ''),
+  );
+  const retry = await chatSendViaCli(retryPrompt, sid, options, send, deps);
+  if (!retry?.success) {
+    send('chat:stream-end', {});
+  }
+  const retryText = String(retry?.text || '').trim();
+
+  if (retry?.success && hasMeaningfulAgentText(retryText)) {
+    return {
+      ...retry,
+      preferResultText: true,
+    };
+  }
+
+  return first;
 }
 
 async function chatSendViaCli(
@@ -1186,8 +1360,16 @@ async function chatSendViaCli(
       const clean = collectedLines.join('\n').trim();
       const shouldFlagUnverifiedLocalFileOperation = looksLikeFilesystemMutationRequest(requestMessage)
         && looksLikeSuccessfulFilesystemMutationResponse(clean);
+      const shouldFlagVpnDnsCompatibilityIssue = looksLikeWebOperationRequest(requestMessage)
+        && looksLikeSpecialUseIpWebBlock(clean);
       if (shouldFlagUnverifiedLocalFileOperation) {
         console.warn('[chat] CLI fallback produced an unverified local filesystem success claim', {
+          sessionId: sid,
+          responsePreview: clean.slice(0, 200),
+        });
+      }
+      if (shouldFlagVpnDnsCompatibilityIssue) {
+        console.warn('[chat] CLI fallback indicates VPN/DNS special-use IP compatibility issue', {
           sessionId: sid,
           responsePreview: clean.slice(0, 200),
         });
@@ -1197,6 +1379,7 @@ async function chatSendViaCli(
         text: clean || 'No response',
         sessionId: sid,
         unverifiedLocalFileOperation: shouldFlagUnverifiedLocalFileOperation || undefined,
+        vpnDnsCompatibilityIssue: shouldFlagVpnDnsCompatibilityIssue || undefined,
       });
     });
     child.on('error', (err) => resolve({ success: false, error: String(err), sessionId: sid }));
