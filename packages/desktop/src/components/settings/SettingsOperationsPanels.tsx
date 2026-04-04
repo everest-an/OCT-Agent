@@ -27,7 +27,7 @@ export function SettingsHealthPanel({
           <button
             onClick={onRunDoctor}
             disabled={doctorLoading}
-            className="flex items-center gap-1 px-2.5 py-1 text-xs bg-slate-700 hover:bg-slate-600 disabled:opacity-50 rounded text-slate-300"
+            className="settings-btn settings-btn-secondary disabled:opacity-50"
           >
             {doctorLoading ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
             {t('settings.health.recheck', 'Re-check')}
@@ -50,14 +50,14 @@ export function SettingsHealthPanel({
             {doctorReport.checks.map((check: any) => (
               <div
                 key={check.id}
-                className={`flex items-center gap-3 p-2.5 rounded-lg text-xs ${
+                className={`flex items-center gap-3 p-2.5 rounded-xl text-xs ${
                   check.status === 'pass'
-                    ? 'bg-emerald-500/5 text-emerald-400'
+                    ? 'settings-glass-soft text-emerald-300'
                     : check.status === 'warn'
-                      ? 'bg-amber-500/10 text-amber-400'
+                      ? 'settings-glass-soft text-amber-300'
                       : check.status === 'fail'
-                        ? 'bg-red-500/10 text-red-400'
-                        : 'bg-slate-800/50 text-slate-500'
+                        ? 'settings-glass-soft text-red-400'
+                        : 'settings-glass-soft text-slate-500'
                 }`}
               >
                 <span className="shrink-0">
@@ -74,7 +74,7 @@ export function SettingsHealthPanel({
                   <button
                     onClick={() => onFix(check.id)}
                     disabled={fixingId === check.id}
-                    className="shrink-0 px-2.5 py-1 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 text-white rounded text-[10px] font-medium"
+                    className="settings-btn settings-btn-primary shrink-0 text-[10px] disabled:bg-slate-700"
                   >
                     {fixingId === check.id
                       ? <Loader2 size={10} className="animate-spin" />
@@ -112,13 +112,13 @@ export function SettingsSecurityAuditPanel({
             <div
               key={`${issue.message}-${index}`}
               className={`flex items-start gap-2 text-xs p-2 rounded-lg ${
-                issue.level === 'warning' ? 'bg-amber-500/10 text-amber-400' : 'bg-slate-800 text-slate-400'
+                issue.level === 'warning' ? 'settings-glass-soft text-amber-300' : 'settings-glass-soft text-slate-400'
               }`}
             >
               {issue.level === 'warning' ? <AlertTriangle size={14} className="mt-0.5 shrink-0" /> : <Shield size={14} className="mt-0.5 shrink-0" />}
               <div>
                 <p>{issue.message}</p>
-                {issue.fix && <code className="mt-1 block text-[10px] text-slate-500 bg-slate-900 px-2 py-1 rounded">{issue.fix}</code>}
+                {issue.fix && <code className="mt-1 block text-[10px] text-slate-500 settings-glass-soft px-2 py-1 rounded">{issue.fix}</code>}
               </div>
             </div>
           ))
@@ -217,7 +217,7 @@ export function SettingsGatewayPanel({
               {gatewayStatus === 'stopped' && (
                 <button
                   onClick={() => onGatewayAction('start')}
-                  className="flex items-center gap-1 px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors"
+                  className="settings-btn settings-btn-primary"
                 >
                   <Play size={10} /> {t('settings.gateway.start')}
                 </button>
@@ -226,13 +226,13 @@ export function SettingsGatewayPanel({
                 <>
                   <button
                     onClick={() => onGatewayAction('restart')}
-                    className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors"
+                    className="settings-btn settings-btn-secondary"
                   >
                     <RotateCw size={10} /> {t('settings.gateway.restart')}
                   </button>
                   <button
                     onClick={() => onGatewayAction('stop')}
-                    className="flex items-center gap-1 px-3 py-1.5 text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg transition-colors"
+                    className="settings-btn settings-btn-danger"
                   >
                     <Square size={10} /> {t('settings.gateway.stop')}
                   </button>
@@ -245,7 +245,7 @@ export function SettingsGatewayPanel({
       <SettingsRow label={t('settings.gateway.logs')} desc={t('settings.gateway.logs.desc')}>
         <button
           onClick={onLoadLogs}
-          className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors"
+          className="settings-btn settings-btn-secondary"
         >
           {t('settings.gateway.viewLogs')} <ChevronRight size={12} />
         </button>
@@ -286,7 +286,7 @@ export function SettingsSystemPanel({
       <SettingsRow label={t('settings.diagnostic')} desc={t('settings.diagnostic.desc')}>
         <button
           onClick={onRunDiagnostic}
-          className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors"
+          className="settings-btn settings-btn-secondary"
         >
           {t('settings.diagnostic.run')} <ChevronRight size={12} />
         </button>
@@ -294,7 +294,7 @@ export function SettingsSystemPanel({
       <SettingsRow label={t('settings.export')} desc={t('settings.export.desc')}>
         <button
           onClick={onExport}
-          className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors"
+          className="settings-btn settings-btn-secondary"
         >
           <Download size={12} /> {t('settings.export')}
         </button>
@@ -302,7 +302,7 @@ export function SettingsSystemPanel({
       <SettingsRow label={t('settings.import')} desc={t('settings.import.desc')}>
         <button
           onClick={onImport}
-          className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors"
+          className="settings-btn settings-btn-secondary"
         >
           <Upload size={12} /> {t('settings.import')}
         </button>
@@ -310,7 +310,7 @@ export function SettingsSystemPanel({
       <SettingsRow label={t('settings.reset')} desc={t('settings.reset.desc')}>
         <button
           onClick={onResetSetup}
-          className="px-3 py-1.5 text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg transition-colors"
+          className="settings-btn settings-btn-danger"
         >
           {t('settings.reset.btn')}
         </button>
@@ -340,7 +340,7 @@ export function SettingsLogsModal({
       maxHeightClass="max-h-[80vh]"
       paddingClass="p-0"
     >
-      <pre className="flex-1 overflow-auto p-4 text-xs font-mono text-slate-300 bg-slate-950 whitespace-pre-wrap">{logs}</pre>
+      <pre className="flex-1 overflow-auto p-4 text-xs font-mono text-slate-300 bg-slate-950/70 whitespace-pre-wrap">{logs}</pre>
     </SettingsModalShell>
   );
 }

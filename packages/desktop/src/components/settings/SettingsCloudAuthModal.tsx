@@ -55,21 +55,21 @@ export function SettingsCloudAuthModal({
       {step === 'waiting' && (
         <div className="space-y-4 text-center">
           <p className="text-sm text-slate-400">{t('settings.memory.cloud.authDesc')}</p>
-          <div className="bg-slate-800 rounded-xl p-4">
+          <div className="settings-glass-soft p-4">
             <p className="text-xs text-slate-500 mb-1">{t('settings.memory.cloud.code')}</p>
             <p className="text-2xl font-mono font-bold text-brand-400 tracking-widest">{userCode}</p>
           </div>
           <button
             onClick={onOpenBrowser}
             disabled={browserOpening}
-            className="flex items-center justify-center gap-2 w-full py-2 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 disabled:text-slate-400 text-sm text-white rounded-xl transition-colors"
+            className="settings-btn settings-btn-primary w-full py-2 disabled:bg-slate-700 disabled:text-slate-400 text-sm"
           >
             {browserOpening ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />} {t('settings.memory.cloud.openBrowser')}
           </button>
           <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
             <Loader2 size={12} className="animate-spin" /> {t('settings.memory.cloud.waiting')}
           </div>
-          <button onClick={onRefreshCode} className="text-xs text-slate-500 hover:text-slate-300 transition-colors">
+          <button onClick={onRefreshCode} className="settings-btn settings-btn-secondary text-xs px-2.5 py-1.5">
             {t('settings.memory.cloud.refreshCode', 'Code expired? Get a new one')}
           </button>
         </div>
@@ -82,7 +82,7 @@ export function SettingsCloudAuthModal({
             <button
               key={memory.id}
               onClick={() => onSelectMemory(memory.id)}
-              className="w-full flex items-center gap-3 p-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-left transition-colors"
+              className="w-full flex items-center gap-3 p-3 settings-glass-soft text-left transition-colors hover:border-slate-500/50"
             >
               <span className="text-brand-400">🧠</span>
               <div>
@@ -98,7 +98,7 @@ export function SettingsCloudAuthModal({
         <div className="text-center space-y-3 py-4">
           <CheckCircle size={40} className="mx-auto text-emerald-400" />
           <p className="text-sm text-emerald-400">{t('settings.memory.cloud.success')}</p>
-          <button onClick={onClose} className="px-6 py-2 bg-brand-600 hover:bg-brand-500 text-white text-sm rounded-xl transition-colors">
+          <button onClick={onClose} className="settings-btn settings-btn-primary px-6 py-2 text-sm">
             OK
           </button>
         </div>
@@ -108,7 +108,7 @@ export function SettingsCloudAuthModal({
         <div className="text-center space-y-3 py-4">
           <CloudOff size={40} className="mx-auto text-red-400" />
           <p className="text-sm text-red-400">{t('settings.memory.cloud.failed')}</p>
-          <button onClick={onRetry} className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded-xl transition-colors">
+          <button onClick={onRetry} className="settings-btn settings-btn-secondary px-6 py-2 text-sm">
             {t('common.retry', 'Retry')}
           </button>
         </div>

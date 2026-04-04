@@ -11,12 +11,12 @@ export function SettingsUsagePanel({
   onClear: () => void;
 }) {
   return (
-    <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 p-4 space-y-3">
+    <div className="settings-glass-card p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">{t('settings.usage') || 'Usage (estimated)'}</h3>
+        <h3 className="settings-section-title">{t('settings.usage') || 'Usage (estimated)'}</h3>
         <button
           onClick={onClear}
-          className="text-[10px] text-slate-600 hover:text-red-400 transition-colors"
+          className="settings-btn settings-btn-danger text-[10px] px-2.5 py-1"
         >
           {t('settings.reset.btn')}
         </button>
@@ -72,38 +72,38 @@ export function SettingsVersionPanel({
   githubOpening: boolean;
 }) {
   return (
-    <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 p-4 space-y-2">
-      <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">{t('settings.versions')}</h3>
+    <div className="settings-glass-card p-4 space-y-2">
+      <h3 className="settings-section-title mb-3">{t('settings.versions')}</h3>
       <div className="grid grid-cols-2 gap-2 text-xs">
-        <div className="flex justify-between p-2 bg-slate-900/50 rounded-lg">
+        <div className="flex justify-between p-2 settings-glass-soft">
           <span className="text-slate-400">{t('app.name', 'AwarenessClaw')}</span>
           <span className="text-slate-200 font-mono">v{packageVersion}</span>
         </div>
-        <div className="flex justify-between p-2 bg-slate-900/50 rounded-lg">
+        <div className="flex justify-between p-2 settings-glass-soft">
           <span className="text-slate-400">{t('settings.versions.openclaw', 'OpenClaw')}</span>
           <span className={`font-mono ${versionInfo?.openclawVersion ? 'text-slate-200' : 'text-red-400'}`}>
             {versionInfo?.openclawVersion || t('settings.diagnostic.notInstalled')}
           </span>
         </div>
-        <div className="flex justify-between p-2 bg-slate-900/50 rounded-lg">
+        <div className="flex justify-between p-2 settings-glass-soft">
           <span className="text-slate-400">Node.js</span>
           <span className={`font-mono ${versionInfo?.nodeVersion ? 'text-slate-200' : 'text-red-400'}`}>
             {versionInfo?.nodeVersion || t('settings.diagnostic.notInstalled')}
           </span>
         </div>
-        <div className="flex justify-between p-2 bg-slate-900/50 rounded-lg">
+        <div className="flex justify-between p-2 settings-glass-soft">
           <span className="text-slate-400">{t('settings.versions.awarenessPlugin', 'Awareness Plugin')}</span>
           <span className={`font-mono ${versionInfo?.awarenessPluginVersion ? 'text-slate-200' : 'text-red-400'}`}>
             {versionInfo?.awarenessPluginVersion ? `v${versionInfo.awarenessPluginVersion}` : t('settings.diagnostic.notInstalled')}
           </span>
         </div>
-        <div className="flex justify-between p-2 bg-slate-900/50 rounded-lg">
+        <div className="flex justify-between p-2 settings-glass-soft">
           <span className="text-slate-400">{t('settings.versions.localDaemon', 'Local Daemon')}</span>
           <span className={`font-mono ${versionInfo?.daemonRunning ? 'text-emerald-400' : 'text-red-400'}`}>
             {versionInfo?.daemonRunning ? `v${versionInfo.daemonVersion || '?'} ✓` : t('settings.versions.offline', 'Offline')}
           </span>
         </div>
-        <div className="flex justify-between p-2 bg-slate-900/50 rounded-lg">
+        <div className="flex justify-between p-2 settings-glass-soft">
           <span className="text-slate-400">{t('settings.diagnostic.platform')}</span>
           <span className="text-slate-200 font-mono">{versionInfo ? `${versionInfo.platform} ${versionInfo.arch}` : '...'}</span>
         </div>
@@ -116,7 +116,7 @@ export function SettingsVersionPanel({
         </div>
       )}
       <div className="flex justify-center pt-2">
-        <button onClick={onOpenGithub} disabled={githubOpening} className="flex items-center gap-1 text-xs text-brand-500 hover:text-brand-400 disabled:text-slate-500">
+        <button onClick={onOpenGithub} disabled={githubOpening} className="settings-btn settings-btn-secondary text-xs disabled:text-slate-500">
           {githubOpening ? <Loader2 size={12} className="animate-spin" /> : null}
           GitHub
         </button>

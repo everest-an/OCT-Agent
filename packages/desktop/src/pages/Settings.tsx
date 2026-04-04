@@ -533,55 +533,57 @@ export default function Settings() {
     });
   };
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="px-6 py-4 border-b border-slate-800">
-        <h1 className="text-lg font-semibold">⚙️ {t('settings.title')}</h1>
+    <div className="settings-ios h-full overflow-y-auto">
+      <div className="settings-ios-header">
+        <div className="settings-ios-shell px-6 py-4">
+          <h1 className="settings-page-title">⚙️ {t('settings.title')}</h1>
+        </div>
       </div>
 
-      <div className="p-6 space-y-6 max-w-2xl">
+      <div className="settings-ios-shell p-6 pb-10 space-y-7">
         <SettingsSection title={`🌐 ${t('settings.web.title', 'Web & Browser')}`}>
-          <div className="p-4 space-y-4">
-            <div className="text-xs text-slate-500">
+          <div className="p-5 space-y-5">
+            <div className="text-xs text-slate-500 leading-5">
               {t('settings.web.desc', 'Configure OpenClaw web search, page fetch, and browser automation settings directly from Desktop. This form is generated from the OpenClaw config schema, so supported fields track the installed OpenClaw version.')}
             </div>
 
-            <div className="rounded-xl border border-slate-700/60 bg-slate-900/40 p-3 space-y-3">
+            <div className="settings-glass-soft p-4 space-y-4">
               <div className="text-xs font-medium text-slate-200">
                 {t('settings.web.flow.title', 'How Desktop uses these web tools')}
               </div>
               <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 px-3 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-200">
+                <div className="settings-glass-soft px-3 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-300">
                     {t('settings.web.flow.search.label', '1. Search')}
                   </div>
-                  <div className="mt-2 text-xs text-slate-100">
+                  <div className="mt-2 text-xs text-slate-200 leading-5">
                     {t('settings.web.flow.search.title', 'Find sources and snippets from the web')}
                   </div>
-                  <div className="mt-1 text-[11px] text-slate-300">
+                  <div className="mt-1 text-[11px] text-slate-400 leading-5">
                     {t('settings.web.flow.search.detail', 'Desktop calls web_search first. If you have not picked another provider, the effective default is {0}.').replace('{0}', effectiveWebProvider)}
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-200">
+                <div className="settings-glass-soft px-3 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-300">
                     {t('settings.web.flow.fetch.label', '2. Fetch')}
                   </div>
-                  <div className="mt-2 text-xs text-slate-100">
+                  <div className="mt-2 text-xs text-slate-200 leading-5">
                     {t('settings.web.flow.fetch.title', 'Read a specific page or article')}
                   </div>
-                  <div className="mt-1 text-[11px] text-slate-300">
+                  <div className="mt-1 text-[11px] text-slate-400 leading-5">
                     {t('settings.web.flow.fetch.detail', 'Desktop uses web_fetch to pull readable page content from a URL. This is usually enough when the user already has the link.')}
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-200">
+                <div className="settings-glass-soft px-3 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-300">
                     {t('settings.web.flow.browser.label', '3. Browser')}
                   </div>
-                  <div className="mt-2 text-xs text-slate-100">
+                  <div className="mt-2 text-xs text-slate-200 leading-5">
                     {t('settings.web.flow.browser.title', 'Open, click, log in, and handle JS-heavy sites')}
                   </div>
-                  <div className="mt-1 text-[11px] text-slate-300">
+                  <div className="mt-1 text-[11px] text-slate-400 leading-5">
                     {t('settings.web.flow.browser.detail', 'Browser stays enabled as a separate tool. It is not your web_search provider, but Desktop keeps it available for page automation.')}
                   </div>
                 </div>
@@ -589,7 +591,7 @@ export default function Settings() {
             </div>
 
             {webProviderGuide && (
-              <div className={`rounded-xl border px-3 py-3 text-xs ${webProviderMissingKey ? 'border-amber-500/30 bg-amber-500/10 text-amber-200' : 'border-sky-500/20 bg-sky-500/10 text-sky-100'}`}>
+              <div className={`settings-glass-soft px-3 py-3 text-xs ${webProviderMissingKey ? 'text-amber-300' : 'text-sky-300'}`}>
                 <div className="font-medium mb-1">{t(webProviderGuide.title, webProviderGuide.title)}</div>
                 <div className="opacity-80">{t(webProviderGuide.detail, webProviderGuide.detail)}</div>
                 {webProviderMissingKey && <div className="mt-2 text-amber-300">{t('settings.web.guide.missingCredential', 'Current status: provider selected, but credential is still missing.')}</div>}
@@ -622,7 +624,7 @@ export default function Settings() {
                     <button
                       onClick={saveWebConfig}
                       disabled={webSaving}
-                      className="flex items-center gap-1 px-3 py-1.5 text-xs bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 disabled:text-slate-500 rounded-lg text-white transition-colors"
+                      className="settings-btn settings-btn-primary disabled:bg-slate-700 disabled:text-slate-500"
                     >
                       {webSaving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
                       {t('settings.web.save', 'Save Web Settings')}
@@ -635,7 +637,7 @@ export default function Settings() {
             )}
 
             {webError && (
-              <div className="text-xs text-red-400 bg-red-950/30 border border-red-900/50 rounded-lg px-3 py-2">
+              <div className="text-xs text-red-400 settings-glass-soft border-red-500/30 px-3 py-2">
                 {webError}
               </div>
             )}

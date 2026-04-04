@@ -24,7 +24,7 @@ export function SettingsTokenPanel({
         <select
           value={thinkingLevel || 'low'}
           onChange={(event) => onThinkingLevelChange(event.target.value)}
-          className="px-3 py-1.5 bg-slate-700 rounded-lg text-sm border-none focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+          className="settings-select text-sm"
         >
           <option value="off">{t('settings.token.thinkingOff')}</option>
           <option value="minimal">{t('settings.token.thinkingMinimal')}</option>
@@ -37,7 +37,7 @@ export function SettingsTokenPanel({
         <select
           value={reasoningDisplay || 'on'}
           onChange={(event) => onReasoningDisplayChange(event.target.value)}
-          className="px-3 py-1.5 bg-slate-700 rounded-lg text-sm border-none focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+          className="settings-select text-sm"
         >
           <option value="off">{t('settings.token.reasoningOff')}</option>
           <option value="on">{t('settings.token.reasoningOn')}</option>
@@ -45,7 +45,7 @@ export function SettingsTokenPanel({
         </select>
       </SettingsRow>
       <SettingsRow label={t('settings.token.estimate')} desc={t('settings.token.estimate.desc')}>
-        <span className="text-xs text-slate-400 font-mono">
+        <span className="settings-mono-badge">
           ~{((thinkingTokens + 500) / 1000).toFixed(1)}k {t('settings.token.overhead')}
         </span>
       </SettingsRow>
@@ -72,7 +72,7 @@ export function SettingsAppearancePanel({
         <select
           value={language}
           onChange={(event) => onLanguageChange(event.target.value)}
-          className="px-3 py-1.5 bg-slate-700 rounded-lg text-sm border-none focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+          className="settings-select text-sm"
         >
           <option value="zh">🇨🇳 中文</option>
           <option value="en">🇺🇸 English</option>
@@ -81,7 +81,7 @@ export function SettingsAppearancePanel({
         </select>
       </SettingsRow>
       <SettingsRow label={t('settings.theme')}>
-        <div className="flex bg-slate-700 rounded-lg overflow-hidden">
+        <div className="settings-pill-group">
           {([
             { key: 'light' as const, icon: Sun, labelKey: 'settings.theme.light' },
             { key: 'dark' as const, icon: Moon, labelKey: 'settings.theme.dark' },
@@ -90,7 +90,7 @@ export function SettingsAppearancePanel({
             <button
               key={key}
               onClick={() => onThemeChange(key)}
-              className={`px-3 py-1.5 text-xs flex items-center gap-1 ${theme === key ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+              className={`settings-pill-button flex items-center gap-1 ${theme === key ? 'is-active' : ''}`}
             >
               <Icon size={12} /> {t(labelKey)}
             </button>

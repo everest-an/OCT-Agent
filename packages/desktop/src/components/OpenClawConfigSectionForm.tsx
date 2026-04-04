@@ -38,10 +38,10 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (val
       type="button"
       title={label}
       aria-label={label}
-      className={`w-11 h-6 rounded-full transition-colors relative ${checked ? 'bg-brand-600' : 'bg-slate-700'}`}
+      className={`settings-toggle ${checked ? 'is-on' : ''}`}
     >
       <div
-        className="w-5 h-5 rounded-full bg-white absolute top-0.5 transition-transform"
+        className="settings-toggle-knob"
         style={{ transform: checked ? 'translateX(21px)' : 'translateX(1px)' }}
       />
     </button>
@@ -58,7 +58,7 @@ export default function OpenClawConfigSectionForm({
   onChange: (path: string, nextValue: any) => void;
 }) {
   const { t } = useI18n();
-  const inputClass = 'w-full px-3 py-2.5 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500 transition-colors';
+  const inputClass = 'settings-input w-full px-3 py-2.5 text-sm transition-colors';
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(sections.map((section) => [section.key, Boolean(section.defaultExpanded)])),
   );
@@ -107,7 +107,7 @@ export default function OpenClawConfigSectionForm({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="settings-config-form space-y-4">
       {sections.map((section) => {
         let lastGroup: string | undefined;
         const primaryFields = section.fields.filter((field) => field.prominence !== 'advanced');
@@ -117,7 +117,7 @@ export default function OpenClawConfigSectionForm({
         const isExpanded = expandedSections[section.key];
 
         return (
-          <div key={section.key} className="rounded-xl border border-slate-700/50 bg-slate-800/40">
+          <div key={section.key} className="settings-glass-soft">
             <div className="px-4 py-3 border-b border-slate-700/50 space-y-2">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -127,7 +127,7 @@ export default function OpenClawConfigSectionForm({
                 {showAdvancedToggle && (
                   <button
                     onClick={() => setExpandedSections((prev) => ({ ...prev, [section.key]: !prev[section.key] }))}
-                    className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 transition-colors whitespace-nowrap"
+                    className="settings-btn settings-btn-secondary text-[11px] whitespace-nowrap"
                   >
                     {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                     {isExpanded

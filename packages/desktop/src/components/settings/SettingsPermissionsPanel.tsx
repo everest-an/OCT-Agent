@@ -103,27 +103,27 @@ export function SettingsPermissionsPanel({
 
   const presetColorClasses: Record<string, { active: string; idle: string }> = {
     blue: {
-      active: 'border-blue-500/60 bg-blue-600/10 text-blue-300',
-      idle: 'border-slate-700 bg-slate-800/50 text-slate-400 hover:border-blue-500/40 hover:text-blue-300',
+      active: 'settings-glass-soft border-blue-500/35 text-slate-200',
+      idle: 'settings-glass-soft text-slate-400 hover:border-blue-500/35 hover:text-blue-300',
     },
     emerald: {
-      active: 'border-emerald-500/60 bg-emerald-600/10 text-emerald-300',
-      idle: 'border-slate-700 bg-slate-800/50 text-slate-400 hover:border-emerald-500/40 hover:text-emerald-300',
+      active: 'settings-glass-soft border-emerald-500/35 text-slate-200',
+      idle: 'settings-glass-soft text-slate-400 hover:border-emerald-500/35 hover:text-emerald-300',
     },
     purple: {
-      active: 'border-purple-500/60 bg-purple-600/10 text-purple-300',
-      idle: 'border-slate-700 bg-slate-800/50 text-slate-400 hover:border-purple-500/40 hover:text-purple-300',
+      active: 'settings-glass-soft border-purple-500/35 text-slate-200',
+      idle: 'settings-glass-soft text-slate-400 hover:border-purple-500/35 hover:text-purple-300',
     },
   };
 
   return (
     <SettingsSection title={`🛡️ ${t('settings.permissions')}`}>
-      <div className="p-4 space-y-3">
-        <p className="text-xs text-slate-500 mb-3">{t('settings.permissions.presetDesc', 'This panel is a simplified desktop view of OpenClaw permissions. It controls tool allow/deny plus part of exec approval behavior.')}</p>
-        <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100/90">
+      <div className="p-5 space-y-5">
+        <p className="text-xs leading-5 text-slate-500">{t('settings.permissions.presetDesc', 'This panel is a simplified desktop view of OpenClaw permissions. It controls tool allow/deny plus part of exec approval behavior.')}</p>
+        <div className="settings-glass-soft px-3 py-3 text-[11px] leading-5 text-amber-300">
           {t('settings.permissions.coverageNote', 'This panel now covers OpenClaw exec approval defaults plus the main agent allowlist in ~/.openclaw/exec-approvals.json. Multi-agent scope switching and richer allowlist metadata editing are still not exposed here yet.')}
         </div>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
           {presets.map(({ key, preset }) => {
             const isActive = activePreset === key;
             const colorClasses = presetColorClasses[preset.color] ?? presetColorClasses.blue;
@@ -157,11 +157,11 @@ export function SettingsPermissionsPanel({
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
-          <div className="rounded-xl border border-emerald-600/20 bg-emerald-600/5 p-3 space-y-2">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+          <div className="settings-glass-soft p-3 space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-emerald-300">{t('settings.permissions.alreadyAllowed', 'Already Allowed')}</span>
-              <span className="text-[10px] text-emerald-400/80">{allowedNow.length + customAllowed.length}</span>
+              <span className="text-xs font-medium text-slate-200">{t('settings.permissions.alreadyAllowed', 'Already Allowed')}</span>
+              <span className="text-[10px] text-slate-400">{allowedNow.length + customAllowed.length}</span>
             </div>
             <div className="space-y-1.5">
               {allowedNow.length === 0 && customAllowed.length === 0 && (
@@ -171,39 +171,39 @@ export function SettingsPermissionsPanel({
                 <button
                   key={tool.id}
                   onClick={() => onToggleAllowedTool(tool.id)}
-                  className="w-full text-left rounded-lg border border-emerald-600/20 bg-slate-900/40 px-3 py-2 hover:border-emerald-500/40 transition-colors"
+                  className="w-full text-left rounded-lg settings-glass-soft px-3 py-2 hover:border-emerald-500/40 transition-colors"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-medium text-slate-100">{tool.label}</span>
-                    <span className="text-[10px] text-emerald-300">{tool.risk}</span>
+                      <span className="text-[10px] text-slate-400">{tool.risk}</span>
                   </div>
                   <div className="text-[10px] text-slate-500 mt-1">{tool.desc}</div>
                 </button>
               ))}
               {customAllowed.map((tool) => (
-                <div key={tool} className="flex items-center justify-between rounded-lg border border-slate-700/60 bg-slate-900/40 px-3 py-2">
+                <div key={tool} className="flex items-center justify-between rounded-lg settings-glass-soft px-3 py-2">
                   <span className="text-[11px] font-mono text-slate-300">{tool}</span>
-                  <button onClick={() => onToggleAllowedTool(tool)} className="text-[10px] text-red-400 hover:text-red-300">{t('common.remove', 'Remove')}</button>
+                  <button onClick={() => onToggleAllowedTool(tool)} className="settings-btn settings-btn-danger text-[10px] px-2 py-1">{t('common.remove', 'Remove')}</button>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="rounded-xl border border-sky-600/20 bg-sky-600/5 p-3 space-y-2">
+          <div className="settings-glass-soft p-3 space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-sky-300">{t('settings.permissions.canBeEnabled', 'Can Be Enabled')}</span>
-              <span className="text-[10px] text-sky-400/80">{availableToAllow.length}</span>
+              <span className="text-xs font-medium text-slate-200">{t('settings.permissions.canBeEnabled', 'Can Be Enabled')}</span>
+              <span className="text-[10px] text-slate-400">{availableToAllow.length}</span>
             </div>
             <div className="space-y-1.5">
               {availableToAllow.map((tool) => (
                 <button
                   key={tool.id}
                   onClick={() => onToggleAllowedTool(tool.id)}
-                  className="w-full text-left rounded-lg border border-slate-700/60 bg-slate-900/40 px-3 py-2 hover:border-sky-500/40 transition-colors"
+                  className="w-full text-left rounded-lg settings-glass-soft px-3 py-2 hover:border-sky-500/40 transition-colors"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-medium text-slate-100">{tool.label}</span>
-                    <span className="text-[10px] text-sky-300">{t('settings.permissions.allowAction', 'Allow')}</span>
+                      <span className="text-[10px] text-slate-400">{t('settings.permissions.allowAction', 'Allow')}</span>
                   </div>
                   <div className="text-[10px] text-slate-500 mt-1">{tool.desc}</div>
                 </button>
@@ -214,10 +214,10 @@ export function SettingsPermissionsPanel({
             </div>
           </div>
 
-          <div className="rounded-xl border border-rose-600/20 bg-rose-600/5 p-3 space-y-2">
+          <div className="settings-glass-soft p-3 space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-rose-300">{t('settings.permissions.blockedNow', 'Blocked Right Now')}</span>
-              <span className="text-[10px] text-rose-400/80">{blockedNow.length + customDenied.length}</span>
+              <span className="text-xs font-medium text-slate-200">{t('settings.permissions.blockedNow', 'Blocked Right Now')}</span>
+              <span className="text-[10px] text-slate-400">{blockedNow.length + customDenied.length}</span>
             </div>
             <div className="space-y-1.5">
               {blockedNow.length === 0 && customDenied.length === 0 && (
@@ -227,26 +227,26 @@ export function SettingsPermissionsPanel({
                 <button
                   key={command.id}
                   onClick={() => onToggleDeniedCommand(command.id)}
-                  className="w-full text-left rounded-lg border border-rose-600/20 bg-slate-900/40 px-3 py-2 hover:border-rose-500/40 transition-colors"
+                  className="w-full text-left rounded-lg settings-glass-soft px-3 py-2 hover:border-rose-500/40 transition-colors"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-medium text-slate-100">{command.label}</span>
-                    <span className="text-[10px] text-rose-300">{command.impact}</span>
+                      <span className="text-[10px] text-slate-400">{command.impact}</span>
                   </div>
                   <div className="text-[10px] text-slate-500 mt-1">{command.desc}</div>
                 </button>
               ))}
               {customDenied.map((command) => (
-                <div key={command} className="flex items-center justify-between rounded-lg border border-slate-700/60 bg-slate-900/40 px-3 py-2">
+                <div key={command} className="flex items-center justify-between rounded-lg settings-glass-soft px-3 py-2">
                   <span className="text-[11px] font-mono text-slate-300">{command}</span>
-                  <button onClick={() => onToggleDeniedCommand(command)} className="text-[10px] text-red-400 hover:text-red-300">{t('common.remove', 'Remove')}</button>
+                  <button onClick={() => onToggleDeniedCommand(command)} className="settings-btn settings-btn-danger text-[10px] px-2 py-1">{t('common.remove', 'Remove')}</button>
                 </div>
               ))}
             </div>
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-700/50 bg-slate-900/30 p-3 space-y-3">
+        <div className="settings-glass-soft p-4 space-y-4">
           <div className="space-y-3">
             <div>
               <div className="text-xs font-medium text-slate-200">{t('settings.permissions.hostExecPolicy', 'Host exec policy')}</div>
@@ -255,7 +255,7 @@ export function SettingsPermissionsPanel({
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
               <div>
                 <div className="text-[11px] text-slate-400 mb-1">{t('settings.permissions.security', 'Security')}</div>
-                <div className="flex bg-slate-800 rounded-lg overflow-hidden border border-slate-700/50">
+                <div className="settings-pill-group w-full">
                   {([
                     { key: 'deny' as const, label: t('settings.permissions.mode.deny', 'Deny') },
                     { key: 'allowlist' as const, label: t('settings.permissions.mode.allowlist', 'Allowlist') },
@@ -264,7 +264,7 @@ export function SettingsPermissionsPanel({
                     <button
                       key={mode.key}
                       onClick={() => onSaveExecSecurity(mode.key)}
-                      className={`flex-1 px-3 py-1.5 text-[11px] transition-colors ${permissions.execSecurity === mode.key ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                      className={`settings-pill-button flex-1 text-[11px] ${permissions.execSecurity === mode.key ? 'is-active' : ''}`}
                     >
                       {mode.label}
                     </button>
@@ -274,7 +274,7 @@ export function SettingsPermissionsPanel({
 
               <div>
                 <div className="text-[11px] text-slate-400 mb-1">{t('settings.permissions.ask', 'Ask')}</div>
-                <div className="flex bg-slate-800 rounded-lg overflow-hidden border border-slate-700/50">
+                <div className="settings-pill-group w-full">
                   {([
                     { key: 'off' as const, label: t('settings.permissions.askMode.off', 'Off') },
                     { key: 'on-miss' as const, label: t('settings.permissions.askMode.onMiss', 'On miss') },
@@ -283,7 +283,7 @@ export function SettingsPermissionsPanel({
                     <button
                       key={mode.key}
                       onClick={() => onSaveExecAsk(mode.key)}
-                      className={`flex-1 px-3 py-1.5 text-[11px] transition-colors ${permissions.execAsk === mode.key ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                      className={`settings-pill-button flex-1 text-[11px] ${permissions.execAsk === mode.key ? 'is-active' : ''}`}
                     >
                       {mode.label}
                     </button>
@@ -293,7 +293,7 @@ export function SettingsPermissionsPanel({
 
               <div>
                 <div className="text-[11px] text-slate-400 mb-1">{t('settings.permissions.askFallback', 'Ask fallback')}</div>
-                <div className="flex bg-slate-800 rounded-lg overflow-hidden border border-slate-700/50">
+                <div className="settings-pill-group w-full">
                   {([
                     { key: 'deny' as const, label: t('settings.permissions.mode.deny', 'Deny') },
                     { key: 'allowlist' as const, label: t('settings.permissions.mode.allowlist', 'Allowlist') },
@@ -302,7 +302,7 @@ export function SettingsPermissionsPanel({
                     <button
                       key={mode.key}
                       onClick={() => onSaveExecAskFallback(mode.key)}
-                      className={`flex-1 px-3 py-1.5 text-[11px] transition-colors ${permissions.execAskFallback === mode.key ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                      className={`settings-pill-button flex-1 text-[11px] ${permissions.execAskFallback === mode.key ? 'is-active' : ''}`}
                     >
                       {mode.label}
                     </button>
@@ -312,7 +312,7 @@ export function SettingsPermissionsPanel({
             </div>
           </div>
 
-          <label className="flex items-start gap-3 rounded-lg border border-slate-700/50 bg-slate-800/40 px-3 py-2">
+          <label className="settings-glass-soft flex items-start gap-3 px-3 py-2">
             <input
               type="checkbox"
               checked={permissions.execAutoAllowSkills}
@@ -325,7 +325,7 @@ export function SettingsPermissionsPanel({
             </div>
           </label>
 
-          <div className="rounded-lg border border-slate-700/50 bg-slate-800/30 p-3 space-y-2">
+          <div className="settings-glass-soft p-3 space-y-2">
             <div>
               <div className="text-xs font-medium text-slate-200">{t('settings.permissions.mainAgentAllowlist', 'Main agent allowlist')}</div>
               <div className="text-[11px] text-slate-500 mt-1">{t('settings.permissions.mainAgentAllowlistDesc', 'These patterns are written to agents.main.allowlist in exec-approvals.json.')}</div>
@@ -333,12 +333,12 @@ export function SettingsPermissionsPanel({
             {permissions.execAllowlist.length > 0 ? (
               <div className="space-y-1.5">
                 {permissions.execAllowlist.map((entry) => (
-                  <div key={entry.id || entry.pattern} className="flex items-center justify-between gap-3 rounded-lg border border-slate-700/60 bg-slate-900/40 px-3 py-2">
+                  <div key={entry.id || entry.pattern} className="flex items-center justify-between gap-3 rounded-lg settings-glass-soft px-3 py-2">
                     <div className="min-w-0">
                       <div className="text-[11px] font-mono text-slate-200 truncate">{entry.pattern}</div>
                       <div className="text-[10px] text-slate-500 truncate">{entry.lastResolvedPath || entry.lastUsedCommand || entry.source || t('settings.permissions.manualPattern', 'Manual pattern')}</div>
                     </div>
-                    <button onClick={() => onRemoveAllowlistPattern(entry.pattern)} className="text-[10px] text-red-400 hover:text-red-300">{t('common.remove', 'Remove')}</button>
+                    <button onClick={() => onRemoveAllowlistPattern(entry.pattern)} className="settings-btn settings-btn-danger text-[10px] px-2 py-1">{t('common.remove', 'Remove')}</button>
                   </div>
                 ))}
               </div>
@@ -350,7 +350,7 @@ export function SettingsPermissionsPanel({
                 value={newAllowlistPattern}
                 onChange={(event) => onNewAllowlistPatternChange(event.target.value)}
                 placeholder="/opt/homebrew/bin/rg or ~/Projects/**/bin/tool"
-                className="flex-1 px-2 py-1 bg-slate-900 border border-slate-700 rounded text-[11px] font-mono text-slate-400 placeholder:text-slate-600 focus:outline-none focus:border-brand-500"
+                className="settings-input flex-1 px-2 py-1 text-[11px] font-mono"
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
                     onAddAllowlistPattern();
@@ -360,7 +360,7 @@ export function SettingsPermissionsPanel({
               <button
                 data-testid="add-allowlist-pattern"
                 onClick={onAddAllowlistPattern}
-                className="px-2 py-1 text-[11px] bg-slate-700 hover:bg-slate-600 rounded text-slate-300"
+                className="settings-btn settings-btn-secondary px-2 py-1 text-[11px]"
               >
                 <Plus size={11} />
               </button>
@@ -370,7 +370,7 @@ export function SettingsPermissionsPanel({
 
         <button
           onClick={onToggleAdvanced}
-          className="w-full flex items-center justify-center gap-1.5 text-[11px] text-slate-600 hover:text-slate-400 transition-colors pt-1"
+          className="settings-btn settings-btn-secondary w-full text-[11px] pt-1"
         >
           <Zap size={10} />
           {showAdvancedPerms
@@ -394,8 +394,8 @@ export function SettingsPermissionsPanel({
                       onClick={() => onToggleAllowedTool(tool.id)}
                       className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg border text-left transition-all ${
                         enabled
-                          ? 'bg-emerald-600/10 border-emerald-600/30 text-slate-200'
-                          : 'bg-slate-900/50 border-slate-700/50 text-slate-400 hover:border-slate-600'
+                          ? 'settings-glass-soft border-emerald-500/45 text-slate-200'
+                          : 'settings-glass-soft text-slate-400 hover:border-slate-500/45'
                       }`}
                     >
                       <div className={`w-4 h-4 rounded flex-shrink-0 flex items-center justify-center border ${enabled ? 'bg-emerald-600 border-emerald-500' : 'border-slate-600'}`}>
@@ -414,7 +414,7 @@ export function SettingsPermissionsPanel({
                 {customAllowed.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mb-1.5">
                     {customAllowed.map((tool) => (
-                      <span key={tool} className="flex items-center gap-1 px-2 py-0.5 bg-slate-700/50 border border-slate-600/50 rounded text-[10px] text-slate-300 font-mono">
+                      <span key={tool} className="flex items-center gap-1 px-2 py-0.5 settings-glass-soft rounded text-[10px] text-slate-300 font-mono">
                         {tool}
                         <button onClick={() => onToggleAllowedTool(tool)} className="hover:text-red-400 ml-0.5">×</button>
                       </span>
@@ -426,7 +426,7 @@ export function SettingsPermissionsPanel({
                     value={newAllowTool}
                     onChange={(event) => onNewAllowToolChange(event.target.value)}
                     placeholder={t('perm.tool.custom', 'Custom tool name (advanced)...')}
-                    className="flex-1 px-2 py-1 bg-slate-900 border border-slate-700 rounded text-[11px] font-mono text-slate-400 placeholder:text-slate-600 focus:outline-none focus:border-brand-500"
+                    className="settings-input flex-1 px-2 py-1 text-[11px] font-mono"
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') {
                         onAddCustomAllowed();
@@ -436,7 +436,7 @@ export function SettingsPermissionsPanel({
                   <button
                     data-testid="add-allow-tool"
                     onClick={onAddCustomAllowed}
-                    className="px-2 py-1 text-[11px] bg-slate-700 hover:bg-slate-600 rounded text-slate-300"
+                    className="settings-btn settings-btn-secondary px-2 py-1 text-[11px]"
                   >
                     <Plus size={11} />
                   </button>
@@ -458,8 +458,8 @@ export function SettingsPermissionsPanel({
                       onClick={() => onToggleDeniedCommand(command.id)}
                       className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg border text-left transition-all ${
                         blocked
-                          ? 'bg-red-600/10 border-red-600/30 text-slate-200'
-                          : 'bg-slate-900/50 border-slate-700/50 text-slate-400 hover:border-slate-600'
+                          ? 'settings-glass-soft border-red-500/45 text-slate-200'
+                          : 'settings-glass-soft text-slate-400 hover:border-slate-500/45'
                       }`}
                     >
                       <div className={`w-4 h-4 rounded flex-shrink-0 flex items-center justify-center border ${blocked ? 'bg-red-600 border-red-500' : 'border-slate-600'}`}>
@@ -478,7 +478,7 @@ export function SettingsPermissionsPanel({
                 {customDenied.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mb-1.5">
                     {customDenied.map((command) => (
-                      <span key={command} className="flex items-center gap-1 px-2 py-0.5 bg-slate-700/50 border border-slate-600/50 rounded text-[10px] text-slate-300 font-mono">
+                      <span key={command} className="flex items-center gap-1 px-2 py-0.5 settings-glass-soft rounded text-[10px] text-slate-300 font-mono">
                         {command}
                         <button onClick={() => onToggleDeniedCommand(command)} className="hover:text-red-400 ml-0.5">×</button>
                       </span>
@@ -490,7 +490,7 @@ export function SettingsPermissionsPanel({
                     value={newDenyCmd}
                     onChange={(event) => onNewDenyCmdChange(event.target.value)}
                     placeholder={t('perm.deny.custom', 'Custom command name (advanced)...')}
-                    className="flex-1 px-2 py-1 bg-slate-900 border border-slate-700 rounded text-[11px] font-mono text-slate-400 placeholder:text-slate-600 focus:outline-none focus:border-brand-500"
+                    className="settings-input flex-1 px-2 py-1 text-[11px] font-mono"
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') {
                         onAddCustomDenied();
@@ -500,7 +500,7 @@ export function SettingsPermissionsPanel({
                   <button
                     data-testid="add-deny-cmd"
                     onClick={onAddCustomDenied}
-                    className="px-2 py-1 text-[11px] bg-slate-700 hover:bg-slate-600 rounded text-slate-300"
+                    className="settings-btn settings-btn-secondary px-2 py-1 text-[11px]"
                   >
                     <Plus size={11} />
                   </button>
