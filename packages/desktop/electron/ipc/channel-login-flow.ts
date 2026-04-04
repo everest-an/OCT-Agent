@@ -17,7 +17,7 @@ export function createChannelLoginWithQR(deps: {
 }) {
   return function channelLoginWithQR(
     loginCmd: string,
-    timeoutMs = 120000,
+    timeoutMs = 180000,
   ): Promise<{ success: boolean; output?: string; error?: string }> {
     const ep = deps.getEnhancedPath();
     const send = (channel: string, data: unknown) => {
@@ -41,7 +41,34 @@ export function createChannelLoginWithQR(deps: {
           })
         : spawn('/bin/bash', ['--norc', '--noprofile', '-c', `export PATH="${ep}"; ${loginCmd} 2>&1`]);
 
+      let idleTimer: NodeJS.Timeout | null = null;
+      const clearIdleTimer = () => {
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+          idleTimer = null;
+        }
+      };
+      const resetIdleTimer = () => {
+        clearIdleTimer();
+        idleTimer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          try { child.kill(); } catch {}
+          if (qrFlushTimer) {
+            clearTimeout(qrFlushTimer);
+            qrFlushTimer = null;
+          }
+          if (qrShown) {
+            resolve({ success: false, error: 'QR code expired. Click "Try again" to get a new QR code.' });
+          } else {
+            resolve({ success: false, error: 'Connection timed out while OpenClaw was still loading. Please retry in 20-60 seconds.' });
+          }
+        }, timeoutMs);
+      };
+      resetIdleTimer();
+
       const processLine = (line: string) => {
+        resetIdleTimer();
         lineCount++;
         stdout += line + '\n';
 
@@ -100,6 +127,7 @@ export function createChannelLoginWithQR(deps: {
       };
 
       child.stdout?.on('data', (data: Buffer) => {
+        resetIdleTimer();
         const chunk = data.toString();
         lineBuffer += chunk;
         const lines = lineBuffer.split('\n');
@@ -108,6 +136,7 @@ export function createChannelLoginWithQR(deps: {
       });
 
       child.stderr?.on('data', (data: Buffer) => {
+        resetIdleTimer();
         const chunk = data.toString();
         lineBuffer += chunk;
         const lines = lineBuffer.split('\n');
@@ -119,6 +148,11 @@ export function createChannelLoginWithQR(deps: {
         if (lineBuffer) processLine(lineBuffer);
         if (settled) return;
         settled = true;
+        clearIdleTimer();
+        if (qrFlushTimer) {
+          clearTimeout(qrFlushTimer);
+          qrFlushTimer = null;
+        }
         if (code === 0) {
           resolve({ success: true, output: 'Connected!' });
         } else if (qrShown) {
@@ -129,21 +163,15 @@ export function createChannelLoginWithQR(deps: {
       });
 
       child.on('error', (err) => {
+        clearIdleTimer();
+        if (qrFlushTimer) {
+          clearTimeout(qrFlushTimer);
+          qrFlushTimer = null;
+        }
         if (settled) return;
         settled = true;
         resolve({ success: false, error: String(err).slice(0, 300) });
       });
-
-      setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        try { child.kill(); } catch {}
-        if (qrShown) {
-          resolve({ success: false, error: 'QR code expired. Click "Try again" to get a new QR code.' });
-        } else {
-          resolve({ success: false, error: 'Connection timed out. Make sure Gateway is running.' });
-        }
-      }, timeoutMs);
     });
   };
 }

@@ -18,6 +18,13 @@ export function registerChannelSetupHandlers(deps: {
 }) {
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  const CHANNEL_LOGIN_IDLE_TIMEOUT_MS = 180000;
+  const CHANNEL_PLUGIN_INSTALL_IDLE_TIMEOUT_MS = 60000;
+  const CHANNEL_PLUGIN_UNINSTALL_IDLE_TIMEOUT_MS = 30000;
+  const CHANNEL_ADD_IDLE_TIMEOUT_MS = 45000;
+  const CHANNEL_BIND_IDLE_TIMEOUT_MS = 30000;
+  const GATEWAY_RESTART_IDLE_TIMEOUT_MS = 30000;
+
   const OFFICIAL_ADD_BEFORE_LOGIN_CHANNELS = new Set(['whatsapp', 'signal', 'imessage']);
 
   const toErrorMessage = (err: unknown) => {
@@ -25,8 +32,19 @@ export function registerChannelSetupHandlers(deps: {
     return String(err || '');
   };
 
-  const formatSetupError = (openclawId: string, rawError: string) => {
+  const isTimeoutLike = (message: string) => {
+    const lower = (message || '').toLowerCase();
+    return lower.includes('timed out') || lower.includes('timeout');
+  };
+
+  const formatSetupError = (openclawId: string, channelLabel: string, rawError: string) => {
     const message = (rawError || '').trim();
+    if (isTimeoutLike(message)) {
+      if (openclawId === 'telegram') {
+        return 'OpenClaw is still loading Telegram or waiting for pairing confirmation. Wait 20-60 seconds, approve any pending pairing code, then retry.';
+      }
+      return `OpenClaw is still loading ${channelLabel}. Please wait 20-60 seconds, then retry.`;
+    }
     if (/spawn\s+npx\s+ENOENT/i.test(message)) {
       return 'OpenClaw could not launch required helper tools (npx not found in runtime PATH). Please rerun Setup to repair runtime tools, then retry.';
     }
@@ -76,13 +94,13 @@ export function registerChannelSetupHandlers(deps: {
       sendStatus(`channels.status.repairingPlugin::${safePluginId}`);
 
       try {
-        await deps.runAsync(`openclaw plugins uninstall --force "${safePluginId}" 2>&1`, 20000);
+        await deps.runAsync(`openclaw plugins uninstall --force "${safePluginId}" 2>&1`, CHANNEL_PLUGIN_UNINSTALL_IDLE_TIMEOUT_MS);
       } catch {
         // Ignore uninstall failures and continue with a clean install attempt.
       }
 
       try {
-        await deps.runAsync(`openclaw plugins install "${packageSpec}" 2>&1`, 45000);
+        await deps.runAsync(`openclaw plugins install "${packageSpec}" 2>&1`, CHANNEL_PLUGIN_INSTALL_IDLE_TIMEOUT_MS);
         repairedAny = true;
       } catch (installErr: unknown) {
         const installMessage = toErrorMessage(installErr);
@@ -167,8 +185,17 @@ export function registerChannelSetupHandlers(deps: {
     };
 
     const bindToMainAgent = async (bindId: string) => {
+      const bindCmd = `openclaw agents bind --agent main --bind ${bindId} 2>&1`;
       sendStatus('channels.status.binding');
-      await deps.runAsync(`openclaw agents bind --agent main --bind ${bindId} 2>&1`, 10000);
+      try {
+        await deps.runAsync(bindCmd, CHANNEL_BIND_IDLE_TIMEOUT_MS);
+      } catch (firstBindErr: unknown) {
+        const firstBindMessage = toErrorMessage(firstBindErr);
+        if (!isTimeoutLike(firstBindMessage)) throw firstBindErr;
+        try { await deps.runAsync('openclaw gateway restart 2>&1', GATEWAY_RESTART_IDLE_TIMEOUT_MS); } catch {}
+        sendStatus('channels.status.binding');
+        await deps.runAsync(bindCmd, CHANNEL_BIND_IDLE_TIMEOUT_MS);
+      }
     };
 
     const channelDef = deps.getChannel(safeChannelId);
@@ -185,29 +212,41 @@ export function registerChannelSetupHandlers(deps: {
     ) || channelDef?.pluginPackage || `@openclaw/${openclawId}`;
     const setupFlow = channelDef?.setupFlow || 'qr-login';
     const saveStrategy = channelDef?.saveStrategy || 'cli';
+    const pluginInstallCmd = `openclaw plugins install "${pluginPkg}" 2>&1`;
 
     sendStatus(`channels.status.configuring::${channelLabel}`);
     try {
-      await deps.runAsync(`openclaw plugins install "${pluginPkg}" 2>&1`, 30000);
+      await deps.runAsync(pluginInstallCmd, CHANNEL_PLUGIN_INSTALL_IDLE_TIMEOUT_MS);
     } catch (pluginErr: unknown) {
       const pluginMsg = toErrorMessage(pluginErr);
-      if (!isIgnorablePluginInstallError(pluginMsg)) {
-        return { success: false, error: formatSetupError(openclawId, pluginMsg) };
+      if (isIgnorablePluginInstallError(pluginMsg)) {
+        // Already installed / duplicate install metadata — continue setup.
+      } else if (isTimeoutLike(pluginMsg)) {
+        try {
+          await deps.runAsync(pluginInstallCmd, CHANNEL_PLUGIN_INSTALL_IDLE_TIMEOUT_MS);
+        } catch (retryInstallErr: unknown) {
+          const retryMsg = toErrorMessage(retryInstallErr);
+          if (!isIgnorablePluginInstallError(retryMsg)) {
+            return { success: false, error: formatSetupError(openclawId, channelLabel, retryMsg) };
+          }
+        }
+      } else {
+        return { success: false, error: formatSetupError(openclawId, channelLabel, pluginMsg) };
       }
     }
 
     if (setupFlow === 'add-only') {
       try {
-        await deps.runAsync(`openclaw channels add --channel ${openclawId} 2>&1`, 15000);
+        await deps.runAsync(`openclaw channels add --channel ${openclawId} 2>&1`, CHANNEL_ADD_IDLE_TIMEOUT_MS);
         await bindToMainAgent(openclawId);
         return { success: true, output: `${channelLabel} connected.` };
       } catch (err: any) {
-        return { success: false, error: formatSetupError(openclawId, err?.message || String(err)) };
+        return { success: false, error: formatSetupError(openclawId, channelLabel, err?.message || String(err)) };
       }
     }
 
     if (shouldPrepareWithChannelsAdd(openclawId, saveStrategy, setupFlow)) {
-      try { await deps.runAsync(`openclaw channels add --channel ${openclawId} 2>&1`, 15000); } catch {}
+      try { await deps.runAsync(`openclaw channels add --channel ${openclawId} 2>&1`, CHANNEL_ADD_IDLE_TIMEOUT_MS); } catch {}
     }
 
     if (process.platform === 'win32' && setupFlow !== 'add-only' && deps.ensureLocalDaemonReadyForRuntime) {
@@ -228,14 +267,14 @@ export function registerChannelSetupHandlers(deps: {
 
     sendStatus(`channels.status.connecting::${channelLabel}`);
     const loginCmd = `openclaw channels login --channel ${openclawId} --verbose`;
-    let result = await deps.channelLoginWithQR(loginCmd);
+    let result = await deps.channelLoginWithQR(loginCmd, CHANNEL_LOGIN_IDLE_TIMEOUT_MS);
 
     if (!result.success) {
       const rawFailure = [result.error || '', result.output || ''].join('\n');
       const repaired = await repairBlockingPlugins(rawFailure, sendStatus);
       if (repaired) {
         sendStatus(`channels.status.connecting::${channelLabel}`);
-        result = await deps.channelLoginWithQR(loginCmd);
+        result = await deps.channelLoginWithQR(loginCmd, CHANNEL_LOGIN_IDLE_TIMEOUT_MS);
       }
     }
 
@@ -243,7 +282,7 @@ export function registerChannelSetupHandlers(deps: {
       try {
         await bindToMainAgent(openclawId);
       } catch (bindErr: any) {
-        return { success: false, error: formatSetupError(openclawId, bindErr?.message || String(bindErr)) };
+        return { success: false, error: formatSetupError(openclawId, channelLabel, bindErr?.message || String(bindErr)) };
       }
       const confirmed = await waitForChannelConfirmation(openclawId, channelLabel, sendStatus);
       if (!confirmed) {

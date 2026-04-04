@@ -91,6 +91,12 @@ export default function Channels() {
     return text.includes('timed out') || text.includes('timeout');
   };
 
+  const getTimeoutHint = () => (
+    activeWizard === 'telegram'
+      ? t('channels.failedTimeoutHintTelegram', 'This is usually not a bad token. Wait 20-60 seconds, then retry. If Telegram sent a pairing code, approve it first.')
+      : t('channels.failedTimeoutHint', 'This is usually not a credential issue. Wait 20-60 seconds, then retry.')
+  );
+
   const translateStatus = (statusKey: string): string => {
     const [key, param] = statusKey.split('::');
     const translated = t(key, '');
@@ -718,7 +724,7 @@ export default function Channels() {
                         </p>
                         {isTimeoutLike(testError) && (
                           <p className="text-xs text-amber-400/80 bg-amber-900/20 rounded-lg px-3 py-2 text-left break-words">
-                            {t('channels.failedTimeoutHint', 'This is usually not a bad token. Wait 20-60 seconds, then retry. If Telegram sent a pairing code, approve it first.')}
+                            {getTimeoutHint()}
                           </p>
                         )}
                         {testError && (

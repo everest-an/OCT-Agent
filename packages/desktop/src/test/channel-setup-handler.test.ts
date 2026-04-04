@@ -72,7 +72,7 @@ describe('registerChannelSetupHandlers', () => {
       success: true,
       pendingConfirmation: true,
     });
-    expect(runAsync).toHaveBeenCalledWith('openclaw channels add --channel whatsapp 2>&1', 15000);
+    expect(runAsync).toHaveBeenCalledWith('openclaw channels add --channel whatsapp 2>&1', 45000);
     expect(send).toHaveBeenCalledWith('channel:status', 'channels.status.awaitingConfirmation::WhatsApp');
   });
 
@@ -157,7 +157,7 @@ describe('registerChannelSetupHandlers', () => {
 
     expect(result).toMatchObject({ success: true });
     expect(channelLoginWithQR).toHaveBeenCalledTimes(1);
-    expect(runAsync).toHaveBeenCalledWith('openclaw plugins install "@tencent-weixin/openclaw-weixin" 2>&1', 30000);
+    expect(runAsync).toHaveBeenCalledWith('openclaw plugins install "@tencent-weixin/openclaw-weixin" 2>&1', 60000);
   });
 
   it('repairs blocking plugin load failures and retries login once', async () => {
@@ -188,8 +188,8 @@ describe('registerChannelSetupHandlers', () => {
 
     expect(result).toMatchObject({ success: true });
     expect(channelLoginWithQR).toHaveBeenCalledTimes(2);
-    expect(runAsync).toHaveBeenCalledWith(expect.stringContaining('openclaw plugins uninstall --force "telegram" 2>&1'), 20000);
-    expect(runAsync).toHaveBeenCalledWith(expect.stringContaining('openclaw plugins install "@openclaw/telegram" 2>&1'), 45000);
+    expect(runAsync).toHaveBeenCalledWith(expect.stringContaining('openclaw plugins uninstall --force "telegram" 2>&1'), 30000);
+    expect(runAsync).toHaveBeenCalledWith(expect.stringContaining('openclaw plugins install "@openclaw/telegram" 2>&1'), 60000);
     expect(send).toHaveBeenCalledWith('channel:status', 'channels.status.repairingPlugin::telegram');
   });
 
@@ -210,8 +210,8 @@ describe('registerChannelSetupHandlers', () => {
     const result = await handler({}, 'whatsapp');
 
     expect(result).toMatchObject({ success: true });
-    expect(runAsync).toHaveBeenCalledWith('openclaw channels add --channel whatsapp 2>&1', 15000);
-    expect(channelLoginWithQR).toHaveBeenCalledWith('openclaw channels login --channel whatsapp --verbose');
+    expect(runAsync).toHaveBeenCalledWith('openclaw channels add --channel whatsapp 2>&1', 45000);
+    expect(channelLoginWithQR).toHaveBeenCalledWith('openclaw channels login --channel whatsapp --verbose', 180000);
   });
   it('resolves repair install spec from openclaw plugins inspect output', async () => {
     const runAsync = vi.fn(async () => 'ok');
@@ -237,6 +237,6 @@ describe('registerChannelSetupHandlers', () => {
     const result = await handler({}, 'wechat');
 
     expect(result).toMatchObject({ success: true });
-    expect(runAsync).toHaveBeenCalledWith(expect.stringContaining('openclaw plugins install "@openclaw/telegram@beta" 2>&1'), 45000);
+    expect(runAsync).toHaveBeenCalledWith(expect.stringContaining('openclaw plugins install "@openclaw/telegram@beta" 2>&1'), 60000);
   });
 });
