@@ -45,6 +45,37 @@ describe('openclaw capability schema helpers', () => {
     expect(sections[0].fields.find((field) => field.path === 'tools.web.search.enabled')?.prominence).toBe('advanced');
   });
 
+  it('falls back to PROVIDER_LABELS dropdown when schema has no enum', () => {
+    const schema = {
+      properties: {
+        tools: {
+          properties: {
+            web: {
+              properties: {
+                search: {
+                  type: 'object',
+                  properties: {
+                    provider: { type: 'string' }, // no enum
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const sections = buildDynamicSectionsFromSchema(schema, 'tools.web', {
+      search: { provider: 'tavily' },
+    });
+
+    const providerField = sections[0].fields.find((f) => f.path === 'tools.web.search.provider');
+    expect(providerField?.type).toBe('select');
+    expect(providerField?.options?.length).toBeGreaterThanOrEqual(10);
+    expect(providerField?.options?.some((o) => o.value === 'tavily')).toBe(true);
+    expect(providerField?.options?.some((o) => o.value === 'duckduckgo')).toBe(true);
+  });
+
   it('writes nested values immutably for schema-driven forms', () => {
     const next = setValueAtPath({ search: { provider: 'brave' } }, 'search.maxResults', 8);
     expect(next).toEqual({ search: { provider: 'brave', maxResults: 8 } });

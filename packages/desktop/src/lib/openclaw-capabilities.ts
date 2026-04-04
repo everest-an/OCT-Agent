@@ -125,8 +125,12 @@ function getEnumOptions(node: JsonSchemaNode): string[] {
     .filter((value): value is string => typeof value === 'string');
 }
 
+/** Paths that must always render as select, even if schema lacks enum. */
+const FORCE_SELECT_PATHS = new Set(['tools.web.search.provider']);
+
 function resolveFieldType(node: JsonSchemaNode, path: string): DynamicConfigField['type'] | null {
   if (FIELD_META[path]?.options?.length) return 'select';
+  if (FORCE_SELECT_PATHS.has(path)) return 'select';
   if (path.toLowerCase().includes('apikey')) return 'password';
 
   const schemaType = Array.isArray(node.type) ? node.type[0] : node.type;
@@ -193,8 +197,13 @@ function buildFieldList(
       value,
       label: PROVIDER_LABELS[value] || titleize(value),
     }));
-    // Schema enum takes priority; fall back to meta?.options only when schema has none.
-    const rawOptions = enumOptions.length > 0 ? enumOptions : (meta?.options || []);
+    // Schema enum takes priority; fall back to PROVIDER_LABELS when schema has none.
+    const providerFallback = FORCE_SELECT_PATHS.has(childPath)
+      ? Object.entries(PROVIDER_LABELS).map(([value, label]) => ({ value, label }))
+      : [];
+    const rawOptions = enumOptions.length > 0
+      ? enumOptions
+      : (meta?.options || providerFallback);
     const options = fieldType === 'select'
       ? appendCurrentOption(rawOptions, currentValue?.[key])
       : undefined;
