@@ -16,9 +16,19 @@ export function createDaemonWatchdog(options: {
       if (health) return;
       console.log('[watchdog] Daemon not responding, attempting restart...');
       try {
-        const startCmd = `npx -y @awareness-sdk/local start --port 37800 --project ${path.join(options.homedir, '.openclaw')} --background`;
+        const projectDir = `"${path.join(options.homedir, '.openclaw')}"`;
+        const startCmd = `npx -y @awareness-sdk/local start --port 37800 --project ${projectDir} --background`;
         if (process.platform === 'win32') {
-          spawn('cmd.exe', ['/c', startCmd], { detached: true, stdio: 'ignore', env: { ...process.env, PATH: options.getEnhancedPath() } }).unref();
+          spawn('cmd.exe', ['/d', '/c', startCmd], {
+            detached: true,
+            stdio: 'ignore',
+            env: {
+              ...process.env,
+              PATH: options.getEnhancedPath(),
+              PATHEXT: process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC',
+              ComSpec: process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe',
+            },
+          }).unref();
         } else {
           spawn('/bin/bash', ['--norc', '--noprofile', '-c', `export PATH="${options.getEnhancedPath()}"; ${startCmd}`], { detached: true, stdio: 'ignore' }).unref();
         }

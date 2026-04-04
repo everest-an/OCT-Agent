@@ -20,6 +20,9 @@ export function createChannelLoginWithQR(deps: {
     timeoutMs = 180000,
   ): Promise<{ success: boolean; output?: string; error?: string }> {
     const ep = deps.getEnhancedPath();
+    const windowsPathext = (typeof process.env.PATHEXT === 'string' && process.env.PATHEXT.trim())
+      ? process.env.PATHEXT
+      : '.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC';
     const send = (channel: string, data: unknown) => {
       deps.sendToRenderer(channel, data);
     };
@@ -37,7 +40,14 @@ export function createChannelLoginWithQR(deps: {
         ? spawn(deps.wrapWindowsCommand(loginCmd), [], {
             cwd: os.homedir(),
             shell: 'cmd.exe',
-            env: { ...process.env, PATH: ep, NO_COLOR: '1', FORCE_COLOR: '0' },
+            env: {
+              ...process.env,
+              PATH: ep,
+              PATHEXT: windowsPathext,
+              ComSpec: process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe',
+              NO_COLOR: '1',
+              FORCE_COLOR: '0',
+            },
           })
         : spawn('/bin/bash', ['--norc', '--noprofile', '-c', `export PATH="${ep}"; ${loginCmd} 2>&1`]);
 

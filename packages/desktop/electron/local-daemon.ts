@@ -101,10 +101,22 @@ export async function startLocalDaemonDetached(options: {
   const npxArgs = ['-y', offlineTarball || '@awareness-sdk/local@latest', 'start', '--port', '37800', '--project', projectDir, '--background'];
 
   const launchDetached = (command: string, args: string[]) => new Promise<void>((resolve, reject) => {
+    const env = process.platform === 'win32'
+      ? {
+          ...process.env,
+          PATH: options.getEnhancedPath(),
+          PATHEXT: process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC',
+          ComSpec: process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe',
+        }
+      : {
+          ...process.env,
+          PATH: options.getEnhancedPath(),
+        };
+
     const child = options.runSpawn(command, args, {
       detached: true,
       stdio: 'ignore',
-      env: { ...process.env, PATH: options.getEnhancedPath() },
+      env,
     });
 
     const handleError = (err: any) => reject(err);

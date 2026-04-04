@@ -37,6 +37,8 @@ export function registerChannelSetupHandlers(deps: {
     return lower.includes('timed out') || lower.includes('timeout');
   };
 
+  const isNpxEnoentLike = (message: string) => /spawn\s+npx(?:\.cmd)?\s+enoent/i.test(message || '');
+
   const formatSetupError = (openclawId: string, channelLabel: string, rawError: string) => {
     const message = (rawError || '').trim();
     if (isTimeoutLike(message)) {
@@ -45,7 +47,7 @@ export function registerChannelSetupHandlers(deps: {
       }
       return `OpenClaw is still loading ${channelLabel}. Please wait 20-60 seconds, then retry.`;
     }
-    if (/spawn\s+npx\s+ENOENT/i.test(message)) {
+    if (isNpxEnoentLike(message)) {
       return 'OpenClaw could not launch required helper tools (npx not found in runtime PATH). Please rerun Setup to repair runtime tools, then retry.';
     }
     if (/Unknown channel/i.test(message)) {
@@ -268,14 +270,33 @@ export function registerChannelSetupHandlers(deps: {
     sendStatus(`channels.status.connecting::${channelLabel}`);
     const loginCmd = `openclaw channels login --channel ${openclawId} --verbose`;
     let result = await deps.channelLoginWithQR(loginCmd, CHANNEL_LOGIN_IDLE_TIMEOUT_MS);
+    let rawFailure = [result.error || '', result.output || ''].join('\n').trim();
+
+    if (!result.success && process.platform === 'win32' && isNpxEnoentLike(rawFailure) && deps.ensureLocalDaemonReadyForRuntime) {
+      // Plugin may still attempt its own auto-start path; force a second daemon preflight and retry once.
+      sendStatus('channels.status.startingMemory');
+      const daemonReady = await deps.ensureLocalDaemonReadyForRuntime();
+      if (daemonReady) {
+        sendStatus(`channels.status.connecting::${channelLabel}`);
+        result = await deps.channelLoginWithQR(loginCmd, CHANNEL_LOGIN_IDLE_TIMEOUT_MS);
+        rawFailure = [result.error || '', result.output || ''].join('\n').trim();
+      }
+    }
 
     if (!result.success) {
-      const rawFailure = [result.error || '', result.output || ''].join('\n');
       const repaired = await repairBlockingPlugins(rawFailure, sendStatus);
       if (repaired) {
         sendStatus(`channels.status.connecting::${channelLabel}`);
         result = await deps.channelLoginWithQR(loginCmd, CHANNEL_LOGIN_IDLE_TIMEOUT_MS);
+        rawFailure = [result.error || '', result.output || ''].join('\n').trim();
       }
+    }
+
+    if (!result.success) {
+      return {
+        success: false,
+        error: formatSetupError(openclawId, channelLabel, rawFailure || result.error || result.output || ''),
+      };
     }
 
     if (result.success) {

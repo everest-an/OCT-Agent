@@ -284,14 +284,20 @@ function isGatewayPermissionError(output: string | null) {
 }
 
 async function ensureLocalDaemonReadyForRuntime(send?: (ch: string, data: any) => void): Promise<boolean> {
-  if (await checkDaemonHealth()) return true;
+  const isDaemonHealthStable = async () => {
+    if (!(await checkDaemonHealth())) return false;
+    await sleep(700);
+    return checkDaemonHealth();
+  };
+
+  if (await isDaemonHealthStable()) return true;
 
   const emit = (message: string) => send?.('chat:status', { type: 'gateway', message });
 
   if (!daemonStartupPromise) {
     daemonStartupLastKickoff = Date.now();
     daemonStartupPromise = (async () => {
-      if (await checkDaemonHealth()) return { success: true, alreadyRunning: true };
+      if (await isDaemonHealthStable()) return { success: true, alreadyRunning: true };
 
       emit('Preparing local memory service...');
 
@@ -312,9 +318,21 @@ async function ensureLocalDaemonReadyForRuntime(send?: (ch: string, data: any) =
         sleep,
       });
 
-      if (ready) {
+      if (ready && await isDaemonHealthStable()) {
         emit('Local memory service ready');
         return { success: true };
+      }
+
+      if (ready) {
+        // Health flipped immediately after first ready signal; wait one more short window.
+        const warmed = await waitForLocalDaemonReady(12000, 'setup.install.daemonStatus.waiting', {
+          sendStatus: sendSetupDaemonStatus,
+          sleep,
+        });
+        if (warmed && await isDaemonHealthStable()) {
+          emit('Local memory service ready');
+          return { success: true };
+        }
       }
 
       return { success: false, error: formatDaemonSetupError() };
@@ -323,7 +341,7 @@ async function ensureLocalDaemonReadyForRuntime(send?: (ch: string, data: any) =
 
   try {
     const result = await daemonStartupPromise;
-    return !!(result.success || result.alreadyRunning || await checkDaemonHealth());
+    return !!(result.success || result.alreadyRunning || await isDaemonHealthStable());
   } finally {
     daemonStartupPromise = null;
   }

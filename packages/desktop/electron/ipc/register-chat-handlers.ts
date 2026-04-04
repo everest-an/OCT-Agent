@@ -436,6 +436,12 @@ function looksLikeFilesystemMutationRequest(text: string): boolean {
   return hasFilesystemContext || looksLikePathReference(trimmed);
 }
 
+function looksLikeFilesystemToolName(toolName: string | undefined): boolean {
+  const normalized = String(toolName || '').trim().toLowerCase();
+  if (!normalized) return false;
+  return /(^|[_.:-])(exec|bash|powershell|read|write|edit|replace|rename|move|delete|remove|mkdir|touch|cat|ls|stat|file)([_.:-]|$)/.test(normalized);
+}
+
 function looksLikeSuccessfulFilesystemMutationResponse(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
@@ -443,7 +449,7 @@ function looksLikeSuccessfulFilesystemMutationResponse(text: string): boolean {
     return false;
   }
 
-  const hasSuccessVerb = /(saved|created|wrote|written|updated|edited|renamed|deleted|removed|moved|overwritten|placed|put|保存|创建|写入|写好|写好了|更新|修改|重命名|删除|移除|移动|放在|放到|已保存|已创建|已写入|已更新)/i.test(trimmed);
+  const hasSuccessVerb = /(saved|created|wrote|written|updated|edited|renamed|deleted|removed|moved|overwritten|placed|put|listed|found|contains?|there (?:is|are)|saving|writing|保存|创建|写入|写好|写好了|更新|修改|重命名|删除|移除|移动|放在|放到|列出|读取|看到|找到了|包含|目前有|如下|已保存|已创建|已写入|已更新|已读取|已列出)/i.test(trimmed);
   if (!hasSuccessVerb) return false;
 
   const hasFilesystemContext = /(file|folder|directory|path|txt|md|json|csv|docx?|log|文件|文件夹|目录|路径|文档|文本)/i.test(trimmed);
@@ -898,6 +904,7 @@ ${message}`;
       let sawAssistantNonTextDelta = false;
       let sawToolBlocks = false;
       let sawCompletedToolResult = false;
+      let sawCompletedFilesystemToolResult = false;
       let sawThinkingBlocks = false;
       let sawFinalState = false;
       let finalAssistantText = '';
@@ -947,6 +954,9 @@ ${message}`;
             sawCompletedToolResult = true;
             const toolId = block.tool_use_id || '';
             const toolName = toolNamesById.get(toolId) || block.name || 'tool';
+            if (looksLikeFilesystemToolName(toolName)) {
+              sawCompletedFilesystemToolResult = true;
+            }
             const toolOutput = extractToolOutput(block);
             noteAwarenessInitCompatibilityIssue(toolName, toolOutput);
             send('chat:event', {
@@ -1039,6 +1049,9 @@ ${message}`;
 
           if (normalizedAgentEvent.phase === 'result') {
             sawCompletedToolResult = true;
+            if (looksLikeFilesystemToolName(toolName)) {
+              sawCompletedFilesystemToolResult = true;
+            }
             noteAwarenessInitCompatibilityIssue(toolName, extractToolDetail(normalizedAgentEvent.result));
             send('chat:status', {
               type: 'tool_update',
@@ -1200,7 +1213,7 @@ ${message}`;
       let shouldFlagUnverifiedLocalFileOperation = looksLikeFilesystemMutationRequest(message)
         && looksLikeSuccessfulFilesystemMutationResponse(finalText)
         && !pendingApprovalRequestId
-        && !sawCompletedToolResult;
+        && !sawCompletedFilesystemToolResult;
       if (looksLikeAwarenessInitCompatibilityError(finalText)) {
         awarenessInitCompatibilityIssue = true;
         awarenessInitFailureDetail = finalText;
@@ -1218,6 +1231,7 @@ ${message}`;
           responsePreview: finalText.slice(0, 200),
           sawToolBlocks,
           sawCompletedToolResult,
+          sawCompletedFilesystemToolResult,
         });
       }
 

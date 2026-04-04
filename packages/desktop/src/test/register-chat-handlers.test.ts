@@ -406,6 +406,117 @@ describe('registerChatHandlers', () => {
     warnSpy.mockRestore();
   });
 
+  it('flags unverified local file-write claims when only non-filesystem tools completed', async () => {
+    const ws = new FakeGatewayClient();
+
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'tool-1',
+                name: 'awareness_lookup',
+                input: { query: 'workspace memory' },
+              },
+              {
+                type: 'tool_result',
+                tool_use_id: 'tool-1',
+                content: [{ type: 'text', text: 'memory recall done' }],
+              },
+              {
+                type: 'text',
+                text: '我已在 E:\\新建文件夹2\\test-writing.txt 写入内容。',
+              },
+            ],
+          },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    registerChatHandlers({
+      sendToRenderer: vi.fn(),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => createAwarenessInitResponse('Memory snapshot')),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, '在 E:\\新建文件夹2 里写一个 txt 文件', 'test-session', {});
+
+    expect(result).toMatchObject({
+      success: true,
+      sessionId: 'test-session',
+      unverifiedLocalFileOperation: true,
+    });
+  });
+
+  it('does not flag unverified local file-write when a filesystem tool result completed', async () => {
+    const ws = new FakeGatewayClient();
+
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'tool-1',
+                name: 'exec',
+                input: { command: "Set-Content -LiteralPath 'E:\\新建文件夹2\\test-writing.txt' -Value 'ok'" },
+              },
+              {
+                type: 'tool_result',
+                tool_use_id: 'tool-1',
+                content: [{ type: 'text', text: 'command finished' }],
+              },
+              {
+                type: 'text',
+                text: '我已在 E:\\新建文件夹2\\test-writing.txt 写入内容。',
+              },
+            ],
+          },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    registerChatHandlers({
+      sendToRenderer: vi.fn(),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => createAwarenessInitResponse('Memory snapshot')),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, '在 E:\\新建文件夹2 里写一个 txt 文件', 'test-session', {});
+
+    expect(result).toMatchObject({
+      success: true,
+      sessionId: 'test-session',
+      text: '我已在 E:\\新建文件夹2\\test-writing.txt 写入内容。',
+    });
+    expect(result.unverifiedLocalFileOperation).toBeUndefined();
+  });
+
   it('silently retries with CLI compatibility fallback when gateway reports special-use IP web blocking', async () => {
     const ws = new FakeGatewayClient();
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});

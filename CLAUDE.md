@@ -26,6 +26,7 @@
 
 **测试**：✅ 手动测试创建 agent → 切换 → 发送消息，回复正确路由到选中 agent
 ```
+6. **GitHub 提交说明要求**：每次提交（commit）到 GitHub 时，必须详细说明本次更新了什么，至少包含修改点、影响范围和验证情况；禁止使用 `update`、`fix`、`misc` 这类模糊描述作为完整提交说明。
 
 ## 项目概述
 AwarenessClaw = OpenClaw（开源 AI Agent 框架）+ Awareness Memory（跨会话记忆），一键安装，超级傻瓜化。

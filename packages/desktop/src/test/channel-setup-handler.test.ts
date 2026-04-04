@@ -132,6 +132,62 @@ describe('registerChannelSetupHandlers', () => {
     expect(channelLoginWithQR).not.toHaveBeenCalled();
   });
 
+  it('retries WeChat login once when Windows reports spawn npx ENOENT', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+
+    const ensureLocalDaemonReadyForRuntime = vi.fn(async () => true);
+    const channelLoginWithQR = vi
+      .fn()
+      .mockResolvedValueOnce({ success: false, error: '[openclaw] Uncaught exception: Error: spawn npx ENOENT' })
+      .mockResolvedValueOnce({ success: true });
+
+    registerChannelSetupHandlers({
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any),
+      getChannel: () => ({ label: 'WeChat', openclawId: 'openclaw-weixin', pluginPackage: '@tencent-weixin/openclaw-weixin', setupFlow: 'qr-login', saveStrategy: 'json-direct' }),
+      runAsync: vi.fn(async () => 'ok'),
+      safeShellExecAsync: vi.fn(async () => 'ok'),
+      readShellOutputAsync: vi.fn(async () => '[{"id":"openclaw-weixin","status":"linked"}]'),
+      channelLoginWithQR,
+      ensureLocalDaemonReadyForRuntime,
+    });
+
+    const handler = getRegisteredSetupHandler();
+    const result = await handler({}, 'wechat');
+
+    expect(result).toMatchObject({ success: true });
+    expect(ensureLocalDaemonReadyForRuntime).toHaveBeenCalledTimes(2);
+    expect(channelLoginWithQR).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns friendly npx PATH error when WeChat login still fails with spawn npx ENOENT', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+
+    const ensureLocalDaemonReadyForRuntime = vi
+      .fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const channelLoginWithQR = vi.fn(async () => ({
+      success: false,
+      error: '[openclaw] Uncaught exception: Error: spawn npx ENOENT',
+    }));
+
+    registerChannelSetupHandlers({
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any),
+      getChannel: () => ({ label: 'WeChat', openclawId: 'openclaw-weixin', pluginPackage: '@tencent-weixin/openclaw-weixin', setupFlow: 'qr-login', saveStrategy: 'json-direct' }),
+      runAsync: vi.fn(async () => 'ok'),
+      safeShellExecAsync: vi.fn(async () => 'ok'),
+      readShellOutputAsync: vi.fn(async () => null),
+      channelLoginWithQR,
+      ensureLocalDaemonReadyForRuntime,
+    });
+
+    const handler = getRegisteredSetupHandler();
+    const result = await handler({}, 'wechat');
+
+    expect(result.success).toBe(false);
+    expect(String(result.error || '')).toContain('npx not found in runtime PATH');
+  });
+
   it('continues setup when plugin install reports already exists', async () => {
     const send = vi.fn();
     const runAsync = vi
