@@ -143,6 +143,10 @@ describe('Settings Page', () => {
   it('collapses advanced web settings by default', async () => {
     await act(async () => { render(<Settings />); });
     expect(screen.getByText(/Web & Browser/)).toBeInTheDocument();
+    expect(screen.getByText(/How Desktop uses these web tools/i)).toBeInTheDocument();
+    expect(screen.getByText(/Find sources and snippets from the web/i)).toBeInTheDocument();
+    expect(screen.getByText(/Read a specific page or article/i)).toBeInTheDocument();
+    expect(screen.getByText(/Open, click, log in, and handle JS-heavy sites/i)).toBeInTheDocument();
     expect(screen.getByText(/Brave Search needs an API key/)).toBeInTheDocument();
     expect(screen.getAllByText(/Show advanced/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Most users only need to pick a search provider/i)).toBeInTheDocument();
