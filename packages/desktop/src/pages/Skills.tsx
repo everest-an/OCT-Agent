@@ -962,6 +962,11 @@ export default function Skills() {
                           {t('skills.missingEnvHint', 'Set required environment variables: {env}').replace('{env}', (detailSkill.missing?.env || []).join(', '))}
                         </p>
                       ) : null}
+                      {actionSlug === detailSkill.slug && installProgress && (
+                        <p className="text-xs text-sky-400 animate-pulse">
+                          {installProgress}
+                        </p>
+                      )}
                       {installResult && (
                         <p className={`text-xs ${installResult.success ? 'text-emerald-400' : 'text-red-400'}`}>
                           {installResult.message}

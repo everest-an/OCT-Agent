@@ -873,6 +873,7 @@ registerOpenClawConfigHandlers({
 registerSkillHandlers({
   home: HOME,
   runAsync,
+  runAsyncWithProgress,
   runSpawnAsync,
   readShellOutputAsync,
 });

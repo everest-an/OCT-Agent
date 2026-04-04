@@ -346,6 +346,7 @@ function fetchJson(url: string): Promise<any> {
 export function registerSkillHandlers(deps: {
   home: string;
   runAsync: (cmd: string, timeoutMs?: number) => Promise<string>;
+  runAsyncWithProgress: (cmd: string, timeoutMs: number, onLine: (line: string, stream: 'stdout' | 'stderr') => void) => Promise<string>;
   runSpawnAsync: (cmd: string, args: string[], timeoutMs?: number) => Promise<string>;
   readShellOutputAsync: (cmd: string, timeoutMs?: number) => Promise<string | null>;
 }) {
@@ -609,21 +610,55 @@ export function registerSkillHandlers(deps: {
           continue;
         }
         sendProgress('installing', spec.label || spec.id || binary);
+
+        // Prepend env vars to speed up and clean output:
+        // - HOMEBREW_NO_AUTO_UPDATE=1: skip brew auto-update (saves 30-60s)
+        // - HOMEBREW_NO_ENV_HINTS=1: suppress env hint noise
+        // - HOMEBREW_NO_INSTALL_CLEANUP=1: skip post-install cleanup
+        const envPrefix = binary === 'brew'
+          ? 'HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_INSTALL_CLEANUP=1 '
+          : '';
+        const fullCommand = envPrefix + command;
+
         try {
-          await deps.runAsync(command, 300000);
-          installed.push({ id: spec.id || binary, label: spec.label || spec.id || binary, command });
+          // Use runAsyncWithProgress for real-time progress to frontend
+          let lastProgressLine = '';
+          await deps.runAsyncWithProgress(fullCommand, 300000, (line: string) => {
+            // Throttle: only send meaningful progress lines
+            const trimmed = line.trim();
+            if (trimmed && trimmed !== lastProgressLine) {
+              lastProgressLine = trimmed;
+              // Extract key brew/npm progress indicators
+              if (trimmed.startsWith('==>') || trimmed.startsWith('✔') || trimmed.startsWith('🍺')
+                  || trimmed.includes('Downloading') || trimmed.includes('Installing')
+                  || trimmed.includes('Linking') || trimmed.includes('added')
+                  || trimmed.includes('npm warn') || trimmed.includes('go: downloading')) {
+                sendProgress('installing', trimmed.slice(0, 120));
+              }
+            }
+          });
+          installed.push({ id: spec.id || binary, label: spec.label || spec.id || binary, command: fullCommand });
           ok = true;
           break;
         } catch (err: any) {
-          lastError = err?.message?.slice(0, 200) || 'Install command failed';
+          lastError = err?.message?.slice(0, 300) || 'Install command failed';
         }
       }
 
       if (!ok) {
+        // Provide actionable error messages instead of raw stderr
+        let friendlyError = lastError;
+        if (lastError.includes('SSL_ERROR') || lastError.includes('curl')) {
+          friendlyError = 'Network error during download. Please check your internet connection and try again.';
+        } else if (lastError.includes('Permission denied') || lastError.includes('EACCES')) {
+          friendlyError = 'Permission denied. Try running the install command manually in Terminal.';
+        } else if (lastError.includes('timed out')) {
+          friendlyError = 'Installation timed out. Your network may be slow — try again or install manually.';
+        }
         failures.push({
           id: spec.id || 'unknown',
           label: spec.label || spec.id || 'unknown',
-          error: lastError || 'No available installer found on this system',
+          error: friendlyError,
         });
       }
     }
