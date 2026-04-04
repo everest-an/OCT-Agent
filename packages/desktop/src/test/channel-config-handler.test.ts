@@ -176,4 +176,51 @@ describe('registerChannelConfigHandlers', () => {
     expect(result.codes).toEqual(['C4AVKKA9', 'LJK9MNP2']);
     expect(readShellOutputAsync).toHaveBeenCalledWith('openclaw pairing list telegram 2>&1', 30000);
   });
+
+  it('resolves plugin install spec from plugins inspect output when channel package is absent', async () => {
+    const runAsync = vi
+      .fn()
+      .mockResolvedValueOnce('plugin installed')
+      .mockResolvedValueOnce('channel added')
+      .mockResolvedValueOnce('gateway restarted')
+      .mockResolvedValueOnce('bound');
+
+    const readShellOutputAsync = vi
+      .fn()
+      .mockResolvedValueOnce('{"install":{"spec":"@openclaw/telegram@beta"}}');
+
+    registerChannelConfigHandlers({
+      home: 'C:/Users/test',
+      safeShellExecAsync: vi.fn(async () => null),
+      readShellOutputAsync,
+      runAsync,
+      discoverOpenClawChannels: vi.fn(),
+      parseCliHelp: vi.fn(() => ({ cliChannels: new Set<string>(), channelFields: new Map() })),
+      applyCliHelp: vi.fn(),
+      mergeCatalog: vi.fn(),
+      mergeChannelOptions: vi.fn(),
+      getAllChannels: vi.fn(() => []),
+      serializeRegistry: vi.fn(() => []),
+      getChannel: vi.fn(() => ({
+        id: 'telegram',
+        openclawId: 'telegram',
+        label: 'Telegram',
+        color: '#26A5E4',
+        iconType: 'svg',
+        connectionType: 'token',
+        saveStrategy: 'cli',
+        configFields: [{ key: 'token' }],
+        source: 'openclaw-dynamic',
+        order: 1,
+      })) as any,
+      buildCLIFlags: vi.fn(() => '--token "abc"'),
+      toOpenclawId: vi.fn((id: string) => id),
+    });
+
+    const handler = getRegisteredSaveHandler();
+    const result = await handler({}, 'telegram', { token: 'abc' });
+
+    expect(result).toMatchObject({ success: true });
+    expect(runAsync).toHaveBeenCalledWith('openclaw plugins install "@openclaw/telegram@beta" 2>&1', 60000);
+  });
 });

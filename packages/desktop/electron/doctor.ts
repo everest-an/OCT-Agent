@@ -207,6 +207,41 @@ function getRepairPluginPackage(channelId: string): string | null {
   return `@openclaw/${channelId}`;
 }
 
+function getNullDevice(platform: NodeJS.Platform) {
+  return platform === 'win32' ? 'NUL' : '/dev/null';
+}
+
+function parsePluginLoadFailure(message: string): { channelId: string; missingModule: string | null } | null {
+  const pluginMatch = message.match(/plugin load failed:\s*([a-zA-Z0-9_-]+):/i)
+    || message.match(/\[plugins\]\s*([a-zA-Z0-9_-]+)\s*failed to load/i);
+  if (!pluginMatch?.[1]) return null;
+  const missingModule = message.match(/Cannot find module '([^']+)'/i)?.[1] || null;
+  return { channelId: pluginMatch[1], missingModule };
+}
+
+async function repairBundledPluginRuntimeDeps(ctx: Ctx, channelId: string): Promise<boolean> {
+  const installPath = ctx.config?.plugins?.installs?.[channelId]?.installPath;
+  if (!installPath || !ctx.openclawPackageDir) return false;
+  if (!String(installPath).startsWith(ctx.openclawPackageDir)) return false;
+
+  const pkgPath = path.join(installPath, 'package.json');
+  if (!fs.existsSync(pkgPath)) return false;
+
+  try {
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    const dependencies = Object.keys(pkg?.dependencies || {}).filter((name) => /^[a-zA-Z0-9@._/-]+$/.test(name));
+    if (dependencies.length === 0) return false;
+
+    await ctx.deps.shellRun(
+      `cd "${ctx.openclawPackageDir}" && npm install --no-save ${dependencies.map((dep) => `"${dep}"`).join(' ')} 2>&1`,
+      120000,
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const CHANNELS_ADD_SUPPORTED = new Set([
   'telegram',
   'whatsapp',
@@ -223,7 +258,7 @@ async function getUnboundChannels(ctx: Ctx): Promise<string[] | null> {
   const enabledChannels = getEnabledChannels(ctx.config);
   if (enabledChannels.length === 0) return [];
 
-  const output = await ctx.deps.shellExec('openclaw agents bindings --json 2>/dev/null', 30000);
+  const output = await ctx.deps.shellExec(`openclaw agents bindings --json 2>${getNullDevice(ctx.deps.platform)}`, 30000);
   const parsed = parseBindingsOutput(output);
   if (!parsed.ok) return null;
   const bindings = parsed.bindings;
@@ -380,7 +415,7 @@ async function fixOpenclawInstall(ctx: Ctx): Promise<FixResult> {
 async function checkOpenclawVersion(ctx: Ctx): Promise<CheckResult> {
   if (!ctx.openclawVersion) return { id: 'openclaw-version', label: 'OpenClaw version', status: 'skipped', message: 'Skipped (OpenClaw not installed)', fixable: 'none' };
   try {
-    const latest = await ctx.deps.shellExec('npm view openclaw version 2>/dev/null', 10000);
+    const latest = await ctx.deps.shellExec(`npm view openclaw version 2>${getNullDevice(ctx.deps.platform)}`, 10000);
     const current = ctx.openclawVersion.match(/(\d+\.\d+\.\d+)/)?.[1];
     const latestVer = latest?.trim();
     if (current && latestVer && current !== latestVer) {
@@ -692,6 +727,18 @@ async function fixChannelBindings(ctx: Ctx): Promise<FixResult> {
       continue;
     } catch (bindErr: any) {
       const bindMessage = String(bindErr?.message || '');
+      const pluginLoadFailure = parsePluginLoadFailure(bindMessage);
+      if (pluginLoadFailure && await repairBundledPluginRuntimeDeps(ctx, pluginLoadFailure.channelId)) {
+        try {
+          await tryBind(ch);
+          fixed++;
+          repairedViaRecovery.push(`${ch}:deps`);
+          continue;
+        } catch {
+          // Fall through to the existing channel recovery path.
+        }
+      }
+
       const needRecovery = /unknown channel|not found|no such channel/i.test(bindMessage) || ch === 'telegram';
       if (!needRecovery) {
         failed.push(ch);

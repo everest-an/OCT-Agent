@@ -54,11 +54,12 @@ describe('registerChannelSetupHandlers', () => {
 
   it('returns pending confirmation instead of failing when OpenClaw is still syncing', async () => {
     const send = vi.fn();
+    const runAsync = vi.fn(async () => 'ok');
 
     registerChannelSetupHandlers({
       getMainWindow: () => ({ isDestroyed: () => false, webContents: { send } } as any),
-      getChannel: () => ({ label: 'WhatsApp', openclawId: 'whatsapp', pluginPackage: '@openclaw/whatsapp', setupFlow: 'qr-login' }),
-      runAsync: vi.fn(async () => 'ok'),
+      getChannel: () => ({ label: 'WhatsApp', openclawId: 'whatsapp', pluginPackage: '@openclaw/whatsapp', setupFlow: 'qr-login', saveStrategy: 'cli' }),
+      runAsync,
       safeShellExecAsync: vi.fn(async () => 'ok'),
       readShellOutputAsync: vi.fn(async () => '[warn] still loading plugins'),
       channelLoginWithQR: vi.fn(async () => ({ success: true })),
@@ -71,6 +72,7 @@ describe('registerChannelSetupHandlers', () => {
       success: true,
       pendingConfirmation: true,
     });
+    expect(runAsync).toHaveBeenCalledWith('openclaw channels add --channel whatsapp 2>&1', 15000);
     expect(send).toHaveBeenCalledWith('channel:status', 'channels.status.awaitingConfirmation::WhatsApp');
   });
 
@@ -84,7 +86,7 @@ describe('registerChannelSetupHandlers', () => {
 
     registerChannelSetupHandlers({
       getMainWindow: () => ({ isDestroyed: () => false, webContents: { send } } as any),
-      getChannel: () => ({ label: 'WeChat', openclawId: 'openclaw-weixin', pluginPackage: '@tencent-weixin/openclaw-weixin', setupFlow: 'qr-login' }),
+      getChannel: () => ({ label: 'WeChat', openclawId: 'openclaw-weixin', pluginPackage: '@tencent-weixin/openclaw-weixin', setupFlow: 'qr-login', saveStrategy: 'json-direct' }),
       runAsync,
       safeShellExecAsync: vi.fn(async () => 'ok'),
       readShellOutputAsync: vi.fn(async () => '[{"id":"openclaw-weixin","status":"linked"}]'),
@@ -113,7 +115,7 @@ describe('registerChannelSetupHandlers', () => {
 
     registerChannelSetupHandlers({
       getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any),
-      getChannel: () => ({ label: 'WeChat', openclawId: 'openclaw-weixin', pluginPackage: '@tencent-weixin/openclaw-weixin', setupFlow: 'qr-login' }),
+      getChannel: () => ({ label: 'WeChat', openclawId: 'openclaw-weixin', pluginPackage: '@tencent-weixin/openclaw-weixin', setupFlow: 'qr-login', saveStrategy: 'json-direct' }),
       runAsync: vi.fn(async () => 'ok'),
       safeShellExecAsync: vi.fn(async () => 'ok'),
       readShellOutputAsync: vi.fn(async () => null),
@@ -128,5 +130,113 @@ describe('registerChannelSetupHandlers', () => {
     expect(String(result.error || '')).toContain('Local memory service is still starting');
     expect(ensureLocalDaemonReadyForRuntime).toHaveBeenCalledTimes(2);
     expect(channelLoginWithQR).not.toHaveBeenCalled();
+  });
+
+  it('continues setup when plugin install reports already exists', async () => {
+    const send = vi.fn();
+    const runAsync = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('plugin already exists: C:/Users/admin/.openclaw/extensions/openclaw-weixin'))
+      .mockResolvedValueOnce('ok');
+    const channelLoginWithQR = vi.fn(async () => ({ success: true }));
+
+    registerChannelSetupHandlers({
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send } } as any),
+      getChannel: () => ({ label: 'WeChat', openclawId: 'openclaw-weixin', pluginPackage: '@tencent-weixin/openclaw-weixin', setupFlow: 'qr-login', saveStrategy: 'json-direct' }),
+      getChannelByOpenclawId: (openclawId: string) => openclawId === 'telegram'
+        ? ({ id: 'telegram', openclawId: 'telegram', pluginPackage: '@openclaw/telegram' } as any)
+        : undefined,
+      runAsync,
+      safeShellExecAsync: vi.fn(async () => 'ok'),
+      readShellOutputAsync: vi.fn(async () => '[{"id":"openclaw-weixin","status":"linked"}]'),
+      channelLoginWithQR,
+    });
+
+    const handler = getRegisteredSetupHandler();
+    const result = await handler({}, 'wechat');
+
+    expect(result).toMatchObject({ success: true });
+    expect(channelLoginWithQR).toHaveBeenCalledTimes(1);
+    expect(runAsync).toHaveBeenCalledWith('openclaw plugins install "@tencent-weixin/openclaw-weixin" 2>&1', 30000);
+  });
+
+  it('repairs blocking plugin load failures and retries login once', async () => {
+    const send = vi.fn();
+    const runAsync = vi.fn(async () => 'ok');
+    const channelLoginWithQR = vi
+      .fn()
+      .mockResolvedValueOnce({
+        success: false,
+        error: "[plugins] telegram failed to load from C:/x: Error: Cannot find module 'grammy'",
+      })
+      .mockResolvedValueOnce({ success: true });
+
+    registerChannelSetupHandlers({
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send } } as any),
+      getChannel: () => ({ label: 'WeChat', openclawId: 'openclaw-weixin', pluginPackage: '@tencent-weixin/openclaw-weixin', setupFlow: 'qr-login', saveStrategy: 'json-direct' }),
+      getChannelByOpenclawId: (openclawId: string) => openclawId === 'telegram'
+        ? ({ id: 'telegram', openclawId: 'telegram', pluginPackage: '@openclaw/telegram' } as any)
+        : undefined,
+      runAsync,
+      safeShellExecAsync: vi.fn(async () => 'ok'),
+      readShellOutputAsync: vi.fn(async () => '[{"id":"openclaw-weixin","status":"linked"}]'),
+      channelLoginWithQR,
+    });
+
+    const handler = getRegisteredSetupHandler();
+    const result = await handler({}, 'wechat');
+
+    expect(result).toMatchObject({ success: true });
+    expect(channelLoginWithQR).toHaveBeenCalledTimes(2);
+    expect(runAsync).toHaveBeenCalledWith(expect.stringContaining('openclaw plugins uninstall --force "telegram" 2>&1'), 20000);
+    expect(runAsync).toHaveBeenCalledWith(expect.stringContaining('openclaw plugins install "@openclaw/telegram" 2>&1'), 45000);
+    expect(send).toHaveBeenCalledWith('channel:status', 'channels.status.repairingPlugin::telegram');
+  });
+
+  it('prepares official CLI channels via channels add before login', async () => {
+    const runAsync = vi.fn(async () => 'ok');
+    const channelLoginWithQR = vi.fn(async () => ({ success: true }));
+
+    registerChannelSetupHandlers({
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any),
+      getChannel: () => ({ label: 'WhatsApp', openclawId: 'whatsapp', pluginPackage: '@openclaw/whatsapp', setupFlow: 'qr-login', saveStrategy: 'cli' }),
+      runAsync,
+      safeShellExecAsync: vi.fn(async () => 'ok'),
+      readShellOutputAsync: vi.fn(async () => '[{"id":"whatsapp","status":"linked"}]'),
+      channelLoginWithQR,
+    });
+
+    const handler = getRegisteredSetupHandler();
+    const result = await handler({}, 'whatsapp');
+
+    expect(result).toMatchObject({ success: true });
+    expect(runAsync).toHaveBeenCalledWith('openclaw channels add --channel whatsapp 2>&1', 15000);
+    expect(channelLoginWithQR).toHaveBeenCalledWith('openclaw channels login --channel whatsapp --verbose');
+  });
+  it('resolves repair install spec from openclaw plugins inspect output', async () => {
+    const runAsync = vi.fn(async () => 'ok');
+    const readShellOutputAsync = vi
+      .fn()
+      .mockResolvedValueOnce('{"install":{"spec":"@openclaw/telegram@beta"}}')
+      .mockResolvedValueOnce('[{"id":"openclaw-weixin","status":"linked"}]');
+    const channelLoginWithQR = vi
+      .fn()
+      .mockResolvedValueOnce({ success: false, error: '[plugins] telegram failed to load: cannot start' })
+      .mockResolvedValueOnce({ success: true });
+
+    registerChannelSetupHandlers({
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any),
+      getChannel: () => ({ label: 'WeChat', openclawId: 'openclaw-weixin', pluginPackage: '@tencent-weixin/openclaw-weixin', setupFlow: 'qr-login' }),
+      runAsync,
+      safeShellExecAsync: vi.fn(async () => 'ok'),
+      readShellOutputAsync,
+      channelLoginWithQR,
+    });
+
+    const handler = getRegisteredSetupHandler();
+    const result = await handler({}, 'wechat');
+
+    expect(result).toMatchObject({ success: true });
+    expect(runAsync).toHaveBeenCalledWith(expect.stringContaining('openclaw plugins install "@openclaw/telegram@beta" 2>&1'), 45000);
   });
 });

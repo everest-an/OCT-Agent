@@ -170,4 +170,93 @@ describe('doctor', () => {
     expect(calls).toContain('openclaw gateway restart 2>&1');
     expect(bindAttempts).toBe(2);
   });
+
+  it('uses Windows null device when checking bindings', async () => {
+    const home = createTempHome();
+    const configDir = path.join(home, '.openclaw');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'openclaw.json'), JSON.stringify({
+      channels: {
+        whatsapp: { enabled: true },
+      },
+    }));
+
+    const shellExec = vi.fn(async (cmd: string) => {
+      if (cmd === 'where node') return 'C:\\Program Files\\nodejs\\node.exe';
+      if (cmd === 'node --version') return 'v24.12.0';
+      if (cmd === 'where openclaw') return 'C:\\Users\\admin\\AppData\\Roaming\\npm\\openclaw.cmd';
+      if (cmd === 'openclaw --version') return 'OpenClaw 2026.4.2 (abcd123)';
+      if (cmd === 'npm root -g') return path.join(home, 'npm-global', 'node_modules');
+      if (cmd === 'npm config get prefix') return path.join(home, 'npm-global');
+      if (cmd === 'openclaw agents bindings --json 2>NUL') return '[]';
+      return null;
+    });
+
+    const { doctor } = createDoctorWithMocks(home, { shellExec, platform: 'win32' });
+    const report = await doctor.runChecks(['channel-bindings']);
+
+    expect(report.checks[0]).toMatchObject({ status: 'warn', message: '1 channel(s) not bound to any agent' });
+    expect(shellExec).toHaveBeenCalledWith('openclaw agents bindings --json 2>NUL', 30000);
+  });
+
+  it('repairs missing bundled telegram runtime deps before rebinding', async () => {
+    const home = createTempHome();
+    const configDir = path.join(home, '.openclaw');
+    const openclawRoot = path.join(home, 'npm-global', 'node_modules', 'openclaw');
+    const telegramDir = path.join(openclawRoot, 'dist', 'extensions', 'telegram');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.mkdirSync(telegramDir, { recursive: true });
+    fs.mkdirSync(openclawRoot, { recursive: true });
+    fs.writeFileSync(path.join(openclawRoot, 'package.json'), JSON.stringify({ name: 'openclaw', version: '2026.4.2' }));
+    fs.writeFileSync(path.join(telegramDir, 'package.json'), JSON.stringify({
+      name: '@openclaw/telegram',
+      dependencies: {
+        grammy: '^1.41.1',
+        '@grammyjs/runner': '^2.0.3',
+      },
+    }));
+    fs.writeFileSync(path.join(configDir, 'openclaw.json'), JSON.stringify({
+      plugins: {
+        installs: {
+          telegram: {
+            installPath: telegramDir,
+          },
+        },
+      },
+      channels: {
+        whatsapp: { enabled: true },
+      },
+    }));
+
+    let bindAttempts = 0;
+    const shellRun = vi.fn(async (cmd: string) => {
+      if (cmd.startsWith('openclaw agents bind --agent main --bind "whatsapp"')) {
+        bindAttempts += 1;
+        if (bindAttempts === 1) {
+          throw new Error("plugin load failed: telegram: Error: Cannot find module 'grammy'");
+        }
+      }
+      return 'ok';
+    });
+
+    const shellExec = vi.fn(async (cmd: string) => {
+      if (cmd === 'where node') return 'C:\\Program Files\\nodejs\\node.exe';
+      if (cmd === 'node --version') return 'v24.12.0';
+      if (cmd === 'where openclaw') return 'C:\\Users\\admin\\AppData\\Roaming\\npm\\openclaw.cmd';
+      if (cmd === 'openclaw --version') return 'OpenClaw 2026.4.2 (abcd123)';
+      if (cmd === 'npm root -g') return path.join(home, 'npm-global', 'node_modules');
+      if (cmd === 'npm config get prefix') return path.join(home, 'npm-global');
+      if (cmd === 'openclaw agents bindings --json 2>NUL') return null;
+      return null;
+    });
+
+    const { doctor } = createDoctorWithMocks(home, { shellExec, shellRun, platform: 'win32' });
+    const result = await doctor.runFix('channel-bindings');
+
+    expect(result).toMatchObject({ success: true });
+    expect(result.message).toContain('repaired: whatsapp:deps');
+    const calls = shellRun.mock.calls.map((c: any) => c[0]);
+    expect(calls).toContain(`cd "${openclawRoot}" && npm install --no-save "grammy" "@grammyjs/runner" 2>&1`);
+    expect(bindAttempts).toBe(2);
+  });
 });

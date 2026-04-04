@@ -4,6 +4,10 @@ import path from 'path';
 import { ipcMain } from 'electron';
 import type { CatalogEntry, ChannelDef, ConfigField } from '../channel-registry';
 import { migrateLegacyChannelConfig } from '../openclaw-config';
+import {
+  isIgnorablePluginInstallError,
+  resolveChannelPluginInstallSpec,
+} from './channel-plugin-spec';
 
 let discoveryDone = false;
 
@@ -224,6 +228,7 @@ export function registerChannelConfigHandlers(deps: {
   getAllChannels: () => Array<unknown>;
   serializeRegistry: () => Array<unknown>;
   getChannel: (channelId: string) => ChannelDef | undefined;
+  getChannelByOpenclawId?: (openclawId: string) => ChannelDef | undefined;
   buildCLIFlags: (channelDef: ChannelDef, config: Record<string, string>) => string;
   toOpenclawId: (channelId: string) => string;
 }) {
@@ -370,7 +375,15 @@ export function registerChannelConfigHandlers(deps: {
       if (!safeOpenclawId) {
         return { success: false, error: `Invalid OpenClaw channel ID: ${openclawId}` };
       }
-      const pluginPkg = channelDef?.pluginPackage || `@openclaw/${openclawId}`;
+      const pluginPkg = (
+        await resolveChannelPluginInstallSpec({
+          pluginId: safeOpenclawId,
+          preferredSpec: channelDef?.pluginPackage || null,
+          getChannel: deps.getChannel,
+          getChannelByOpenclawId: deps.getChannelByOpenclawId,
+          readShellOutputAsync: deps.readShellOutputAsync,
+        })
+      ) || channelDef?.pluginPackage || `@openclaw/${openclawId}`;
       const saveStrategy = channelDef?.saveStrategy || 'cli';
       const configForCli = safeOpenclawId === 'telegram' ? coerceTelegramCliConfig(channelDef, config) : config;
       let pluginInstallError: string | null = null;
@@ -378,7 +391,10 @@ export function registerChannelConfigHandlers(deps: {
       try {
         await deps.runAsync(`openclaw plugins install "${pluginPkg}" 2>&1`, 60000);
       } catch (err: any) {
-        pluginInstallError = err?.message || String(err);
+        const installMessage = err?.message || String(err);
+        if (!isIgnorablePluginInstallError(installMessage)) {
+          pluginInstallError = installMessage;
+        }
       }
 
       if (saveStrategy === 'json-direct') {

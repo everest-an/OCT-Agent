@@ -1,9 +1,15 @@
 import { ipcMain } from 'electron';
 import { parseJsonShellOutput } from '../openclaw-shell-output';
+import {
+  isIgnorablePluginInstallError,
+  resolveChannelPluginInstallSpec,
+  sanitizePluginId,
+} from './channel-plugin-spec';
 
 export function registerChannelSetupHandlers(deps: {
   getMainWindow: () => typeof Electron.BrowserWindow.prototype | null;
   getChannel: (channelId: string) => any;
+  getChannelByOpenclawId?: (openclawId: string) => any;
   runAsync: (cmd: string, timeoutMs?: number) => Promise<string>;
   safeShellExecAsync: (cmd: string, timeoutMs?: number) => Promise<string | null>;
   readShellOutputAsync: (cmd: string, timeoutMs?: number) => Promise<string | null>;
@@ -11,6 +17,13 @@ export function registerChannelSetupHandlers(deps: {
   ensureLocalDaemonReadyForRuntime?: () => Promise<boolean>;
 }) {
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const OFFICIAL_ADD_BEFORE_LOGIN_CHANNELS = new Set(['whatsapp', 'signal', 'imessage']);
+
+  const toErrorMessage = (err: unknown) => {
+    if (err instanceof Error) return err.message || String(err);
+    return String(err || '');
+  };
 
   const formatSetupError = (openclawId: string, rawError: string) => {
     const message = (rawError || '').trim();
@@ -23,7 +36,74 @@ export function registerChannelSetupHandlers(deps: {
     return message.slice(0, 300) || `Channel setup failed for "${openclawId}".`;
   };
 
+  const extractPluginLoadFailures = (rawText: string) => {
+    const text = rawText || '';
+    const pluginIds = new Set<string>();
+
+    const patterns = [
+      /\[plugins\]\s+([a-z0-9@/_-]+)\s+failed to load/gi,
+      /PluginLoadFailureError:\s*([a-z0-9@/_-]+)\s+failed to load/gi,
+    ];
+
+    for (const pattern of patterns) {
+      let match: RegExpExecArray | null;
+      while ((match = pattern.exec(text)) !== null) {
+        const pluginId = (match[1] || '').trim().toLowerCase();
+        if (pluginId) pluginIds.add(pluginId);
+      }
+    }
+
+    return [...pluginIds];
+  };
+
+  const repairBlockingPlugins = async (rawFailure: string, sendStatus: (msg: string) => void) => {
+    const failingPlugins = extractPluginLoadFailures(rawFailure);
+    if (failingPlugins.length === 0) return false;
+
+    let repairedAny = false;
+    for (const pluginId of failingPlugins) {
+      const packageSpec = await resolveChannelPluginInstallSpec({
+        pluginId,
+        getChannel: deps.getChannel,
+        getChannelByOpenclawId: deps.getChannelByOpenclawId,
+        readShellOutputAsync: deps.readShellOutputAsync,
+      });
+      if (!packageSpec) continue;
+
+      const safePluginId = sanitizePluginId(pluginId);
+      if (!safePluginId) continue;
+
+      sendStatus(`channels.status.repairingPlugin::${safePluginId}`);
+
+      try {
+        await deps.runAsync(`openclaw plugins uninstall --force "${safePluginId}" 2>&1`, 20000);
+      } catch {
+        // Ignore uninstall failures and continue with a clean install attempt.
+      }
+
+      try {
+        await deps.runAsync(`openclaw plugins install "${packageSpec}" 2>&1`, 45000);
+        repairedAny = true;
+      } catch (installErr: unknown) {
+        const installMessage = toErrorMessage(installErr);
+        if (isIgnorablePluginInstallError(installMessage)) {
+          repairedAny = true;
+          continue;
+        }
+        return false;
+      }
+    }
+
+    return repairedAny;
+  };
+
   const isLinkedStatus = (value: string | null | undefined) => /configured|linked|active|enabled/i.test(value || '');
+
+  const shouldPrepareWithChannelsAdd = (openclawId: string, saveStrategy: string, setupFlow: string) => {
+    if (setupFlow === 'add-only' || saveStrategy !== 'cli') return false;
+    if (OFFICIAL_ADD_BEFORE_LOGIN_CHANNELS.has(openclawId)) return true;
+    return setupFlow === 'add-then-login';
+  };
 
   const isChannelLinked = (output: string | null, openclawId: string) => {
     if (!output) return false;
@@ -94,15 +174,26 @@ export function registerChannelSetupHandlers(deps: {
     const channelDef = deps.getChannel(safeChannelId);
     const openclawId = channelDef?.openclawId || safeChannelId;
     const channelLabel = channelDef?.label || safeChannelId;
-    const pluginPkg = channelDef?.pluginPackage || `@openclaw/${openclawId}`;
+    const pluginPkg = (
+      await resolveChannelPluginInstallSpec({
+        pluginId: openclawId,
+        preferredSpec: channelDef?.pluginPackage || null,
+        getChannel: deps.getChannel,
+        getChannelByOpenclawId: deps.getChannelByOpenclawId,
+        readShellOutputAsync: deps.readShellOutputAsync,
+      })
+    ) || channelDef?.pluginPackage || `@openclaw/${openclawId}`;
     const setupFlow = channelDef?.setupFlow || 'qr-login';
+    const saveStrategy = channelDef?.saveStrategy || 'cli';
 
     sendStatus(`channels.status.configuring::${channelLabel}`);
     try {
       await deps.runAsync(`openclaw plugins install "${pluginPkg}" 2>&1`, 30000);
-    } catch (pluginErr: any) {
-      const pluginMsg = pluginErr?.message || String(pluginErr);
-      return { success: false, error: formatSetupError(openclawId, pluginMsg) };
+    } catch (pluginErr: unknown) {
+      const pluginMsg = toErrorMessage(pluginErr);
+      if (!isIgnorablePluginInstallError(pluginMsg)) {
+        return { success: false, error: formatSetupError(openclawId, pluginMsg) };
+      }
     }
 
     if (setupFlow === 'add-only') {
@@ -115,7 +206,7 @@ export function registerChannelSetupHandlers(deps: {
       }
     }
 
-    if (setupFlow === 'add-then-login') {
+    if (shouldPrepareWithChannelsAdd(openclawId, saveStrategy, setupFlow)) {
       try { await deps.runAsync(`openclaw channels add --channel ${openclawId} 2>&1`, 15000); } catch {}
     }
 
@@ -136,7 +227,18 @@ export function registerChannelSetupHandlers(deps: {
     }
 
     sendStatus(`channels.status.connecting::${channelLabel}`);
-    const result = await deps.channelLoginWithQR(`openclaw channels login --channel ${openclawId} --verbose`);
+    const loginCmd = `openclaw channels login --channel ${openclawId} --verbose`;
+    let result = await deps.channelLoginWithQR(loginCmd);
+
+    if (!result.success) {
+      const rawFailure = [result.error || '', result.output || ''].join('\n');
+      const repaired = await repairBlockingPlugins(rawFailure, sendStatus);
+      if (repaired) {
+        sendStatus(`channels.status.connecting::${channelLabel}`);
+        result = await deps.channelLoginWithQR(loginCmd);
+      }
+    }
+
     if (result.success) {
       try {
         await bindToMainAgent(openclawId);

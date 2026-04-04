@@ -120,15 +120,35 @@ export function parseCliHelp(helpOutput: string): {
 } {
   const cliChannels = new Set<string>();
   const channelFields = new Map<string, ConfigField[]>();
+  const lines = helpOutput.split('\n');
 
   // 1. Parse --channel enum
-  const enumMatch = helpOutput.match(/--channel\s+<\w+>\s+Channel\s*\n\s*\(([^)]+)\)/);
-  if (enumMatch) {
-    for (const ch of enumMatch[1].split('|')) cliChannels.add(ch.trim().toLowerCase());
+  let enumRaw = '';
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!/--channel\s+<[^>]+>/i.test(line)) continue;
+
+    const joined = `${line.trim()} ${(lines[i + 1] || '').trim()}`;
+    const inlineMatch = joined.match(/\(([^)]+)\)/);
+    if (inlineMatch?.[1]) {
+      enumRaw = inlineMatch[1];
+      break;
+    }
+  }
+
+  if (!enumRaw) {
+    const fallbackMatch = helpOutput.match(/--channel\s+<[^>]+>[\s\S]*?\(([^)\n]+(?:\|[^)\n]+)+)\)/i);
+    if (fallbackMatch?.[1]) enumRaw = fallbackMatch[1];
+  }
+
+  if (enumRaw) {
+    for (const ch of enumRaw.split('|')) {
+      const normalized = ch.trim().toLowerCase();
+      if (normalized) cliChannels.add(normalized);
+    }
   }
 
   // 2. Parse each --flag line and map to channels
-  const lines = helpOutput.split('\n');
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     const m = line.match(/^(--[\w-]+)\s+(?:<(\w+)>)?\s*(.*)/);

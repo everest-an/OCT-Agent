@@ -72,6 +72,18 @@ describe('Channel Registry', () => {
       expect(cliChannels).not.toContain('nostr');
     });
 
+    it('extracts channel enum from inline help format', () => {
+      const inlineHelp = `
+Options:
+  --channel <name> Channel (telegram | whatsapp | discord)
+  --token <token>  Bot token (Telegram/Discord)`;
+      const { cliChannels } = parseCliHelp(inlineHelp);
+
+      expect(cliChannels).toContain('telegram');
+      expect(cliChannels).toContain('whatsapp');
+      expect(cliChannels).toContain('discord');
+    });
+
     it('extracts per-channel config fields from flag descriptions', () => {
       const { channelFields } = parseCliHelp(MOCK_CLI_HELP);
 
