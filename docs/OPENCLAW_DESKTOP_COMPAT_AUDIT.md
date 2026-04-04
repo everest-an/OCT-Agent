@@ -475,3 +475,69 @@
 - 如果标准是“Desktop 是否已经符合 OpenClaw chat 的全部关键功能并完成高阶链路闭环”，答案目前仍是 `no`，但 `Project Folder / workspace cwd` 已不应继续按“仅 prompt 注入”归因，需以修复后的 UI deep smoke 结果为准
 
 这就是当前阶段的最终判定；后续继续测试，应视为针对具体缺口的专项修复验证，而不是再重复做一轮全量可用性判断。
+
+## 12. Windows 复测结论（2026-04-04，channel routing 修复后）
+
+### 12.1 当前环境与安装态
+
+本轮在 Windows 上补了一次更贴近发版交付物的复测，直接核对已安装桌面端与本机 OpenClaw 运行态：
+
+- OS：Windows
+- Desktop commit：`e1955e2`
+- 已安装桌面版本：`0.1.0`
+- OpenClaw：`OpenClaw 2026.4.2 (d74a122)`
+- daemon health：`http://127.0.0.1:37800/healthz -> status=ok`
+
+同时确认当前桌面端进程已在运行，说明本轮安装包至少满足：
+
+- 已安装 EXE 可正常启动
+- 当前不会出现“安装成功但主程序起不来”的阻塞问题
+
+### 12.2 Channel routing 后端证据已恢复为正常
+
+本轮直接验证了两条最关键的 routing 证据：
+
+1. `openclaw agents bindings --json`
+2. `openclaw channels list`
+
+结果如下：
+
+- bindings JSON 已可正常解析，且明确包含：
+  - `main <- whatsapp/default`
+  - `main <- telegram`
+- `openclaw channels list` 已能列出：
+  - `Telegram default: configured, token=config, enabled`
+  - `WhatsApp default: linked, enabled`
+
+这意味着：
+
+- 之前 Settings 里 `Channel routing` 发黄时，对应的底层证据链现在已经恢复
+- 至少从 OpenClaw CLI 真实返回看，Telegram / WhatsApp 的“已配置 + 已绑定”状态都能被读出来
+- 本轮 doctor 的 Windows `NUL` 重定向修复与插件依赖自愈修复，没有再把 routing 检查卡死在旧的失败模式上
+
+### 12.3 仍存在的残余风险
+
+虽然 `openclaw channels list` 已经能输出有效结果，但在有用输出之后仍然跟着一条：
+
+- `AbortError: This operation was aborted`
+
+当前判断：
+
+- 这更像 OpenClaw 上游 CLI / Gateway 的收尾不稳定，而不是 Desktop 当前 routing 状态再次损坏
+- 因为同一命令已经先给出了有效 channel 列表，说明主链路信息并没有丢
+- 但它仍应保留为已知风险，不能假装 runtime 已经完全无噪音
+
+### 12.4 本轮可形成的发布前判断
+
+截至 2026-04-04 这轮 Windows 复测，可以成立的判断是：
+
+- 已确认：安装包 `0.1.0` 可安装、可启动，桌面进程正在运行
+- 已确认：OpenClaw bindings 可读，Telegram / WhatsApp routing 后端证据正常
+- 已确认：local daemon 正常，Awareness memory 插件已初始化
+- 未确认：Settings 页黄色告警是否在 UI 层已经同步消失；这一项仍需要一次人工打开桌面端后的目视复核
+- 未确认：startup/lifecycle GUI、真实 channel setup UI、chat 高阶链路，这些仍属于需要人工 deep smoke 的区块
+
+因此本轮最准确的结论是：
+
+- `channel routing` 的底层运行时问题，当前可以视为已修复并有 CLI 证据支撑
+- 但发版前如果要给出“Windows 已完全通过桌面端验收”的结论，仍需要补最后一次 GUI 目视复核
