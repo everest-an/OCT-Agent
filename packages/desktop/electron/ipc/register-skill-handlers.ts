@@ -590,6 +590,35 @@ export function registerSkillHandlers(deps: {
       }
     };
 
+    // Pre-check: detect required package managers and auto-install brew if missing (macOS only)
+    const neededManagers = new Set(specs.map((s: SkillInstallSpec) => (s.kind || 'auto').toLowerCase()));
+    if (neededManagers.has('brew') || neededManagers.has('auto')) {
+      if (!(await isCommandAvailable('brew'))) {
+        if (process.platform === 'darwin') {
+          // Auto-install Homebrew on macOS (non-interactive)
+          sendProgress('installing', 'Installing Homebrew (first time only)...');
+          try {
+            await deps.runAsyncWithProgress(
+              'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
+              600000, // 10 min timeout for brew install
+              (line: string) => {
+                const t = line.trim();
+                if (t && (t.startsWith('==>') || t.includes('Installing') || t.includes('Downloading'))) {
+                  sendProgress('installing', `Homebrew: ${t.slice(0, 100)}`);
+                }
+              },
+            );
+            console.log('[skill:install-deps] Homebrew installed successfully');
+          } catch (brewErr: any) {
+            console.warn('[skill:install-deps] Homebrew install failed:', brewErr?.message?.slice(0, 200));
+          }
+        } else {
+          // No brew on Windows/Linux — will fall through to npm/winget/apt fallback
+          console.log('[skill:install-deps] brew not available on this platform, trying alternatives');
+        }
+      }
+    }
+
     for (const spec of specs) {
       const commands = buildInstallCommands(spec);
       if (commands.length === 0) {

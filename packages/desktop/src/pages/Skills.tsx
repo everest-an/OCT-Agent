@@ -82,13 +82,19 @@ const LOCAL_STATUS_TABS = ['all', 'ready', 'needs-setup', 'disabled'] as const;
 type LocalStatusFilter = (typeof LOCAL_STATUS_TABS)[number];
 type TranslateFunc = (key: string, fallback?: string) => string;
 
+const OS_LABELS: Record<string, string> = { darwin: 'macOS', win32: 'Windows', linux: 'Linux' };
+
 function summarizeMissing(skill: LocalSkillStatus) {
   const missing = skill.missing || {};
+  // Show OS incompatibility prominently
+  if (missing.os && missing.os.length > 0) {
+    const osNames = missing.os.map(os => OS_LABELS[os] || os).join('/');
+    return `${osNames} only`;
+  }
   const parts = [
     ...(missing.bins || []).map(bin => `bin:${bin}`),
     ...(missing.env || []).map(env => `env:${env}`),
     ...(missing.config || []).map(config => `config:${config}`),
-    ...(missing.os || []).map(os => `os:${os}`),
   ];
   return parts.slice(0, 3).join(' · ');
 }
@@ -944,6 +950,17 @@ export default function Skills() {
                   </span>
                 ) : detailSkill.bundled && !detailSkill.eligible ? (
                   /* Built-in skill needs setup — show install guidance */
+                  (detailSkill.missing?.os?.length ?? 0) > 0 ? (
+                    /* OS incompatible — show clear message, no install button */
+                    <div className="flex-1 space-y-2">
+                      <div className="flex items-center gap-2 px-3 py-2 bg-red-500/10 rounded-lg">
+                        <span className="text-red-400 text-sm">
+                          {t('skills.osIncompatible', 'This skill requires {os} and is not available on your system.').replace('{os}', (detailSkill.missing?.os || []).map(os => os === 'darwin' ? 'macOS' : os === 'win32' ? 'Windows' : os === 'linux' ? 'Linux' : os).join(' / '))}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                  /* Installable — show install specs + auto-install button */
                   <div className="flex items-center gap-2 w-full">
                     <div className="flex-1 space-y-1">
                       {(detailSkill.install && detailSkill.install.length > 0) ? (
@@ -992,6 +1009,7 @@ export default function Skills() {
                       </button>
                     )}
                   </div>
+                  )
                 ) : installedSlugs.has(detailSkill.slug) ? (
                   /* ClawHub installed skill — show uninstall */
                   <>
