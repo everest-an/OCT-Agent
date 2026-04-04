@@ -174,7 +174,8 @@ describe('doctor', () => {
     const result = await doctor.runFix('channel-bindings');
 
     expect(result).toMatchObject({ success: true, message: 'Bound 1 channel(s) to main agent' });
-    expect(shellRun).toHaveBeenCalledTimes(1);
+    expect(shellRun).toHaveBeenCalledTimes(2);
+    expect(shellRun).toHaveBeenCalledWith('openclaw agents bindings --json', 45000);
     expect(shellRun).toHaveBeenCalledWith('openclaw agents bind --agent main --bind "whatsapp" 2>&1', 30000);
   });
 
@@ -244,7 +245,45 @@ describe('doctor', () => {
     const report = await doctor.runChecks(['channel-bindings']);
 
     expect(report.checks[0]).toMatchObject({ status: 'warn', message: '1 channel(s) not bound to any agent' });
-    expect(shellExec).toHaveBeenCalledWith('openclaw agents bindings --json 2>NUL', 30000);
+    expect(shellExec).toHaveBeenCalledWith('openclaw agents bindings --json 2>NUL', 45000);
+  });
+
+  it('parses bindings JSON even when command output has plugin log noise', async () => {
+    const home = createTempHome();
+    const configDir = path.join(home, '.openclaw');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'openclaw.json'), JSON.stringify({
+      channels: {
+        whatsapp: { enabled: true },
+      },
+    }));
+
+    const shellRun = vi.fn(async (cmd: string) => {
+      if (cmd === 'openclaw agents bindings --json') {
+        return [
+          '[plugins] Awareness memory plugin registered',
+          '[plugins] Awareness memory plugin initialized',
+          '[]',
+        ].join('\n');
+      }
+      return 'ok';
+    });
+
+    const shellExec = vi.fn(async (cmd: string) => {
+      if (cmd.includes('which -a node')) return '/usr/local/bin/node';
+      if (cmd === 'node --version') return 'v23.11.0';
+      if (cmd.includes('which -a openclaw')) return '/usr/local/bin/openclaw';
+      if (cmd === 'openclaw --version') return 'OpenClaw 2026.3.31 (abcd123)';
+      if (cmd === 'npm config get prefix') return '/usr/local';
+      if (cmd.includes('openclaw agents bindings --json')) return null;
+      return null;
+    });
+
+    const { doctor } = createDoctorWithMocks(home, { shellExec, shellRun });
+    const report = await doctor.runChecks(['channel-bindings']);
+
+    expect(report.checks[0]).toMatchObject({ status: 'warn', message: '1 channel(s) not bound to any agent' });
+    expect(shellExec.mock.calls.some((call: any[]) => String(call[0]).includes('openclaw agents bindings --json 2>'))).toBe(false);
   });
 
   it('repairs missing bundled telegram runtime deps before rebinding', async () => {

@@ -19,6 +19,7 @@ import {
 
 const OPENCLAW_INSTALL_TIMEOUT_MS = 300000;
 const WEB_DNS_CANARY_DOMAINS = ['example.com', 'openclaw.ai'];
+const CHANNEL_BINDINGS_CHECK_TIMEOUT_MS = 45000;
 
 // Cache for channel-bindings check to avoid slow CLI calls on every startup
 let _lastBindingsCheckPass: number = 0;
@@ -187,20 +188,37 @@ function sanitizeChannelId(channelId: string): string | null {
 function parseBindingsOutput(output: string | null): { ok: boolean; bindings: any[] } {
   if (!output) return { ok: false, bindings: [] };
 
-  const objectStart = output.indexOf('{');
-  const arrayStart = output.indexOf('[');
-  const jsonStart = [objectStart, arrayStart].filter(index => index >= 0).sort((a, b) => a - b)[0];
-  if (jsonStart === undefined) return { ok: false, bindings: [] };
+  const normalized = output.trim();
+  if (!normalized) return { ok: false, bindings: [] };
 
-  try {
-    const parsed = JSON.parse(output.slice(jsonStart));
-    if (Array.isArray(parsed)) return { ok: true, bindings: parsed };
-    if (Array.isArray(parsed.bindings)) return { ok: true, bindings: parsed.bindings };
-    if (Array.isArray(parsed.data)) return { ok: true, bindings: parsed.data };
-    return { ok: true, bindings: [] };
-  } catch {
-    return { ok: false, bindings: [] };
+  const parseCandidate = (candidate: string): { ok: boolean; bindings: any[] } | null => {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (Array.isArray(parsed)) return { ok: true, bindings: parsed };
+      if (Array.isArray(parsed.bindings)) return { ok: true, bindings: parsed.bindings };
+      if (Array.isArray(parsed.data)) return { ok: true, bindings: parsed.data };
+      return { ok: true, bindings: [] };
+    } catch {
+      return null;
+    }
+  };
+
+  const lines = normalized.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (!line.startsWith('{') && !line.startsWith('[')) continue;
+    const parsed = parseCandidate(line);
+    if (parsed) return parsed;
   }
+
+  for (let i = 0; i < normalized.length; i += 1) {
+    const ch = normalized[i];
+    if (ch !== '{' && ch !== '[') continue;
+    const parsed = parseCandidate(normalized.slice(i));
+    if (parsed) return parsed;
+  }
+
+  return { ok: false, bindings: [] };
 }
 
 function parseIpv4Address(ip: string): number[] | null {
@@ -315,8 +333,22 @@ async function getUnboundChannels(ctx: Ctx): Promise<string[] | null> {
   const enabledChannels = getEnabledChannels(ctx.config);
   if (enabledChannels.length === 0) return [];
 
-  const output = await ctx.deps.shellExec(`openclaw agents bindings --json 2>${getNullDevice(ctx.deps.platform)}`, 30000);
-  const parsed = parseBindingsOutput(output);
+  let output: string | null = null;
+  try {
+    output = await ctx.deps.shellRun('openclaw agents bindings --json', CHANNEL_BINDINGS_CHECK_TIMEOUT_MS);
+  } catch {
+    output = null;
+  }
+
+  let parsed = parseBindingsOutput(output);
+  if (!parsed.ok) {
+    output = await ctx.deps.shellExec(
+      `openclaw agents bindings --json 2>${getNullDevice(ctx.deps.platform)}`,
+      CHANNEL_BINDINGS_CHECK_TIMEOUT_MS,
+    );
+    parsed = parseBindingsOutput(output);
+  }
+
   if (!parsed.ok) return null;
   const bindings = parsed.bindings;
 
