@@ -25,9 +25,16 @@ function isAllowedMarkdownFile(fileName: string) {
 function getAgentReadDirectories(home: string, agentId: string) {
   const slug = toAgentSlug(agentId);
   const globalWorkspaceDir = path.join(home, '.openclaw', 'workspace');
-  const workspaceDir = path.join(home, '.openclaw', 'workspaces', slug);
   const agentDir = path.join(home, '.openclaw', 'agents', slug, 'agent');
-  return DEFAULT_AGENT_IDS.has(agentId) ? [globalWorkspaceDir, agentDir] : [workspaceDir, agentDir];
+  if (DEFAULT_AGENT_IDS.has(agentId)) return [globalWorkspaceDir, agentDir];
+  // OpenClaw uses two possible workspace paths depending on how the agent was created:
+  // - ~/.openclaw/workspaces/<slug> (if --workspace was passed)
+  // - ~/.openclaw/workspace-<slug> (OpenClaw's default when no --workspace is passed)
+  // Check both, prefer whichever actually exists.
+  const nestedWsDir = path.join(home, '.openclaw', 'workspaces', slug);
+  const flatWsDir = path.join(home, '.openclaw', `workspace-${slug}`);
+  const wsDir = fs.existsSync(flatWsDir) ? flatWsDir : nestedWsDir;
+  return [wsDir, agentDir];
 }
 
 function listMarkdownFilesFromDirectories(directories: string[]) {
@@ -106,25 +113,20 @@ export function registerAgentHandlers(deps: {
       const displayName = name.replace(/["\\\n\r]/g, '').trim();
       if (!displayName) return { success: false, error: 'Invalid agent name' };
       await deps.ensureGatewayRunning();
-      const baseWsDir = path.join(deps.home, '.openclaw', 'workspaces');
-      const baseAgentsDir = path.join(deps.home, '.openclaw', 'agents');
-      fs.mkdirSync(baseWsDir, { recursive: true });
-      fs.mkdirSync(baseAgentsDir, { recursive: true });
       // Slug must be ASCII for filesystem safety
       const slug = displayName.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || `agent-${Date.now()}`;
-      const wsDir = path.join(baseWsDir, slug);
-      // Do NOT pre-create wsDir — OpenClaw agents add only seeds workspace files
-      // (AGENTS.md, BOOTSTRAP.md, SOUL.md, etc.) when the directory does NOT exist.
-      // Pre-creating an empty dir causes OpenClaw to skip seeding.
-      // Use runSpawnAsync (array args) to prevent shell injection from displayName
+      // Use OpenClaw's default workspace path format: ~/.openclaw/workspace-<slug>
+      // NOT ~/.openclaw/workspaces/<slug> which is our old convention.
+      // --non-interactive requires --workspace, and OpenClaw seeds workspace files
+      // (AGENTS.md, BOOTSTRAP.md, SOUL.md, etc.) only when the dir does NOT exist.
+      const wsDir = path.join(deps.home, '.openclaw', `workspace-${slug}`);
       const spawnArgs = ['agents', 'add', displayName, '--non-interactive', '--workspace', wsDir];
       const safeModel = model ? model.replace(/[^a-zA-Z0-9/_:.-]/g, '') : '';
       if (safeModel) { spawnArgs.push('--model', safeModel); }
       // OpenClaw loads all plugins on every CLI invocation (15-20s), so 45s timeout is needed
       await deps.runSpawnAsync('openclaw', spawnArgs, 45000);
       if (systemPrompt) {
-        const agentDir = path.join(baseAgentsDir, slug, 'agent');
-        // Ensure dirs exist (OpenClaw should have created them, but be safe)
+        const agentDir = path.join(deps.home, '.openclaw', 'agents', slug, 'agent');
         fs.mkdirSync(wsDir, { recursive: true });
         fs.mkdirSync(agentDir, { recursive: true });
         fs.writeFileSync(path.join(wsDir, 'SOUL.md'), systemPrompt, 'utf-8');
@@ -206,12 +208,8 @@ export function registerAgentHandlers(deps: {
   ipcMain.handle('agents:write-file', async (_e: any, agentId: string, fileName: string, content: string) => {
     if (!isAllowedMarkdownFile(fileName)) return { success: false, error: 'File not allowed' };
     try {
-      const slug = toAgentSlug(agentId);
-      const wsDir = path.join(deps.home, '.openclaw', 'workspaces', slug);
-      const agentDir = path.join(deps.home, '.openclaw', 'agents', slug, 'agent');
-      const globalWs = path.join(deps.home, '.openclaw', 'workspace');
-      const isDefault = DEFAULT_AGENT_IDS.has(agentId);
-      const targets = isDefault ? [globalWs] : [wsDir, agentDir];
+      // Use getAgentReadDirectories which already handles both workspace path formats
+      const targets = getAgentReadDirectories(deps.home, agentId);
       for (const dir of targets) {
         fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(path.join(dir, fileName), content, 'utf-8');
@@ -226,12 +224,8 @@ export function registerAgentHandlers(deps: {
   ipcMain.handle('agents:delete-file', async (_e: any, agentId: string, fileName: string) => {
     if (!isAllowedMarkdownFile(fileName)) return { success: false, error: 'File not allowed' };
     try {
-      const slug = toAgentSlug(agentId);
-      const wsDir = path.join(deps.home, '.openclaw', 'workspaces', slug);
-      const agentDir = path.join(deps.home, '.openclaw', 'agents', slug, 'agent');
-      const globalWs = path.join(deps.home, '.openclaw', 'workspace');
-      const isDefault = DEFAULT_AGENT_IDS.has(agentId);
-      const targets = isDefault ? [globalWs] : [wsDir, agentDir];
+      // Use getAgentReadDirectories which handles both workspace path formats
+      const targets = getAgentReadDirectories(deps.home, agentId);
       let deleted = false;
       for (const dir of targets) {
         const fp = path.join(dir, fileName);
