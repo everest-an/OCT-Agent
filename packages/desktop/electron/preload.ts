@@ -190,6 +190,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   memoryEnableSlotReplacement: () => ipcRenderer.invoke('memory:enable-slot-replacement'),
   memoryGetSlotStatus: () => ipcRenderer.invoke('memory:get-slot-status'),
   memoryLearningStatus: (opts?: { agentId?: string; workspacePath?: string }) => ipcRenderer.invoke('memory:learning-status', opts || {}),
+  memoryPromotionList: (opts?: { agentId?: string; workspacePath?: string }) => ipcRenderer.invoke('memory:promotion-list', opts || {}),
+  memoryPromotionApply: (payload: { proposalId: string; agentId?: string; workspacePath?: string }) => ipcRenderer.invoke('memory:promotion-apply', payload),
+  memoryPromotionReject: (payload: { proposalId: string; agentId?: string; workspacePath?: string }) => ipcRenderer.invoke('memory:promotion-reject', payload),
+  memoryPromotionApplyAll: (opts?: { agentId?: string; workspacePath?: string }) => ipcRenderer.invoke('memory:promotion-apply-all', opts || {}),
   memoryLogLearning: (payload: {
     type: 'learning' | 'error' | 'feature';
     summary: string;

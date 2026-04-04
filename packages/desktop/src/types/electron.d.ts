@@ -80,6 +80,121 @@ export interface ElectronAPI {
   bootstrap?: () => Promise<{ success: boolean; output?: string | null }>;
   modelsReadProviders?: () => Promise<{ success: boolean; providers: Array<{ key: string; baseUrl: string; apiType?: string; hasApiKey: boolean; models: Array<{ id: string; name: string }> }>; primaryModel: string }>;
   modelsDiscover?: (input: { providerKey: string; baseUrl: string; apiKey?: string }) => Promise<{ success: boolean; models: Array<{ id: string; name: string }>; error?: string }>;
+  memoryLearningStatus?: (opts?: { agentId?: string; workspacePath?: string }) => Promise<{
+    success: boolean;
+    rootDir?: string;
+    learningsDir?: string;
+    pendingCount?: number;
+    highPriorityPendingCount?: number;
+    promotionProposalCount?: number;
+    readyForPromotionCount?: number;
+    error?: string;
+  }>;
+  memoryPromotionList?: (opts?: { agentId?: string; workspacePath?: string }) => Promise<{
+    success: boolean;
+    rootDir?: string;
+    learningsDir?: string;
+    proposalFilePath?: string;
+    items?: Array<{
+      id: string;
+      status: 'proposed' | 'approved' | 'rejected';
+      target: 'AGENTS.md' | 'SOUL.md' | 'TOOLS.md';
+      patternKey: string;
+      summary: string;
+      ruleText: string;
+      evidenceCount: number;
+      evidenceIds: string[];
+      createdAt?: string;
+      approvedAt?: string;
+    }>;
+    error?: string;
+  }>;
+  memoryPromotionApply?: (payload: { proposalId: string; agentId?: string; workspacePath?: string }) => Promise<{
+    success: boolean;
+    rootDir?: string;
+    learningsDir?: string;
+    proposalFilePath?: string;
+    targetFilePath?: string;
+    proposal?: {
+      id: string;
+      status: 'proposed' | 'approved' | 'rejected';
+      target: 'AGENTS.md' | 'SOUL.md' | 'TOOLS.md';
+      patternKey: string;
+      summary: string;
+      ruleText: string;
+      evidenceCount: number;
+      evidenceIds: string[];
+      createdAt?: string;
+      approvedAt?: string;
+    };
+    error?: string;
+  }>;
+  memoryPromotionReject?: (payload: { proposalId: string; agentId?: string; workspacePath?: string }) => Promise<{
+    success: boolean;
+    rootDir?: string;
+    learningsDir?: string;
+    proposalFilePath?: string;
+    proposal?: {
+      id: string;
+      status: 'proposed' | 'approved' | 'rejected';
+      target: 'AGENTS.md' | 'SOUL.md' | 'TOOLS.md';
+      patternKey: string;
+      summary: string;
+      ruleText: string;
+      evidenceCount: number;
+      evidenceIds: string[];
+      createdAt?: string;
+      approvedAt?: string;
+    };
+    error?: string;
+  }>;
+  memoryPromotionApplyAll?: (opts?: { agentId?: string; workspacePath?: string }) => Promise<{
+    success: boolean;
+    rootDir?: string;
+    learningsDir?: string;
+    proposalFilePath?: string;
+    result?: {
+      requestedCount: number;
+      appliedCount: number;
+      skippedCount: number;
+      applied: Array<{
+        proposalId: string;
+        target: 'AGENTS.md' | 'SOUL.md' | 'TOOLS.md';
+        targetFilePath: string;
+      }>;
+    };
+    error?: string;
+  }>;
+  memoryLogLearning?: (payload: {
+    type: 'learning' | 'error' | 'feature';
+    summary: string;
+    details?: string;
+    suggestedAction?: string;
+    area?: 'frontend' | 'backend' | 'infra' | 'tests' | 'docs' | 'config';
+    priority?: 'low' | 'medium' | 'high' | 'critical';
+    category?: 'correction' | 'insight' | 'knowledge_gap' | 'best_practice';
+    commandName?: string;
+    source?: string;
+    relatedFiles?: string[];
+    tags?: string[];
+    complexity?: 'simple' | 'medium' | 'complex';
+    frequency?: 'first_time' | 'recurring';
+    userContext?: string;
+    agentId?: string;
+    workspacePath?: string;
+  }) => Promise<{
+    success: boolean;
+    id?: string;
+    filePath?: string;
+    rootDir?: string;
+    learningsDir?: string;
+    promotion?: {
+      generatedCount?: number;
+      proposalFilePath?: string;
+      proposalIds?: string[];
+    };
+    error?: string;
+  }>;
 
   // Task Center
   workflowConfig?: () => Promise<{ maxSpawnDepth: number; maxChildrenPerAgent: number; agentToAgentEnabled: boolean }>;

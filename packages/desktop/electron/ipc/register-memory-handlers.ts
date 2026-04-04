@@ -5,7 +5,14 @@ import os from 'os';
 import { callMcp, checkMemoryHealth, fetchMemoryEvents, fetchKnowledgeCards, fetchCardEvolution, type MemoryEventQueryOptions } from '../memory-client';
 import { buildMemoryInitArgs, buildMemorySearchArgs } from '../memory-protocol';
 import { readJsonFileWithBom } from '../json-file';
-import { appendSelfImprovementEntry, getSelfImprovementStatus } from '../self-improvement';
+import {
+  applyAllSelfImprovementPromotionProposals,
+  appendSelfImprovementEntry,
+  applySelfImprovementPromotionProposal,
+  getSelfImprovementStatus,
+  listSelfImprovementPromotionProposals,
+  rejectSelfImprovementPromotionProposal,
+} from '../self-improvement';
 
 type FileBackedMemoryEvent = {
   id: string;
@@ -242,6 +249,76 @@ export function registerMemoryHandlers() {
         agentId: payload.agentId || 'main',
         workspacePath: payload.workspacePath,
         source: payload.source || 'desktop',
+      });
+      return { success: true, ...result };
+    } catch (err: any) {
+      return { success: false, error: err?.message || String(err) };
+    }
+  });
+
+  ipcMain.handle('memory:promotion-list', async (_e, opts?: { agentId?: string; workspacePath?: string }) => {
+    try {
+      const result = await listSelfImprovementPromotionProposals({
+        homeDir: os.homedir(),
+        agentId: opts?.agentId || 'main',
+        workspacePath: opts?.workspacePath,
+      });
+      return { success: true, ...result };
+    } catch (err: any) {
+      return { success: false, error: err?.message || String(err) };
+    }
+  });
+
+  ipcMain.handle('memory:promotion-apply', async (_e, payload: {
+    proposalId: string;
+    agentId?: string;
+    workspacePath?: string;
+  }) => {
+    if (!payload?.proposalId || !payload.proposalId.trim()) {
+      return { success: false, error: 'proposalId is required.' };
+    }
+
+    try {
+      const result = await applySelfImprovementPromotionProposal({
+        proposalId: payload.proposalId.trim(),
+        homeDir: os.homedir(),
+        agentId: payload.agentId || 'main',
+        workspacePath: payload.workspacePath,
+      });
+      return { success: true, ...result };
+    } catch (err: any) {
+      return { success: false, error: err?.message || String(err) };
+    }
+  });
+
+  ipcMain.handle('memory:promotion-reject', async (_e, payload: {
+    proposalId: string;
+    agentId?: string;
+    workspacePath?: string;
+  }) => {
+    if (!payload?.proposalId || !payload.proposalId.trim()) {
+      return { success: false, error: 'proposalId is required.' };
+    }
+
+    try {
+      const result = await rejectSelfImprovementPromotionProposal({
+        proposalId: payload.proposalId.trim(),
+        homeDir: os.homedir(),
+        agentId: payload.agentId || 'main',
+        workspacePath: payload.workspacePath,
+      });
+      return { success: true, ...result };
+    } catch (err: any) {
+      return { success: false, error: err?.message || String(err) };
+    }
+  });
+
+  ipcMain.handle('memory:promotion-apply-all', async (_e, opts?: { agentId?: string; workspacePath?: string }) => {
+    try {
+      const result = await applyAllSelfImprovementPromotionProposals({
+        homeDir: os.homedir(),
+        agentId: opts?.agentId || 'main',
+        workspacePath: opts?.workspacePath,
       });
       return { success: true, ...result };
     } catch (err: any) {

@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import Memory from '../pages/Memory';
 
 /** Helper: make memoryCheckHealth return daemon-connected */
-function mockDaemonConnected() {
+function mockDaemonConnected(overrides: Record<string, unknown> = {}) {
   (window as any).electronAPI = {
     ...(window as any).electronAPI,
     memoryCheckHealth: () => Promise.resolve({
@@ -27,6 +27,7 @@ function mockDaemonConnected() {
       items: [{ id: 'mem1', type: 'turn_summary', title: 'Event one', source: 'claude-code', created_at: '2026-03-30T10:00:00Z' }],
       total: 1, limit: 50, offset: 0,
     }),
+    ...overrides,
   };
 }
 
@@ -96,5 +97,70 @@ describe('Memory Page', () => {
     await act(async () => { fireEvent.click(toggle); });
     expect(screen.getByText('Awareness Memory')).toBeInTheDocument();
     expect(screen.getByText('OpenClaw Local')).toBeInTheDocument();
+  });
+
+  it('renders self improvement panel and saves a learning entry from settings', async () => {
+    const memoryLogLearning = vi.fn(() => Promise.resolve({
+      success: true,
+      id: 'LRN-20260405-001',
+      filePath: '/Users/test/.openclaw/workspace/.learnings/LEARNINGS.md',
+      promotion: { generatedCount: 1, proposalIds: ['PROMO-20260405-001'] },
+    }));
+
+    mockDaemonConnected({
+      memoryLearningStatus: () => Promise.resolve({
+        success: true,
+        rootDir: '/Users/test/.openclaw/workspace',
+        learningsDir: '/Users/test/.openclaw/workspace/.learnings',
+        pendingCount: 2,
+        highPriorityPendingCount: 1,
+        promotionProposalCount: 1,
+        readyForPromotionCount: 1,
+      }),
+      memoryPromotionList: () => Promise.resolve({
+        success: true,
+        items: [{
+          id: 'PROMO-20260405-001',
+          status: 'proposed',
+          target: 'TOOLS.md',
+          patternKey: 'TOOLS.md|learning|docs|verify openclaw cli flags',
+          summary: 'Verify OpenClaw CLI flags before changing chat command arguments',
+          ruleText: 'Before running chat workflow changes, verify CLI flags first.',
+          evidenceCount: 3,
+          evidenceIds: ['LRN-20260405-001'],
+          createdAt: '2026-04-05T00:00:00.000Z',
+        }],
+      }),
+      memoryLogLearning,
+    });
+
+    await act(async () => { render(<Memory />); });
+    await waitFor(() => expect(screen.getByText('Settings')).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText('Settings')); });
+    await waitFor(() => expect(screen.getByText('Self Improvement')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByPlaceholderText('One-line description of what happened'), {
+      target: { value: 'Verify CLI flags before updating desktop chat flow' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Include context, what was wrong, and what changed.'), {
+      target: { value: 'The CLI failed silently until the flag list was checked against --help output.' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('What should we do differently next time?'), {
+      target: { value: 'Verify supported flags before shipping chat command changes.' },
+    });
+
+    await act(async () => { fireEvent.click(screen.getByText('Save Entry')); });
+
+    await waitFor(() => expect(memoryLogLearning).toHaveBeenCalledTimes(1));
+    expect(memoryLogLearning).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'learning',
+      summary: 'Verify CLI flags before updating desktop chat flow',
+      area: 'docs',
+      priority: 'medium',
+      category: 'insight',
+      agentId: 'main',
+    }));
+    expect(screen.getByText(/Generated promotion proposals:/)).toBeInTheDocument();
+    expect(screen.getByText('Promotion Queue')).toBeInTheDocument();
   });
 });
