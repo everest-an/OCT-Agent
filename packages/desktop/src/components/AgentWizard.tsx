@@ -91,25 +91,45 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
   const [useMainModel, setUseMainModel] = useState(true);
 
   // Step 3: Channel binding
-  const [availableChannels, setAvailableChannels] = useState<string[]>([]);
+  const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; label: string }>>([]);
+  const [channelsLoading, setChannelsLoading] = useState(true);
   const [selectedBindings, setSelectedBindings] = useState<string[]>([]);
 
   const styles: PersonalityStyle[] = ['friendly', 'professional', 'minimal', 'creative'];
 
-  // Load available channels on mount
+  // Load available channels from the dynamic channel registry (OpenClaw discovery)
   useEffect(() => {
     const loadChannels = async () => {
-      if (!window.electronAPI) return;
+      if (!window.electronAPI) { setChannelsLoading(false); return; }
       try {
-        const result = await (window.electronAPI as any).channelListConfigured();
-        const supported = await (window.electronAPI as any).channelListSupported?.();
-        const all = new Set<string>([
-          ...(result?.configured || []),
-          ...(supported?.channels || []),
-        ]);
-        all.delete('local');
-        setAvailableChannels(Array.from(all).sort());
+        const api = window.electronAPI as any;
+        // Use the channel registry which already has friendly labels from OpenClaw catalog
+        const regResult = await api.channelGetRegistry?.();
+        const configured = await api.channelListConfigured?.();
+        const configuredSet = new Set<string>(configured?.configured || []);
+
+        if (regResult?.channels?.length > 0) {
+          // Use registry channels (has label, id, openclawId from OpenClaw dynamic discovery)
+          const channels = (regResult.channels as Array<{ id: string; openclawId?: string; label: string }>)
+            .filter(ch => ch.id !== 'local')
+            .map(ch => ({
+              id: ch.openclawId || ch.id,
+              label: ch.label || ch.id,
+              configured: configuredSet.has(ch.id) || configuredSet.has(ch.openclawId || ''),
+            }))
+            .sort((a, b) => {
+              // Configured channels first, then alphabetical
+              if (a.configured !== b.configured) return a.configured ? -1 : 1;
+              return a.label.localeCompare(b.label);
+            });
+          setAvailableChannels(channels);
+        } else {
+          // Fallback: use configured list as-is
+          const ids = Array.from(configuredSet).filter(id => id !== 'local');
+          setAvailableChannels(ids.map(id => ({ id, label: id })).sort((a, b) => a.label.localeCompare(b.label)));
+        }
       } catch { /* ignore */ }
+      setChannelsLoading(false);
     };
     loadChannels();
   }, []);
@@ -239,11 +259,11 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
     }
   };
 
-  const toggleBinding = (channel: string) => {
+  const toggleBinding = (channelId: string) => {
     setSelectedBindings(prev =>
-      prev.includes(channel)
-        ? prev.filter(c => c !== channel)
-        : [...prev, channel]
+      prev.includes(channelId)
+        ? prev.filter(c => c !== channelId)
+        : [...prev, channelId]
     );
   };
 
@@ -490,7 +510,12 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
                 <p className="text-xs text-slate-500">{t('agentWizard.step4.hint', 'Optionally bind messaging channels to this agent')}</p>
               </div>
 
-              {availableChannels.length === 0 ? (
+              {channelsLoading ? (
+                <div className="flex-1 flex flex-col items-center justify-center gap-3">
+                  <Loader2 size={24} className="text-slate-500 animate-spin" />
+                  <p className="text-sm text-slate-500">{t('agentWizard.step4.loading', 'Loading channels...')}</p>
+                </div>
+              ) : availableChannels.length === 0 ? (
                 <div className="flex-1 flex flex-col items-center justify-center gap-3">
                   <Link size={24} className="text-slate-600" />
                   <p className="text-sm text-slate-500 text-center">
@@ -502,24 +527,24 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
                   <p className="text-[11px] text-slate-500">
                     {t('agentWizard.step4.selectChannels', 'Select channels to route to this agent:')}
                   </p>
-                  {availableChannels.map(channel => (
+                  {availableChannels.map(ch => (
                     <button
-                      key={channel}
-                      onClick={() => toggleBinding(channel)}
+                      key={ch.id}
+                      onClick={() => toggleBinding(ch.id)}
                       className={`w-full p-3 rounded-xl border text-left transition-all flex items-center gap-3 ${
-                        selectedBindings.includes(channel)
+                        selectedBindings.includes(ch.id)
                           ? 'border-emerald-500 bg-emerald-500/10'
                           : 'border-slate-700 bg-slate-800/50 hover:border-slate-600'
                       }`}
                     >
                       <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
-                        selectedBindings.includes(channel) ? 'border-emerald-500 bg-emerald-500' : 'border-slate-600'
+                        selectedBindings.includes(ch.id) ? 'border-emerald-500 bg-emerald-500' : 'border-slate-600'
                       }`}>
-                        {selectedBindings.includes(channel) && <Check size={12} className="text-white" />}
+                        {selectedBindings.includes(ch.id) && <Check size={12} className="text-white" />}
                       </div>
-                      <Link size={14} className={selectedBindings.includes(channel) ? 'text-emerald-400' : 'text-slate-500'} />
-                      <span className={`text-sm ${selectedBindings.includes(channel) ? 'text-emerald-300' : 'text-slate-300'}`}>
-                        {channel}
+                      <Link size={14} className={selectedBindings.includes(ch.id) ? 'text-emerald-400' : 'text-slate-500'} />
+                      <span className={`text-sm ${selectedBindings.includes(ch.id) ? 'text-emerald-300' : 'text-slate-300'}`}>
+                        {ch.label}
                       </span>
                     </button>
                   ))}
