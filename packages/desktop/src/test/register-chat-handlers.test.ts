@@ -49,6 +49,27 @@ function createCliFallbackChild(output: string) {
   return child;
 }
 
+function createCliFallbackErrorChild(stderrLines: string[], exitCode = 1) {
+  const child = new EventEmitter() as EventEmitter & {
+    stdout: EventEmitter;
+    stderr: EventEmitter;
+    kill: ReturnType<typeof vi.fn>;
+    emitOutput: () => void;
+  };
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = vi.fn();
+
+  child.emitOutput = () => {
+    for (const line of stderrLines) {
+      child.stderr.emit('data', Buffer.from(`${line}\n`));
+    }
+    child.emit('exit', exitCode);
+  };
+
+  return child;
+}
+
 function createAwarenessInitResponse(renderedContext = 'Memory context loaded') {
   return {
     result: {
@@ -98,6 +119,50 @@ describe('registerChatHandlers', () => {
       }),
     );
     expect(spawnMock).toHaveBeenCalled();
+  });
+
+  it('filters Node internal stack lines and returns a friendly runtime repair hint for npx ENOENT', async () => {
+    const fakeChild = createCliFallbackErrorChild([
+      '[openclaw] Uncaught exception: Error: spawn npx ENOENT',
+      'at ChildProcess._handle.onexit (node:internal/child_process:286:19)',
+      'at onErrorNT (node:internal/child_process:484:16)',
+      'at process.processTicksAndRejections (node:internal/process/task_queues:89:21)',
+    ], 1);
+    spawnMock.mockReturnValue(fakeChild as any);
+
+    const sendToRenderer = vi.fn();
+
+    registerChatHandlers({
+      sendToRenderer,
+      ensureGatewayRunning: vi.fn(async () => ({ ok: false, error: 'Gateway failed to start.' })),
+      getGatewayWs: vi.fn(),
+      getConnectedGatewayWs: vi.fn(() => null),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const pending = handlers['chat:send']({}, 'hello from cli fallback', 'test-session', {});
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
+    fakeChild.emitOutput();
+    const result = await pending;
+
+    expect(result).toMatchObject({
+      success: false,
+      sessionId: 'test-session',
+    });
+    expect(String(result.error || '')).toContain('Please rerun Setup to repair your runtime');
+
+    const streamedText = sendToRenderer.mock.calls
+      .filter(([channel]) => channel === 'chat:stream')
+      .map(([, payload]) => String(payload || ''))
+      .join('\n');
+
+    expect(streamedText).not.toContain('ChildProcess._handle.onexit');
+    expect(streamedText).not.toContain('processTicksAndRejections');
   });
 
   it('preserves workspace instructions when CLI fallback is used', async () => {

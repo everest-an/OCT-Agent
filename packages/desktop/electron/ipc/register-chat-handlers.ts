@@ -1578,6 +1578,7 @@ async function chatSendViaCli(
 ): Promise<any> {
   return new Promise((resolve) => {
     const collectedLines: string[] = [];
+    const rawOutputLines: string[] = [];
     let stdoutRemainder = '';
     let stderrRemainder = '';
     const thinkingFlag = options?.thinkingLevel && options.thinkingLevel !== 'off'
@@ -1612,6 +1613,10 @@ async function chatSendViaCli(
       const trimmed = line.trim();
       if (!trimmed) return true;
       if (trimmed.startsWith('[')) return true;
+      if (/^at\s+ChildProcess\._handle\.onexit\b/i.test(trimmed)) return true;
+      if (/^at\s+onErrorNT\b/i.test(trimmed)) return true;
+      if (/^at\s+process\.processTicksAndRejections\b/i.test(trimmed)) return true;
+      if (/^at\s+.*\(node:internal\//i.test(trimmed)) return true;
       if (trimmed.startsWith('Config')) return true;
       if (trimmed.startsWith('Registered')) return true;
       if (trimmed.includes('plugin')) return true;
@@ -1622,6 +1627,12 @@ async function chatSendViaCli(
       if (/^Bind:/i.test(trimmed)) return true;
       if (/^Config:\s+/i.test(trimmed)) return true;
       return false;
+    };
+
+    const rememberRawLine = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      rawOutputLines.push(trimmed);
     };
 
     const flushChunk = (chunk: string, fromStderr: boolean) => {
@@ -1635,6 +1646,7 @@ async function chatSendViaCli(
 
       for (const line of lines) {
         const trimmed = line.trim();
+        rememberRawLine(trimmed);
         if (!isNoiseLine(trimmed)) {
           collectedLines.push(trimmed);
           send('chat:stream', `${trimmed}\n`);
@@ -1647,6 +1659,7 @@ async function chatSendViaCli(
       if (fromStderr) stderrRemainder = '';
       else stdoutRemainder = '';
       if (!line) return;
+      rememberRawLine(line);
       if (!isNoiseLine(line)) {
         collectedLines.push(line);
         send('chat:stream', `${line}\n`);
@@ -1666,8 +1679,18 @@ async function chatSendViaCli(
       flushRemainder(true);
       send('chat:stream-end', {});
       const clean = collectedLines.join('\n').trim();
+      const rawCombined = rawOutputLines.join('\n');
 
       if (code !== 0) {
+        if (/spawn\s+npx(?:\.cmd)?\s+ENOENT/i.test(`${rawCombined}\n${clean}`)) {
+          resolve({
+            success: false,
+            error: 'OpenClaw could not start the local helper runtime. Please rerun Setup to repair your runtime, then retry.',
+            sessionId: sid,
+          });
+          return;
+        }
+
         resolve({
           success: false,
           error: clean || `OpenClaw exited with code ${code ?? 'unknown'}`,
