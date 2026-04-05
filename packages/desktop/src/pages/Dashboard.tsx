@@ -977,6 +977,10 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
         })));
       }
     }).catch(() => {});
+    // Refresh channel sessions — user may have connected a new channel on the Channels page
+    api?.channelSessions?.().then((res: any) => {
+      if (res?.success) setChannelSessions(res.sessions || []);
+    }).catch(() => {});
     if (agentStatus === 'idle') {
       // Small delay so the hidden→visible transition completes first
       const t = setTimeout(() => textareaRef.current?.focus(), 50);

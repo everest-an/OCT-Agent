@@ -332,7 +332,7 @@ export default function App() {
             <Dashboard isActive={currentPage === 'chat'} onNavigate={setCurrentPage} />
           </div>
           {currentPage === 'memory' && <div className="h-full overflow-y-auto"><Memory /></div>}
-          {currentPage === 'channels' && <div className="h-full overflow-y-auto"><Channels /></div>}
+          {currentPage === 'channels' && <div className="h-full overflow-y-auto"><Channels onNavigate={setCurrentPage} /></div>}
           {currentPage === 'models' && <div className="h-full overflow-y-auto"><Models /></div>}
           {currentPage === 'skills' && <div className="h-full overflow-y-auto"><Skills /></div>}
           {currentPage === 'automation' && <div className="h-full overflow-y-auto"><Automation /></div>}

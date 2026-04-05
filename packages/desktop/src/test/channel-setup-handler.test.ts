@@ -35,6 +35,14 @@ describe('registerChannelSetupHandlers', () => {
       .mockResolvedValueOnce('[plugins] Registered\n[{"id":"signal","status":"linked"}]');
     const channelLoginWithQR = vi.fn(async () => ({ success: true }));
 
+    // Isolate from real ~/.openclaw/openclaw.json — isChannelLinkedInFile must return
+    // false so waitForChannelConfirmation falls through to the CLI slow path.
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(() => undefined);
+    vi.spyOn(fs, 'readFileSync').mockImplementation((filePath: any) => {
+      if (String(filePath).includes('openclaw.json')) return JSON.stringify({ channels: {} }) as any;
+      throw new Error(`unexpected readFileSync(${String(filePath)})`);
+    });
+
     registerChannelSetupHandlers({
       getMainWindow: () => ({ isDestroyed: () => false, webContents: { send } } as any),
       getChannel: () => ({ label: 'Signal', openclawId: 'signal', pluginPackage: '@openclaw/signal', setupFlow: 'add-then-login' }),
@@ -56,6 +64,14 @@ describe('registerChannelSetupHandlers', () => {
   it('returns pending confirmation instead of failing when OpenClaw is still syncing', async () => {
     const send = vi.fn();
     const runAsync = vi.fn(async () => 'ok');
+
+    // Isolate from real ~/.openclaw/openclaw.json — isChannelLinkedInFile must return
+    // false so all readShellOutputAsync calls return 'no match' and we get pendingConfirmation.
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(() => undefined);
+    vi.spyOn(fs, 'readFileSync').mockImplementation((filePath: any) => {
+      if (String(filePath).includes('openclaw.json')) return JSON.stringify({ channels: {} }) as any;
+      throw new Error(`unexpected readFileSync(${String(filePath)})`);
+    });
 
     registerChannelSetupHandlers({
       getMainWindow: () => ({ isDestroyed: () => false, webContents: { send } } as any),

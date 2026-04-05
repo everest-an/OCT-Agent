@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Check, CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, Loader2, Pencil, Radio, Unplug, X } from 'lucide-react';
+import { Check, CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, Loader2, MessageSquare, Pencil, Radio, Unplug, X } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { useExternalNavigator } from '../lib/useExternalNavigator';
 import PasswordInput from '../components/PasswordInput';
@@ -65,7 +65,9 @@ function DynamicConfigForm({ fields, values, onChange, t }: {
 // Main Channels page
 // ---------------------------------------------------------------------------
 
-export default function Channels() {
+type Page = 'chat' | 'memory' | 'channels' | 'models' | 'skills' | 'automation' | 'agents' | 'settings';
+
+export default function Channels({ onNavigate }: { onNavigate?: (page: Page) => void }) {
   const { t } = useI18n();
   const { openExternal, isOpening } = useExternalNavigator();
 
@@ -176,6 +178,10 @@ export default function Channels() {
     });
     (window.electronAPI as any).onChannelStatus?.((statusKey: string) => {
       setChannelProgress(statusKey);
+      // QR scan done — backend is now binding/confirming; clear QR so status messages show
+      if (statusKey.includes('binding') || statusKey.includes('confirming') || statusKey.includes('awaitingConfirmation')) {
+        setAsciiQR(null);
+      }
     });
   }, []);
 
@@ -311,6 +317,10 @@ export default function Channels() {
       if (result.success && result.pendingConfirmation) {
         setTestNotice(t('channels.pendingConfirmation', 'Login completed. OpenClaw is still confirming the channel. This can take a few seconds.'));
       }
+      if (result.success) {
+        // Backend has flushed the channel list cache; refresh the displayed list.
+        await loadConfiguredChannels(false);
+      }
       if (!result.success) {
         setTestError(result.error || t('channels.setupFailed', 'Setup failed. Check Gateway in Settings.'));
       }
@@ -318,6 +328,11 @@ export default function Channels() {
       const config = buildConfig()!;
       const saveResult = await (window.electronAPI as any).channelSave(activeWizard, config);
       if (!saveResult.success) { setTestStatus('error'); setTestError(saveResult.error || t('channels.saveFailed', 'Could not save. Please try again.')); return; }
+
+      // Refresh the channel list immediately after a successful save so the
+      // sidebar shows the newly-connected channel without waiting for the next
+      // poll cycle.
+      await loadConfiguredChannels(false);
 
       const testResult = await (window.electronAPI as any).channelTest(activeWizard);
       setTestStatus(testResult.success ? 'success' : 'error');
@@ -697,7 +712,7 @@ export default function Channels() {
                                   ? t('channels.guide.wechat.scan', 'Scan QR with WeChat to link')
                                   : t('channels.signal.scanHint', 'Open Signal → Settings → Linked Devices → Link New Device')}
                             </p>
-                            <div className="bg-white rounded-xl p-3 overflow-x-auto">
+                            <div className="flex justify-center bg-white rounded-xl p-3">
                               <pre className="text-black text-[10px] leading-none font-mono whitespace-pre select-text">{asciiQR}</pre>
                             </div>
                             <p className="text-xs text-slate-500 text-center">{t('channels.qr.waiting', 'Waiting for scan...')}</p>
@@ -763,11 +778,15 @@ export default function Channels() {
                     )}
                   </div>
                   {testStatus === 'success' && (
-                    <div className="flex justify-end">
+                    <div className="flex justify-end gap-2">
                       <button onClick={closeWizard}
-                        className="px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-sm font-medium transition-colors inline-flex items-center gap-1.5">
-                        <Check size={14} />
+                        className="px-5 py-2 border border-slate-600 hover:border-slate-400 text-slate-300 hover:text-white rounded-xl text-sm font-medium transition-colors">
                         {t('channels.done')}
+                      </button>
+                      <button onClick={() => { closeWizard(); onNavigate?.('chat'); }}
+                        className="px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-sm font-medium transition-colors inline-flex items-center gap-1.5">
+                        <MessageSquare size={14} />
+                        {t('channels.openChat', 'Open Chat')}
                       </button>
                     </div>
                   )}

@@ -232,6 +232,15 @@ describe('registerChannelConfigHandlers', () => {
       .mockResolvedValueOnce('telegram configured enabled')
       .mockResolvedValueOnce('Runtime: running');
 
+    // Isolate from real ~/.openclaw/openclaw.json — detectChannelConnectivity must
+    // follow the full call sequence (channels list → gateway status fallback) so
+    // each mock slot is consumed in the right order.
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(() => undefined);
+    vi.spyOn(fs, 'readFileSync').mockImplementation((filePath: any) => {
+      if (String(filePath).includes('openclaw.json')) return JSON.stringify({ channels: {} }) as any;
+      throw new Error(`unexpected readFileSync(${String(filePath)})`);
+    });
+
     registerChannelConfigHandlers({
       home: 'C:/Users/test',
       safeShellExecAsync: vi.fn(async () => null),
