@@ -36,6 +36,7 @@ export interface KnowledgeCardsTabProps {
   cardEvolution: Array<{ id: string; title: string; created_at?: string; status?: string; evolution_type?: string }> | null;
   evolutionLoading: boolean;
   signals: PerceptionSignal[];
+  tasks: Array<{ id: string; title: string; description?: string; priority: string; status: string; created_at?: string }>;
 }
 
 export function KnowledgeCardsTab({
@@ -50,8 +51,50 @@ export function KnowledgeCardsTab({
   cardEvolution,
   evolutionLoading,
   signals,
+  tasks,
 }: KnowledgeCardsTabProps) {
   const { t } = useI18n();
+
+  // When "tasks" filter is active, show tasks instead of knowledge cards
+  if (selectedCategory === '_tasks') {
+    return (
+      <>
+        {tasks.length === 0 ? (
+          <div className="text-center py-12 text-slate-500 space-y-2">
+            <p className="text-sm">{t('memory.noTasks', 'No open tasks')}</p>
+          </div>
+        ) : (
+          tasks.map((task) => (
+            <div key={task.id} className="p-4 rounded-xl border bg-slate-800/50 border-slate-700/50 hover:border-slate-600 transition-colors">
+              <div className="flex items-center gap-2 mb-2">
+                <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                  task.priority === 'high' ? 'bg-red-500/20 text-red-300 border border-red-500/30'
+                  : task.priority === 'medium' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                  : 'bg-slate-700 text-slate-400'
+                }`}>
+                  {task.priority}
+                </span>
+                <span className={`text-xs px-1.5 py-0.5 rounded ${
+                  task.status === 'open' ? 'bg-blue-500/20 text-blue-300' : 'bg-emerald-500/20 text-emerald-300'
+                }`}>
+                  {task.status}
+                </span>
+                {task.created_at && (
+                  <span className="ml-auto text-[11px] text-slate-500">
+                    {new Date(task.created_at).toLocaleDateString()}
+                  </span>
+                )}
+              </div>
+              <h4 className="font-medium text-sm text-slate-200">{task.title}</h4>
+              {task.description && (
+                <p className="mt-1 text-sm text-slate-400">{task.description}</p>
+              )}
+            </div>
+          ))
+        )}
+      </>
+    );
+  }
 
   return (
     <>

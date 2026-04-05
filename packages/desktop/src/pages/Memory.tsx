@@ -109,6 +109,7 @@ export default function Memory() {
   const [events, setEvents] = useState<MemoryEvent[]>([]);
   const [eventsTotal, setEventsTotal] = useState(0);
   const [eventsOffset, setEventsOffset] = useState(0);
+  const [tasks, setTasks] = useState<Array<{ id: string; title: string; description?: string; priority: string; status: string; created_at?: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<any[] | null>(null);
@@ -247,6 +248,18 @@ export default function Memory() {
     }
   }, [api, t]);
 
+  const loadTasks = useCallback(async () => {
+    if (!api?.memoryGetTasks) return;
+    try {
+      const result = await api.memoryGetTasks();
+      const text = result?.content?.[0]?.text || result?.result?.content?.[0]?.text || '[]';
+      const parsed = typeof text === 'string' ? JSON.parse(text) : text;
+      setTasks(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      // tasks are optional
+    }
+  }, [api]);
+
   const loadContext = useCallback(async () => {
     if (!api) return false;
     try {
@@ -352,9 +365,10 @@ export default function Memory() {
             contextLoaded ? Promise.resolve() : loadDailySummary(),
             loadLearningStatus(),
             loadPromotionProposals(),
+            loadTasks(),
           ]);
         } else {
-          await Promise.all([loadLearningStatus(), loadPromotionProposals()]);
+          await Promise.all([loadLearningStatus(), loadPromotionProposals(), loadTasks()]);
         }
       } finally {
         setLoading(false);
@@ -692,6 +706,18 @@ export default function Memory() {
                 </button>
               );
             })}
+            {/* Tasks quick filter */}
+            <button
+              onClick={() => { setSelectedCategory('_tasks'); setSearchResults(null); }}
+              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
+                selectedCategory === '_tasks' ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+              }`}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <Play size={12} />
+                Tasks ({tasks.length})
+              </span>
+            </button>
           </div>
         )}
       </div>
@@ -828,6 +854,7 @@ export default function Memory() {
                 cardEvolution={cardEvolution}
                 evolutionLoading={evolutionLoading}
                 signals={signals}
+                tasks={tasks}
               />
             )}
 
