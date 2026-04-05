@@ -837,7 +837,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
     api.agentsList?.().then((res: any) => {
       if (res?.success && res.agents?.length > 0) {
         setAgents(res.agents.map((a: any) => ({
-          id: a.id, name: a.name || a.id, emoji: a.emoji || '🤖', isDefault: a.isDefault,
+          id: a.id, name: a.name || a.id, emoji: a.emoji || '', isDefault: a.isDefault,
         })));
       }
     }).catch(() => {});
@@ -973,7 +973,7 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
     api?.agentsList?.().then((res: any) => {
       if (res?.success && res.agents?.length > 0) {
         setAgents(res.agents.map((a: any) => ({
-          id: a.id, name: a.name || a.id, emoji: a.emoji || '🤖', isDefault: a.isDefault,
+          id: a.id, name: a.name || a.id, emoji: a.emoji || '', isDefault: a.isDefault,
         })));
       }
     }).catch(() => {});

@@ -1,6 +1,6 @@
 /**
  * Agent Creation Wizard — 2-step flow:
- *   Step 0: Name + emoji
+ *   Step 0: Name
  *   Step 1: Channel binding (optional, from dynamic OpenClaw registry)
  *   → Create agent (preserving BOOTSTRAP.md)
  *   → Auto-navigate to chat for Bootstrap Q&A ritual
@@ -16,12 +16,6 @@ interface AgentWizardProps {
   onCancel: () => void;
 }
 
-const AGENT_EMOJIS = [
-  '🤖', '🧠', '🔬', '🎯', '📊', '💡', '🛡️', '🚀',
-  '📝', '🔧', '🎨', '📚', '🐾', '💼', '⚡', '🌙',
-  '🔥', '🐚', '🏠', '🦞', '👨‍💻', '🧪', '📡', '🎭',
-];
-
 const TOTAL_STEPS = 2;
 
 export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) {
@@ -29,7 +23,7 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
 
   const [step, setStep] = useState(0);
   const [agentName, setAgentName] = useState('');
-  const [agentEmoji, setAgentEmoji] = useState('🤖');
+  const [agentEmoji] = useState('');
   const [saving, setSaving] = useState(false);
   const [savingStatus, setSavingStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -122,7 +116,7 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
       setSavingStatus(t('agentWizard.status.workspace', 'Setting up workspace...'));
       if (api.agentsWriteFile) {
         await api.agentsWriteFile(slug, 'IDENTITY.md',
-          `# Identity\n\n- **name**: ${finalName}\n- **emoji**: ${agentEmoji}\n- **role**: AI Assistant\n`
+          `# Identity\n\n- **name**: ${finalName}\n- **emoji**: ${agentEmoji || 'default'}\n- **role**: AI Assistant\n`
         );
       }
 
@@ -175,24 +169,30 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
         {error && (
           <div className="mb-4 flex items-center gap-2 p-3 bg-red-600/10 border border-red-600/20 rounded-xl text-xs text-red-400">
             <span className="flex-1">{error}</span>
-            <button onClick={() => setError(null)}><X size={12} /></button>
+            <button
+              onClick={() => setError(null)}
+              aria-label={t('common.close', 'Close')}
+              title={t('common.close', 'Close')}
+            >
+              <X size={12} />
+            </button>
           </div>
         )}
 
         {/* Step content */}
         <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-6 min-h-[300px] flex flex-col">
 
-          {/* Step 0: Name + Emoji */}
+          {/* Step 0: Name */}
           {step === 0 && (
             <div className="flex-1 flex flex-col gap-4">
               <div className="text-center">
                 <h2 className="text-lg font-semibold text-white mb-1">{t('agentWizard.step1.title', 'Name your agent')}</h2>
-                <p className="text-xs text-slate-500">{t('agentWizard.step1.hint', 'Give it a unique name and emoji')}</p>
+                <p className="text-xs text-slate-500">{t('agentWizard.step1.hint', 'Give it a unique name')}</p>
               </div>
 
               <div className="flex items-center gap-3 mx-auto w-full max-w-xs">
-                <div className="w-12 h-12 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-2xl shrink-0">
-                  {agentEmoji}
+                <div className="w-12 h-12 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
+                  <Bot size={22} className="text-sky-300" />
                 </div>
                 <input
                   type="text"
@@ -203,26 +203,6 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
                   autoFocus
                   onKeyDown={e => e.key === 'Enter' && canProceed && handleNext()}
                 />
-              </div>
-
-              <div>
-                <p className="text-[11px] text-slate-500 mb-2">{t('agentWizard.step1.pickEmoji', 'Pick an icon:')}</p>
-                <div className="grid grid-cols-8 gap-1.5">
-                  {AGENT_EMOJIS.map(emoji => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      onClick={() => setAgentEmoji(emoji)}
-                      className={`w-9 h-9 rounded-lg text-lg flex items-center justify-center transition-all ${
-                        agentEmoji === emoji
-                          ? 'bg-brand-500/20 ring-2 ring-brand-500 scale-110'
-                          : 'bg-slate-800/50 hover:bg-slate-700/70'
-                      }`}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
               </div>
 
               {/* Bootstrap hint */}

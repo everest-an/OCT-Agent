@@ -82,7 +82,7 @@ export default function BootstrapWizard({ onComplete, onSkip }: BootstrapWizardP
       );
 
       // Write IDENTITY.md
-      const emoji = style === 'friendly' ? '🐾' : style === 'professional' ? '💼' : style === 'minimal' ? '⚡' : '🎨';
+      const emoji = 'default';
       await writeBootstrapFile('IDENTITY.md',
         `# Identity\n\n- **name**: ${finalAgentName}\n- **emoji**: ${emoji}\n- **role**: AI Assistant\n`
       );

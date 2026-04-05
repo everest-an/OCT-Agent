@@ -99,8 +99,10 @@ export function SettingsVersionPanel({
         </div>
         <div className="flex justify-between p-2 settings-glass-soft">
           <span className="text-slate-400">{t('settings.versions.localDaemon', 'Local Daemon')}</span>
-          <span className={`font-mono ${versionInfo?.daemonRunning ? 'text-emerald-400' : 'text-red-400'}`}>
-            {versionInfo?.daemonRunning ? `v${versionInfo.daemonVersion || '?'} ✓` : t('settings.versions.offline', 'Offline')}
+          <span className={`font-mono ${versionInfo?.daemonRunning ? 'text-emerald-400' : 'text-red-400'} inline-flex items-center gap-1`}>
+            {versionInfo?.daemonRunning
+              ? <><span>{`v${versionInfo.daemonVersion || '?'}`}</span><CheckCircle size={12} /></>
+              : t('settings.versions.offline', 'Offline')}
           </span>
         </div>
         <div className="flex justify-between p-2 settings-glass-soft">

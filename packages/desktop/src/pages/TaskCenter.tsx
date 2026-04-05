@@ -9,8 +9,9 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { Target, Plus, Zap, AlertCircle, Loader2, Bot, ArrowRight } from 'lucide-react';
+import { ArrowRight, AlertCircle, Bot, CheckCircle2, Loader2, Plus, Target, X, XCircle, Zap } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
+import AgentAvatar from '../components/AgentAvatar';
 import {
   loadTasks,
   saveTasks,
@@ -443,8 +444,10 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: any) =>
             <button
               onClick={() => setStatusMessage(null)}
               className="ml-3 text-xs opacity-70 hover:opacity-100"
+              aria-label={t('common.close', 'Close')}
+              title={t('common.close', 'Close')}
             >
-              ✕
+              <X size={12} />
             </button>
           </div>
         )}
@@ -568,12 +571,16 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: any) =>
                         className="w-full text-left px-3 py-2.5 rounded-lg bg-slate-800/40 border border-slate-700/30 hover:bg-slate-800/70 hover:border-slate-600/40 transition-all group"
                       >
                         <div className="flex items-center gap-2">
-                          <span>{task.agentEmoji || '🤖'}</span>
+                          <AgentAvatar name={task.agentName || task.agentId} emoji={task.agentEmoji || ''} size={14} />
                           <span className="text-sm text-slate-200 truncate flex-1">{task.title}</span>
                           {task.status === 'done' ? (
-                            <span className="text-[10px] text-emerald-400 bg-emerald-900/20 px-1.5 py-0.5 rounded">✓</span>
+                            <span className="inline-flex items-center justify-center text-emerald-400 bg-emerald-900/20 px-1.5 py-0.5 rounded">
+                              <CheckCircle2 size={11} />
+                            </span>
                           ) : (
-                            <span className="text-[10px] text-red-400 bg-red-900/20 px-1.5 py-0.5 rounded">✕</span>
+                            <span className="inline-flex items-center justify-center text-red-400 bg-red-900/20 px-1.5 py-0.5 rounded">
+                              <XCircle size={11} />
+                            </span>
                           )}
                         </div>
                         {(task.result || task.error) && (

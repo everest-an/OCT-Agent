@@ -1,9 +1,27 @@
 import { useEffect, useState } from 'react';
-import { ChevronRight, ChevronLeft, Loader2, Check, Globe, AlertTriangle, RefreshCw } from 'lucide-react';
+import {
+  AlertTriangle,
+  Brain,
+  Check,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Cloud,
+  Globe,
+  House,
+  KeyRound,
+  Lightbulb,
+  Loader2,
+  MessageCircle,
+  RefreshCw,
+  Rocket,
+  Smartphone,
+} from 'lucide-react';
 import { useAppConfig, MODEL_PROVIDERS, type ModelProviderDef, getProviderProfile } from '../lib/store';
 import { useI18n } from '../lib/i18n';
 import { DEFAULT_ONBOARDING_PERMISSION_PRESET, PERMISSION_PRESET_VALUES } from '../lib/permission-presets';
 import PasswordInput from '../components/PasswordInput';
+import ProviderIcon from '../components/ProviderIcon';
 import logoUrl from '../assets/logo.png';
 
 interface SetupProps {
@@ -465,7 +483,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                     }`}
                   >
                     <div className="flex items-center gap-3 mb-1">
-                      <span className="text-xl">{p.emoji}</span>
+                      <ProviderIcon providerKey={p.key} size={20} />
                       <span className="font-medium">{p.name}</span>
                       <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-300">{p.tag}</span>
                     </div>
@@ -482,8 +500,9 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                     {/* API Key */}
                     {provider.needsKey && (
                       <>
-                        <label className="block text-sm font-medium text-slate-300">
-                          🔑 {t('setup.apiKey')}
+                        <label className="flex items-center gap-1.5 text-sm font-medium text-slate-300">
+                          <KeyRound size={13} className="text-amber-400" />
+                          {t('setup.apiKey')}
                         </label>
                         <PasswordInput
                           value={apiKey}
@@ -491,8 +510,9 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                           placeholder={t('setup.apiKey.placeholder')}
                           className="w-full px-4 py-2.5 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500 transition-colors"
                         />
-                        <p className="text-xs text-slate-500">
-                          💡 {t('setup.apiKey.hint')}{' '}
+                        <p className="text-xs text-slate-500 inline-flex items-center gap-1.5">
+                          <Lightbulb size={12} className="text-amber-300" />
+                          {t('setup.apiKey.hint')}{' '}
                           <button className="text-brand-400 hover:underline">
                             {t('setup.apiKey.tutorial')}
                           </button>
@@ -535,8 +555,9 @@ export default function SetupWizard({ onComplete }: SetupProps) {
 
                     {/* No key needed hint */}
                     {!provider.needsKey && (
-                      <p className="text-sm text-slate-300">
-                        🏠 {t('setup.model.localHint')}
+                      <p className="text-sm text-slate-300 inline-flex items-center gap-1.5">
+                        <House size={14} className="text-emerald-300" />
+                        {t('setup.model.localHint')}
                       </p>
                     )}
 
@@ -657,7 +678,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                   }`}
                 >
                   <div className="flex items-center gap-3 mb-2">
-                    <span className="text-2xl">🏠</span>
+                    <House size={22} className="text-emerald-300" />
                     <div>
                       <div className="font-medium text-lg">{t('setup.memory.local')}</div>
                       <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-600/20 text-emerald-400">
@@ -679,7 +700,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                   }`}
                 >
                   <div className="flex items-center gap-3 mb-2">
-                    <span className="text-2xl">☁️</span>
+                    <Cloud size={22} className="text-sky-300" />
                     <div>
                       <div className="font-medium text-lg">{t('setup.memory.cloud')}</div>
                     </div>
@@ -712,7 +733,9 @@ export default function SetupWizard({ onComplete }: SetupProps) {
           {/* ===== DONE ===== */}
           {step === 'done' && (
             <div className="text-center space-y-8">
-              <div className="text-6xl">🎉</div>
+              <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-600/15 text-emerald-300">
+                <CheckCircle2 size={44} />
+              </div>
               <div>
                 <h2 className="text-3xl font-bold mb-3">
                   {t('setup.done.title')}
@@ -724,24 +747,25 @@ export default function SetupWizard({ onComplete }: SetupProps) {
 
               <div className="space-y-3 text-sm text-slate-400 max-w-sm mx-auto text-left">
                 <div className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/50">
-                  <span>💬</span>
+                  <MessageCircle size={16} className="text-sky-300 mt-0.5" />
                   <span>{t('setup.done.tip.chat')}</span>
                 </div>
                 <div className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/50">
-                  <span>📱</span>
+                  <Smartphone size={16} className="text-violet-300 mt-0.5" />
                   <span>{t('setup.done.tip.channels')}</span>
                 </div>
                 <div className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/50">
-                  <span>🧠</span>
+                  <Brain size={16} className="text-cyan-300 mt-0.5" />
                   <span>{t('setup.done.tip.memory')}</span>
                 </div>
               </div>
 
               <button
                 onClick={handleFinish}
-                className="px-8 py-3 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-lg font-medium transition-colors"
+                className="px-8 py-3 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-lg font-medium transition-colors inline-flex items-center gap-2"
               >
-                🚀 {t('setup.done.start')}
+                <Rocket size={18} />
+                {t('setup.done.start')}
               </button>
             </div>
           )}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ChevronRight, ChevronLeft, Check, ExternalLink, X, Loader2, Unplug } from 'lucide-react';
+import { Check, CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, Loader2, Pencil, Radio, Unplug, X } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { useExternalNavigator } from '../lib/useExternalNavigator';
 import PasswordInput from '../components/PasswordInput';
@@ -489,7 +489,10 @@ export default function Channels() {
   return (
     <div className="h-full flex flex-col">
       <div className="px-6 py-4 border-b border-slate-800">
-        <h1 className="text-lg font-semibold">📡 {t('channels.title')}</h1>
+        <h1 className="text-lg font-semibold inline-flex items-center gap-2">
+          <Radio size={18} className="text-sky-300" />
+          {t('channels.title')}
+        </h1>
         <p className="text-xs text-slate-500">{t('channels.subtitleConnected')}</p>
       </div>
 
@@ -513,7 +516,10 @@ export default function Channels() {
                     <ChannelIcon channelId={ch.id} size={28} />
                     <div className="flex-1 min-w-0">
                       <div className="font-medium text-sm">{getChannelLabel(ch)}</div>
-                      <div className="text-xs text-emerald-400">✅ {ch.id === 'local' ? t('channels.builtIn') : t('channels.configured')}</div>
+                      <div className="text-xs text-emerald-400 inline-flex items-center gap-1.5">
+                        <CheckCircle2 size={12} />
+                        {ch.id === 'local' ? t('channels.builtIn') : t('channels.configured')}
+                      </div>
                     </div>
                   </button>
                   {ch.id !== 'local' && (
@@ -596,7 +602,10 @@ export default function Channels() {
                 {t('channels.connectPrefix')} {getChannelLabel(activeChannel)}
                 {configuredChannels.has(activeWizard) && (
                   <span className="text-xs font-normal px-2 py-0.5 bg-amber-600/20 border border-amber-600/30 text-amber-400 rounded-full">
-                    ✏️ {t('channels.editingBadge', 'Editing')}
+                    <span className="inline-flex items-center gap-1">
+                      <Pencil size={11} />
+                      {t('channels.editingBadge', 'Editing')}
+                    </span>
                   </span>
                 )}
               </h2>
@@ -747,8 +756,9 @@ export default function Channels() {
                   {testStatus === 'success' && (
                     <div className="flex justify-end">
                       <button onClick={closeWizard}
-                        className="px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-sm font-medium transition-colors">
-                        {t('channels.done')} ✓
+                        className="px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-sm font-medium transition-colors inline-flex items-center gap-1.5">
+                        <Check size={14} />
+                        {t('channels.done')}
                       </button>
                     </div>
                   )}

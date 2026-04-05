@@ -1,9 +1,10 @@
 /**
  * KanbanCard — a single task card in the kanban board.
- * Displays agent emoji, title, status badge, elapsed time, and priority stripe.
+ * Displays agent avatar, title, status badge, elapsed time, and priority stripe.
  */
 
-import { Loader2, RotateCw, X, Eye } from 'lucide-react';
+import { CheckCircle2, Eye, Loader2, RotateCw, X, XCircle } from 'lucide-react';
+import AgentAvatar from '../AgentAvatar';
 import type { Task } from '../../lib/task-store';
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -46,9 +47,9 @@ export default function KanbanCard({ task, t, onRetry, onCancel, onViewDetail, i
         ${isDragging ? 'opacity-50 scale-95' : ''}
       `}
     >
-      {/* Header: agent emoji + title */}
+      {/* Header: agent avatar + title */}
       <div className="flex items-start gap-2 mb-2">
-        <span className="text-base flex-shrink-0">{task.agentEmoji || '🤖'}</span>
+        <AgentAvatar name={task.agentName || task.agentId} emoji={task.agentEmoji || ''} size={16} className="flex-shrink-0" />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-slate-200 line-clamp-2 leading-snug">{task.title}</p>
           {task.agentName && (
@@ -61,8 +62,8 @@ export default function KanbanCard({ task, t, onRetry, onCancel, onViewDetail, i
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           {isActive && <Loader2 size={12} className="animate-spin text-sky-400" />}
-          {task.status === 'done' && <span className="text-emerald-400 text-xs">✓</span>}
-          {task.status === 'failed' && <span className="text-red-400 text-xs">✕</span>}
+          {task.status === 'done' && <CheckCircle2 size={12} className="text-emerald-400" />}
+          {task.status === 'failed' && <XCircle size={12} className="text-red-400" />}
           <span className="text-[11px] text-slate-400">
             {isActive && task.startedAt ? elapsed(task.startedAt) : ''}
             {task.status === 'done' && task.completedAt && task.startedAt

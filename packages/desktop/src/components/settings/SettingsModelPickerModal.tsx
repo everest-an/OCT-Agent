@@ -1,5 +1,6 @@
-import { Bot, Check, KeyRound, Link2, Loader2 } from 'lucide-react';
+import { AlertCircle, Bot, Check, CheckCircle2, KeyRound, Link2, Loader2 } from 'lucide-react';
 import PasswordInput from '../PasswordInput';
+import ProviderIcon from '../ProviderIcon';
 import { SettingsModalShell } from './SettingsPrimitives';
 
 type Provider = {
@@ -90,7 +91,7 @@ export function SettingsModelPickerModal({
               }`}
             >
               <div className="flex items-center gap-2 mb-0.5">
-                <span>{provider.emoji}</span>
+                <ProviderIcon providerKey={provider.key} size={14} />
                 <span className="font-medium text-sm">{provider.name}</span>
               </div>
               <span className="text-slate-500">{provider.tag}</span>
@@ -139,6 +140,9 @@ export function SettingsModelPickerModal({
                 value={tempBaseUrl || selectedProvider.baseUrl}
                 onChange={(event) => onBaseUrlChange(event.target.value)}
                 className="settings-input w-full px-3 py-2 text-xs font-mono"
+                title={t('settings.model.baseUrl', 'API Base URL')}
+                aria-label={t('settings.model.baseUrl', 'API Base URL')}
+                placeholder={selectedProvider.baseUrl || 'https://'}
               />
               <p className="text-xs text-slate-600 mt-1">{t('settings.model.baseUrlHint')}</p>
             </div>
@@ -152,8 +156,18 @@ export function SettingsModelPickerModal({
                 >
                   {testingConnection ? <Loader2 size={12} className="animate-spin" /> : <Link2 size={12} />} {t('settings.model.discoverModels', 'Test & Refresh Models')}
                 </button>
-                {testResult === 'success' && <span className="text-xs text-emerald-400">{t('settings.model.detectSuccess', 'Model list updated')}</span>}
-                {testResult === 'error' && <span className="text-xs text-red-400">{t('settings.model.detectFailed', 'Could not fetch models, please check API Key / Base URL')}</span>}
+                {testResult === 'success' && (
+                  <span className="inline-flex items-center gap-1.5 text-xs text-emerald-400">
+                    <CheckCircle2 size={12} />
+                    {t('settings.model.detectSuccess', 'Model list updated')}
+                  </span>
+                )}
+                {testResult === 'error' && (
+                  <span className="inline-flex items-center gap-1.5 text-xs text-red-400">
+                    <AlertCircle size={12} />
+                    {t('settings.model.detectFailed', 'Could not fetch models, please check API Key / Base URL')}
+                  </span>
+                )}
               </div>
             )}
           </div>

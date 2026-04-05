@@ -1,5 +1,6 @@
-import { ChevronDown, ExternalLink, FolderOpen, Loader2 } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ExternalLink, FolderOpen, KeyRound, Loader2 } from 'lucide-react';
 import { getProviderProfile, hasProviderCredentials } from '../../lib/store';
+import ProviderIcon from '../ProviderIcon';
 
 type Provider = {
   key: string;
@@ -82,7 +83,8 @@ export function DashboardHeader({
           onClick={onToggleModelSelector}
           className="flex items-center gap-1 px-2 py-0.5 text-[11px] hover:bg-slate-800 rounded-md text-slate-500 transition-colors"
         >
-          {currentProvider?.emoji} {config.modelId?.split('/').pop() || t('chat.selectModel', 'Select model')}
+          {currentProvider ? <ProviderIcon providerKey={currentProvider.key} size={11} /> : null}
+          {config.modelId?.split('/').pop() || t('chat.selectModel', 'Select model')}
           <ChevronDown size={9} />
         </button>
         {showModelSelector && (
@@ -96,8 +98,17 @@ export function DashboardHeader({
                 return (
                   <div key={provider.key}>
                     <div className="px-3 py-1.5 text-[10px] font-medium border-b border-slate-800 sticky top-0 bg-slate-900 flex items-center justify-between">
-                      <span className="text-slate-500">{provider.emoji} {provider.name}</span>
-                      {isConfigured ? <span className="text-emerald-500">✅</span> : provider.needsKey ? <span className="text-amber-500">🔑</span> : <span className="text-slate-600">{t('chat.free', 'Free')}</span>}
+                      <span className="text-slate-500 inline-flex items-center gap-1.5">
+                        <ProviderIcon providerKey={provider.key} size={11} />
+                        {provider.name}
+                      </span>
+                      {isConfigured ? (
+                        <CheckCircle2 size={11} className="text-emerald-500" />
+                      ) : provider.needsKey ? (
+                        <KeyRound size={11} className="text-amber-500" />
+                      ) : (
+                        <span className="text-slate-600">{t('chat.free', 'Free')}</span>
+                      )}
                     </div>
                     {provider.models.map((model) => (
                       <button
@@ -121,7 +132,10 @@ export function DashboardHeader({
                       >
                         {model.label}
                         {config.providerKey === provider.key && config.modelId === model.id && (
-                          <span className="ml-1 text-brand-400 font-medium">✓ {t('chat.active', 'Active')}</span>
+                          <span className="ml-1 text-brand-400 font-medium inline-flex items-center gap-1">
+                            <CheckCircle2 size={11} />
+                            {t('chat.active', 'Active')}
+                          </span>
                         )}
                         {provider.needsKey && !isConfigured && (
                           <span className="ml-1 text-[10px] text-amber-500">{t('chat.setupInModels', 'Set up in Models')}</span>

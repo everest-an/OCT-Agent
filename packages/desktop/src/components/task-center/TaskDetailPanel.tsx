@@ -5,7 +5,8 @@
 import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { X, Loader2, Clock, Bot, AlertTriangle, CheckCircle2, RotateCw, ChevronDown } from 'lucide-react';
+import { X, Loader2, Clock, Bot, AlertTriangle, CheckCircle2, RotateCw } from 'lucide-react';
+import AgentAvatar from '../AgentAvatar';
 import type { Task } from '../../lib/task-store';
 
 interface TaskDetailPanelProps {
@@ -94,10 +95,15 @@ export default function TaskDetailPanel({ t, task, onClose, onRetry, onCancel }:
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-lg">{task.agentEmoji || '🤖'}</span>
+          <AgentAvatar name={task.agentName || task.agentId} emoji={task.agentEmoji || ''} size={18} />
           <h3 className="text-sm font-semibold text-slate-200 truncate">{task.title}</h3>
         </div>
-        <button onClick={onClose} className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200">
+        <button
+          onClick={onClose}
+          className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200"
+          aria-label={t('common.close', 'Close')}
+          title={t('common.close', 'Close')}
+        >
           <X size={16} />
         </button>
       </div>

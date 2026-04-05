@@ -446,7 +446,7 @@ export interface ModelProviderDef {
 // All base URLs and model IDs verified from official documentation (2026-03)
 export const MODEL_PROVIDERS: ModelProviderDef[] = [
   {
-    key: 'qwen-portal', name: '通义千问 Qwen', emoji: '☁️', tag: '🆓 每模型100万免费',
+    key: 'qwen-portal', name: '通义千问 Qwen', emoji: '', tag: '每模型100万免费',
     desc: '阿里云百炼，中文最强，多模态',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     apiType: 'openai-completions',
@@ -461,7 +461,7 @@ export const MODEL_PROVIDERS: ModelProviderDef[] = [
     needsKey: true,
   },
   {
-    key: 'deepseek', name: 'DeepSeek', emoji: '🔬', tag: '🆓 免费额度',
+    key: 'deepseek', name: 'DeepSeek', emoji: '', tag: '免费额度',
     desc: '免费额度充足，推理能力强',
     baseUrl: 'https://api.deepseek.com/v1',
     models: [
@@ -471,7 +471,7 @@ export const MODEL_PROVIDERS: ModelProviderDef[] = [
     needsKey: true,
   },
   {
-    key: 'openai', name: 'OpenAI', emoji: '⚡', tag: '全球最流行',
+    key: 'openai', name: 'OpenAI', emoji: '', tag: '全球最流行',
     desc: 'GPT 系列，需付费',
     baseUrl: 'https://api.openai.com/v1',
     models: [
@@ -482,7 +482,7 @@ export const MODEL_PROVIDERS: ModelProviderDef[] = [
     needsKey: true,
   },
   {
-    key: 'anthropic', name: 'Claude', emoji: '🧠', tag: '超强推理',
+    key: 'anthropic', name: 'Claude', emoji: '', tag: '超强推理',
     desc: 'Anthropic 出品，代码分析最强',
     baseUrl: 'https://api.anthropic.com/v1',
     models: [
@@ -493,7 +493,7 @@ export const MODEL_PROVIDERS: ModelProviderDef[] = [
     needsKey: true,
   },
   {
-    key: 'zhipu', name: '智谱 AI', emoji: '🇨🇳', tag: '🆓 Flash 免费',
+    key: 'zhipu', name: '智谱 AI', emoji: '', tag: 'Flash 免费',
     desc: 'GLM 系列，Flash 模型完全免费',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4/',
     models: [
@@ -504,7 +504,7 @@ export const MODEL_PROVIDERS: ModelProviderDef[] = [
     needsKey: true,
   },
   {
-    key: 'moonshot', name: '月之暗面 Kimi', emoji: '🌙', tag: '超长上下文',
+    key: 'moonshot', name: '月之暗面 Kimi', emoji: '', tag: '超长上下文',
     desc: 'Kimi K2.5，256K 上下文',
     baseUrl: 'https://api.moonshot.cn/v1',
     models: [
@@ -515,7 +515,7 @@ export const MODEL_PROVIDERS: ModelProviderDef[] = [
     needsKey: true,
   },
   {
-    key: 'volcengine', name: '豆包 / 火山引擎', emoji: '🔥', tag: '字节跳动',
+    key: 'volcengine', name: '豆包 / 火山引擎', emoji: '', tag: '字节跳动',
     desc: '豆包大模型，性价比高',
     baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
     models: [
@@ -526,7 +526,7 @@ export const MODEL_PROVIDERS: ModelProviderDef[] = [
     needsKey: true,
   },
   {
-    key: 'qianfan', name: '文心一言 / 千帆', emoji: '🏛️', tag: '百度',
+    key: 'qianfan', name: '文心一言 / 千帆', emoji: '', tag: '百度',
     desc: 'ERNIE 系列',
     baseUrl: 'https://qianfan.baidubce.com/v2',
     models: [
@@ -536,7 +536,7 @@ export const MODEL_PROVIDERS: ModelProviderDef[] = [
     needsKey: true,
   },
   {
-    key: 'minimax', name: 'MiniMax 海螺', emoji: '🐚', tag: '长上下文',
+    key: 'minimax', name: 'MiniMax 海螺', emoji: '', tag: '长上下文',
     desc: '204K 上下文',
     baseUrl: 'https://api.minimaxi.com/v1',
     models: [
@@ -546,7 +546,7 @@ export const MODEL_PROVIDERS: ModelProviderDef[] = [
     needsKey: true,
   },
   {
-    key: 'siliconflow', name: 'SiliconFlow', emoji: '🚀', tag: '🆓 $1 新用户',
+    key: 'siliconflow', name: 'SiliconFlow', emoji: '', tag: '$1 新用户',
     desc: '聚合多模型',
     baseUrl: 'https://api.siliconflow.cn/v1',
     models: [
@@ -557,7 +557,7 @@ export const MODEL_PROVIDERS: ModelProviderDef[] = [
     needsKey: true,
   },
   {
-    key: 'groq', name: 'Groq', emoji: '⚡', tag: '🆓 免费极速',
+    key: 'groq', name: 'Groq', emoji: '', tag: '免费极速',
     desc: '最快推理，免费无需信用卡',
     baseUrl: 'https://api.groq.com/openai/v1',
     models: [
@@ -567,7 +567,7 @@ export const MODEL_PROVIDERS: ModelProviderDef[] = [
     needsKey: true,
   },
   {
-    key: 'ollama', name: 'Ollama 本地', emoji: '🏠', tag: '完全离线免费',
+    key: 'ollama', name: 'Ollama 本地', emoji: '', tag: '完全离线免费',
     desc: '在你电脑上本地运行',
     baseUrl: 'http://localhost:11434/v1',
     models: [

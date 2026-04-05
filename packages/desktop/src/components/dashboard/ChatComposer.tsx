@@ -1,4 +1,5 @@
 import { AlertTriangle, Bot, Check, ChevronDown, File, Image, Loader2, Paperclip, Send, Shield, Square, X } from 'lucide-react';
+import AgentAvatar from '../AgentAvatar';
 
 type AttachedFile = {
   name: string;
@@ -182,7 +183,7 @@ export function ChatComposer({
                       }}
                       className="w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-800 transition-colors text-left"
                     >
-                      <span className="text-base">{agent.emoji || '🤖'}</span>
+                      <AgentAvatar name={agent.name} emoji={agent.emoji} size={16} className="flex-shrink-0" />
                       <div>
                         <span className="text-xs text-slate-200 font-medium">{agent.name}</span>
                         <span className="text-[10px] text-slate-500 ml-1.5">@{agent.id}</span>
@@ -277,7 +278,11 @@ export function ChatComposer({
                       className="flex items-center gap-1 p-1.5 text-slate-500 hover:text-slate-300 hover:bg-slate-700/50 rounded-lg transition-colors"
                       title={`${t('chat.agent.switch', 'Switch agent')}: ${agents.find((a) => a.id === selectedAgentId)?.name || ''}`}
                     >
-                      <span className="text-xs">{agents.find((a) => a.id === selectedAgentId)?.emoji || '🤖'}</span>
+                      <AgentAvatar
+                        name={agents.find((a) => a.id === selectedAgentId)?.name || ''}
+                        emoji={agents.find((a) => a.id === selectedAgentId)?.emoji || ''}
+                        size={14}
+                      />
                       <ChevronDown size={10} />
                     </button>
                     {showAgentMenu && (
@@ -291,7 +296,7 @@ export function ChatComposer({
                               agent.id === selectedAgentId ? 'bg-brand-600/15 text-brand-300' : 'text-slate-300 hover:bg-slate-700/60'
                             }`}
                           >
-                            <span>{agent.emoji}</span>
+                            <AgentAvatar name={agent.name} emoji={agent.emoji} size={14} />
                             <span className="flex-1 truncate">{agent.name}</span>
                             {agent.id === selectedAgentId && <Check size={11} className="text-brand-400" />}
                           </button>

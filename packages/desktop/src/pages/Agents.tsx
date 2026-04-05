@@ -3,6 +3,7 @@ import { Bot, Plus, Trash2, Link, Loader2, RefreshCw, Edit3, Check, X, AlertCirc
 import { useI18n } from '../lib/i18n';
 import { useAppConfig } from '../lib/store';
 import AgentWizard from '../components/AgentWizard';
+import AgentAvatar from '../components/AgentAvatar';
 
 interface AgentInfo {
   id: string;
@@ -62,7 +63,7 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: string) => 
     setLoading(true);
     setError(null);
     if (!window.electronAPI) {
-      setAgents([{ id: 'main', name: 'Claw', emoji: '🦞', isDefault: true, bindings: [] }]);
+      setAgents([{ id: 'main', name: 'Claw', emoji: '', isDefault: true, bindings: [] }]);
       setLoading(false);
       return;
     }
@@ -248,7 +249,10 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: string) => 
       <div className="px-6 py-4 border-b border-slate-800">
         <div className="flex items-center justify-between mb-2">
           <div>
-            <h1 className="text-lg font-semibold">🤖 {t('agents.title')}</h1>
+            <h1 className="text-lg font-semibold inline-flex items-center gap-2">
+              <Bot size={18} className="text-sky-300" />
+              {t('agents.title')}
+            </h1>
             <p className="text-xs text-slate-500">{t('agents.subtitle')}</p>
           </div>
           <div className="flex items-center gap-2">
@@ -306,7 +310,7 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: string) => 
                 <div className="p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <span className="text-2xl">{agent.emoji || '🤖'}</span>
+                        <AgentAvatar emoji={agent.emoji} size={28} className="text-2xl" />
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium">{agent.name || agent.id}</span>
@@ -356,7 +360,7 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: string) => 
                   {editingId === agent.id && (
                     <div className="space-y-2 pl-11 pt-2 border-t border-slate-700/30">
                       <div className="flex items-center gap-2">
-                        <input value={editEmoji} onChange={(e) => setEditEmoji(e.target.value)} placeholder="🤖"
+                        <input value={editEmoji} onChange={(e) => setEditEmoji(e.target.value)} placeholder={t('agents.emojiOptional', 'Optional')}
                           className="w-10 px-1 py-1 bg-slate-900 border border-slate-600 rounded text-center text-sm" maxLength={4} />
                         <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder={t('agents.namePlaceholder', 'Name')}
                           className="flex-1 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm" />

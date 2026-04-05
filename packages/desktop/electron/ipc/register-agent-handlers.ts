@@ -90,7 +90,7 @@ export function registerAgentHandlers(deps: {
             const agents = list.map((a: any) => ({
               id: a.id || a.name || 'main',
               name: a.identityName || a.displayName || a.name || a.id,
-              emoji: a.identityEmoji || a.emoji || '🤖',
+              emoji: a.identityEmoji || a.emoji || '',
               model: a.model || a.defaultModel || null,
               bindings: Array.isArray(a.bindingDetails) ? a.bindingDetails : Array.isArray(a.bindings) ? a.bindings : [],
               isDefault: a.isDefault === true || a.default === true || a.id === 'main',
@@ -101,9 +101,9 @@ export function registerAgentHandlers(deps: {
           }
         } catch {}
       }
-      return { success: true, agents: [{ id: 'main', name: 'Main Agent', emoji: '🦞', isDefault: true, bindings: [] }] };
+      return { success: true, agents: [{ id: 'main', name: 'Main Agent', emoji: '', isDefault: true, bindings: [] }] };
     } catch {
-      return { success: true, agents: [{ id: 'main', name: 'Main Agent', emoji: '🦞', isDefault: true, bindings: [] }] };
+      return { success: true, agents: [{ id: 'main', name: 'Main Agent', emoji: '', isDefault: true, bindings: [] }] };
     }
   });
 

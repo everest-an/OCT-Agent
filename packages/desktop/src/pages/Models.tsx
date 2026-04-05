@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, Database, Loader2, Plus, RefreshCw, Sparkles, X } from 'lucide-react';
+import { Bot, Check, Database, Loader2, Plus, RefreshCw, Sparkles, X } from 'lucide-react';
 import PasswordInput from '../components/PasswordInput';
+import ProviderIcon from '../components/ProviderIcon';
 import { SettingsModalShell, SettingsSection } from '../components/settings/SettingsPrimitives';
 import { useI18n } from '../lib/i18n';
 import {
@@ -341,7 +342,10 @@ export default function Models() {
   return (
     <div className="h-full overflow-y-auto">
       <div className="px-6 py-4 border-b border-slate-800">
-        <h1 className="text-lg font-semibold">🤖 {t('models.title', 'Models')}</h1>
+        <h1 className="text-lg font-semibold inline-flex items-center gap-2">
+          <Bot size={18} className="text-sky-300" />
+          {t('models.title', 'Models')}
+        </h1>
         <p className="mt-1 text-sm text-slate-400">{t('models.subtitle', 'Manage the active model, OpenClaw-supported providers, and your own custom model catalog in one place.')}</p>
       </div>
 
@@ -404,7 +408,10 @@ export default function Models() {
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <div className="text-base font-medium text-slate-100">{provider.emoji} {provider.name}</div>
+                            <div className="text-base font-medium text-slate-100 inline-flex items-center gap-2">
+                              <ProviderIcon providerKey={provider.key} size={16} />
+                              {provider.name}
+                            </div>
                             <div className="mt-1 text-xs text-slate-500">{provider.tag || provider.key}</div>
                           </div>
                           {isActive && (
@@ -438,9 +445,15 @@ export default function Models() {
                   <div className="text-xs uppercase tracking-[0.2em] text-slate-500">{t('models.current', 'Current Model')}</div>
                   <div className="mt-2 text-base font-medium text-slate-100">
                     {activeProvider
-                      ? `${activeProvider.emoji} ${activeProvider.name}`
+                      ? activeProvider.name
                       : t('models.notConfigured', 'No active model configured')}
                   </div>
+                  {activeProvider && (
+                    <div className="mt-1 inline-flex items-center gap-2 text-xs text-slate-500">
+                      <ProviderIcon providerKey={activeProvider.key} size={13} />
+                      {activeProvider.key}
+                    </div>
+                  )}
                   <div className="mt-1 text-sm text-slate-300">{activeModel?.label || config.modelId || t('models.notConfigured', 'No active model configured')}</div>
                   <div className="mt-3 text-xs text-slate-500">{t('models.currentHint', 'Saving here updates both Desktop local state and OpenClaw primary model.')}</div>
                   {activeProvider && (
@@ -471,7 +484,7 @@ export default function Models() {
           <SettingsModalShell
             title={(
               <span className="flex items-center gap-2">
-                <span>{customMode ? '✨' : editingProvider?.emoji || '🤖'}</span>
+                {customMode ? <Sparkles size={14} className="text-amber-300" /> : <ProviderIcon providerKey={editingProvider?.key} size={14} />}
                 {customMode ? t('models.editor.customTitle', 'Custom Provider') : `${editingProvider?.name || t('models.editor.title', 'Provider Configuration')}`}
               </span>
             )}
@@ -507,7 +520,10 @@ export default function Models() {
               <div className="rounded-2xl border border-slate-700 bg-slate-900/50 px-4 py-4">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
-                    <div className="text-base font-medium text-slate-100">{customMode ? t('models.quickSetup', 'Quick Setup') : `${editingProvider?.emoji || '🤖'} ${editingProvider?.name || providerName}`}</div>
+                    <div className="text-base font-medium text-slate-100 inline-flex items-center gap-2">
+                      {!customMode && <ProviderIcon providerKey={editingProvider?.key || effectiveProviderKey} size={16} />}
+                      {customMode ? t('models.quickSetup', 'Quick Setup') : `${editingProvider?.name || providerName}`}
+                    </div>
                     <div className="mt-1 text-xs text-slate-500">{customMode ? t('models.quickSetupHint', 'Start with the provider name, endpoint, and API type. Advanced fields stay tucked away until you need them.') : editingProvider?.desc || sourceSummary}</div>
                   </div>
                   {!customMode && editingProvider?.tag && (
@@ -690,7 +706,12 @@ export default function Models() {
                             <div className="text-sm font-medium text-slate-100 truncate">{model.label}</div>
                             <div className="mt-1 text-[10px] uppercase tracking-wide text-slate-500">{model.source}</div>
                           </button>
-                          <button onClick={() => removeModel(model.id)} className="text-slate-500 transition-colors hover:text-rose-300">
+                          <button
+                            onClick={() => removeModel(model.id)}
+                            className="text-slate-500 transition-colors hover:text-rose-300"
+                            aria-label={t('common.delete', 'Delete')}
+                            title={t('common.delete', 'Delete')}
+                          >
                             <X size={12} />
                           </button>
                         </div>

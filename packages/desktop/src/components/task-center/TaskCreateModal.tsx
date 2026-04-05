@@ -64,6 +64,8 @@ export default function TaskCreateModal({ t, agents, onClose, onCreate }: TaskCr
           <button
             onClick={onClose}
             className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
+            aria-label={t('common.close', 'Close')}
+            title={t('common.close', 'Close')}
           >
             <X size={18} />
           </button>
@@ -100,10 +102,11 @@ export default function TaskCreateModal({ t, agents, onClose, onCreate }: TaskCr
                 value={agentId}
                 onChange={(e) => setAgentId(e.target.value)}
                 className="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                title={t('taskCreate.assignTo')}
               >
                 {agents.map((a) => (
                   <option key={a.id} value={a.id}>
-                    {a.emoji || '🤖'} {a.name || a.id}
+                    {a.name || a.id}
                   </option>
                 ))}
               </select>
@@ -118,6 +121,7 @@ export default function TaskCreateModal({ t, agents, onClose, onCreate }: TaskCr
                 value={priority}
                 onChange={(e) => setPriority(e.target.value as 'low' | 'medium' | 'high')}
                 className="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                title={t('taskCreate.priority')}
               >
                 <option value="low">{t('taskCreate.priorityLow')}</option>
                 <option value="medium">{t('taskCreate.priorityMedium')}</option>

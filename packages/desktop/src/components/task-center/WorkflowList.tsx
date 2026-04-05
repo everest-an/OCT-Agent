@@ -4,7 +4,7 @@
  */
 
 import { useState } from 'react';
-import { Zap, ChevronRight, FileText, Loader2 } from 'lucide-react';
+import { Bug, ChevronRight, ClipboardList, FileText, Loader2, Lock, Rocket, Search, Workflow, Zap, type LucideIcon } from 'lucide-react';
 
 interface WorkflowInfo {
   id: string;
@@ -27,23 +27,27 @@ interface WorkflowListProps {
 }
 
 // Builtin workflow metadata (i18n-friendly descriptions)
-const BUILTIN_META: Record<string, { descKey: string; descFallback: string; icon: string }> = {
+const BUILTIN_META: Record<string, { descKey: string; descFallback: string; icon: LucideIcon }> = {
   'code-review': {
     descKey: 'workflow.desc.codeReview',
     descFallback: 'Analyze → Review → Summarize. Structured code review with severity levels.',
-    icon: '🔍',
+    icon: Search,
   },
   'feature-dev': {
     descKey: 'workflow.desc.featureDev',
     descFallback: 'Plan → Implement → Test → Review. Full feature development pipeline.',
-    icon: '🚀',
+    icon: Rocket,
   },
   'bug-fix': {
     descKey: 'workflow.desc.bugFix',
     descFallback: 'Investigate → Fix → Verify. Root cause analysis and minimal fix.',
-    icon: '🐛',
+    icon: Bug,
   },
 };
+
+function getBuiltinKey(id: string): string {
+  return id.replace(/^builtin-/, '');
+}
 
 export default function WorkflowList({
   t,
@@ -58,11 +62,6 @@ export default function WorkflowList({
 
   const selected = workflows.find((w) => w.id === selectedId);
 
-  // Extract workflow name without prefix for metadata lookup
-  function getBuiltinKey(id: string): string {
-    return id.replace(/^builtin-/, '');
-  }
-
   function handleArgChange(name: string, value: string) {
     setArgValues((prev) => ({ ...prev, [name]: value }));
   }
@@ -76,7 +75,9 @@ export default function WorkflowList({
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center space-y-4 max-w-sm">
-          <div className="text-3xl">🦞</div>
+          <div className="flex justify-center">
+            <Workflow size={32} className="text-sky-300" />
+          </div>
           <p className="text-sm text-slate-400">{t('taskCenter.lobster.notInstalled')}</p>
           <button
             onClick={onInstallLobster}
@@ -111,6 +112,7 @@ export default function WorkflowList({
         {workflows.map((wf) => {
           const meta = BUILTIN_META[getBuiltinKey(wf.id)];
           const isSelected = wf.id === selectedId;
+          const Icon = meta?.icon || ClipboardList;
           return (
             <button
               key={wf.id}
@@ -127,7 +129,7 @@ export default function WorkflowList({
               `}
             >
               <div className="flex items-center gap-2.5">
-                <span className="text-lg">{meta?.icon || wf.icon || '📋'}</span>
+                <Icon size={18} className={isSelected ? 'text-sky-300' : 'text-slate-400'} />
                 <div className="flex-1 min-w-0">
                   <p className={`text-sm font-medium ${isSelected ? 'text-sky-300' : 'text-slate-200'}`}>
                     {wf.name}
@@ -153,9 +155,10 @@ export default function WorkflowList({
         <div className="flex-1 min-w-0 bg-slate-800/30 rounded-xl border border-slate-700/40 p-5 overflow-y-auto">
           {/* Header */}
           <div className="flex items-center gap-3 mb-4">
-            <span className="text-2xl">
-              {BUILTIN_META[getBuiltinKey(selected.id)]?.icon || selected.icon || '📋'}
-            </span>
+            {(() => {
+              const Icon = BUILTIN_META[getBuiltinKey(selected.id)]?.icon || ClipboardList;
+              return <Icon size={20} className="text-sky-300" />;
+            })()}
             <div>
               <h3 className="text-base font-semibold text-slate-100">{selected.name}</h3>
               <p className="text-xs text-slate-400 mt-0.5">
@@ -182,10 +185,13 @@ export default function WorkflowList({
                         : 'bg-slate-800 border-slate-700/60 text-slate-300'
                       }
                     `}>
-                      {step.approval ? '🔒 ' : ''}{step.id}
+                      <span className="inline-flex items-center gap-1">
+                        {step.approval ? <Lock size={11} /> : null}
+                        {step.id}
+                      </span>
                     </span>
                     {i < selected.steps!.length - 1 && (
-                      <span className="text-slate-600 text-xs">→</span>
+                      <ChevronRight size={11} className="text-slate-600" />
                     )}
                   </div>
                 ))}
