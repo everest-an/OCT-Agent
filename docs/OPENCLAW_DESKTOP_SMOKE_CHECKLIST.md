@@ -16,6 +16,8 @@
 
 如果要做真机 WhatsApp 防打扰与配对闭环验证，请使用 [OPENCLAW_WHATSAPP_REAL_SMOKE_2026-04-05.md](OPENCLAW_WHATSAPP_REAL_SMOKE_2026-04-05.md)。这份脚本要求真实设备和真实联系人，重点覆盖“陌生联系人不被打扰、owner 可用、allowlist/pairing 可控、重连不回归”。
 
+如果要验证 Windows 首次安装后“首聊自动恢复”链路（daemon pending + CLI fallback ENOENT 自愈重试），请使用 [OPENCLAW_WINDOWS_FIRST_CHAT_RECOVERY_SMOKE_2026-04-05.md](OPENCLAW_WINDOWS_FIRST_CHAT_RECOVERY_SMOKE_2026-04-05.md)。
+
 ## 2. 执行前提
 
 - 本机已安装 OpenClaw，且版本基线为 `OpenClaw 2026.3.31 (213a704)` 或更新兼容版本
@@ -121,6 +123,14 @@
 - 在生成过程中点击 abort
 - 预期：不会残留悬挂子进程
 - 预期：前端状态能结束，不会一直停在 generating
+
+### 5.5 Windows 首聊自动恢复
+
+- 仅在 Windows 上执行，且使用“刚完成 Setup”的环境
+- 进入聊天页后立刻发送第一条消息
+- 预期：如果本地服务仍在预热，启动阶段会短暂显示 warming 状态，再自动恢复
+- 预期：若 CLI fallback 首轮命中 `spawn npx ENOENT`，会自动执行本地修复并重试一次
+- 预期：聊天最终返回正常回复，不出现 Node 内部堆栈文本（如 `ChildProcess._handle.onexit`）
 
 ## 6. 结果记录模板
 

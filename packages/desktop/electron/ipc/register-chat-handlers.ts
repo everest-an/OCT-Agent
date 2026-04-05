@@ -1525,6 +1525,7 @@ async function chatSendViaCliWithWebCompatibilityRetry(params: {
   send: (channel: string, payload: any) => void;
   deps: {
     getEnhancedPath: () => string;
+    prepareCliFallback?: () => Promise<void>;
     runSpawn?: (cmd: string, args: string[], opts?: Record<string, unknown>) => ReturnType<typeof spawn>;
     wrapWindowsCommand: (command: string) => string;
     stripAnsi: (output: string) => string;
@@ -1533,6 +1534,40 @@ async function chatSendViaCliWithWebCompatibilityRetry(params: {
 }): Promise<any> {
   const { requestMessage, originalUserMessage, sid, options, send, deps } = params;
   const first = await chatSendViaCli(requestMessage, sid, options, send, deps);
+
+  if (first?.localRuntimeMissing && deps.prepareCliFallback) {
+    send('chat:status', {
+      type: 'gateway',
+      message: 'Local memory service is recovering. Retrying automatically...',
+    });
+
+    try {
+      await deps.prepareCliFallback?.();
+    } catch (prepareErr: any) {
+      const detail = prepareErr?.message || String(prepareErr || '');
+      if (/LOCAL_DAEMON_NOT_READY/i.test(detail)) {
+        return {
+          success: false,
+          error: 'Local memory service is still starting. Please wait 20-60 seconds, then retry.',
+          sessionId: sid,
+        };
+      }
+      return {
+        success: false,
+        error: 'OpenClaw could not start the local helper runtime automatically. Please rerun Setup to repair your runtime, then retry.',
+        sessionId: sid,
+      };
+    }
+
+    const repairedRetry = await chatSendViaCli(requestMessage, sid, options, send, deps);
+    if (repairedRetry?.success) {
+      send('chat:status', {
+        type: 'gateway',
+        message: 'Local memory service recovered. Continuing your request.',
+      });
+    }
+    return repairedRetry;
+  }
 
   if (!first?.vpnDnsCompatibilityIssue) {
     return first;
@@ -1570,6 +1605,7 @@ async function chatSendViaCli(
   send: (channel: string, payload: any) => void,
   deps: {
     getEnhancedPath: () => string;
+    prepareCliFallback?: () => Promise<void>;
     runSpawn?: (cmd: string, args: string[], opts?: Record<string, unknown>) => ReturnType<typeof spawn>;
     wrapWindowsCommand: (command: string) => string;
     stripAnsi: (output: string) => string;
@@ -1577,10 +1613,21 @@ async function chatSendViaCli(
   },
 ): Promise<any> {
   return new Promise((resolve) => {
+    let settled = false;
     const collectedLines: string[] = [];
     const rawOutputLines: string[] = [];
     let stdoutRemainder = '';
     let stderrRemainder = '';
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    const finalize = (result: any) => {
+      if (settled) return;
+      settled = true;
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = null;
+      }
+      resolve(result);
+    };
     const thinkingFlag = options?.thinkingLevel && options.thinkingLevel !== 'off'
       ? ` --thinking ${options.thinkingLevel}` : '';
     const sanitizedAgentId = options?.agentId && options.agentId !== 'main'
@@ -1683,15 +1730,16 @@ async function chatSendViaCli(
 
       if (code !== 0) {
         if (/spawn\s+npx(?:\.cmd)?\s+ENOENT/i.test(`${rawCombined}\n${clean}`)) {
-          resolve({
+          finalize({
             success: false,
             error: 'OpenClaw could not start the local helper runtime. Please rerun Setup to repair your runtime, then retry.',
             sessionId: sid,
+            localRuntimeMissing: true,
           });
           return;
         }
 
-        resolve({
+        finalize({
           success: false,
           error: clean || `OpenClaw exited with code ${code ?? 'unknown'}`,
           sessionId: sid,
@@ -1715,7 +1763,7 @@ async function chatSendViaCli(
           responsePreview: clean.slice(0, 200),
         });
       }
-      resolve({
+      finalize({
         success: true,
         text: clean || 'No response',
         sessionId: sid,
@@ -1723,10 +1771,22 @@ async function chatSendViaCli(
         vpnDnsCompatibilityIssue: shouldFlagVpnDnsCompatibilityIssue || undefined,
       });
     });
-    child.on('error', (err) => resolve({ success: false, error: String(err), sessionId: sid }));
-    setTimeout(() => {
+    child.on('error', (err) => {
+      const message = String(err);
+      if (/spawn\s+npx(?:\.cmd)?\s+ENOENT/i.test(message)) {
+        finalize({
+          success: false,
+          error: 'OpenClaw could not start the local helper runtime. Please rerun Setup to repair your runtime, then retry.',
+          sessionId: sid,
+          localRuntimeMissing: true,
+        });
+        return;
+      }
+      finalize({ success: false, error: message, sessionId: sid });
+    });
+    timeoutHandle = setTimeout(() => {
       try { child.kill(); } catch {}
-      resolve({ success: false, error: 'Response timeout', sessionId: sid });
+      finalize({ success: false, error: 'Response timeout', sessionId: sid });
     }, CHAT_TIMEOUT_MS);
   });
 }

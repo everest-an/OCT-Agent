@@ -17,6 +17,8 @@ import logoUrl from './assets/logo.png';
 
 const SETUP_COMPLETED_AT_KEY = 'awareness-claw-setup-completed-at';
 const POST_SETUP_RUNTIME_GRACE_MS = 3 * 60 * 1000;
+const POST_SETUP_DAEMON_RECHECK_ATTEMPTS = 3;
+const POST_SETUP_DAEMON_RECHECK_DELAY_MS = 15000;
 
 function estimateStartupProgress(message: string) {
   const text = message.toLowerCase();
@@ -185,8 +187,27 @@ export default function App() {
       }
 
       try {
-        const result = await window.electronAPI.startupEnsureRuntime();
+        let result = await window.electronAPI.startupEnsureRuntime();
         if (cancelled) return;
+
+        if (!result.ok && result.blockingId === 'daemon-running' && recentlyCompletedSetup) {
+          for (let attempt = 0; attempt < POST_SETUP_DAEMON_RECHECK_ATTEMPTS; attempt += 1) {
+            if (cancelled) return;
+
+            setStartupMessage('Local service is still warming up...');
+            setStartupProgress(94);
+
+            await new Promise((resolve) => setTimeout(resolve, POST_SETUP_DAEMON_RECHECK_DELAY_MS));
+            if (cancelled) return;
+
+            result = await window.electronAPI.startupEnsureRuntime();
+            if (cancelled) return;
+
+            if (result.ok || result.blockingId !== 'daemon-running') {
+              break;
+            }
+          }
+        }
 
         if (!result.ok && result.needsSetup) {
           const setupBlockingIds = new Set(['node-installed', 'openclaw-installed', 'plugin-installed']);
@@ -201,6 +222,10 @@ export default function App() {
           setStartupProgress(100);
           setRuntimeReady(true);
           return;
+        }
+
+        if (!result.ok && result.blockingId === 'daemon-running' && recentlyCompletedSetup) {
+          console.warn('[startup] Local daemon still warming after post-setup rechecks:', result.blockingMessage || 'daemon-running');
         }
       } catch (err) {
         console.warn('[startup] Runtime check failed:', err);

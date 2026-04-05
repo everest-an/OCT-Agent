@@ -165,6 +165,54 @@ describe('registerChatHandlers', () => {
     expect(streamedText).not.toContain('processTicksAndRejections');
   });
 
+  it('silently repairs local runtime and retries once when CLI fallback hits spawn npx ENOENT', async () => {
+    const first = createCliFallbackErrorChild([
+      '[openclaw] Uncaught exception: Error: spawn npx ENOENT',
+      'at ChildProcess._handle.onexit (node:internal/child_process:286:19)',
+    ], 1);
+    const second = createCliFallbackChild('CLI retry after repair reply');
+    spawnMock
+      .mockReturnValueOnce(first as any)
+      .mockReturnValueOnce(second as any);
+
+    const sendToRenderer = vi.fn();
+    const prepareCliFallback = vi.fn(async () => undefined);
+
+    registerChatHandlers({
+      sendToRenderer,
+      ensureGatewayRunning: vi.fn(async () => ({ ok: false, error: 'Gateway failed to start.' })),
+      prepareCliFallback,
+      getGatewayWs: vi.fn(),
+      getConnectedGatewayWs: vi.fn(() => null),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const pending = handlers['chat:send']({}, 'hello from cli fallback', 'test-session', {});
+
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
+    first.emitOutput();
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(2));
+    second.emitOutput();
+
+    const result = await pending;
+
+    expect(prepareCliFallback).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({
+      success: true,
+      text: 'CLI retry after repair reply',
+      sessionId: 'test-session',
+    });
+    expect(sendToRenderer).toHaveBeenCalledWith(
+      'chat:status',
+      expect.objectContaining({ message: 'Local memory service is recovering. Retrying automatically...' }),
+    );
+  });
+
   it('preserves workspace instructions when CLI fallback is used', async () => {
     const fakeChild = createCliFallbackChild('CLI workspace reply');
     spawnMock.mockReturnValue(fakeChild as any);
