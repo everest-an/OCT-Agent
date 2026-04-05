@@ -22,6 +22,7 @@ export function createDaemonWatchdog(options: {
           spawn('cmd.exe', ['/d', '/c', startCmd], {
             detached: true,
             stdio: 'ignore',
+            windowsHide: true,
             env: {
               ...process.env,
               PATH: options.getEnhancedPath(),

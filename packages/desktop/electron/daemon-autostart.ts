@@ -203,7 +203,7 @@ export async function isDaemonAutostartEnabled(): Promise<boolean> {
 
 function runCommand(cmd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let stdout = '';
     let stderr = '';
     child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });

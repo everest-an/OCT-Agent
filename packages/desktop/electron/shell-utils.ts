@@ -297,6 +297,7 @@ export function createShellUtils(options: { home: string; app: any }) {
     };
 
     const spawnOptions = {
+      ...(process.platform === 'win32' && { windowsHide: true }),
       ...opts,
       env: mergeSpawnEnv(),
     };
