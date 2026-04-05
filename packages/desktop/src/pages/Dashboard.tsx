@@ -450,6 +450,10 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
   const [channelLoading, setChannelLoading] = useState(false);
   const [channelReplyText, setChannelReplyText] = useState('');
   const [channelReplying, setChannelReplying] = useState(false);
+  // Gateway health for channel view warning
+  const [gatewayRunning, setGatewayRunning] = useState<boolean | undefined>(undefined);
+  // Unread message counts per channel session key
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   // Confirm dialog state (replaces native window.confirm)
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null);
   // Stream timeout tracking
@@ -779,7 +783,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
       setChannelSessions(prev => prev.map(s =>
         s.sessionKey === msg.sessionKey ? { ...s, updatedAt: Date.now() } : s
       ));
-      // If this channel is currently viewed, append the message
+      // If this channel is currently viewed, append the message; otherwise increment unread
       setActiveChannelKey(currentKey => {
         if (currentKey === msg.sessionKey && msg.message) {
           const content = Array.isArray(msg.message.content)
@@ -793,6 +797,9 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
             model: msg.message.model,
           };
           setChannelMessages(prev => [...prev, newMsg]);
+        } else {
+          // Not currently viewing this session — mark unread
+          setUnreadCounts(prev => ({ ...prev, [msg.sessionKey]: (prev[msg.sessionKey] || 0) + 1 }));
         }
         return currentKey;
       });
@@ -809,6 +816,11 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         setChannelMessages(res.messages || []);
       }
     }).catch(() => {}).finally(() => setChannelLoading(false));
+
+    // Check gateway health whenever user opens a channel view
+    api.gatewayStatus?.().then((res: any) => {
+      setGatewayRunning(!!res?.running);
+    }).catch(() => { setGatewayRunning(false); });
   }, [activeChannelKey]);
 
   // When Channels page triggers "Open Chat" for a specific channel, open sidebar
@@ -1486,6 +1498,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         activeSessionId={activeSessionId}
         channelSessions={channelSessions}
         activeChannelKey={activeChannelKey}
+        unreadCounts={unreadCounts}
         renamingId={renamingId}
         renameValue={renameValue}
         onRenameValueChange={setRenameValue}
@@ -1503,6 +1516,8 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         onSelectChannel={(sessionKey) => {
           setActiveChannelKey(sessionKey);
           setActiveSessionId('');
+          // Clear unread badge when user opens this session
+          setUnreadCounts(prev => { const n = { ...prev }; delete n[sessionKey]; return n; });
         }}
         onSelectSession={(sessionId) => {
           setActiveSessionId(sessionId);
@@ -1555,6 +1570,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
             channelReplyText={channelReplyText}
             channelReplying={channelReplying}
             messagesEndRef={messagesEndRef}
+            gatewayRunning={gatewayRunning}
             onBack={handleBackToLocal}
             onReplyTextChange={setChannelReplyText}
             onReplySubmit={handleChannelReply}

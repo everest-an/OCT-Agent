@@ -73,7 +73,7 @@ describe('i18n regression keys', () => {
     );
 
     expect(screen.getByText('还没有消息')).toBeTruthy();
-    expect(screen.getByText('发送一条消息来开始对话')).toBeTruthy();
+    // Empty state now shows per-channel hint (not a generic "send a message" line)
     expect(screen.getByPlaceholderText('回复这个频道...')).toBeTruthy();
   });
 
