@@ -99,7 +99,7 @@ describe('Memory Page', () => {
     expect(screen.getByText('OpenClaw Local')).toBeInTheDocument();
   });
 
-  it('renders self improvement panel and saves a learning entry in timeline', async () => {
+  it('renders self improvement panel and saves a learning entry in dedicated tab', async () => {
     const memoryLogLearning = vi.fn(() => Promise.resolve({
       success: true,
       id: 'LRN-20260405-001',
@@ -139,6 +139,8 @@ describe('Memory Page', () => {
 
     await act(async () => { render(<Memory />); });
     await waitFor(() => expect(screen.getByText('Self Improvement')).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText('Self Improvement')); });
+    await waitFor(() => expect(screen.getByPlaceholderText('One-line description of what happened')).toBeInTheDocument());
 
     fireEvent.change(screen.getByPlaceholderText('One-line description of what happened'), {
       target: { value: 'Verify CLI flags before updating desktop chat flow' },
