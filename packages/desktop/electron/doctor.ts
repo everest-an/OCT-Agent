@@ -626,7 +626,10 @@ async function fixGatewayStart(ctx: Ctx): Promise<FixResult> {
         const installMessage = installErr?.message || '';
         if (/EACCES|Access is denied|permission denied|拒绝访问|schtasks create failed/i.test(installMessage)) {
           try {
-            await ctx.deps.shellRun('where openclaw >nul 2>nul && start "" /B openclaw gateway run --force', 10000);
+            await ctx.deps.shellRun(
+              'where openclaw >nul 2>nul && powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath openclaw -ArgumentList \'gateway\',\'run\',\'--force\',\'--allow-unconfigured\'"',
+              10000,
+            );
             return {
               id: 'gateway-running',
               success: true,

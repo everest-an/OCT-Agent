@@ -126,6 +126,7 @@
 - [x] **首次安装本地服务启动不阻断修复**：`setup:start-daemon` 新增多级兜底（延长等待窗口、前台 bootstrap 启动、缓存修复后再拉起），最终在“仍在后台预热”场景返回 pending 成功并继续安装，避免首次安装被 daemon 预热卡死（2026-04-05）
 - [x] **首次安装 OpenClaw 卡住修复（Windows 包内环境）**：`setup:install-openclaw` 不再默认用 `process.execPath + npm-cli` 执行安装，改为优先 `node + bundled npm-cli`（缺失时再回退），并要求 `openclaw --version` 真实可执行才判定成功，避免“安装 AI 引擎”步骤长时间卡住后误报超时（2026-04-05）
 - [x] **安装向导循环重置修复**：启动时运行时健康检查区分 setup-blocking 与 runtime-blocking；仅 Node/OpenClaw/插件未就绪才触发 `needsSetup`，daemon 暂时不可用仅保留运行时告警，不再把已完成安装的用户强制打回 Setup（2026-04-05）
+- [x] **Windows Gateway fallback 重复拉起/黑窗修复**：主进程和 Doctor 不再通过 `start ... openclaw gateway run --force` 拉起临时 Gateway；改为隐藏窗口的 detached 直启，并增加短冷却去重，避免出现多个 `cmd /K openclaw gateway run --force` 窗口（2026-04-05）
 
 ---
 

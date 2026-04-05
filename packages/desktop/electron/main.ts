@@ -73,6 +73,9 @@ let daemonStartupPromise: Promise<{ success: boolean; alreadyRunning?: boolean; 
 let daemonStartupLastKickoff = 0;
 let gatewayWsClient: GatewayClient | null = null;
 let gatewayRepairPromise: Promise<{ ok: boolean; error?: string }> | null = null;
+let gatewayUserSessionLastLaunchAt = 0;
+
+const GATEWAY_USER_SESSION_RELAUNCH_COOLDOWN_MS = 15000;
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
@@ -365,6 +368,8 @@ function startGatewayRepairInBackground(send?: (ch: string, data: any) => void) 
 async function startGatewayInUserSession(send?: (ch: string, data: any) => void): Promise<{ ok: boolean; error?: string }> {
   send?.('chat:status', { type: 'gateway', message: 'Starting temporary Gateway...' });
 
+  const launchRecently = (Date.now() - gatewayUserSessionLastLaunchAt) < GATEWAY_USER_SESSION_RELAUNCH_COOLDOWN_MS;
+
   try {
     if (process.platform === 'win32') {
       // Guard against global OpenClaw removal: avoid `start ... openclaw` popup.
@@ -377,25 +382,28 @@ async function startGatewayInUserSession(send?: (ch: string, data: any) => void)
         };
       }
 
-      const child = runSpawn('cmd.exe', ['/d', '/c', 'start', '', '/b', 'openclaw', 'gateway', 'run', '--force'], {
-        cwd: HOME,
-        detached: true,
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      child.stderr?.on('data', (d: Buffer) => console.error('[gateway-session]', d.toString().trim()));
-      child.on('exit', (code: number | null) => { if (code && code !== 0) console.error(`[gateway-session] exited with code ${code}`); });
-      child.unref();
+      if (!launchRecently) {
+        // Spawn OpenClaw directly to avoid creating visible cmd.exe /K windows on Windows.
+        const child = runSpawn('openclaw', ['gateway', 'run', '--force', '--allow-unconfigured'], {
+          cwd: HOME,
+          detached: true,
+          windowsHide: true,
+          stdio: 'ignore',
+        });
+        gatewayUserSessionLastLaunchAt = Date.now();
+        child.unref();
+      }
     } else {
-      const child = runSpawn('openclaw', ['gateway', 'run', '--force'], {
-        cwd: HOME,
-        detached: true,
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      child.stderr?.on('data', (d: Buffer) => console.error('[gateway-session]', d.toString().trim()));
-      child.on('exit', (code: number | null) => { if (code && code !== 0) console.error(`[gateway-session] exited with code ${code}`); });
-      child.unref();
+      if (!launchRecently) {
+        const child = runSpawn('openclaw', ['gateway', 'run', '--force', '--allow-unconfigured'], {
+          cwd: HOME,
+          detached: true,
+          windowsHide: true,
+          stdio: 'ignore',
+        });
+        gatewayUserSessionLastLaunchAt = Date.now();
+        child.unref();
+      }
     }
   } catch (err: any) {
     return { ok: false, error: err?.message || 'Could not launch the temporary Gateway process.' };
