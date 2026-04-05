@@ -13,6 +13,7 @@ import {
   resolveChannelPluginInstallSpec,
   sanitizePluginId,
 } from './channel-plugin-spec';
+import { clearChannelStatusCache } from './register-channel-list-handlers';
 
 export function registerChannelSetupHandlers(deps: {
   getMainWindow: () => typeof Electron.BrowserWindow.prototype | null;
@@ -61,6 +62,18 @@ export function registerChannelSetupHandlers(deps: {
     }
     if (/Unknown channel/i.test(message)) {
       return `OpenClaw does not recognize channel "${openclawId}" yet. Please reinstall the channel plugin and retry.`;
+    }
+    // WeChat plugin SDK incompatibility (OpenClaw 2026.4.2+ API break)
+    if (/resolvePreferredOpenClawTmpDir is not a function/i.test(message)) {
+      return `${channelLabel} plugin is incompatible with your current OpenClaw version (internal API changed). ` +
+        'Please run this command in a terminal to update the plugin: ' +
+        'openclaw plugins install @tencent-weixin/openclaw-weixin --force';
+    }
+    // WeChat / WhatsApp AbortError — full plugin preload causing AbortController timeout (upstream regression)
+    if (/AbortError/i.test(message) || /This operation was aborted/i.test(message)) {
+      return `${channelLabel} initialization was interrupted (the plugin loaded too slowly on this OpenClaw version). ` +
+        'Please try connecting again — it usually succeeds on the second attempt. ' +
+        `If it keeps failing, run: openclaw plugins install @tencent-weixin/openclaw-weixin --force`;
     }
     return message.slice(0, 300) || `Channel setup failed for "${openclawId}".`;
   };
@@ -299,6 +312,20 @@ export function registerChannelSetupHandlers(deps: {
     }
   };
 
+  // Fast path: read openclaw.json directly instead of spawning `openclaw channels list`.
+  // This avoids the 15-20 s full plugin preload triggered by every CLI invocation (upstream
+  // issue tracked in OpenClaw PR #59713). Returns true as soon as channels[id].enabled is set.
+  const isChannelLinkedInFile = (openclawId: string): boolean => {
+    try {
+      const raw = fs.readFileSync(OPENCLAW_CONFIG_PATH, 'utf8');
+      const cfg = JSON.parse(raw);
+      const channelCfg = cfg?.channels?.[openclawId];
+      return channelCfg?.enabled === true;
+    } catch {
+      return false;
+    }
+  };
+
   const isChannelLinked = (output: string | null, openclawId: string) => {
     if (!output) return false;
 
@@ -332,6 +359,13 @@ export function registerChannelSetupHandlers(deps: {
   };
 
   const waitForChannelConfirmation = async (openclawId: string, label: string, sendStatus: (msg: string) => void) => {
+    // Fast path: check the config file directly — no CLI spawn, no plugin preload.
+    // By the time we reach this function we have already written enabled:true for the
+    // channel, so a successful QR-login will almost always return true here immediately.
+    if (isChannelLinkedInFile(openclawId)) return true;
+
+    // Slow path: fall back to `openclaw channels list` for channels whose configuration
+    // is written asynchronously by the OpenClaw daemon (e.g. after OAuth callback).
     const attempts = [12000, 8000, 8000];
 
     for (let index = 0; index < attempts.length; index += 1) {
@@ -340,6 +374,8 @@ export function registerChannelSetupHandlers(deps: {
       if (isChannelLinked(output, openclawId)) {
         return true;
       }
+      // Re-check the file after each CLI call in case OpenClaw wrote it in the meantime.
+      if (isChannelLinkedInFile(openclawId)) return true;
 
       if (index < attempts.length - 1) {
         await sleep(1500);
@@ -503,6 +539,28 @@ export function registerChannelSetupHandlers(deps: {
 
     if (result.success) {
       sanitizeLegacyChannelConfigFile(openclawId);
+
+      // Ensure enabled:true is written to openclaw.json for all QR-login channels.
+      // - For json-direct channels (WeChat) this is always needed: OpenClaw CLI never
+      //   writes the flag for them.
+      // - For cli-strategy channels (WhatsApp, Signal) `channels add` should already have
+      //   set it, but we write defensively in case the CLI omitted it or wrote a different
+      //   key structure. This is safe (idempotent) and cheap.
+      try {
+        const raw = fs.readFileSync(OPENCLAW_CONFIG_PATH, 'utf8');
+        const cfg = JSON.parse(raw);
+        if (cfg && typeof cfg === 'object') {
+          if (!cfg.channels) cfg.channels = {};
+          if (!cfg.channels[openclawId]) cfg.channels[openclawId] = {};
+          if (!cfg.channels[openclawId].enabled) {
+            cfg.channels[openclawId].enabled = true;
+            fs.writeFileSync(OPENCLAW_CONFIG_PATH, JSON.stringify(cfg, null, 2));
+          }
+        }
+      } catch { /* non-fatal — channel list still works via CLI fallback */ }
+
+      // Flush the channel list cache so the next call returns fresh data.
+      clearChannelStatusCache();
 
       try {
         await bindToMainAgent(openclawId);

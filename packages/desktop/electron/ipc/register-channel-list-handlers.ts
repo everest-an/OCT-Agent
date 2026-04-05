@@ -5,6 +5,11 @@ import { parseJsonShellOutput } from '../openclaw-shell-output';
 
 const channelStatusCache: { configured: string[]; ts: number } = { configured: [], ts: 0 };
 
+export function clearChannelStatusCache() {
+  channelStatusCache.configured = [];
+  channelStatusCache.ts = 0;
+}
+
 function readConfiguredFromFile(home: string, toFrontendId: (openclawId: string) => string): string[] {
   try {
     const configPath = path.join(home, '.openclaw', 'openclaw.json');
@@ -29,9 +34,13 @@ export function registerChannelListHandlers(deps: {
   ipcMain.handle('channel:list-configured', async () => {
     const fromFile = readConfiguredFromFile(deps.home, deps.toFrontendId);
 
-    if (Date.now() - channelStatusCache.ts < 60000 && channelStatusCache.configured.length > 0) {
-      return { success: true, configured: channelStatusCache.configured };
-    }
+    // Always start from the freshly-read file. Supplement with recent CLI cache
+    // so channels detected by CLI (but not yet written to file) also appear.
+    // This ensures a just-completed WeChat/one-click setup is immediately visible.
+    const cacheIsRecent = Date.now() - channelStatusCache.ts < 60000;
+    const immediate: string[] = cacheIsRecent && channelStatusCache.configured.length > 0
+      ? [...new Set([...fromFile, ...channelStatusCache.configured])]
+      : fromFile;
 
     deps.readShellOutputAsync('openclaw channels list 2>&1', 20000).then((output) => {
       if (!output) return;
@@ -81,7 +90,7 @@ export function registerChannelListHandlers(deps: {
       }
     }).catch(() => {});
 
-    return { success: true, configured: fromFile };
+    return { success: true, configured: immediate };
   });
 
   ipcMain.handle('channel:list-supported', async () => {
