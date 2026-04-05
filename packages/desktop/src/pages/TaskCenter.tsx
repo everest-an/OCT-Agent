@@ -48,7 +48,9 @@ interface SetupStatus {
   agentToAgentEnabled: boolean;
 }
 
-export default function TaskCenter({ onNavigate }: { onNavigate?: (page: any) => void }) {
+import type { Page } from '../components/Sidebar';
+
+export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) => void }) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<Tab>('board');
   const [tasks, setTasks] = useState<readonly Task[]>([]);

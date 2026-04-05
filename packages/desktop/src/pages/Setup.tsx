@@ -241,6 +241,10 @@ export default function SetupWizard({ onComplete }: SetupProps) {
       }
     }
 
+    // All install tasks completed — set a one-shot flag so App.tsx Guard 1
+    // can let the user through without relying on a time window.
+    localStorage.setItem('awareness-claw-install-tasks-done', 'true');
+
     // Check if user already has OpenClaw configured with models
     await new Promise((r) => setTimeout(r, 500));
     if (!simulate && api) {

@@ -218,10 +218,13 @@ export default function App() {
             return;
           }
 
-          // Guard 1: User just finished setup — freshly-installed components may not be
-          // immediately detectable (Windows PATH not refreshed, AV scanning, etc.).
-          // Let them through; Doctor in Settings will repair silently in the background.
-          if (recentlyCompletedSetup) {
+          // Guard 1: All install tasks just completed in the wizard (flag set after
+          // step 5/daemon is done). Freshly-installed components may not be immediately
+          // detectable on Windows (PATH not refreshed, AV scanning, etc.).
+          // Consume the flag once and let the user through; Doctor repairs in background.
+          const installTasksDone = localStorage.getItem('awareness-claw-install-tasks-done') === 'true';
+          if (installTasksDone) {
+            localStorage.removeItem('awareness-claw-install-tasks-done');
             setStartupProgress(100);
             setRuntimeReady(true);
             return;
@@ -291,6 +294,7 @@ export default function App() {
           </div>
           <div className="space-y-2">
             <div className="h-2 overflow-hidden rounded-full bg-slate-800 ring-1 ring-slate-700/80">
+              {/* eslint-disable-next-line react/forbid-dom-props */}
               <div
                 className="h-full rounded-full bg-gradient-to-r from-sky-500 via-blue-500 to-cyan-400 transition-all duration-500 ease-out"
                 style={{ width: `${Math.max(8, Math.min(100, startupProgress))}%` }}

@@ -26,7 +26,9 @@ const WORKSPACE_FILE_META: Record<string, string> = {
   'HEARTBEAT.md': 'agents.file.heartbeat.desc',
 };
 
-export default function Agents({ onNavigate }: { onNavigate?: (page: string) => void } = {}) {
+import type { Page } from '../components/Sidebar';
+
+export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => void } = {}) {
   const { t } = useI18n();
   const { updateConfig } = useAppConfig();
   const [agents, setAgents] = useState<AgentInfo[]>([]);
