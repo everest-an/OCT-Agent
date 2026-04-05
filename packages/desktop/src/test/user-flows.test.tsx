@@ -438,13 +438,13 @@ describe('Memory Page — Timeline & Daemon (E2E)', () => {
     expect(screen.getByText('turn_brief')).toBeInTheDocument();
     expect(screen.getByText('code_change')).toBeInTheDocument();
     // Tags should render
-    expect(screen.getByText('npm')).toBeInTheDocument();
-    expect(screen.getByText('config')).toBeInTheDocument();
+    expect(screen.getAllByText('npm').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('config').length).toBeGreaterThan(0);
   });
 
   it('flow: clicking event expands full content, clicking again collapses', async () => {
     mockDaemonOnline();
-    const longContent = 'A'.repeat(300); // Over 200 chars → should be collapsible
+    const longContent = 'A'.repeat(1200); // Over 600 chars threshold → should be collapsible
     getApi().memoryGetEvents = vi.fn().mockResolvedValue({
       items: [{ id: 'mem1', type: 'turn_brief', title: 'Long event', source: 'manual', created_at: '2026-03-30T10:00:00Z', fts_content: longContent }],
       total: 1,
@@ -454,16 +454,16 @@ describe('Memory Page — Timeline & Daemon (E2E)', () => {
     await waitFor(() => expect(screen.getByText('Long event')).toBeInTheDocument());
 
     // Should show expand button
-    const expandBtn = screen.getByText(/Show full content/i);
+    const expandBtn = screen.getByText(/Show full content|展开完整内容/i);
     expect(expandBtn).toBeInTheDocument();
 
     // Click to expand
     await act(async () => { fireEvent.click(expandBtn); });
-    expect(screen.getByText(/Collapse/i)).toBeInTheDocument();
+    expect(screen.getByText(/Collapse|收起/i)).toBeInTheDocument();
 
     // Click to collapse
-    await act(async () => { fireEvent.click(screen.getByText(/Collapse/i)); });
-    expect(screen.getByText(/Show full content/i)).toBeInTheDocument();
+    await act(async () => { fireEvent.click(screen.getByText(/Collapse|收起/i)); });
+    expect(screen.getByText(/Show full content|展开完整内容/i)).toBeInTheDocument();
   });
 
   it('flow: Load More button fetches next page of events', async () => {

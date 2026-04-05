@@ -219,6 +219,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
     // Step 5: Start daemon
     if (startIdx <= stepKeys.indexOf('daemon')) {
       updateInstallStep('daemon', 'running');
+      let daemonPending = false;
       if (simulate) {
         await new Promise((r) => setTimeout(r, 1000));
       } else {
@@ -229,8 +230,15 @@ export default function SetupWizard({ onComplete }: SetupProps) {
           setInstallError({ key: 'daemon', message });
           return;
         }
+        daemonPending = !!res?.pending;
+        if (daemonPending) {
+          const detail = t('setup.install.daemonPending', 'Local service is still warming up in the background. Setup will continue automatically.');
+          updateInstallStep('daemon', 'done', detail);
+        }
       }
-      updateInstallStep('daemon', 'done');
+      if (simulate || !daemonPending) {
+        updateInstallStep('daemon', 'done');
+      }
     }
 
     // Check if user already has OpenClaw configured with models

@@ -60,6 +60,9 @@
       "node_modules/npm/**/*",
       "cache/**/*"
     ],
+    "asarUnpack": [
+      "node_modules/npm/**/*"
+    ],
     "extraResources": [
       { "from": "workflows", "to": "workflows", "filter": ["*.yaml", "*.yml"] }
     ],

@@ -6,6 +6,10 @@ import { writeDesktopExecApprovalDefaults } from '../openclaw-config';
 
 const OPENCLAW_INSTALL_TIMEOUT_MS = 300000;
 const OPENCLAW_STATUS_PULSE_MS = 15000;
+const SETUP_DAEMON_WAIT_PREPARING_MS = 120000;
+const SETUP_DAEMON_WAIT_RETRYING_MS = 180000;
+const SETUP_DAEMON_WAIT_AFTER_BOOTSTRAP_MS = 90000;
+const SETUP_DAEMON_BOOTSTRAP_TIMEOUT_MS = 240000;
 
 function isCommandTimeoutError(message: string) {
   return /timed out/i.test(message);
@@ -70,6 +74,38 @@ export function registerSetupHandlers(deps: {
       return await task();
     } finally {
       clearInterval(interval);
+    }
+  };
+
+  const isNodeBinaryMissing = (message: string) => {
+    const normalized = message.toLowerCase();
+    return normalized.includes('enoent')
+      || normalized.includes('node is not recognized')
+      || normalized.includes('command not found')
+      || normalized.includes('not recognized as an internal or external command');
+  };
+
+  const isNodeCliEntryMissing = (message: string) => {
+    const normalized = message.toLowerCase();
+    return normalized.includes('cannot find module') || normalized.includes('module not found');
+  };
+
+  const runWithBundledNpmCli = async (
+    cliPath: string,
+    cliArgs: string,
+    timeoutMs: number,
+    cwd?: string,
+  ) => {
+    const prefix = cwd ? `cd "${cwd}" && ` : '';
+    const nodeCommand = `${prefix}node "${cliPath}" ${cliArgs}`.trim();
+    try {
+      return await deps.runAsync(nodeCommand, timeoutMs);
+    } catch (nodeErr: any) {
+      const message = nodeErr?.message || String(nodeErr);
+      if (!isNodeBinaryMissing(message) && !isNodeCliEntryMissing(message)) throw nodeErr;
+
+      const processCommand = `${prefix}"${process.execPath}" "${cliPath}" ${cliArgs}`.trim();
+      return deps.runAsync(processCommand, timeoutMs);
     }
   };
 
@@ -245,11 +281,13 @@ export function registerSetupHandlers(deps: {
       if (fs.existsSync(globalOpenClawPkg)) {
         sendOpenClawStatus('setup.install.openclawStatus.foundPackage');
         const ver = await deps.safeShellExecAsync('openclaw --version', 8000);
-        return {
-          success: true,
-          alreadyInstalled: true,
-          version: ver || 'OpenClaw installed',
-        };
+        if (ver) {
+          return {
+            success: true,
+            alreadyInstalled: true,
+            version: ver,
+          };
+        }
       }
     }
 
@@ -289,9 +327,14 @@ export function registerSetupHandlers(deps: {
               : 'setup.install.openclawStatus.preparingNpm'
         );
         const cmd = npmCli
-          ? `"${process.execPath}" "${npmCli}" install -g openclaw ${reg}`.trim()
+          ? `install -g openclaw ${reg}`.trim()
           : `npm install -g openclaw ${reg}`.trim();
-        await runOpenClawStage('setup.install.openclawStatus.downloading', () => deps.runAsync(cmd, OPENCLAW_INSTALL_TIMEOUT_MS));
+        await runOpenClawStage('setup.install.openclawStatus.downloading', () => {
+          if (npmCli) {
+            return runWithBundledNpmCli(npmCli, cmd, OPENCLAW_INSTALL_TIMEOUT_MS);
+          }
+          return deps.runAsync(cmd, OPENCLAW_INSTALL_TIMEOUT_MS);
+        });
         sendOpenClawStatus('setup.install.openclawStatus.verifying');
         const verified = await deps.safeShellExecAsync('openclaw --version', 10000);
         if (verified) {
@@ -388,7 +431,7 @@ export function registerSetupHandlers(deps: {
 
     try {
       if (pluginTarball && npmCli) {
-        await deps.runAsync(`cd "${deps.home}" && ${process.execPath} "${npmCli}" exec --yes ${pluginTarball} install awareness-memory --force`, 60000);
+        await runWithBundledNpmCli(npmCli, `exec --yes "${pluginTarball}" install awareness-memory --force`, 60000, deps.home);
         deps.persistAwarenessPluginConfig({ enableSlot: true });
         writeDesktopExecApprovalDefaults(deps.home);
         return { success: true, method: 'clawhub-offline' };
@@ -423,6 +466,28 @@ export function registerSetupHandlers(deps: {
     if (existingPromise) return existingPromise;
 
     const startupPromise = (async () => {
+      const daemonProjectDir = path.join(deps.home, '.openclaw');
+      const daemonSpec = deps.resolveBundledCache('awareness-sdk-local.tgz') || '@awareness-sdk/local@latest';
+      const bundledNpxCli = deps.getBundledNpmBin('npx');
+
+      const bootstrapDaemonInForeground = async (statusKey: string) => {
+        deps.sendSetupDaemonStatus(statusKey);
+        try {
+          if (bundledNpxCli) {
+            await runWithBundledNpmCli(
+              bundledNpxCli,
+              `-y "${daemonSpec}" start --port 37800 --project "${daemonProjectDir}" --background 2>&1`,
+              SETUP_DAEMON_BOOTSTRAP_TIMEOUT_MS,
+            );
+          } else {
+            await deps.runAsync(`npx -y "${daemonSpec}" start --port 37800 --project "${daemonProjectDir}" --background 2>&1`, SETUP_DAEMON_BOOTSTRAP_TIMEOUT_MS);
+          }
+          return true;
+        } catch {
+          return false;
+        }
+      };
+
       const isReady = await deps.checkDaemonHealth();
       if (isReady) return { success: true, alreadyRunning: true };
 
@@ -448,11 +513,14 @@ export function registerSetupHandlers(deps: {
         if (err?.code === 'ENOENT') {
           return { success: false, error: 'Node/npm not found. Please install Node.js 22+ and reopen AwarenessClaw.' };
         }
-        return { success: false, error: err?.message?.slice(0, 200) || String(err) };
+        const foregroundStarted = await bootstrapDaemonInForeground('setup.install.daemonStatus.preparing');
+        if (!foregroundStarted) {
+          return { success: false, error: err?.message?.slice(0, 200) || String(err) };
+        }
       }
 
       deps.sendSetupDaemonStatus('setup.install.daemonStatus.preparing');
-      if (await deps.waitForLocalDaemonReady(75000, 'setup.install.daemonStatus.preparing', { sendStatus: deps.sendSetupDaemonStatus, sleep: deps.sleep })) {
+      if (await deps.waitForLocalDaemonReady(SETUP_DAEMON_WAIT_PREPARING_MS, 'setup.install.daemonStatus.preparing', { sendStatus: deps.sendSetupDaemonStatus, sleep: deps.sleep })) {
         return { success: true };
       }
 
@@ -472,15 +540,30 @@ export function registerSetupHandlers(deps: {
         if (err?.code === 'ENOENT') {
           return { success: false, error: 'Node/npm not found. Please install Node.js 22+ and reopen AwarenessClaw.' };
         }
-        return { success: false, error: err?.message?.slice(0, 200) || String(err) };
+        const foregroundStarted = await bootstrapDaemonInForeground('setup.install.daemonStatus.retrying');
+        if (!foregroundStarted) {
+          return { success: false, error: err?.message?.slice(0, 200) || String(err) };
+        }
       }
 
       deps.sendSetupDaemonStatus('setup.install.daemonStatus.retrying');
-      if (await deps.waitForLocalDaemonReady(90000, 'setup.install.daemonStatus.retrying', { sendStatus: deps.sendSetupDaemonStatus, sleep: deps.sleep })) {
+      if (await deps.waitForLocalDaemonReady(SETUP_DAEMON_WAIT_RETRYING_MS, 'setup.install.daemonStatus.retrying', { sendStatus: deps.sendSetupDaemonStatus, sleep: deps.sleep })) {
         return { success: true };
       }
 
-      return { success: false, error: deps.formatDaemonSetupError() };
+      const foregroundStarted = await bootstrapDaemonInForeground('setup.install.daemonStatus.retrying');
+      if (foregroundStarted) {
+        if (await deps.waitForLocalDaemonReady(SETUP_DAEMON_WAIT_AFTER_BOOTSTRAP_MS, 'setup.install.daemonStatus.waiting', { sendStatus: deps.sendSetupDaemonStatus, sleep: deps.sleep })) {
+          return { success: true };
+        }
+      }
+
+      // Do not block first install forever when native deps are still compiling in background.
+      return {
+        success: true,
+        pending: true,
+        warning: deps.formatDaemonSetupError(),
+      };
     })();
 
     deps.setDaemonStartupPromise(startupPromise);

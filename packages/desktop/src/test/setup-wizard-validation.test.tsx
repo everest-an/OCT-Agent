@@ -321,6 +321,15 @@ describe('Setup Wizard — API Key Validation', () => {
     expect(api.modelsDiscover).not.toHaveBeenCalled();
   });
 
+  it('daemon warmup pending: setup continues without blocking first install', async () => {
+    const { api } = await advanceToModelStep({
+      startDaemon: vi.fn().mockResolvedValue({ success: true, pending: true }),
+    });
+
+    expect(api.startDaemon).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/choose your ai brain/i)).toBeInTheDocument();
+  });
+
   it('first install applies onboarding permission defaults when setup completes', async () => {
     const permissionsUpdate = vi.fn().mockResolvedValue({ success: true });
     const { api, onComplete } = await advanceToDoneStep({ permissionsUpdate });

@@ -18,7 +18,7 @@ export interface ElectronAPI {
   installNodeJs: () => Promise<{ success: boolean; alreadyInstalled?: boolean; method?: string; error?: string; hint?: string }>;
   installOpenClaw: () => Promise<{ success: boolean; alreadyInstalled?: boolean; version?: string; method?: string; error?: string; hint?: string }>;
   installPlugin: () => Promise<{ success: boolean; error?: string }>;
-  startDaemon: () => Promise<{ success: boolean; alreadyRunning?: boolean; error?: string }>;
+  startDaemon: () => Promise<{ success: boolean; alreadyRunning?: boolean; pending?: boolean; warning?: string; error?: string }>;
   onSetupStatus?: (callback: (status: { stepKey: string; key: string; detail?: string }) => void) => (() => void);
   onSetupDaemonStatus?: (callback: (status: { key: string; detail?: string }) => void) => (() => void);
   saveConfig: (config: Record<string, unknown>) => Promise<{ success: boolean }>;
@@ -92,6 +92,9 @@ export interface ElectronAPI {
     highPriorityPendingCount?: number;
     promotionProposalCount?: number;
     readyForPromotionCount?: number;
+    todayProcessedCount?: number;
+    todayApprovedCount?: number;
+    todayRejectedCount?: number;
     error?: string;
   }>;
   memoryPromotionList?: (opts?: { agentId?: string; workspacePath?: string }) => Promise<{
@@ -110,6 +113,7 @@ export interface ElectronAPI {
       evidenceIds: string[];
       createdAt?: string;
       approvedAt?: string;
+      rejectedAt?: string;
     }>;
     error?: string;
   }>;
@@ -130,6 +134,7 @@ export interface ElectronAPI {
       evidenceIds: string[];
       createdAt?: string;
       approvedAt?: string;
+      rejectedAt?: string;
     };
     error?: string;
   }>;
@@ -149,6 +154,7 @@ export interface ElectronAPI {
       evidenceIds: string[];
       createdAt?: string;
       approvedAt?: string;
+      rejectedAt?: string;
     };
     error?: string;
   }>;

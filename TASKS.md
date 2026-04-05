@@ -38,6 +38,7 @@
 - [ ] 建立诊断包导出（traceId + capability snapshot + 最近日志 + 环境信息）用于快速归因
 - [ ] 设定兼容性 KPI：频道首连成功率、自动修复成功率、用户可感知等待时长，并在 Dashboard 持续观测
 - [ ] 按 docs/structures.md 红线推进主进程拆分，优先低风险抽离，不在同一 PR 混合行为改动和重构
+- [x] 新增 GitHub Actions 三端桌面测试矩阵（Windows/macOS/Linux），每次 push/PR 自动执行 `packages/desktop` 测试（2026-04-05）
 
 ### 聊天（最高优先级）
 - [x] 聊天气泡 UI（用户蓝色/AI 深色）
@@ -82,12 +83,17 @@
 - [x] **轻量化 + 节省 token**：新增 Thinking Level 控制（off/minimal/low/medium/high），token 估算显示，recall limit 联动 token 开销（2026-03-30）
 - [x] **.learnings 递归晋升提案**：当同类模式在最近窗口内累计达到阈值时，自动生成 `.learnings/PROMOTION_PROPOSALS.md` 提案（先提案后人工确认，不直接改 SOUL/AGENTS/TOOLS）（2026-04-05）
 - [x] **.learnings 提案审批闭环**：Memory 页面支持提案单条应用、拒绝与批量应用，审批结果回写 `PROMOTION_PROPOSALS.md` 并同步状态统计（2026-04-05）
+- [x] **自我进化入口融入 Memory 主流程**：将 Self Improvement 面板从 Settings 迁移到 Timeline 主视图，新增“今日处理”运营指标，并将审批动作写入 Awareness 记忆事件流（2026-04-05）
+- [x] **自我进化提案冲突策略 + 回滚增强**：提案应用按目标文件执行 replace/dedupe 规则（TOOLS 同 pattern 替换、AGENTS/SOUL 等价规则去重），且在审批写入失败时自动回滚目标文件与提案文件快照，避免半成功状态（2026-04-05）
 
 ### 通道
 - [x] 通道配置写入 openclaw.json（Telegram/Discord/Slack/Feishu）（2026-03-30）
 - [x] 测试连接功能（channel:test IPC）（2026-03-30）
 - [x] 通道状态检测框架（读取 openclaw.json channels）（2026-03-30）
 - [x] Telegram 无终端配对闭环：频道页新增“粘贴配对码 + 一键 Approve”，批准后自动重绑 main agent 并自动连通性检测（2026-04-04）
+- [x] 通道配置兼容修复：清理旧版遗留的 `channels.whatsapp.errorPolicy` 非法字段（避免 OpenClaw 2026.4.x 配置校验失败），并将已知主流通道“`dmPolicy=allowlist` 但无 `allowFrom`”自动回退为 `pairing`、`dmPolicy=open` 但缺少 `*` 时自动补齐（防止单通道坏配置拖垮全通道）；`pairing approve` 对齐 `--channel` 语法并在频道页提供 WhatsApp 一键 Approve（2026-04-05）
+- [x] 新增 WhatsApp 真机手工冒烟脚本：覆盖默认防打扰、owner 自聊、allowlist 放行、pairing 审批、重启一致性、断开重连回归（`docs/OPENCLAW_WHATSAPP_REAL_SMOKE_2026-04-05.md`）（2026-04-05）
+- [x] 通道会话隔离默认值收口：统一将 openclaw.json `session.dmScope` 从空值/非法值/`main` 修正为 `per-channel-peer`，并在 setup/save/pairing 全链路自动修复；sessions.list 映射新增 session key 回退解析，避免跨通道会话污染和漏显示（2026-04-05）
 
 ### 定时任务（Cron）
 - [x] Cron 可视化管理页面（独立"自动化"tab）（2026-03-30）
@@ -117,6 +123,8 @@
 - [x] **Windows 本地 daemon 启动兜底修复**：桌面端改用 `npx.cmd` 并在缺失时回退到 bundled npm CLI，避免 Electron 里用 bare `npx` 触发 `ENOENT` 导致聊天前本地服务拉不起来（2026-04-03）
 - [x] **Windows Gateway token_missing 修复（BOM 容错）**：openclaw.json 带 UTF-8 BOM 时，桌面端读取配置会 JSON.parse 失败导致 token 丢失；主进程改为 BOM 容错 JSON 读取，Gateway WS 握手恢复带 token 鉴权（2026-04-03）
 - [x] **重装后首启运行时预检收口**：首启/重装后不再跳过 startupEnsureRuntime；启动阶段会继续收敛 OpenClaw/Gateway/本地设备授权，避免把 `ENOENT` / `pairing required` 留到用户第一条聊天消息里（2026-04-05）
+- [x] **首次安装本地服务启动不阻断修复**：`setup:start-daemon` 新增多级兜底（延长等待窗口、前台 bootstrap 启动、缓存修复后再拉起），最终在“仍在后台预热”场景返回 pending 成功并继续安装，避免首次安装被 daemon 预热卡死（2026-04-05）
+- [x] **首次安装 OpenClaw 卡住修复（Windows 包内环境）**：`setup:install-openclaw` 不再默认用 `process.execPath + npm-cli` 执行安装，改为优先 `node + bundled npm-cli`（缺失时再回退），并要求 `openclaw --version` 真实可执行才判定成功，避免“安装 AI 引擎”步骤长时间卡住后误报超时（2026-04-05）
 
 ---
 
