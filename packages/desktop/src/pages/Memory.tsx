@@ -9,6 +9,8 @@ import { useMemorySettings } from '../hooks/useMemorySettings';
 import './memory-graph.css';
 import { MemorySettingsPanel } from '../components/memory/MemorySettingsPanel';
 import { SelfImprovementPanel } from '../components/memory/SelfImprovementPanel';
+import { TimelineTab } from '../components/memory/TimelineTab';
+import { KnowledgeCardsTab } from '../components/memory/KnowledgeCardsTab';
 import { useSelfImprovement } from '../hooks/useSelfImprovement';
 import { SettingsCloudAuthModal } from '../components/settings/SettingsCloudAuthModal';
 import {
@@ -795,333 +797,38 @@ export default function Memory() {
 
             {/* === TIMELINE TAB === */}
             {activeTab === 'timeline' && (
-              <>
-                {/* Source view toggle — separate conversations from dev memories */}
-                <div className="flex gap-1.5 mb-2">
-                  {([['chat', 'Conversations'], ['dev', 'Dev Logs'], ['all', 'All']] as const).map(([key, label]) => (
-                    <button
-                      key={key}
-                      onClick={() => setSourceView(key)}
-                      className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
-                        sourceView === key
-                          ? 'bg-brand-600/20 text-brand-400 border border-brand-500/40'
-                          : 'text-slate-500 hover:text-slate-300'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {/* Event type filter chips — dynamically generated from actual event types */}
-                <div className="flex gap-2 flex-wrap mb-2">
-                  {['all', ...[...new Set(events.map(e => e.type).filter(Boolean))].sort()].map((filterType) => {
-                    const typeLabels: Record<string, string> = {
-                      all: `All (${events.length})`,
-                      code_change: 'Code',
-                      conversation: 'Chat',
-                      task: 'Task',
-                      note: 'Note',
-                    };
-                    const label = typeLabels[filterType!] ?? filterType!;
-                    const count = filterType === 'all' ? null : events.filter(e => e.type === filterType).length;
-                    return (
-                      <button
-                        key={filterType}
-                        onClick={() => setSelectedEventType(filterType!)}
-                        className={`px-3 py-1 text-xs rounded-lg transition-colors ${
-                          selectedEventType === filterType
-                            ? 'bg-brand-600 text-white'
-                            : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                        }`}
-                      >
-                        {label}{count !== null ? ` (${count})` : ''}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {displayedEvents.length === 0 && (
-                  <div className="text-center py-12 text-slate-500 space-y-2">
-                    {searchQuery && searchResults !== null ? (
-                      <p className="text-sm">{t('memory.noResults', 'No results for "{query}"').replace('{query}', searchQuery)}</p>
-                    ) : (
-                      <>
-                        <p>{t('memory.noData')}</p>
-                        <p className="text-xs mt-1">{t('memory.noData.hint')}</p>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                {displayedEvents.map((event) => {
-                  const src = getSourceDisplay(event.source);
-                  const SourceIcon = src.icon;
-                  const isExpanded = expandedEvent === event.id;
-                  const isCodeChange = event.type === 'code_change';
-
-                  // For code_change events, parse the content for a cleaner display
-                  const parsedCode = isCodeChange && event.fts_content
-                    ? parseCodeChangeContent(event.fts_content)
-                    : null;
-
-                  const contentPreview = event.fts_content || event.title || '';
-                  const hasLongContent = isCodeChange
-                    ? (parsedCode ? parsedCode.diffLines.length > 3 : false)
-                    : contentPreview.length > 200;
-
-                  return (
-                    <div
-                      key={event.id}
-                      className="p-4 bg-slate-800/50 rounded-xl border border-slate-700/50 hover:border-slate-600 transition-colors"
-                    >
-                      {/* Event header */}
-                      <div className="flex items-center gap-2 mb-2 flex-wrap">
-                        <SourceIcon size={16} className="text-slate-300" />
-                        <span className="text-xs font-medium text-slate-300">{src.label}</span>
-                        {event.type && (
-                          <span className="text-[10px] px-1.5 py-0.5 bg-slate-700 rounded text-slate-400">
-                            {event.type}
-                          </span>
-                        )}
-                        {event.session_id && (
-                          <span className="text-[10px] text-slate-600 truncate max-w-[120px]" title={event.session_id}>
-                            {event.session_id.slice(0, 12)}...
-                          </span>
-                        )}
-                        {event.agent_role && (
-                          <span className="text-[10px] px-1.5 py-0.5 bg-blue-500/10 rounded text-blue-400">
-                            {event.agent_role}
-                          </span>
-                        )}
-                        {event.created_at && (
-                          <span className="ml-auto text-[11px] text-slate-500" title={new Date(event.created_at).toLocaleString()}>
-                            {formatRelativeTime(event.created_at)}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Event title — for code_change show parsed shortPath */}
-                      {isCodeChange && parsedCode ? (
-                        <h4 className="flex items-center gap-1.5 font-medium text-sm mb-1 text-slate-200">
-                          <FileCode size={14} className="text-slate-400" />
-                          {parsedCode.shortPath}
-                        </h4>
-                      ) : event.title ? (
-                        <h4 className="font-medium text-sm mb-1 text-slate-200">
-                          <HighlightText text={event.title} query={searchQuery} />
-                        </h4>
-                      ) : null}
-
-                      {/* Event content */}
-                      {isCodeChange && parsedCode ? (
-                        // code_change: show diff lines in monospace, max 3 lines unless expanded
-                        parsedCode.diffLines.length > 0 && (
-                          <div className="text-slate-400 leading-relaxed">
-                            <div className="space-y-0.5">
-                              {(isExpanded ? parsedCode.diffLines : parsedCode.diffLines.slice(0, 3)).map((line, i) => (
-                                <p key={i} className="text-xs font-mono truncate">{line}</p>
-                              ))}
-                            </div>
-                            {hasLongContent && (
-                              <button
-                                onClick={() => setExpandedEvent(isExpanded ? null : event.id)}
-                                className="text-xs text-brand-400 hover:text-brand-300 mt-1"
-                              >
-                                {isExpanded ? t('memory.collapseContent') : t('memory.expandContent')}
-                              </button>
-                            )}
-                          </div>
-                        )
-                      ) : contentPreview ? (
-                        <div className="text-sm text-slate-400 leading-relaxed">
-                          <div className={isExpanded ? '' : 'line-clamp-3'}>
-                            {searchQuery ? (
-                              <p><HighlightText text={contentPreview} query={searchQuery} /></p>
-                            ) : (
-                              <ReactMarkdown remarkPlugins={[remarkGfm]} components={memoryMarkdownComponents}>
-                                {contentPreview}
-                              </ReactMarkdown>
-                            )}
-                          </div>
-                          {hasLongContent && (
-                            <button
-                              onClick={() => setExpandedEvent(isExpanded ? null : event.id)}
-                              className="text-xs text-brand-400 hover:text-brand-300 mt-1"
-                            >
-                              {isExpanded ? t('memory.collapseContent') : t('memory.expandContent')}
-                            </button>
-                          )}
-                        </div>
-                      ) : null}
-
-                      {/* Tags */}
-                      {event.tags && (
-                        <div className="flex gap-1 mt-2 flex-wrap">
-                          {event.tags.split(',').map((tag, i) => (
-                            <span key={i} className="text-[10px] px-1.5 py-0.5 bg-slate-700/50 rounded text-slate-500">
-                              {tag.trim()}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-
-                {/* Load More */}
-                {events.length > 0 && events.length < eventsTotal && (
-                  <button
-                    onClick={() => loadEvents(eventsOffset, true)}
-                    className="w-full py-2.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800/50 rounded-xl transition-colors"
-                  >
-                    {t('memory.loadMore')} ({events.length}/{eventsTotal})
-                  </button>
-                )}
-              </>
+              <TimelineTab
+                events={events}
+                displayedEvents={displayedEvents}
+                eventsTotal={eventsTotal}
+                eventsOffset={eventsOffset}
+                sourceView={sourceView}
+                selectedEventType={selectedEventType}
+                expandedEvent={expandedEvent}
+                searchQuery={searchQuery}
+                searchResults={searchResults}
+                setSourceView={setSourceView}
+                setSelectedEventType={setSelectedEventType}
+                setExpandedEvent={setExpandedEvent}
+                loadEvents={loadEvents}
+              />
             )}
 
             {/* === KNOWLEDGE CARDS TAB === */}
             {activeTab === 'knowledge' && (
-              <>
-                {displayCards.length === 0 && !loading && (
-                  <div className="text-center py-12 text-slate-500 space-y-2">
-                    {searchQuery && searchResults !== null ? (
-                      <>
-                        <p className="text-sm">{t('memory.noResults', 'No results for "{query}"').replace('{query}', searchQuery)}</p>
-                        <p className="text-xs text-slate-600">{t('memory.noData.hint')}</p>
-                      </>
-                    ) : selectedCategory !== 'all' ? (
-                      <>
-                        <p className="text-sm">{t('memory.noCategoryCards', 'No cards in this category')}</p>
-                        <button
-                          onClick={() => setSelectedCategory('all')}
-                          className="text-xs text-brand-400 hover:text-brand-300 underline underline-offset-2"
-                        >
-                          {t('memory.clearFilter', 'Clear filter')}
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <p>{t('memory.noData')}</p>
-                        <p className="text-xs mt-1">{t('memory.noData.hint')}</p>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                {displayCards.map((card: any, i: number) => {
-                  const catDisplay = getCategoryDisplay(card.category);
-                  const CategoryIcon = catDisplay.icon;
-                  const isExpanded = expandedCard === card.id;
-                  const relatedSignal = signals.find(s => s.card_id === card.id || (s.card_title && s.card_title === card.title));
-                  const RelatedSignalIcon = relatedSignal?.type === 'staleness'
-                    ? AlarmClock
-                    : relatedSignal?.type === 'contradiction'
-                      ? TriangleAlert
-                      : Bell;
-                  return (
-                    <div
-                      key={card.id || i}
-                      onClick={() => card.id && toggleCardExpand(card.id)}
-                      className={`p-4 rounded-xl border transition-colors cursor-pointer ${
-                        card.status === 'superseded'
-                          ? 'bg-slate-800/30 border-slate-700/30 opacity-60'
-                          : isExpanded
-                            ? 'bg-slate-800/70 border-brand-500/50 ring-1 ring-brand-500/20'
-                            : 'bg-slate-800/50 border-slate-700/50 hover:border-slate-600'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 mb-2">
-                        <CategoryIcon size={14} className={catDisplay.color} />
-                        <span className={`text-xs font-medium ${catDisplay.color}`}>{t(catDisplay.label, catDisplay.label)}</span>
-                        {card.created_at && (
-                          <>
-                            <span className="text-xs text-slate-600">&middot;</span>
-                            <span className="text-xs text-slate-500">{new Date(card.created_at).toLocaleDateString()}</span>
-                          </>
-                        )}
-                        {card.confidence != null && card.confidence > 0 && (
-                          <span className="text-xs text-sky-400/70 font-medium">{Math.round(card.confidence * 100)}%</span>
-                        )}
-                        {card.days_ago != null && (
-                          <span className="text-xs text-slate-500">
-                            {card.days_ago === 0 ? t('memory.today', 'today') : `${card.days_ago}d ago`}
-                          </span>
-                        )}
-                        {card.tokens_est != null && card.tokens_est > 0 && (
-                          <span className="text-[10px] text-slate-600">~{card.tokens_est}tok</span>
-                        )}
-                        {card.status === 'superseded' && (
-                          <span className="text-xs px-1.5 py-0.5 bg-amber-600/20 rounded text-amber-500 border border-amber-600/30">
-                            {t('memory.superseded', 'Superseded')}
-                          </span>
-                        )}
-                        {relatedSignal && (
-                          <span className="text-xs px-1.5 py-0.5 bg-purple-600/20 rounded text-purple-400 border border-purple-600/30">
-                            <RelatedSignalIcon size={11} className="inline mr-1" />{relatedSignal.type}
-                          </span>
-                        )}
-                        <span className="ml-auto text-xs text-slate-600">
-                          {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                        </span>
-                      </div>
-                      <h4 className={`font-medium text-sm mb-1 ${card.status === 'superseded' ? 'line-through text-slate-500' : ''}`}>
-                        <HighlightText text={card.title} query={searchQuery} />
-                      </h4>
-                      <div className="text-sm text-slate-400 leading-relaxed">
-                        {searchQuery ? (
-                          <p><HighlightText text={card.summary} query={searchQuery} /></p>
-                        ) : (
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={memoryMarkdownComponents}>
-                            {card.summary}
-                          </ReactMarkdown>
-                        )}
-                      </div>
-
-                      {/* Expanded detail: tags + evolution chain */}
-                      {isExpanded && (
-                        <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-2" onClick={(e) => e.stopPropagation()}>
-                          {/* Tags */}
-                          {card.tags && (() => {
-                            const tags = typeof card.tags === 'string' ? (() => { try { return JSON.parse(card.tags); } catch { return []; } })() : card.tags;
-                            return Array.isArray(tags) && tags.length > 0 ? (
-                              <div className="flex flex-wrap gap-1">
-                                {tags.map((tag: string, j: number) => (
-                                  <span key={j} className="text-xs px-1.5 py-0.5 bg-slate-700/60 rounded text-slate-400">{tag}</span>
-                                ))}
-                              </div>
-                            ) : null;
-                          })()}
-
-                          {/* Evolution chain */}
-                          {evolutionLoading ? (
-                            <div className="flex items-center gap-2 text-xs text-slate-500">
-                              <Loader2 size={12} className="animate-spin" />
-                              {t('memory.loadingEvolution', 'Loading history...')}
-                            </div>
-                          ) : cardEvolution && cardEvolution.length > 0 ? (
-                            <div className="space-y-1.5">
-                              <p className="text-xs font-medium text-slate-400">{t('memory.evolutionChain', 'Version History')}</p>
-                              {cardEvolution.map((ver: any, j: number) => (
-                                <div key={j} className={`text-xs p-2 rounded ${ver.id === card.id ? 'bg-brand-500/10 border border-brand-500/20' : 'bg-slate-800/50'}`}>
-                                  <span className="text-slate-500">{ver.created_at ? new Date(ver.created_at).toLocaleDateString() : ''}</span>
-                                  {' '}
-                                  <span className={ver.status === 'superseded' ? 'line-through text-slate-600' : 'text-slate-300'}>{ver.title || '(no title)'}</span>
-                                  {ver.evolution_type && ver.evolution_type !== 'initial' && (
-                                    <span className="ml-1 text-amber-400">({ver.evolution_type})</span>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          ) : cardEvolution !== null ? (
-                            <p className="text-xs text-slate-600">{t('memory.noEvolution', 'No version history')}</p>
-                          ) : null}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </>
+              <KnowledgeCardsTab
+                displayCards={displayCards}
+                loading={loading}
+                searchQuery={searchQuery}
+                searchResults={searchResults}
+                selectedCategory={selectedCategory}
+                setSelectedCategory={setSelectedCategory}
+                expandedCard={expandedCard}
+                toggleCardExpand={toggleCardExpand}
+                cardEvolution={cardEvolution}
+                evolutionLoading={evolutionLoading}
+                signals={signals}
+              />
             )}
 
             {/* === KNOWLEDGE GRAPH TAB === */}
