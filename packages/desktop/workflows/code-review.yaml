@@ -9,6 +9,8 @@ args:
     default: ""
   files:
     default: ""
+  directory:
+    default: ""
 
 steps:
   - id: analyze

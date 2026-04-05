@@ -1,10 +1,10 @@
 /**
  * WorkflowList — displays available workflow templates (builtin + custom).
- * Left side: list of workflows. Right side: selected workflow detail + run form.
+ * Left side: list of workflows + "New" button. Right side: selected workflow detail + run form.
  */
 
 import { useState } from 'react';
-import { Bug, ChevronRight, ClipboardList, FileText, Loader2, Lock, Rocket, Search, Workflow, Zap, type LucideIcon } from 'lucide-react';
+import { Bug, ChevronRight, ClipboardList, FileText, FolderOpen, Loader2, Lock, Plus, Rocket, Search, Workflow, X, Zap, type LucideIcon } from 'lucide-react';
 
 interface WorkflowInfo {
   id: string;
@@ -45,6 +45,18 @@ const BUILTIN_META: Record<string, { descKey: string; descFallback: string; icon
   },
 };
 
+const WORKFLOW_TEMPLATE = `# My Workflow
+name: my-workflow
+args:
+  task:
+    default: ""
+  directory:
+    default: ""
+steps:
+  - id: execute
+    run: openclaw agent -m "$LOBSTER_ARG_TASK"
+`;
+
 function getBuiltinKey(id: string): string {
   return id.replace(/^builtin-/, '');
 }
@@ -59,6 +71,10 @@ export default function WorkflowList({
 }: WorkflowListProps) {
   const [selectedId, setSelectedId] = useState<string | null>(workflows[0]?.id || null);
   const [argValues, setArgValues] = useState<Record<string, string>>({});
+  const [showEditor, setShowEditor] = useState(false);
+  const [editorContent, setEditorContent] = useState(WORKFLOW_TEMPLATE);
+  const [editorFileName, setEditorFileName] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const selected = workflows.find((w) => w.id === selectedId);
 
@@ -66,9 +82,33 @@ export default function WorkflowList({
     setArgValues((prev) => ({ ...prev, [name]: value }));
   }
 
+  async function handlePickDir(argName: string) {
+    const result = await window.electronAPI?.taskPickDirectory?.();
+    if (result && !result.cancelled && result.path) {
+      setArgValues((prev) => ({ ...prev, [argName]: result.path! }));
+    }
+  }
+
   function handleRun() {
     if (!selected) return;
     onRun(selected, argValues);
+  }
+
+  async function handleSaveWorkflow() {
+    if (!editorFileName.trim() || !editorContent.trim()) return;
+    setSaving(true);
+    try {
+      const result = await window.electronAPI?.workflowSave?.(editorFileName.trim(), editorContent);
+      if (result?.success) {
+        setShowEditor(false);
+        setEditorContent(WORKFLOW_TEMPLATE);
+        setEditorFileName('');
+        // Reload workflow list
+        const wfResult = await window.electronAPI?.workflowList?.();
+        // Can't update parent state directly — user should re-open tab
+      }
+    } catch { /* ignore */ }
+    setSaving(false);
   }
 
   if (!lobsterInstalled) {
@@ -97,10 +137,79 @@ export default function WorkflowList({
     );
   }
 
-  if (workflows.length === 0) {
+  if (workflows.length === 0 && !showEditor) {
     return (
-      <div className="flex items-center justify-center h-64 text-slate-500 text-sm">
-        {t('taskCenter.emptyWorkflows')}
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center space-y-4">
+          <p className="text-sm text-slate-500">{t('taskCenter.emptyWorkflows')}</p>
+          <button
+            onClick={() => setShowEditor(true)}
+            className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium transition-colors flex items-center gap-2 mx-auto"
+          >
+            <Plus size={14} />
+            {t('workflow.create', 'Create Workflow')}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // YAML editor modal
+  if (showEditor) {
+    return (
+      <div className="flex flex-col gap-4 h-full min-h-0">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-200">
+            {t('workflow.createNew', 'Create New Workflow')}
+          </h3>
+          <button
+            onClick={() => setShowEditor(false)}
+            className="p-1 rounded hover:bg-slate-800 text-slate-400"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div>
+          <label className="text-xs text-slate-400 mb-1 block">
+            {t('workflow.fileName', 'File name')}
+          </label>
+          <input
+            value={editorFileName}
+            onChange={(e) => setEditorFileName(e.target.value)}
+            placeholder="my-workflow"
+            className="w-full max-w-xs rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+          />
+        </div>
+
+        <div className="flex-1 min-h-0">
+          <label className="text-xs text-slate-400 mb-1 block">
+            {t('workflow.yamlContent', 'YAML content')}
+          </label>
+          <textarea
+            value={editorContent}
+            onChange={(e) => setEditorContent(e.target.value)}
+            spellCheck={false}
+            className="w-full h-full min-h-[200px] rounded-lg bg-slate-900 border border-slate-700 px-4 py-3 text-sm text-slate-200 font-mono focus:outline-none focus:ring-2 focus:ring-sky-500/40 resize-none"
+          />
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleSaveWorkflow}
+            disabled={!editorFileName.trim() || saving}
+            className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium disabled:opacity-50 flex items-center gap-2"
+          >
+            {saving && <Loader2 size={14} className="animate-spin" />}
+            {t('workflow.save', 'Save')}
+          </button>
+          <button
+            onClick={() => setShowEditor(false)}
+            className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+          >
+            {t('common.cancel', 'Cancel')}
+          </button>
+        </div>
       </div>
     );
   }
@@ -108,46 +217,57 @@ export default function WorkflowList({
   return (
     <div className="flex gap-4 h-full min-h-0">
       {/* Left: workflow list */}
-      <div className="w-72 flex-shrink-0 overflow-y-auto space-y-1">
-        {workflows.map((wf) => {
-          const meta = BUILTIN_META[getBuiltinKey(wf.id)];
-          const isSelected = wf.id === selectedId;
-          const Icon = meta?.icon || ClipboardList;
-          return (
-            <button
-              key={wf.id}
-              onClick={() => {
-                setSelectedId(wf.id);
-                setArgValues({});
-              }}
-              className={`
-                w-full text-left px-3 py-3 rounded-xl transition-all duration-150
-                ${isSelected
-                  ? 'bg-sky-600/15 border border-sky-500/30'
-                  : 'bg-slate-800/40 border border-transparent hover:bg-slate-800/70 hover:border-slate-700/50'
-                }
-              `}
-            >
-              <div className="flex items-center gap-2.5">
-                <Icon size={18} className={isSelected ? 'text-sky-300' : 'text-slate-400'} />
-                <div className="flex-1 min-w-0">
-                  <p className={`text-sm font-medium ${isSelected ? 'text-sky-300' : 'text-slate-200'}`}>
-                    {wf.name}
-                  </p>
-                  <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">
-                    {meta ? t(meta.descKey, meta.descFallback) : wf.description}
-                  </p>
+      <div className="w-72 flex-shrink-0 flex flex-col gap-2">
+        {/* New workflow button */}
+        <button
+          onClick={() => setShowEditor(true)}
+          className="w-full text-left px-3 py-2.5 rounded-xl bg-sky-600/10 border border-sky-500/20 hover:bg-sky-600/20 transition-colors flex items-center gap-2 text-sm text-sky-400"
+        >
+          <Plus size={14} />
+          {t('workflow.create', 'Create Workflow')}
+        </button>
+
+        <div className="flex-1 overflow-y-auto space-y-1">
+          {workflows.map((wf) => {
+            const meta = BUILTIN_META[getBuiltinKey(wf.id)];
+            const isSelected = wf.id === selectedId;
+            const Icon = meta?.icon || ClipboardList;
+            return (
+              <button
+                key={wf.id}
+                onClick={() => {
+                  setSelectedId(wf.id);
+                  setArgValues({});
+                }}
+                className={`
+                  w-full text-left px-3 py-3 rounded-xl transition-all duration-150
+                  ${isSelected
+                    ? 'bg-sky-600/15 border border-sky-500/30'
+                    : 'bg-slate-800/40 border border-transparent hover:bg-slate-800/70 hover:border-slate-700/50'
+                  }
+                `}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Icon size={18} className={isSelected ? 'text-sky-300' : 'text-slate-400'} />
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-medium ${isSelected ? 'text-sky-300' : 'text-slate-200'}`}>
+                      {wf.name}
+                    </p>
+                    <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">
+                      {meta ? t(meta.descKey, meta.descFallback) : wf.description}
+                    </p>
+                  </div>
+                  {isSelected && <ChevronRight size={14} className="text-sky-400 flex-shrink-0" />}
                 </div>
-                {isSelected && <ChevronRight size={14} className="text-sky-400 flex-shrink-0" />}
-              </div>
-              {wf.isBuiltin && (
-                <span className="inline-block mt-1.5 text-[10px] px-1.5 py-0.5 rounded bg-slate-700/50 text-slate-500">
-                  Built-in
-                </span>
-              )}
-            </button>
-          );
-        })}
+                {wf.isBuiltin && (
+                  <span className="inline-block mt-1.5 text-[10px] px-1.5 py-0.5 rounded bg-slate-700/50 text-slate-500">
+                    Built-in
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Right: selected workflow detail */}
@@ -206,21 +326,42 @@ export default function WorkflowList({
                 {t('workflow.args')}
               </h4>
               <div className="space-y-3">
-                {selected.args.map((arg) => (
-                  <div key={arg.name}>
-                    <label className="text-xs text-slate-400 mb-1 block">
-                      {arg.name}
-                      {arg.required && <span className="text-red-400 ml-0.5">*</span>}
-                    </label>
-                    <textarea
-                      value={argValues[arg.name] ?? arg.default ?? ''}
-                      onChange={(e) => handleArgChange(arg.name, e.target.value)}
-                      rows={2}
-                      placeholder={arg.description || arg.name}
-                      className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500/40 resize-none"
-                    />
-                  </div>
-                ))}
+                {selected.args.map((arg) => {
+                  const isDir = arg.name === 'directory' || arg.name === 'dir' || arg.name === 'workDir';
+                  return (
+                    <div key={arg.name}>
+                      <label className="text-xs text-slate-400 mb-1 block">
+                        {arg.name}
+                        {arg.required && <span className="text-red-400 ml-0.5">*</span>}
+                      </label>
+                      {isDir ? (
+                        <div className="flex gap-2">
+                          <input
+                            value={argValues[arg.name] ?? arg.default ?? ''}
+                            onChange={(e) => handleArgChange(arg.name, e.target.value)}
+                            placeholder={arg.description || t('workflow.dirPlaceholder', 'Select project directory...')}
+                            className="flex-1 rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                          />
+                          <button
+                            onClick={() => handlePickDir(arg.name)}
+                            className="flex-shrink-0 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 transition-colors"
+                            title={t('taskCreate.browseDir', 'Browse...')}
+                          >
+                            <FolderOpen size={16} />
+                          </button>
+                        </div>
+                      ) : (
+                        <textarea
+                          value={argValues[arg.name] ?? arg.default ?? ''}
+                          onChange={(e) => handleArgChange(arg.name, e.target.value)}
+                          rows={2}
+                          placeholder={arg.description || arg.name}
+                          className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500/40 resize-none"
+                        />
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -233,6 +374,19 @@ export default function WorkflowList({
             <Zap size={16} />
             {t('workflow.run')}
           </button>
+
+          {/* Delete custom workflow */}
+          {!selected.isBuiltin && (
+            <button
+              onClick={async () => {
+                await window.electronAPI?.workflowDelete?.(selected.yamlPath);
+                setSelectedId(null);
+              }}
+              className="mt-3 text-xs text-red-400/60 hover:text-red-400 transition-colors"
+            >
+              {t('workflow.delete', 'Delete this workflow')}
+            </button>
+          )}
 
           {/* YAML path (small) */}
           <div className="mt-4 flex items-center gap-1.5 text-[10px] text-slate-600">

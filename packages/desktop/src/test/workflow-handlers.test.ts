@@ -88,6 +88,8 @@ describe('register-workflow-handlers', () => {
       'workflow:approve',
       'workflow:save',
       'workflow:delete',
+      'task:pick-directory',
+      'task:poll-status',
     ];
     for (const channel of expected) {
       expect(handlers[channel], `Missing handler: ${channel}`).toBeDefined();

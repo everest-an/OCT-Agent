@@ -31,6 +31,7 @@ export interface Task {
   readonly workflowRunId?: string;
   readonly model?: string;
   readonly timeoutSeconds?: number;
+  readonly workDir?: string;
 }
 
 export type WorkflowStepType = 'agent-send' | 'command' | 'approval';
@@ -131,6 +132,7 @@ export function createTask(params: {
   priority?: TaskPriority;
   model?: string;
   timeoutSeconds?: number;
+  workDir?: string;
 }): Task {
   return {
     id: uuid(),
@@ -143,6 +145,7 @@ export function createTask(params: {
     createdAt: now(),
     model: params.model,
     timeoutSeconds: params.timeoutSeconds,
+    workDir: params.workDir,
   };
 }
 

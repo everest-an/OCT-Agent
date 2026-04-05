@@ -152,23 +152,15 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
   }, [workflowRuns]);
 
   // Listen for sub-agent status updates from Gateway
+  // Events are now pre-mapped by the IPC handler to: started | completed | failed
   useEffect(() => {
     const unsub = window.electronAPI?.onTaskStatusUpdate?.((data) => {
       if (!data) return;
 
-      const eventMap: Record<string, 'started' | 'completed' | 'failed' | 'timeout'> = {
-        'agent.started': 'started',
-        'agent.step_started': 'started',
-        'agent.finished': 'completed',
-        'subagent.spawned': 'started',
-      };
-
-      const mapped = eventMap[data.event];
-      if (!mapped) return;
-
-      const finalEvent = data.status === 'failed' ? 'failed'
-        : data.status === 'timeout' ? 'timeout'
-        : mapped;
+      // IPC handler already maps Gateway events (lifecycle:start/end, chat:final, etc.)
+      // to simple task events: 'started' | 'completed' | 'failed'
+      const finalEvent = data.event as 'started' | 'completed' | 'failed';
+      if (finalEvent !== 'started' && finalEvent !== 'completed' && finalEvent !== 'failed') return;
 
       setTasks((prev) => {
         // 1. Try matching by runId
@@ -189,8 +181,8 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
           }
         }
 
-        // 3. Fallback: if agent.finished and we have exactly 1 running task, it's likely that one
-        if (finalEvent === 'completed' || finalEvent === 'failed' || finalEvent === 'timeout') {
+        // 3. Fallback: if completed/failed and we have exactly 1 running task, it's likely that one
+        if (finalEvent === 'completed' || finalEvent === 'failed') {
           const runningTasks = prev.filter((t) => t.status === 'running' || t.status === 'queued');
           if (runningTasks.length === 1) {
             return updateTask(prev, runningTasks[0].id, {
@@ -207,6 +199,33 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
     return unsub;
   }, []);
 
+  // Poll running tasks for completion (fallback when Gateway events are missed)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTasks((prev) => {
+        const runningTasks = prev.filter((t) =>
+          (t.status === 'running' || t.status === 'queued') && t.sessionKey
+        );
+        if (runningTasks.length === 0) return prev;
+
+        // Poll each running task (fire-and-forget, updates state asynchronously)
+        for (const task of runningTasks) {
+          window.electronAPI?.taskPollStatus?.(task.sessionKey!).then((result) => {
+            if (result?.status === 'completed') {
+              setTasks((curr) => updateTask(curr, task.id, {
+                status: 'done',
+                completedAt: new Date().toISOString(),
+                result: result.result || undefined,
+              }));
+            }
+          }).catch(() => {});
+        }
+        return prev;
+      });
+    }, 15000); // Poll every 15 seconds
+    return () => clearInterval(interval);
+  }, []);
+
   // ---- Task actions ----
 
   const handleCreateTask = useCallback(async (params: {
@@ -215,6 +234,7 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
     priority: 'low' | 'medium' | 'high';
     model?: string;
     timeoutSeconds?: number;
+    workDir?: string;
   }) => {
     const agent = agents.find((a) => a.id === params.agentId);
     const newTask = createTask({
@@ -233,6 +253,7 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
         agentId: params.agentId,
         model: params.model,
         timeoutSeconds: params.timeoutSeconds,
+        workDir: params.workDir,
       });
 
       if (result?.success) {

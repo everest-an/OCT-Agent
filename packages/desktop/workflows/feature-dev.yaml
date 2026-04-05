@@ -8,6 +8,8 @@ args:
     default: ""
   context:
     default: ""
+  directory:
+    default: ""
 
 steps:
   - id: plan

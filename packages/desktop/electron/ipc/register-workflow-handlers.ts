@@ -8,7 +8,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, dialog } from 'electron';
 import type { GatewayClient } from '../gateway-ws';
 import { readJsonFileWithBom } from '../json-file';
 
@@ -105,33 +105,107 @@ function attachSubagentListener(deps: WorkflowHandlerDeps) {
 
   // We attach lazily when the first task operation happens.
   // The listener forwards sub-agent lifecycle events to the renderer.
+  //
+  // OpenClaw Gateway event structure (verified via source code):
+  //
+  //   Event "agent" — carries ALL agent lifecycle/tool/assistant events:
+  //     payload.stream = "lifecycle" | "tool" | "assistant" | "error"
+  //     payload.data.phase = "start" | "end" | "error"  (for lifecycle stream)
+  //     payload.runId, payload.sessionKey
+  //
+  //   Event "chat" — chat completion events:
+  //     payload.state = "delta" | "final" | "aborted" | "error"
+  //     payload.runId, payload.sessionKey
+  //     payload.message?.content (for final)
+  //
+  //   Event "sessions.changed" — session metadata (sub-agent spawn/end):
+  //     payload.phase = "start" | "end" | "error"
+  //     payload.sessionKey, payload.runId, payload.spawnedBy
+  //
   deps.getGatewayWs().then((ws) => {
+    // 1. Agent lifecycle events (stream=lifecycle, data.phase=start/end/error)
     ws.on('event:agent', (payload: any) => {
       const win = deps.getMainWindow();
       if (!win || win.isDestroyed()) return;
 
-      // Normalize event name from payload
-      const eventName: string = payload?.event || payload?.state || '';
+      const stream: string = payload?.stream || '';
+      const phase: string = payload?.data?.phase || '';
 
-      // Sub-agent lifecycle events we care about
-      if (
-        eventName === 'subagent.spawned' ||
-        eventName === 'agent.started' ||
-        eventName === 'agent.step_started' ||
-        eventName === 'agent.step_completed' ||
-        eventName === 'agent.finished' ||
-        eventName === 'tool.call' ||
-        eventName === 'tool.output'
-      ) {
-        win.webContents.send('task:status-update', {
-          event: eventName,
-          runId: payload?.runId || payload?.data?.runId || '',
-          agentId: payload?.agentId || payload?.data?.agentId || '',
-          status: payload?.status || payload?.data?.status || '',
-          result: payload?.result || payload?.data?.result || '',
-          sessionKey: payload?.sessionKey || payload?.data?.sessionKey || '',
-        });
+      let taskEvent: string | null = null;
+      if (stream === 'lifecycle') {
+        if (phase === 'start') taskEvent = 'started';
+        else if (phase === 'end') taskEvent = 'completed';
+        else if (phase === 'error') taskEvent = 'failed';
+      } else if (stream === 'error') {
+        taskEvent = 'failed';
       }
+
+      if (!taskEvent) return;
+
+      win.webContents.send('task:status-update', {
+        event: taskEvent,
+        runId: payload?.runId || '',
+        agentId: '',
+        status: taskEvent,
+        result: payload?.data?.error || '',
+        sessionKey: payload?.sessionKey || '',
+      });
+    });
+
+    // 2. Chat completion events (state=final/error/aborted)
+    ws.on('event:chat', (payload: any) => {
+      const win = deps.getMainWindow();
+      if (!win || win.isDestroyed()) return;
+
+      const state: string = payload?.state || '';
+      let taskEvent: string | null = null;
+      if (state === 'final') taskEvent = 'completed';
+      else if (state === 'error') taskEvent = 'failed';
+      else if (state === 'aborted') taskEvent = 'failed';
+
+      if (!taskEvent) return;
+
+      // Extract result text from chat final message
+      const message = payload?.message;
+      const resultText = Array.isArray(message?.content)
+        ? message.content.filter((c: any) => c?.type === 'text').map((c: any) => c.text).join('')
+        : (typeof message?.content === 'string' ? message.content : '');
+
+      win.webContents.send('task:status-update', {
+        event: taskEvent,
+        runId: payload?.runId || '',
+        agentId: '',
+        status: taskEvent,
+        result: resultText || payload?.errorMessage || '',
+        sessionKey: payload?.sessionKey || '',
+      });
+    });
+
+    // 3. Session changes (sub-agent spawn/end tracking)
+    ws.on('event:sessions.changed', (payload: any) => {
+      const win = deps.getMainWindow();
+      if (!win || win.isDestroyed()) return;
+
+      // Only care about sub-agent sessions
+      const key: string = payload?.sessionKey || '';
+      if (!key.includes('subagent')) return;
+
+      const phase: string = payload?.phase || '';
+      let taskEvent: string | null = null;
+      if (phase === 'start') taskEvent = 'started';
+      else if (phase === 'end') taskEvent = 'completed';
+      else if (phase === 'error') taskEvent = 'failed';
+
+      if (!taskEvent) return;
+
+      win.webContents.send('task:status-update', {
+        event: taskEvent,
+        runId: payload?.runId || '',
+        agentId: '',
+        status: taskEvent,
+        result: '',
+        sessionKey: key,
+      });
     });
   }).catch(() => {
     // Gateway not available — listener will be re-attempted on next operation.
@@ -275,13 +349,18 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
         thinking?: string;
         timeoutSeconds?: number;
         sessionKey?: string;
+        workDir?: string;
       },
     ) => {
       // Ensure sub-agent listener is attached
       attachSubagentListener(deps);
 
-      // Build the spawn command
-      const escaped = params.title.replace(/"/g, '\\"');
+      // Build the spawn command.
+      // If workDir is specified, prepend a working directory instruction so the agent knows where to operate.
+      const rawDesc = params.workDir
+        ? `Working directory: ${params.workDir}\n\n${params.title}`
+        : params.title;
+      const escaped = rawDesc.replace(/"/g, '\\"');
       let spawnCmd = `/subagents spawn ${params.agentId} "${escaped}"`;
       if (params.model) spawnCmd += ` --model ${params.model}`;
       if (params.thinking) spawnCmd += ` --thinking ${params.thinking}`;
@@ -531,6 +610,45 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err?.message?.slice(0, 200) || 'Delete failed' };
+    }
+  });
+
+  /** Pick a directory via native dialog (for workspace selection). */
+  ipcMain.handle('task:pick-directory', async () => {
+    const win = getMainWindow();
+    if (!win) return { cancelled: true };
+    const result = await dialog.showOpenDialog(win, {
+      properties: ['openDirectory'],
+      title: 'Select working directory',
+    });
+    if (result.canceled || !result.filePaths.length) {
+      return { cancelled: true };
+    }
+    return { cancelled: false, path: result.filePaths[0] };
+  });
+
+  /** Check task completion by polling session history (fallback for missed events). */
+  ipcMain.handle('task:poll-status', async (_e, sessionKey: string) => {
+    try {
+      const ws = await deps.getGatewayWs();
+      const messages = await ws.chatHistory(sessionKey);
+      if (!messages || messages.length === 0) return { status: 'unknown' };
+
+      // Check the last message — if it's from agent and has no pending tool calls, likely done
+      const last = messages[messages.length - 1];
+      const role = last?.role || last?.type || '';
+      const hasToolCalls = messages.some((m: any) =>
+        m.role === 'tool' || m.type === 'tool_result' || m.type === 'tool_use');
+
+      if (role === 'assistant' && !last?.tool_use) {
+        // Has assistant response with no pending tools — likely completed
+        const text = last?.content || last?.text || '';
+        return { status: 'completed', result: typeof text === 'string' ? text.slice(0, 500) : '' };
+      }
+
+      return { status: 'running' };
+    } catch {
+      return { status: 'unknown' };
     }
   });
 }

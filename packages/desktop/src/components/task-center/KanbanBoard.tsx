@@ -1,33 +1,35 @@
 /**
- * KanbanBoard — 6-column drag-and-drop task board.
+ * KanbanBoard — 5-column drag-and-drop task board.
  * Uses HTML5 DnD API — zero new dependencies.
  *
- * Columns: Backlog → Queued → Running → Review → Done → Failed
+ * Columns: Backlog → Queued → Running → Done → Failed
  * Drag rules:
- *   Backlog → Queued: triggers sub-agent spawn
- *   Failed → Queued: triggers retry
- *   Other moves are local reorder only
+ *   Backlog/Failed → Queued: triggers sub-agent spawn (the only meaningful drag)
+ *   Other columns are read-only — tasks flow there automatically via Gateway events
  */
 
 import { useState } from 'react';
 import KanbanCard from './KanbanCard';
-import { KANBAN_COLUMNS, tasksByColumn } from '../../lib/task-store';
 import type { Task, TaskStatus } from '../../lib/task-store';
 
-const COLUMN_I18N: Record<TaskStatus, string> = {
+// Ordered columns for display (removed 'review' — it had no real purpose)
+const DISPLAY_COLUMNS: readonly TaskStatus[] = ['backlog', 'queued', 'running', 'done', 'failed'] as const;
+
+// Only these columns accept drops — other columns are auto-managed by Gateway events
+const DROPPABLE_COLUMNS: ReadonlySet<TaskStatus> = new Set(['queued']);
+
+const COLUMN_I18N: Record<string, string> = {
   backlog: 'kanban.backlog',
   queued: 'kanban.queued',
   running: 'kanban.running',
-  review: 'kanban.review',
   done: 'kanban.done',
   failed: 'kanban.failed',
 };
 
-const COLUMN_COLORS: Record<TaskStatus, string> = {
+const COLUMN_COLORS: Record<string, string> = {
   backlog: 'bg-slate-500',
   queued: 'bg-amber-500',
   running: 'bg-sky-500',
-  review: 'bg-purple-500',
   done: 'bg-emerald-500',
   failed: 'bg-red-500',
 };
@@ -41,6 +43,18 @@ interface KanbanBoardProps {
   onViewDetail: (taskId: string) => void;
 }
 
+function tasksByColumn(tasks: readonly Task[]): Record<TaskStatus, readonly Task[]> {
+  const result: Record<string, Task[]> = {
+    backlog: [], queued: [], running: [], review: [], done: [], failed: [],
+  };
+  for (const t of tasks) {
+    // Migrate any 'review' tasks to 'done' (column removed)
+    const col = t.status === 'review' ? 'done' : t.status;
+    (result[col] ?? result.backlog).push(t);
+  }
+  return result as Record<TaskStatus, readonly Task[]>;
+}
+
 export default function KanbanBoard({
   tasks,
   t,
@@ -52,7 +66,12 @@ export default function KanbanBoard({
   const columns = tasksByColumn(tasks);
   const [dragOverColumn, setDragOverColumn] = useState<TaskStatus | null>(null);
 
+  function canDrop(column: TaskStatus): boolean {
+    return DROPPABLE_COLUMNS.has(column);
+  }
+
   function handleDragOver(e: React.DragEvent, column: TaskStatus) {
+    if (!canDrop(column)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     setDragOverColumn(column);
@@ -65,6 +84,7 @@ export default function KanbanBoard({
   function handleDrop(e: React.DragEvent, toColumn: TaskStatus) {
     e.preventDefault();
     setDragOverColumn(null);
+    if (!canDrop(toColumn)) return;
 
     const taskId = e.dataTransfer.getData('text/plain');
     if (!taskId) return;
@@ -72,14 +92,18 @@ export default function KanbanBoard({
     const task = tasks.find((t) => t.id === taskId);
     if (!task || task.status === toColumn) return;
 
+    // Only allow backlog/failed → queued (spawn/retry)
+    if (task.status !== 'backlog' && task.status !== 'failed') return;
+
     onMoveTask(taskId, task.status, toColumn);
   }
 
   return (
     <div className="flex gap-3 overflow-x-auto pb-4 min-h-0 flex-1">
-      {KANBAN_COLUMNS.map((column) => {
-        const items = columns[column];
+      {DISPLAY_COLUMNS.map((column) => {
+        const items = columns[column] || [];
         const isOver = dragOverColumn === column;
+        const droppable = canDrop(column);
 
         return (
           <div
@@ -87,7 +111,7 @@ export default function KanbanBoard({
             className={`
               flex-shrink-0 w-64 flex flex-col rounded-xl
               bg-slate-900/50 border transition-colors duration-150
-              ${isOver ? 'border-sky-500/50 bg-sky-950/20' : 'border-slate-800/60'}
+              ${isOver && droppable ? 'border-sky-500/50 bg-sky-950/20' : 'border-slate-800/60'}
             `}
             onDragOver={(e) => handleDragOver(e, column)}
             onDragLeave={handleDragLeave}
@@ -110,7 +134,11 @@ export default function KanbanBoard({
             <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-[120px]">
               {items.length === 0 && (
                 <div className="text-center py-6 text-[11px] text-slate-600">
-                  {column === 'backlog' ? t('kanban.dragHint') : ''}
+                  {column === 'backlog'
+                    ? t('kanban.dragHint', 'Drag to "Queued" to start')
+                    : column === 'queued'
+                    ? t('kanban.dropHint', 'Drop tasks here to run')
+                    : ''}
                 </div>
               )}
               {items.map((task) => (

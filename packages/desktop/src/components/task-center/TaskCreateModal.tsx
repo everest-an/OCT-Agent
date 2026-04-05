@@ -1,10 +1,11 @@
 /**
  * TaskCreateModal — create a new task and assign it to an agent.
  * Super beginner-friendly: just describe what you want done + pick an agent.
+ * Includes optional working directory selector for specifying where the agent should operate.
  */
 
 import { useState } from 'react';
-import { X, Loader2 } from 'lucide-react';
+import { FolderOpen, X, Loader2 } from 'lucide-react';
 
 interface AgentOption {
   id: string;
@@ -22,6 +23,7 @@ interface TaskCreateModalProps {
     priority: 'low' | 'medium' | 'high';
     model?: string;
     timeoutSeconds?: number;
+    workDir?: string;
   }) => Promise<void>;
 }
 
@@ -37,7 +39,15 @@ export default function TaskCreateModal({ t, agents, onClose, onCreate }: TaskCr
   const [agentId, setAgentId] = useState(agents[0]?.id || 'main');
   const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium');
   const [timeout, setTimeout] = useState(300);
+  const [workDir, setWorkDir] = useState('');
   const [creating, setCreating] = useState(false);
+
+  async function handlePickDir() {
+    const result = await window.electronAPI?.taskPickDirectory?.();
+    if (result && !result.cancelled && result.path) {
+      setWorkDir(result.path);
+    }
+  }
 
   async function handleSubmit() {
     if (!title.trim() || creating) return;
@@ -48,6 +58,7 @@ export default function TaskCreateModal({ t, agents, onClose, onCreate }: TaskCr
         agentId,
         priority,
         timeoutSeconds: timeout,
+        workDir: workDir || undefined,
       });
       onClose();
     } catch {
@@ -89,6 +100,39 @@ export default function TaskCreateModal({ t, agents, onClose, onCreate }: TaskCr
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSubmit();
               }}
             />
+          </div>
+
+          {/* Working directory */}
+          <div>
+            <label className="text-xs font-medium text-slate-400 mb-1.5 block">
+              {t('taskCreate.workDir', 'Working Directory')}
+              <span className="text-slate-600 ml-1">{t('taskCreate.workDirHint', '(optional)')}</span>
+            </label>
+            <div className="flex gap-2">
+              <div
+                className={`flex-1 rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-sm truncate ${
+                  workDir ? 'text-slate-200' : 'text-slate-600'
+                }`}
+              >
+                {workDir || t('taskCreate.workDirPlaceholder', 'Default agent workspace')}
+              </div>
+              <button
+                onClick={handlePickDir}
+                className="flex-shrink-0 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-slate-100 transition-colors"
+                title={t('taskCreate.browseDir', 'Browse...')}
+              >
+                <FolderOpen size={16} />
+              </button>
+              {workDir && (
+                <button
+                  onClick={() => setWorkDir('')}
+                  className="flex-shrink-0 px-2 py-2 rounded-lg text-slate-500 hover:text-slate-300 transition-colors"
+                  title={t('common.clear', 'Clear')}
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Agent + Priority row */}

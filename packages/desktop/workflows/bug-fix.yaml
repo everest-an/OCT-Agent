@@ -8,6 +8,8 @@ args:
     default: ""
   reproduction:
     default: ""
+  directory:
+    default: ""
 
 steps:
   - id: investigate

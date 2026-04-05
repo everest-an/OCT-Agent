@@ -212,9 +212,11 @@ export interface ElectronAPI {
   workflowEnableCollaboration?: () => Promise<{ success: boolean; config?: { maxSpawnDepth: number; agentToAgentEnabled: boolean } }>;
   workflowCheckLobster?: () => Promise<{ installed: boolean; enabled: boolean }>;
   workflowInstallLobster?: () => Promise<{ success: boolean; error?: string }>;
-  taskCreate?: (params: { title: string; agentId: string; model?: string; thinking?: string; timeoutSeconds?: number; sessionKey?: string }) => Promise<{ success: boolean; runId?: string; sessionKey?: string; error?: string }>;
+  taskCreate?: (params: { title: string; agentId: string; model?: string; thinking?: string; timeoutSeconds?: number; sessionKey?: string; workDir?: string }) => Promise<{ success: boolean; runId?: string; sessionKey?: string; error?: string }>;
   taskCancel?: (sessionKey: string) => Promise<{ success: boolean; error?: string }>;
   taskDetail?: (sessionKey: string) => Promise<{ success: boolean; messages?: unknown[]; error?: string }>;
+  taskPickDirectory?: () => Promise<{ cancelled: boolean; path?: string }>;
+  taskPollStatus?: (sessionKey: string) => Promise<{ status: string; result?: string }>;
   workflowList?: () => Promise<{ workflows: Array<{ id: string; name: string; description: string; icon: string; yamlPath: string; isBuiltin: boolean }> }>;
   workflowRun?: (yamlPath: string, args: Record<string, string>) => Promise<{ success: boolean; status?: string; output?: unknown; error?: string }>;
   workflowApprove?: (resumeToken: string, approve: boolean) => Promise<{ success: boolean; error?: string }>;
