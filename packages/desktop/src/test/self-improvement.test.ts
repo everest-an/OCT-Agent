@@ -30,6 +30,7 @@ describe('self-improvement promotion proposals', () => {
       area: 'docs' as const,
       source: 'desktop',
       workspacePath,
+      _allowedRoots: [workspacePath],
       summary: 'Verify OpenClaw CLI flags before changing chat command arguments',
     };
 
@@ -47,7 +48,7 @@ describe('self-improvement promotion proposals', () => {
     expect(proposals).toContain('Verify OpenClaw CLI flags before changing chat command arguments');
     expect(proposals).toContain('`TOOLS.md`');
 
-    const status = await getSelfImprovementStatus({ workspacePath });
+    const status = await getSelfImprovementStatus({ workspacePath, _allowedRoots: [workspacePath] });
     expect(status.promotionProposalCount).toBe(1);
     expect(status.readyForPromotionCount).toBe(1);
   });
@@ -58,6 +59,7 @@ describe('self-improvement promotion proposals', () => {
       area: 'docs' as const,
       source: 'desktop',
       workspacePath,
+      _allowedRoots: [workspacePath],
       summary: 'Verify OpenClaw CLI flags before changing chat command arguments',
     };
 
@@ -81,6 +83,7 @@ describe('self-improvement promotion proposals', () => {
       area: 'docs' as const,
       source: 'desktop',
       workspacePath,
+      _allowedRoots: [workspacePath],
       summary: 'Verify OpenClaw CLI flags before changing chat command arguments',
     };
 
@@ -88,12 +91,13 @@ describe('self-improvement promotion proposals', () => {
     await appendSelfImprovementEntry(payload);
     await appendSelfImprovementEntry(payload);
 
-    const beforeApply = await listSelfImprovementPromotionProposals({ workspacePath });
+    const beforeApply = await listSelfImprovementPromotionProposals({ workspacePath, _allowedRoots: [workspacePath] });
     expect(beforeApply.items.length).toBe(1);
     expect(beforeApply.items[0].status).toBe('proposed');
 
     const applied = await applySelfImprovementPromotionProposal({
       workspacePath,
+      _allowedRoots: [workspacePath],
       proposalId: beforeApply.items[0].id,
     });
 
@@ -105,15 +109,16 @@ describe('self-improvement promotion proposals', () => {
     expect(toolsContent).toContain(`promotion: ${beforeApply.items[0].id}`);
     expect(toolsContent).toContain('Auto-promoted Rule');
 
-    const afterApply = await listSelfImprovementPromotionProposals({ workspacePath });
+    const afterApply = await listSelfImprovementPromotionProposals({ workspacePath, _allowedRoots: [workspacePath] });
     expect(afterApply.items[0].status).toBe('approved');
 
-    const status = await getSelfImprovementStatus({ workspacePath });
+    const status = await getSelfImprovementStatus({ workspacePath, _allowedRoots: [workspacePath] });
     expect(status.promotionProposalCount).toBe(1);
     expect(status.readyForPromotionCount).toBe(0);
 
     await applySelfImprovementPromotionProposal({
       workspacePath,
+      _allowedRoots: [workspacePath],
       proposalId: beforeApply.items[0].id,
     });
 
@@ -128,6 +133,7 @@ describe('self-improvement promotion proposals', () => {
       area: 'docs' as const,
       source: 'desktop',
       workspacePath,
+      _allowedRoots: [workspacePath],
       summary: 'Verify OpenClaw CLI flags before changing chat command arguments',
     };
 
@@ -135,20 +141,21 @@ describe('self-improvement promotion proposals', () => {
     await appendSelfImprovementEntry(payload);
     await appendSelfImprovementEntry(payload);
 
-    const listed = await listSelfImprovementPromotionProposals({ workspacePath });
+    const listed = await listSelfImprovementPromotionProposals({ workspacePath, _allowedRoots: [workspacePath] });
     expect(listed.items).toHaveLength(1);
     expect(listed.items[0].status).toBe('proposed');
 
     const rejected = await rejectSelfImprovementPromotionProposal({
       workspacePath,
+      _allowedRoots: [workspacePath],
       proposalId: listed.items[0].id,
     });
     expect(rejected.proposal.status).toBe('rejected');
 
-    const afterReject = await listSelfImprovementPromotionProposals({ workspacePath });
+    const afterReject = await listSelfImprovementPromotionProposals({ workspacePath, _allowedRoots: [workspacePath] });
     expect(afterReject.items[0].status).toBe('rejected');
 
-    const status = await getSelfImprovementStatus({ workspacePath });
+    const status = await getSelfImprovementStatus({ workspacePath, _allowedRoots: [workspacePath] });
     expect(status.readyForPromotionCount).toBe(0);
   });
 
@@ -158,6 +165,7 @@ describe('self-improvement promotion proposals', () => {
       area: 'docs' as const,
       source: 'desktop',
       workspacePath,
+      _allowedRoots: [workspacePath],
       summary: 'Verify OpenClaw CLI flags before changing chat command arguments',
     };
     const payloadTwo = {
@@ -165,6 +173,7 @@ describe('self-improvement promotion proposals', () => {
       area: 'docs' as const,
       source: 'desktop',
       workspacePath,
+      _allowedRoots: [workspacePath],
       summary: 'Use a consistent concise communication style across responses',
     };
 
@@ -173,20 +182,21 @@ describe('self-improvement promotion proposals', () => {
       await appendSelfImprovementEntry(payloadTwo);
     }
 
-    const before = await listSelfImprovementPromotionProposals({ workspacePath });
+    const before = await listSelfImprovementPromotionProposals({ workspacePath, _allowedRoots: [workspacePath] });
     expect(before.items).toHaveLength(2);
 
     await applySelfImprovementPromotionProposal({
       workspacePath,
+      _allowedRoots: [workspacePath],
       proposalId: before.items[0].id,
     });
 
-    const bulk = await applyAllSelfImprovementPromotionProposals({ workspacePath });
+    const bulk = await applyAllSelfImprovementPromotionProposals({ workspacePath, _allowedRoots: [workspacePath] });
     expect(bulk.result.requestedCount).toBe(1);
     expect(bulk.result.appliedCount).toBe(1);
     expect(bulk.result.skippedCount).toBe(1);
 
-    const after = await listSelfImprovementPromotionProposals({ workspacePath });
+    const after = await listSelfImprovementPromotionProposals({ workspacePath, _allowedRoots: [workspacePath] });
     expect(after.items.every((item) => item.status === 'approved')).toBe(true);
   });
 });

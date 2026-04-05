@@ -1522,7 +1522,10 @@ async function chatSendViaCli(
     let stderrRemainder = '';
     const thinkingFlag = options?.thinkingLevel && options.thinkingLevel !== 'off'
       ? ` --thinking ${options.thinkingLevel}` : '';
-    const agentFlag = options?.agentId && options.agentId !== 'main' ? ` --agent "${options.agentId}"` : '';
+    const sanitizedAgentId = options?.agentId && options.agentId !== 'main'
+      && /^[a-z][a-z0-9-]{0,63}$/.test(options.agentId) && !options.agentId.endsWith('-')
+      ? options.agentId : '';
+    const agentFlag = sanitizedAgentId ? ` --agent "${sanitizedAgentId}"` : '';
     const escapedMsg = requestMessage.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\\$').replace(/`/g, '\\`');
     // Note: openclaw CLI does not support --reasoning flag; reasoning is controlled via
     // openclaw.json agents.defaults.reasoningDefault (set in syncToOpenClaw)
@@ -1531,8 +1534,8 @@ async function chatSendViaCli(
     if (options?.thinkingLevel && options.thinkingLevel !== 'off') {
       openclawArgs.push('--thinking', options.thinkingLevel);
     }
-    if (options?.agentId && options.agentId !== 'main') {
-      openclawArgs.push('--agent', options.agentId);
+    if (sanitizedAgentId) {
+      openclawArgs.push('--agent', sanitizedAgentId);
     }
     const cwd = options?.workspacePath || os.homedir();
     const spawnChatProcess = deps.spawnChatProcess || spawn;

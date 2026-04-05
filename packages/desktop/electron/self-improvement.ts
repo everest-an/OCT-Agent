@@ -2,381 +2,160 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-export type SelfImprovementEntryType = 'learning' | 'error' | 'feature';
-export type SelfImprovementPriority = 'low' | 'medium' | 'high' | 'critical';
-export type SelfImprovementArea = 'frontend' | 'backend' | 'infra' | 'tests' | 'docs' | 'config';
-export type SelfImprovementPromotionTarget = 'AGENTS.md' | 'SOUL.md' | 'TOOLS.md';
+// Re-export public types for external consumers
+export type {
+  SelfImprovementEntryType,
+  SelfImprovementPriority,
+  SelfImprovementArea,
+  SelfImprovementPromotionTarget,
+  SelfImprovementPromotionBulkApplyResult,
+  SelfImprovementLogInput,
+  SelfImprovementStatus,
+  SelfImprovementPromotionSummary,
+  SelfImprovementPromotionProposal,
+} from './self-improvement-types';
 
-export type SelfImprovementPromotionBulkApplyResult = {
-  requestedCount: number;
-  appliedCount: number;
-  skippedCount: number;
-  applied: Array<{
-    proposalId: string;
-    target: SelfImprovementPromotionTarget;
-    targetFilePath: string;
-  }>;
-};
-export type SelfImprovementLogInput = {
-  type: SelfImprovementEntryType;
-  summary: string;
-  details?: string;
-  suggestedAction?: string;
-  area?: SelfImprovementArea;
-  priority?: SelfImprovementPriority;
-  category?: 'correction' | 'insight' | 'knowledge_gap' | 'best_practice';
-  commandName?: string;
-  source?: string;
-  relatedFiles?: string[];
-  tags?: string[];
-  complexity?: 'simple' | 'medium' | 'complex';
-  frequency?: 'first_time' | 'recurring';
-  userContext?: string;
-  workspacePath?: string;
-  homeDir?: string;
-  agentId?: string;
-};
+import type {
+  EntryFileName,
+  SelfImprovementLogInput,
+  SelfImprovementPromotionProposal,
+  SelfImprovementPromotionBulkApplyResult,
+  SelfImprovementPromotionSummary,
+  SelfImprovementStatus,
+  SelfImprovementPromotionTarget,
+  WorkspaceParams,
+} from './self-improvement-types';
 
-export type SelfImprovementStatus = {
+import {
+  LEARNINGS_HEADER,
+  ERRORS_HEADER,
+  FEATURE_REQUESTS_HEADER,
+  PROMOTION_PROPOSALS_HEADER,
+  DEFAULT_PROMOTION_RULE,
+  TARGET_FILE_HEADER,
+  resolveWorkspaceRoot,
+  trimText,
+  formatSequence,
+  getDateStamp,
+  getTypePrefix,
+  escapeRegExp,
+  isPathWithinAllowedRoot,
+} from './self-improvement-types';
+
+import {
+  parseEntryBlocks,
+  parsePromotionBlocks,
+  updateProposalStatusBlock,
+  pickPromotionTarget,
+  buildPromotionRuleText,
+  readPatternKeysFromProposals,
+  nextPromotionSequence,
+  formatPromotionProposalEntry,
+  buildLearningEntry,
+  buildErrorEntry,
+  buildFeatureEntry,
+  buildAppliedRuleBlock,
+} from './self-improvement-parsers';
+
+// ---------------------------------------------------------------------------
+// Async mutex — prevents race conditions in read-compute-write sequences.
+// Electron main process is single-threaded but async, so an in-process mutex
+// is sufficient (no cross-process contention).
+// ---------------------------------------------------------------------------
+
+class AsyncMutex {
+  private queue: Array<() => void> = [];
+  private locked = false;
+
+  async acquire(): Promise<void> {
+    if (this.locked) {
+      await new Promise<void>((resolve) => this.queue.push(resolve));
+    }
+    this.locked = true;
+  }
+
+  release(): void {
+    if (this.queue.length > 0) {
+      const next = this.queue.shift();
+      if (next) next();
+    } else {
+      this.locked = false;
+    }
+  }
+}
+
+const appendMutex = new AsyncMutex();
+
+// ---------------------------------------------------------------------------
+// File helpers
+// ---------------------------------------------------------------------------
+
+async function ensureFileIfMissing(filePath: string, initialContent: string): Promise<boolean> {
+  try {
+    await fs.promises.access(filePath, fs.constants.F_OK);
+    return false;
+  } catch {
+    await fs.promises.writeFile(filePath, initialContent, 'utf8');
+    return true;
+  }
+}
+
+async function ensureTargetFileExists(rootDir: string, target: SelfImprovementPromotionTarget): Promise<string> {
+  const targetPath = path.join(rootDir, target);
+  try {
+    await fs.promises.access(targetPath, fs.constants.F_OK);
+    return targetPath;
+  } catch {
+    await fs.promises.mkdir(rootDir, { recursive: true });
+    await fs.promises.writeFile(targetPath, TARGET_FILE_HEADER[target], 'utf8');
+    return targetPath;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Scaffold
+// ---------------------------------------------------------------------------
+
+export async function ensureSelfImprovementScaffold(params?: WorkspaceParams): Promise<{
   rootDir: string;
   learningsDir: string;
-  pendingCount: number;
-  highPriorityPendingCount: number;
-  promotionProposalCount: number;
-  readyForPromotionCount: number;
-};
+  createdFiles: string[];
+}> {
+  const homeDir = params?.homeDir || os.homedir();
+  const openclawRoot = path.join(homeDir, '.openclaw');
+  const allowedRoots = params?._allowedRoots ?? [openclawRoot];
+  const rawRoot = (params?.workspacePath || '').trim() || resolveWorkspaceRoot(homeDir, params?.agentId || 'main');
+  const rootDir = path.resolve(rawRoot);
 
-export type SelfImprovementPromotionSummary = {
-  generatedCount: number;
-  proposalFilePath?: string;
-  proposalIds: string[];
-};
-
-export type SelfImprovementPromotionProposal = {
-  id: string;
-  status: 'proposed' | 'approved' | 'rejected';
-  target: SelfImprovementPromotionTarget;
-  patternKey: string;
-  summary: string;
-  ruleText: string;
-  evidenceCount: number;
-  evidenceIds: string[];
-  createdAt?: string;
-  approvedAt?: string;
-};
-
-type SelfImprovementPromotionRule = {
-  recurrenceThreshold: number;
-  windowDays: number;
-};
-
-const LEARNINGS_HEADER = '# Learnings\n\nCorrections, insights, and knowledge gaps captured during development.\n\n**Categories**: correction | insight | knowledge_gap | best_practice\n\n---\n';
-const ERRORS_HEADER = '# Errors\n\nCommand failures and integration errors.\n\n---\n';
-const FEATURE_REQUESTS_HEADER = '# Feature Requests\n\nCapabilities requested by users.\n\n---\n';
-const PROMOTION_PROPOSALS_HEADER = '# Promotion Proposals\n\nAuto-generated proposals for promoting recurring patterns into workspace memory files.\n\n**Rule**: recurring pattern >= 3 occurrences within 30 days.\n\n---\n';
-const DEFAULT_PROMOTION_RULE: SelfImprovementPromotionRule = {
-  recurrenceThreshold: 3,
-  windowDays: 30,
-};
-const TARGET_FILE_HEADER: Record<SelfImprovementPromotionTarget, string> = {
-  'AGENTS.md': '# AGENTS\n\nWorkflow rules and coordination guidelines.\n\n',
-  'SOUL.md': '# SOUL\n\nBehavior and communication principles.\n\n',
-  'TOOLS.md': '# TOOLS\n\nTool usage rules and operational safeguards.\n\n',
-};
-
-type EntryFileName = 'LEARNINGS.md' | 'ERRORS.md' | 'FEATURE_REQUESTS.md';
-
-type ParsedLearningEntry = {
-  id: string;
-  type: SelfImprovementEntryType;
-  title: string;
-  summary: string;
-  area: SelfImprovementArea;
-  priority: SelfImprovementPriority;
-  status: string;
-  loggedAt: Date | null;
-  patternKey: string;
-};
-
-type ParsedPromotionEntry = SelfImprovementPromotionProposal & {
-  rawBlock: string;
-};
-
-function toAgentSlug(agentId: string): string {
-  return agentId.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'main';
-}
-
-function resolveWorkspaceRoot(homeDir: string, agentId = 'main'): string {
-  const normalizedAgent = (agentId || 'main').trim().toLowerCase();
-  if (normalizedAgent === 'main' || normalizedAgent === 'default') {
-    return path.join(homeDir, '.openclaw', 'workspace');
+  const isAllowed = allowedRoots.some((root) => isPathWithinAllowedRoot(rootDir, root));
+  if (!isAllowed) {
+    throw new Error(`Workspace path must be within allowed directories, got: ${rootDir}`);
   }
 
-  const slug = toAgentSlug(normalizedAgent);
-  const candidates = [
-    path.join(homeDir, '.openclaw', `workspace-${slug}`),
-    path.join(homeDir, '.openclaw', 'workspaces', slug),
-    path.join(homeDir, '.openclaw', 'agents', slug, 'agent'),
+  const learningsDir = path.join(rootDir, '.learnings');
+
+  await fs.promises.mkdir(learningsDir, { recursive: true });
+
+  const createdFiles: string[] = [];
+  const targets: Array<[EntryFileName, string]> = [
+    ['LEARNINGS.md', LEARNINGS_HEADER],
+    ['ERRORS.md', ERRORS_HEADER],
+    ['FEATURE_REQUESTS.md', FEATURE_REQUESTS_HEADER],
   ];
 
-  return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
-}
-
-function trimText(input?: string, fallback = 'N/A'): string {
-  const text = String(input || '').replace(/\r\n/g, '\n').trim();
-  return text || fallback;
-}
-
-function listText(values?: string[]): string {
-  if (!Array.isArray(values) || values.length === 0) return 'n/a';
-  const cleaned = values.map((value) => String(value || '').trim()).filter(Boolean);
-  return cleaned.length > 0 ? cleaned.join(', ') : 'n/a';
-}
-
-function formatSequence(value: number): string {
-  return String(Math.max(value, 1)).padStart(3, '0');
-}
-
-function getDateStamp(now: Date): string {
-  return [
-    now.getUTCFullYear(),
-    String(now.getUTCMonth() + 1).padStart(2, '0'),
-    String(now.getUTCDate()).padStart(2, '0'),
-  ].join('');
-}
-
-function getTypePrefix(type: SelfImprovementEntryType): 'LRN' | 'ERR' | 'FEAT' {
-  if (type === 'error') return 'ERR';
-  if (type === 'feature') return 'FEAT';
-  return 'LRN';
-}
-
-function parseTypeFromId(id: string): SelfImprovementEntryType {
-  if (id.startsWith('ERR-')) return 'error';
-  if (id.startsWith('FEAT-')) return 'feature';
-  return 'learning';
-}
-
-function normalizePatternText(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 140);
-}
-
-function buildPatternKey(type: SelfImprovementEntryType, area: string, summary: string): string {
-  return `${type}|${area}|${normalizePatternText(summary)}`;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function extractSection(block: string, section: string): string {
-  const matcher = new RegExp(`###\\s+${escapeRegExp(section)}\\n([\\s\\S]*?)(?=\\n###\\s+|\\n\\*\\*|\\n---|$)`, 'i');
-  const match = matcher.exec(block);
-  return match ? match[1].trim() : '';
-}
-
-function parseLoggedAt(value?: string): Date | null {
-  const normalized = String(value || '').trim();
-  if (!normalized) return null;
-  const parsed = new Date(normalized);
-  return Number.isFinite(parsed.getTime()) ? parsed : null;
-}
-
-function parseEntryBlocks(content: string): ParsedLearningEntry[] {
-  const entries: ParsedLearningEntry[] = [];
-  const matcher = /^## \[([A-Z]+-\d{8}-\d{3})\]\s+([^\n]+)\n([\s\S]*?)(?=^## \[|(?![\s\S]))/gm;
-
-  let match: RegExpExecArray | null = null;
-  while (true) {
-    match = matcher.exec(content);
-    if (!match) break;
-
-    const id = String(match[1] || '').trim();
-    const title = String(match[2] || '').trim();
-    const block = String(match[3] || '');
-    if (!id) continue;
-
-    const type = parseTypeFromId(id);
-    const status = (block.match(/\*\*Status\*\*:\s*([^\n]+)/i)?.[1] || 'pending').trim().toLowerCase();
-    const priority = (block.match(/\*\*Priority\*\*:\s*([^\n]+)/i)?.[1] || 'medium').trim().toLowerCase() as SelfImprovementPriority;
-    const area = (block.match(/\*\*Area\*\*:\s*([^\n]+)/i)?.[1] || 'docs').trim().toLowerCase() as SelfImprovementArea;
-    const loggedAt = parseLoggedAt(block.match(/\*\*Logged\*\*:\s*([^\n]+)/i)?.[1]);
-    const summary = extractSection(block, 'Summary')
-      || extractSection(block, 'Requested Capability')
-      || extractSection(block, 'Error')
-      || title;
-    const patternKey = buildPatternKey(type, area, summary || title);
-    if (!patternKey.endsWith('|')) {
-      entries.push({
-        id,
-        type,
-        title,
-        summary: summary || title,
-        area,
-        priority,
-        status,
-        loggedAt,
-        patternKey,
-      });
+  for (const [fileName, header] of targets) {
+    const targetPath = path.join(learningsDir, fileName);
+    if (await ensureFileIfMissing(targetPath, header)) {
+      createdFiles.push(targetPath);
     }
   }
 
-  return entries;
+  return { rootDir, learningsDir, createdFiles };
 }
 
-function pickPromotionTarget(entry: ParsedLearningEntry): SelfImprovementPromotionTarget {
-  const summary = `${entry.title} ${entry.summary}`;
-  const behaviorPattern = /(tone|style|communication|concise|verbosity|persona|behavior|attitude|language)/i;
-  const toolPattern = /(cli|command|shell|flag|argument|args|path|permission|gateway|plugin|tool|npm|openclaw|stderr)/i;
-
-  if (entry.type === 'error' || toolPattern.test(summary)) return 'TOOLS.md';
-  if (behaviorPattern.test(summary)) return 'SOUL.md';
-  return 'AGENTS.md';
-}
-
-function buildPromotionRuleText(entry: ParsedLearningEntry, target: SelfImprovementPromotionTarget): string {
-  if (target === 'TOOLS.md') {
-    return `Before running workflows related to "${trimText(entry.summary)}", verify command arguments and capture full stderr for failures.`;
-  }
-  if (target === 'SOUL.md') {
-    return `Apply a consistent communication behavior for "${trimText(entry.summary)}" across future responses and avoid reverting to previous style.`;
-  }
-  return `Standardize a repeatable workflow for "${trimText(entry.summary)}" and keep AGENTS.md aligned when steps evolve.`;
-}
-
-function nextPromotionSequence(fileContent: string, dateStamp: string): number {
-  const matcher = new RegExp(`\\[PROMO-${dateStamp}-(\\d{3})\\]`, 'g');
-  let maxFound = 0;
-  let match: RegExpExecArray | null = null;
-  while (true) {
-    match = matcher.exec(fileContent);
-    if (!match) break;
-    const parsed = Number.parseInt(match[1], 10);
-    if (Number.isFinite(parsed) && parsed > maxFound) {
-      maxFound = parsed;
-    }
-  }
-  return maxFound + 1;
-}
-
-function readPatternKeysFromProposals(content: string): Set<string> {
-  const keys = new Set<string>();
-  const matcher = /\*\*Pattern-Key\*\*:\s*([^\n]+)/g;
-  let match: RegExpExecArray | null = null;
-  while (true) {
-    match = matcher.exec(content);
-    if (!match) break;
-    const key = String(match[1] || '').trim();
-    if (key) keys.add(key);
-  }
-  return keys;
-}
-
-function formatPromotionProposalEntry(input: {
-  proposalId: string;
-  createdAt: string;
-  target: SelfImprovementPromotionTarget;
-  patternKey: string;
-  summary: string;
-  ruleText: string;
-  evidenceIds: string[];
-  evidenceCount: number;
-  windowDays: number;
-  recurrenceThreshold: number;
-}): string {
-  return [
-    `## [${input.proposalId}] ${input.target}`,
-    '',
-    `**Created**: ${input.createdAt}`,
-    '**Status**: proposed',
-    `**Pattern-Key**: ${input.patternKey}`,
-    `**Target**: \`${input.target}\``,
-    `**Evidence Count**: ${input.evidenceCount}`,
-    `**Evidence IDs**: ${input.evidenceIds.join(', ') || 'n/a'}`,
-    `**Window**: ${input.windowDays} days`,
-    `**Trigger**: recurrence >= ${input.recurrenceThreshold}`,
-    '',
-    '### Pattern Summary',
-    trimText(input.summary),
-    '',
-    '### Proposed Rule',
-    trimText(input.ruleText),
-    '',
-    '---',
-  ].join('\n');
-}
-
-function parsePromotionStatus(value: string): 'proposed' | 'approved' | 'rejected' {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'approved') return 'approved';
-  if (normalized === 'rejected') return 'rejected';
-  return 'proposed';
-}
-
-function parseCommaList(value: string): string[] {
-  return String(value || '')
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function parsePromotionBlocks(content: string): ParsedPromotionEntry[] {
-  const entries: ParsedPromotionEntry[] = [];
-  const matcher = /^## \[(PROMO-\d{8}-\d{3})\]\s+([^\n]+)\n([\s\S]*?)(?=^## \[PROMO-|(?![\s\S]))/gm;
-
-  let match: RegExpExecArray | null = null;
-  while (true) {
-    match = matcher.exec(content);
-    if (!match) break;
-
-    const id = String(match[1] || '').trim();
-    const body = String(match[3] || '');
-    const rawBlock = String(match[0] || '').trimEnd();
-    if (!id || !rawBlock) continue;
-
-    const status = parsePromotionStatus(body.match(/\*\*Status\*\*:\s*([^\n]+)/i)?.[1] || 'proposed');
-    const targetText = (body.match(/\*\*Target\*\*:\s*([^\n]+)/i)?.[1] || match[2] || 'AGENTS.md').replace(/`/g, '').trim();
-    const target = (['AGENTS.md', 'SOUL.md', 'TOOLS.md'].includes(targetText) ? targetText : 'AGENTS.md') as SelfImprovementPromotionTarget;
-    const patternKey = (body.match(/\*\*Pattern-Key\*\*:\s*([^\n]+)/i)?.[1] || '').trim();
-    const evidenceCount = Number.parseInt((body.match(/\*\*Evidence Count\*\*:\s*([^\n]+)/i)?.[1] || '0').trim(), 10) || 0;
-    const evidenceIds = parseCommaList(body.match(/\*\*Evidence IDs\*\*:\s*([^\n]+)/i)?.[1] || '');
-    const createdAt = (body.match(/\*\*Created\*\*:\s*([^\n]+)/i)?.[1] || '').trim() || undefined;
-    const approvedAt = (body.match(/\*\*Approved\*\*:\s*([^\n]+)/i)?.[1] || '').trim() || undefined;
-
-    entries.push({
-      id,
-      status,
-      target,
-      patternKey,
-      summary: extractSection(body, 'Pattern Summary') || '',
-      ruleText: extractSection(body, 'Proposed Rule') || '',
-      evidenceCount,
-      evidenceIds,
-      createdAt,
-      approvedAt,
-      rawBlock,
-    });
-  }
-
-  return entries;
-}
-
-function updateProposalStatusBlock(block: string, status: 'proposed' | 'approved' | 'rejected', approvedAt?: string): string {
-  let next = block.replace(/\*\*Status\*\*:\s*[^\n]+/i, `**Status**: ${status}`);
-  if (status === 'approved' && approvedAt) {
-    if (/\*\*Approved\*\*:/i.test(next)) {
-      next = next.replace(/\*\*Approved\*\*:\s*[^\n]+/i, `**Approved**: ${approvedAt}`);
-    } else {
-      next = next.replace(/\n---\s*$/, `\n**Approved**: ${approvedAt}\n\n---`);
-    }
-  }
-  return next;
-}
+// ---------------------------------------------------------------------------
+// Proposal status management
+// ---------------------------------------------------------------------------
 
 async function setPromotionProposalStatus(params: {
   proposalFilePath: string;
@@ -404,20 +183,27 @@ async function setPromotionProposalStatus(params: {
     }
 
     await fs.promises.writeFile(params.proposalFilePath, updatedContent, 'utf8');
-    proposal.status = params.status;
-    if (approvedAt) proposal.approvedAt = approvedAt;
   }
 
   const { rawBlock: _rawBlock, ...safeProposal } = proposal;
-  return safeProposal;
+  return {
+    ...safeProposal,
+    status: params.status,
+    ...(params.status === 'approved' ? { approvedAt: new Date().toISOString() } : {}),
+  };
 }
+
+// ---------------------------------------------------------------------------
+// Recurring pattern evaluation
+// ---------------------------------------------------------------------------
+
 async function evaluateRecurringPromotion(learningsDir: string): Promise<SelfImprovementPromotionSummary> {
   const rule = DEFAULT_PROMOTION_RULE;
   const now = Date.now();
   const windowStart = now - (rule.windowDays * 24 * 60 * 60 * 1000);
 
   const sourceFiles = ['LEARNINGS.md', 'ERRORS.md', 'FEATURE_REQUESTS.md'];
-  const allEntries: ParsedLearningEntry[] = [];
+  const allEntries = [];
 
   for (const fileName of sourceFiles) {
     const filePath = path.join(learningsDir, fileName);
@@ -429,7 +215,7 @@ async function evaluateRecurringPromotion(learningsDir: string): Promise<SelfImp
     }
   }
 
-  const grouped = new Map<string, { representative: ParsedLearningEntry; entries: ParsedLearningEntry[] }>();
+  const grouped = new Map<string, { representative: (typeof allEntries)[0]; entries: typeof allEntries }>();
   for (const entry of allEntries) {
     if (!entry.patternKey || !entry.loggedAt) continue;
     if (entry.loggedAt.getTime() < windowStart) continue;
@@ -452,11 +238,7 @@ async function evaluateRecurringPromotion(learningsDir: string): Promise<SelfImp
 
   const existingPatternKeys = readPatternKeysFromProposals(proposalContent);
   const proposalIds: string[] = [];
-  let nextContent = proposalContent;
-
-  if (!nextContent) {
-    nextContent = PROMOTION_PROPOSALS_HEADER;
-  }
+  let nextContent = proposalContent || PROMOTION_PROPOSALS_HEADER;
 
   const dateStamp = getDateStamp(new Date());
   for (const { representative, entries } of grouped.values()) {
@@ -502,35 +284,75 @@ async function evaluateRecurringPromotion(learningsDir: string): Promise<SelfImp
   };
 }
 
-function buildAppliedRuleBlock(proposal: SelfImprovementPromotionProposal, appliedAt: string): string {
-  return [
-    `<!-- promotion: ${proposal.id} -->`,
-    `### [${proposal.id}] Auto-promoted Rule`,
-    `- Pattern: ${trimText(proposal.summary)}`,
-    `- Rule: ${trimText(proposal.ruleText)}`,
-    `- Evidence: ${proposal.evidenceIds.join(', ') || 'n/a'}`,
-    `- Applied: ${appliedAt}`,
-    '',
-  ].join('\n');
+// ---------------------------------------------------------------------------
+// Sequence counter
+// ---------------------------------------------------------------------------
+
+function nextSequence(fileContent: string, prefix: 'LRN' | 'ERR' | 'FEAT', dateStamp: string): number {
+  const matcher = new RegExp(`\\[${prefix}-${dateStamp}-(\\d{3})\\]`, 'g');
+  let maxFound = 0;
+  let match: RegExpExecArray | null = null;
+  while (true) {
+    match = matcher.exec(fileContent);
+    if (!match) break;
+    const parsed = Number.parseInt(match[1], 10);
+    if (Number.isFinite(parsed) && parsed > maxFound) {
+      maxFound = parsed;
+    }
+  }
+  return maxFound + 1;
 }
 
-async function ensureTargetFileExists(rootDir: string, target: SelfImprovementPromotionTarget): Promise<string> {
-  const targetPath = path.join(rootDir, target);
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+export async function appendSelfImprovementEntry(input: SelfImprovementLogInput): Promise<{
+  id: string;
+  filePath: string;
+  rootDir: string;
+  learningsDir: string;
+  promotion: SelfImprovementPromotionSummary;
+}> {
+  const { rootDir, learningsDir } = await ensureSelfImprovementScaffold(input);
+
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const dateStamp = getDateStamp(now);
+  const prefix = getTypePrefix(input.type);
+
+  const targetFileName: EntryFileName = input.type === 'error'
+    ? 'ERRORS.md'
+    : input.type === 'feature'
+      ? 'FEATURE_REQUESTS.md'
+      : 'LEARNINGS.md';
+
+  const filePath = path.join(learningsDir, targetFileName);
+
+  await appendMutex.acquire();
   try {
-    await fs.promises.access(targetPath, fs.constants.F_OK);
-    return targetPath;
-  } catch {
-    await fs.promises.mkdir(rootDir, { recursive: true });
-    await fs.promises.writeFile(targetPath, TARGET_FILE_HEADER[target], 'utf8');
-    return targetPath;
+    const existing = await fs.promises.readFile(filePath, 'utf8');
+    const sequence = formatSequence(nextSequence(existing, prefix, dateStamp));
+    const id = `${prefix}-${dateStamp}-${sequence}`;
+
+    const entry = input.type === 'error'
+      ? buildErrorEntry(id, nowIso, input)
+      : input.type === 'feature'
+        ? buildFeatureEntry(id, nowIso, input)
+        : buildLearningEntry(id, nowIso, input);
+
+    const needsSeparator = existing.trim().length > 0 && !existing.endsWith('\n\n');
+    await fs.promises.appendFile(filePath, `${needsSeparator ? '\n' : ''}${entry}\n`, 'utf8');
+
+    const promotion = await evaluateRecurringPromotion(learningsDir);
+
+    return { id, filePath, rootDir, learningsDir, promotion };
+  } finally {
+    appendMutex.release();
   }
 }
 
-export async function listSelfImprovementPromotionProposals(params?: {
-  homeDir?: string;
-  agentId?: string;
-  workspacePath?: string;
-}): Promise<{
+export async function listSelfImprovementPromotionProposals(params?: WorkspaceParams): Promise<{
   rootDir: string;
   learningsDir: string;
   proposalFilePath: string;
@@ -557,11 +379,8 @@ export async function listSelfImprovementPromotionProposals(params?: {
   return { rootDir, learningsDir, proposalFilePath, items };
 }
 
-export async function applySelfImprovementPromotionProposal(input: {
+export async function applySelfImprovementPromotionProposal(input: WorkspaceParams & {
   proposalId: string;
-  homeDir?: string;
-  agentId?: string;
-  workspacePath?: string;
 }): Promise<{
   rootDir: string;
   learningsDir: string;
@@ -569,18 +388,10 @@ export async function applySelfImprovementPromotionProposal(input: {
   targetFilePath: string;
   proposal: SelfImprovementPromotionProposal;
 }> {
-  const { rootDir, learningsDir } = await ensureSelfImprovementScaffold({
-    homeDir: input.homeDir,
-    agentId: input.agentId,
-    workspacePath: input.workspacePath,
-  });
+  const { rootDir, learningsDir } = await ensureSelfImprovementScaffold(input);
   const proposalFilePath = path.join(learningsDir, 'PROMOTION_PROPOSALS.md');
 
-  const list = await listSelfImprovementPromotionProposals({
-    homeDir: input.homeDir,
-    agentId: input.agentId,
-    workspacePath: input.workspacePath,
-  });
+  const list = await listSelfImprovementPromotionProposals(input);
   const proposal = list.items.find((item) => item.id === input.proposalId);
   if (!proposal) {
     throw new Error(`Promotion proposal not found: ${input.proposalId}`);
@@ -601,31 +412,18 @@ export async function applySelfImprovementPromotionProposal(input: {
     status: 'approved',
   });
 
-  return {
-    rootDir,
-    learningsDir,
-    proposalFilePath,
-    targetFilePath,
-    proposal: safeProposal,
-  };
+  return { rootDir, learningsDir, proposalFilePath, targetFilePath, proposal: safeProposal };
 }
 
-export async function rejectSelfImprovementPromotionProposal(input: {
+export async function rejectSelfImprovementPromotionProposal(input: WorkspaceParams & {
   proposalId: string;
-  homeDir?: string;
-  agentId?: string;
-  workspacePath?: string;
 }): Promise<{
   rootDir: string;
   learningsDir: string;
   proposalFilePath: string;
   proposal: SelfImprovementPromotionProposal;
 }> {
-  const { rootDir, learningsDir } = await ensureSelfImprovementScaffold({
-    homeDir: input.homeDir,
-    agentId: input.agentId,
-    workspacePath: input.workspacePath,
-  });
+  const { rootDir, learningsDir } = await ensureSelfImprovementScaffold(input);
   const proposalFilePath = path.join(learningsDir, 'PROMOTION_PROPOSALS.md');
 
   const proposal = await setPromotionProposalStatus({
@@ -634,19 +432,10 @@ export async function rejectSelfImprovementPromotionProposal(input: {
     status: 'rejected',
   });
 
-  return {
-    rootDir,
-    learningsDir,
-    proposalFilePath,
-    proposal,
-  };
+  return { rootDir, learningsDir, proposalFilePath, proposal };
 }
 
-export async function applyAllSelfImprovementPromotionProposals(params?: {
-  homeDir?: string;
-  agentId?: string;
-  workspacePath?: string;
-}): Promise<{
+export async function applyAllSelfImprovementPromotionProposals(params?: WorkspaceParams): Promise<{
   rootDir: string;
   learningsDir: string;
   proposalFilePath: string;
@@ -658,10 +447,8 @@ export async function applyAllSelfImprovementPromotionProposals(params?: {
 
   for (const proposal of proposed) {
     const outcome = await applySelfImprovementPromotionProposal({
+      ...params,
       proposalId: proposal.id,
-      homeDir: params?.homeDir,
-      agentId: params?.agentId,
-      workspacePath: params?.workspacePath,
     });
     applied.push({
       proposalId: proposal.id,
@@ -682,218 +469,10 @@ export async function applyAllSelfImprovementPromotionProposals(params?: {
     },
   };
 }
-function nextSequence(fileContent: string, prefix: 'LRN' | 'ERR' | 'FEAT', dateStamp: string): number {
-  const matcher = new RegExp(`\\[${prefix}-${dateStamp}-(\\d{3})\\]`, 'g');
-  let maxFound = 0;
-  let match: RegExpExecArray | null = null;
-  while (true) {
-    match = matcher.exec(fileContent);
-    if (!match) break;
-    const parsed = Number.parseInt(match[1], 10);
-    if (Number.isFinite(parsed) && parsed > maxFound) {
-      maxFound = parsed;
-    }
-  }
-  return maxFound + 1;
-}
 
-function buildLearningEntry(id: string, nowIso: string, input: SelfImprovementLogInput): string {
-  const category = input.category || 'insight';
-  const priority = input.priority || 'medium';
-  const area = input.area || 'docs';
-  const summary = trimText(input.summary);
-  const details = trimText(input.details, summary);
-  const suggestedAction = trimText(input.suggestedAction, 'Capture this learning in project guidance if it recurs.');
-  const source = trimText(input.source, 'desktop');
-  const relatedFiles = listText(input.relatedFiles);
-  const tags = listText(input.tags);
-
-  return [
-    `## [${id}] ${category}`,
-    '',
-    `**Logged**: ${nowIso}`,
-    `**Priority**: ${priority}`,
-    '**Status**: pending',
-    `**Area**: ${area}`,
-    '',
-    '### Summary',
-    summary,
-    '',
-    '### Details',
-    details,
-    '',
-    '### Suggested Action',
-    suggestedAction,
-    '',
-    '### Metadata',
-    `- Source: ${source}`,
-    `- Related Files: ${relatedFiles}`,
-    `- Tags: ${tags}`,
-    '',
-    '---',
-  ].join('\n');
-}
-
-function buildErrorEntry(id: string, nowIso: string, input: SelfImprovementLogInput): string {
-  const priority = input.priority || 'high';
-  const area = input.area || 'backend';
-  const summary = trimText(input.summary);
-  const errorText = trimText(input.details, summary);
-  const suggestedFix = trimText(input.suggestedAction, 'Retry with diagnostics and capture the exact failing step.');
-  const commandName = trimText(input.commandName, 'desktop_operation');
-  const source = trimText(input.source, 'desktop');
-  const relatedFiles = listText(input.relatedFiles);
-
-  return [
-    `## [${id}] ${commandName}`,
-    '',
-    `**Logged**: ${nowIso}`,
-    `**Priority**: ${priority}`,
-    '**Status**: pending',
-    `**Area**: ${area}`,
-    '',
-    '### Summary',
-    summary,
-    '',
-    '### Error',
-    errorText,
-    '',
-    '### Context',
-    `- Source: ${source}`,
-    '- Repro step: see session timeline in Memory tab',
-    '',
-    '### Suggested Fix',
-    suggestedFix,
-    '',
-    '### Metadata',
-    '- Reproducible: unknown',
-    `- Related Files: ${relatedFiles}`,
-    '',
-    '---',
-  ].join('\n');
-}
-
-function buildFeatureEntry(id: string, nowIso: string, input: SelfImprovementLogInput): string {
-  const priority = input.priority || 'medium';
-  const area = input.area || 'frontend';
-  const summary = trimText(input.summary);
-  const userContext = trimText(input.userContext, trimText(input.details, 'Requested during desktop usage flow.'));
-  const complexity = input.complexity || 'medium';
-  const suggestedImplementation = trimText(input.suggestedAction, 'Design a minimal UX-first flow and validate it with end-to-end tests.');
-  const frequency = input.frequency || 'first_time';
-
-  return [
-    `## [${id}] ${summary.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'requested_capability'}`,
-    '',
-    `**Logged**: ${nowIso}`,
-    `**Priority**: ${priority}`,
-    '**Status**: pending',
-    `**Area**: ${area}`,
-    '',
-    '### Requested Capability',
-    summary,
-    '',
-    '### User Context',
-    userContext,
-    '',
-    '### Complexity Estimate',
-    complexity,
-    '',
-    '### Suggested Implementation',
-    suggestedImplementation,
-    '',
-    '### Metadata',
-    `- Frequency: ${frequency}`,
-    '- Related Features: memory',
-    '',
-    '---',
-  ].join('\n');
-}
-
-async function ensureFileIfMissing(filePath: string, initialContent: string): Promise<boolean> {
-  try {
-    await fs.promises.access(filePath, fs.constants.F_OK);
-    return false;
-  } catch {
-    await fs.promises.writeFile(filePath, initialContent, 'utf8');
-    return true;
-  }
-}
-
-export async function ensureSelfImprovementScaffold(params?: {
-  homeDir?: string;
-  agentId?: string;
-  workspacePath?: string;
-}): Promise<{
-  rootDir: string;
-  learningsDir: string;
-  createdFiles: string[];
-}> {
-  const homeDir = params?.homeDir || os.homedir();
-  const rootDir = (params?.workspacePath || '').trim() || resolveWorkspaceRoot(homeDir, params?.agentId || 'main');
-  const learningsDir = path.join(rootDir, '.learnings');
-
-  await fs.promises.mkdir(learningsDir, { recursive: true });
-
-  const createdFiles: string[] = [];
-  const targets: Array<[EntryFileName, string]> = [
-    ['LEARNINGS.md', LEARNINGS_HEADER],
-    ['ERRORS.md', ERRORS_HEADER],
-    ['FEATURE_REQUESTS.md', FEATURE_REQUESTS_HEADER],
-  ];
-
-  for (const [fileName, header] of targets) {
-    const targetPath = path.join(learningsDir, fileName);
-    if (await ensureFileIfMissing(targetPath, header)) {
-      createdFiles.push(targetPath);
-    }
-  }
-
-  return { rootDir, learningsDir, createdFiles };
-}
-
-export async function appendSelfImprovementEntry(input: SelfImprovementLogInput): Promise<{
-  id: string;
-  filePath: string;
-  rootDir: string;
-  learningsDir: string;
-  promotion: SelfImprovementPromotionSummary;
-}> {
-  const { rootDir, learningsDir } = await ensureSelfImprovementScaffold({
-    homeDir: input.homeDir,
-    agentId: input.agentId,
-    workspacePath: input.workspacePath,
-  });
-
-  const now = new Date();
-  const nowIso = now.toISOString();
-  const dateStamp = getDateStamp(now);
-  const prefix = getTypePrefix(input.type);
-
-  const targetFileName: EntryFileName = input.type === 'error'
-    ? 'ERRORS.md'
-    : input.type === 'feature'
-      ? 'FEATURE_REQUESTS.md'
-      : 'LEARNINGS.md';
-
-  const filePath = path.join(learningsDir, targetFileName);
-  const existing = await fs.promises.readFile(filePath, 'utf8');
-  const sequence = formatSequence(nextSequence(existing, prefix, dateStamp));
-  const id = `${prefix}-${dateStamp}-${sequence}`;
-
-  const entry = input.type === 'error'
-    ? buildErrorEntry(id, nowIso, input)
-    : input.type === 'feature'
-      ? buildFeatureEntry(id, nowIso, input)
-      : buildLearningEntry(id, nowIso, input);
-
-  const needsSeparator = existing.trim().length > 0 && !existing.endsWith('\n\n');
-  await fs.promises.appendFile(filePath, `${needsSeparator ? '\n' : ''}${entry}\n`, 'utf8');
-
-  const promotion = await evaluateRecurringPromotion(learningsDir);
-
-  return { id, filePath, rootDir, learningsDir, promotion };
-}
+// ---------------------------------------------------------------------------
+// Status query
+// ---------------------------------------------------------------------------
 
 function countMatches(source: string, pattern: RegExp): number {
   const matches = source.match(pattern);
@@ -901,19 +480,11 @@ function countMatches(source: string, pattern: RegExp): number {
 }
 
 function countHighPriorityPending(source: string): number {
-  const blocks = source.split(/\n## \[/g);
-  return blocks.reduce((count, block) => {
-    if (!/\*\*Status\*\*:\s*pending\b/i.test(block)) return count;
-    if (!/\*\*Priority\*\*:\s*(high|critical)\b/i.test(block)) return count;
-    return count + 1;
-  }, 0);
+  const matcher = /\*\*Priority\*\*:\s*(high|critical)\s*\n[\s\S]*?\*\*Status\*\*:\s*pending/gi;
+  return countMatches(source, matcher);
 }
 
-export async function getSelfImprovementStatus(params?: {
-  homeDir?: string;
-  agentId?: string;
-  workspacePath?: string;
-}): Promise<SelfImprovementStatus> {
+export async function getSelfImprovementStatus(params?: WorkspaceParams): Promise<SelfImprovementStatus> {
   const { rootDir, learningsDir } = await ensureSelfImprovementScaffold(params);
   const files = [
     path.join(learningsDir, 'LEARNINGS.md'),
@@ -926,33 +497,24 @@ export async function getSelfImprovementStatus(params?: {
   let promotionProposalCount = 0;
   let readyForPromotionCount = 0;
 
-  for (const filePath of files) {
-    let content = '';
+  for (const file of files) {
     try {
-      content = await fs.promises.readFile(filePath, 'utf8');
+      const content = await fs.promises.readFile(file, 'utf8');
+      pendingCount += countMatches(content, /\*\*Status\*\*:\s*pending/gi);
+      highPriorityPendingCount += countHighPriorityPending(content);
     } catch {
-      continue;
+      // missing file
     }
-    pendingCount += countMatches(content, /\*\*Status\*\*:\s*pending\b/gi);
-    highPriorityPendingCount += countHighPriorityPending(content);
   }
 
-  const proposalsPath = path.join(learningsDir, 'PROMOTION_PROPOSALS.md');
   try {
-    const proposalsContent = await fs.promises.readFile(proposalsPath, 'utf8');
-    promotionProposalCount = countMatches(proposalsContent, /^## \[PROMO-\d{8}-\d{3}\]/gm);
-    readyForPromotionCount = countMatches(proposalsContent, /^\*\*Status\*\*:\s*proposed\b/gmi);
+    const proposalContent = await fs.promises.readFile(path.join(learningsDir, 'PROMOTION_PROPOSALS.md'), 'utf8');
+    const proposals = parsePromotionBlocks(proposalContent);
+    promotionProposalCount = proposals.length;
+    readyForPromotionCount = proposals.filter((item) => item.status === 'proposed').length;
   } catch {
-    promotionProposalCount = 0;
-    readyForPromotionCount = 0;
+    // no proposals file
   }
 
-  return {
-    rootDir,
-    learningsDir,
-    pendingCount,
-    highPriorityPendingCount,
-    promotionProposalCount,
-    readyForPromotionCount,
-  };
+  return { rootDir, learningsDir, pendingCount, highPriorityPendingCount, promotionProposalCount, readyForPromotionCount };
 }

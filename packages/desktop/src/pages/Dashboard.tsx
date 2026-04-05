@@ -602,10 +602,8 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
       }
     });
 
-    // Debug: forward main-process gateway events to DevTools console
     api.onChatDebug?.((msg: string) => {
       if (!activeRunRef.current) return;
-      console.log(msg);
       resetChatActivityTimeout();
     });
 
