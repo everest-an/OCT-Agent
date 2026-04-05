@@ -567,6 +567,13 @@ export default function Memory() {
       count: cards.length,
     },
     {
+      id: 'self-improvement',
+      label: t('memory.selfImprovement.tab', t('memory.selfImprovement.badge', 'Self Improvement')),
+      hint: t('memory.selfImprovement.tabHint', 'Learnings, proposals, approvals'),
+      icon: Sparkles,
+      count: selfImprovement.learningStatus?.promotionProposalCount,
+    },
+    {
       id: 'graph',
       label: t('memory.graph', 'Graph'),
       hint: t('memory.graphHint', 'Relationships across memories'),
@@ -823,24 +830,21 @@ export default function Memory() {
 
             {/* === TIMELINE TAB === */}
             {activeTab === 'timeline' && (
-              <>
-                <SelfImprovementPanel {...selfImprovement} />
-                <TimelineTab
-                  events={events}
-                  displayedEvents={displayedEvents}
-                  eventsTotal={eventsTotal}
-                  eventsOffset={eventsOffset}
-                  sourceView={sourceView}
-                  selectedEventType={selectedEventType}
-                  expandedEvent={expandedEvent}
-                  searchQuery={searchQuery}
-                  searchResults={searchResults}
-                  setSourceView={setSourceView}
-                  setSelectedEventType={setSelectedEventType}
-                  setExpandedEvent={setExpandedEvent}
-                  loadEvents={loadEvents}
-                />
-              </>
+              <TimelineTab
+                events={events}
+                displayedEvents={displayedEvents}
+                eventsTotal={eventsTotal}
+                eventsOffset={eventsOffset}
+                sourceView={sourceView}
+                selectedEventType={selectedEventType}
+                expandedEvent={expandedEvent}
+                searchQuery={searchQuery}
+                searchResults={searchResults}
+                setSourceView={setSourceView}
+                setSelectedEventType={setSelectedEventType}
+                setExpandedEvent={setExpandedEvent}
+                loadEvents={loadEvents}
+              />
             )}
 
             {/* === KNOWLEDGE CARDS TAB === */}
@@ -859,6 +863,11 @@ export default function Memory() {
                 signals={signals}
                 tasks={tasks}
               />
+            )}
+
+            {/* === SELF IMPROVEMENT TAB === */}
+            {activeTab === 'self-improvement' && (
+              <SelfImprovementPanel {...selfImprovement} />
             )}
 
             {/* === KNOWLEDGE GRAPH TAB === */}
