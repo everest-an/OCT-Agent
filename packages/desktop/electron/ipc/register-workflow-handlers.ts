@@ -118,12 +118,18 @@ function attachSubagentListener(deps: WorkflowHandlerDeps) {
   //     payload.runId, payload.sessionKey
   //     payload.message?.content (for final)
   //
-  //   Event "sessions.changed" — session metadata (sub-agent spawn/end):
-  //     payload.phase = "start" | "end" | "error"
-  //     payload.sessionKey, payload.runId, payload.spawnedBy
+  //   Note: "sessions.changed" does NOT exist as a Gateway event (verified via
+  //   GitHub source + Issue #38966). Sub-agent tracking must use event:agent
+  //   with sessionKey containing "subagent:" segment instead.
+  //
+  //   Event ordering: lifecycle:end fires BEFORE chat:final.
+  //   runId is always present (required field on AgentEventPayload).
+  //   Sub-agent sessionKey format: agent:<id>:subagent:<uuid>
   //
   deps.getGatewayWs().then((ws) => {
     // 1. Agent lifecycle events (stream=lifecycle, data.phase=start/end/error)
+    //    This catches BOTH main agent and sub-agent runs.
+    //    Sub-agent runs have sessionKey containing ":subagent:".
     ws.on('event:agent', (payload: any) => {
       const win = deps.getMainWindow();
       if (!win || win.isDestroyed()) return;
@@ -153,6 +159,8 @@ function attachSubagentListener(deps: WorkflowHandlerDeps) {
     });
 
     // 2. Chat completion events (state=final/error/aborted)
+    //    lifecycle:end fires first, then chat:final follows with result text.
+    //    We use chat:final to capture the actual response content.
     ws.on('event:chat', (payload: any) => {
       const win = deps.getMainWindow();
       if (!win || win.isDestroyed()) return;
@@ -178,33 +186,6 @@ function attachSubagentListener(deps: WorkflowHandlerDeps) {
         status: taskEvent,
         result: resultText || payload?.errorMessage || '',
         sessionKey: payload?.sessionKey || '',
-      });
-    });
-
-    // 3. Session changes (sub-agent spawn/end tracking)
-    ws.on('event:sessions.changed', (payload: any) => {
-      const win = deps.getMainWindow();
-      if (!win || win.isDestroyed()) return;
-
-      // Only care about sub-agent sessions
-      const key: string = payload?.sessionKey || '';
-      if (!key.includes('subagent')) return;
-
-      const phase: string = payload?.phase || '';
-      let taskEvent: string | null = null;
-      if (phase === 'start') taskEvent = 'started';
-      else if (phase === 'end') taskEvent = 'completed';
-      else if (phase === 'error') taskEvent = 'failed';
-
-      if (!taskEvent) return;
-
-      win.webContents.send('task:status-update', {
-        event: taskEvent,
-        runId: payload?.runId || '',
-        agentId: '',
-        status: taskEvent,
-        result: '',
-        sessionKey: key,
       });
     });
   }).catch(() => {
