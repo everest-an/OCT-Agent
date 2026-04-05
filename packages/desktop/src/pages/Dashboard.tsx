@@ -403,7 +403,13 @@ function TypewriterMessage({ content, isNew }: { content: string; isNew: boolean
 
 // --- Main Component ---
 
-export default function Dashboard({ isActive = true, onNavigate }: { isActive?: boolean; onNavigate?: (page: 'chat' | 'memory' | 'channels' | 'models' | 'skills' | 'automation' | 'agents' | 'settings') => void }) {
+export default function Dashboard({ isActive = true, onNavigate, pendingChannelId, onChannelOpened }: {
+  isActive?: boolean;
+  onNavigate?: (page: 'chat' | 'memory' | 'channels' | 'models' | 'skills' | 'automation' | 'agents' | 'settings') => void;
+  /** If set, open the sidebar and select the first session for this channel (set by Channels page "Open Chat") */
+  pendingChannelId?: string | null;
+  onChannelOpened?: () => void;
+}) {
   const { config, syncConfig, selectModel, updateConfig } = useAppConfig();
   const { t } = useI18n();
   const { openDashboard, isOpening } = useExternalNavigator();
@@ -804,6 +810,31 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
       }
     }).catch(() => {}).finally(() => setChannelLoading(false));
   }, [activeChannelKey]);
+
+  // When Channels page triggers "Open Chat" for a specific channel, open sidebar
+  // and select the most recent session for that channel (or just show sidebar if none yet).
+  useEffect(() => {
+    if (!pendingChannelId) return;
+    // Open sidebar so the user can see channels panel
+    setShowSidebar(true);
+    // Refresh sessions to pick up the newly connected channel
+    const api = window.electronAPI as any;
+    api?.channelSessions?.().then((res: any) => {
+      if (res?.success && res.sessions?.length > 0) {
+        setChannelSessions(res.sessions);
+        // Find the most recent session for this specific channel
+        const match = (res.sessions as Array<{ sessionKey: string; channel: string; updatedAt: number }>)
+          .filter(s => s.channel === pendingChannelId)
+          .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+        if (match) {
+          setActiveChannelKey(match.sessionKey);
+          setActiveSessionId('');
+        }
+      }
+    }).catch(() => {}).finally(() => {
+      onChannelOpened?.();
+    });
+  }, [pendingChannelId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ⌘N / Ctrl+N — new session from anywhere in the chat view
   useEffect(() => {

@@ -67,7 +67,11 @@ function DynamicConfigForm({ fields, values, onChange, t }: {
 
 type Page = 'chat' | 'memory' | 'channels' | 'models' | 'skills' | 'automation' | 'agents' | 'settings';
 
-export default function Channels({ onNavigate }: { onNavigate?: (page: Page) => void }) {
+export default function Channels({ onNavigate, onOpenChannelChat }: {
+  onNavigate?: (page: Page) => void;
+  /** Navigate to chat tab and open the session for a specific channel (e.g. 'whatsapp') */
+  onOpenChannelChat?: (channelId: string) => void;
+}) {
   const { t } = useI18n();
   const { openExternal, isOpening } = useExternalNavigator();
 
@@ -822,13 +826,18 @@ export default function Channels({ onNavigate }: { onNavigate?: (page: Page) => 
                           className="px-5 py-2 border border-slate-600 hover:border-slate-400 text-slate-300 hover:text-white rounded-xl text-sm font-medium transition-colors">
                           {t('channels.done')}
                         </button>
-                        {(!activeWizard || !EXTERNAL_CHANNELS.has(activeWizard)) && (
-                          <button onClick={() => { closeWizard(); onNavigate?.('chat'); }}
-                            className="px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-sm font-medium transition-colors inline-flex items-center gap-1.5">
-                            <MessageSquare size={14} />
-                            {t('channels.openChat', 'Open Chat')}
-                          </button>
-                        )}
+                        <button onClick={() => {
+                          closeWizard();
+                          if (activeWizard && onOpenChannelChat) {
+                            onOpenChannelChat(activeWizard);
+                          } else {
+                            onNavigate?.('chat');
+                          }
+                        }}
+                          className="px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-sm font-medium transition-colors inline-flex items-center gap-1.5">
+                          <MessageSquare size={14} />
+                          {t('channels.openChat', 'Open Chat')}
+                        </button>
                       </div>
                     </div>
                   )}

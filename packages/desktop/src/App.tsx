@@ -110,6 +110,8 @@ export default function App() {
   const [startupMessage, setStartupMessage] = useState('Preparing AwarenessClaw...');
   const [startupProgress, setStartupProgress] = useState(8);
   const [currentPage, setCurrentPage] = useState<Page>('chat');
+  // Channel to focus in Dashboard after "Open Chat" from Channels page
+  const [pendingChannelId, setPendingChannelId] = useState<string | null>(null);
 
   // Apply theme switching
   useThemeEffect(config.theme || 'dark');
@@ -329,10 +331,12 @@ export default function App() {
         <main className="flex-1 overflow-hidden relative">
           {/* Dashboard is always mounted so in-flight chats survive tab switches */}
           <div className={`absolute inset-0 overflow-y-auto ${currentPage === 'chat' ? '' : 'hidden'}`}>
-            <Dashboard isActive={currentPage === 'chat'} onNavigate={setCurrentPage} />
+            <Dashboard isActive={currentPage === 'chat'} onNavigate={setCurrentPage}
+              pendingChannelId={pendingChannelId} onChannelOpened={() => setPendingChannelId(null)} />
           </div>
           {currentPage === 'memory' && <div className="h-full overflow-y-auto"><Memory /></div>}
-          {currentPage === 'channels' && <div className="h-full overflow-y-auto"><Channels onNavigate={setCurrentPage} /></div>}
+          {currentPage === 'channels' && <div className="h-full overflow-y-auto"><Channels onNavigate={setCurrentPage}
+            onOpenChannelChat={(channelId) => { setPendingChannelId(channelId); setCurrentPage('chat'); }} /></div>}
           {currentPage === 'models' && <div className="h-full overflow-y-auto"><Models /></div>}
           {currentPage === 'skills' && <div className="h-full overflow-y-auto"><Skills /></div>}
           {currentPage === 'automation' && <div className="h-full overflow-y-auto"><Automation /></div>}
