@@ -138,6 +138,15 @@ export function registerChannelSetupHandlers(deps: {
     !!value && typeof value === 'object' && !Array.isArray(value)
   );
 
+  const wrapOpenclawConfigPathCommand = (command: string, scopedConfigPath: string) => {
+    if (process.platform === 'win32') {
+      const escapedPath = scopedConfigPath.replace(/"/g, '""');
+      return `set "OPENCLAW_CONFIG_PATH=${escapedPath}" && ${command}`;
+    }
+    const escapedPath = scopedConfigPath.replace(/"/g, '\\"');
+    return `OPENCLAW_CONFIG_PATH="${escapedPath}" ${command}`;
+  };
+
   const disableOpenClawMemoryPlugin = (config: Record<string, any>) => {
     const plugins = isPlainRecord(config.plugins) ? config.plugins : null;
     if (!plugins) return false;
@@ -209,6 +218,62 @@ export function registerChannelSetupHandlers(deps: {
       return {
         usedScopedConfig: false,
         result: await deps.channelLoginWithQR(loginCmd, timeoutMs),
+      };
+    } finally {
+      if (tempConfigPath) {
+        try { fs.rmSync(tempConfigPath, { force: true }); } catch {}
+      }
+    }
+  };
+
+  const runCommandWithScopedConfig = async (command: string, timeoutMs: number) => {
+    let tempConfigPath: string | null = null;
+    try {
+      const raw = fs.readFileSync(OPENCLAW_CONFIG_PATH, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (!isPlainRecord(parsed)) {
+        return {
+          usedScopedConfig: false,
+          output: null as string | null,
+          error: null as string | null,
+        };
+      }
+
+      const isolated = JSON.parse(JSON.stringify(parsed));
+      const changed = disableOpenClawMemoryPlugin(isolated);
+      if (!changed) {
+        return {
+          usedScopedConfig: false,
+          output: null as string | null,
+          error: null as string | null,
+        };
+      }
+
+      tempConfigPath = path.join(
+        os.tmpdir(),
+        `awarenessclaw-channel-cmd-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+      );
+      fs.writeFileSync(tempConfigPath, JSON.stringify(isolated, null, 2));
+
+      try {
+        const output = await deps.runAsync(wrapOpenclawConfigPathCommand(command, tempConfigPath), timeoutMs);
+        return {
+          usedScopedConfig: true,
+          output,
+          error: null as string | null,
+        };
+      } catch (scopedErr: unknown) {
+        return {
+          usedScopedConfig: true,
+          output: null as string | null,
+          error: toErrorMessage(scopedErr),
+        };
+      }
+    } catch {
+      return {
+        usedScopedConfig: false,
+        output: null as string | null,
+        error: null as string | null,
       };
     } finally {
       if (tempConfigPath) {
@@ -342,6 +407,19 @@ export function registerChannelSetupHandlers(deps: {
           const retryMsg = toErrorMessage(retryInstallErr);
           if (!isIgnorablePluginInstallError(retryMsg)) {
             return { success: false, error: formatSetupError(openclawId, channelLabel, retryMsg) };
+          }
+        }
+      } else if (process.platform === 'win32' && isNpxEnoentLike(pluginMsg)) {
+        // Keep official OpenClaw behavior intact; only this command uses an isolated
+        // config that disables memory plugin auto-start to avoid cross-plugin ENOENT.
+        const scopedInstall = await runCommandWithScopedConfig(pluginInstallCmd, CHANNEL_PLUGIN_INSTALL_IDLE_TIMEOUT_MS);
+        if (!scopedInstall.usedScopedConfig) {
+          return { success: false, error: formatSetupError(openclawId, channelLabel, pluginMsg) };
+        }
+
+        if (scopedInstall.error) {
+          if (!isIgnorablePluginInstallError(scopedInstall.error)) {
+            return { success: false, error: formatSetupError(openclawId, channelLabel, scopedInstall.error) };
           }
         }
       } else {

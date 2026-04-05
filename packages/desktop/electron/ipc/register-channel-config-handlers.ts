@@ -45,6 +45,50 @@ function isTimeoutLike(message: string): boolean {
   return lower.includes('timed out') || lower.includes('timeout');
 }
 
+function isNpxEnoentLike(message: string): boolean {
+  return /spawn\s+npx(?:\.cmd)?\s+ENOENT/i.test(message || '');
+}
+
+function isPlainRecord(value: unknown): value is Record<string, any> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function disableOpenClawMemoryPlugin(config: Record<string, any>) {
+  const plugins = isPlainRecord(config.plugins) ? config.plugins : null;
+  if (!plugins) return false;
+
+  let changed = false;
+  const entries = isPlainRecord(plugins.entries) ? plugins.entries : null;
+  const memoryEntry = entries && isPlainRecord(entries['openclaw-memory'])
+    ? entries['openclaw-memory']
+    : null;
+  if (entries && memoryEntry && memoryEntry.enabled !== false) {
+    entries['openclaw-memory'] = {
+      ...memoryEntry,
+      enabled: false,
+    };
+    changed = true;
+  }
+
+  if (Array.isArray(plugins.allow)) {
+    const nextAllow = plugins.allow.filter((id: unknown) => String(id || '') !== 'openclaw-memory');
+    if (nextAllow.length !== plugins.allow.length) {
+      plugins.allow = nextAllow;
+      changed = true;
+    }
+  }
+
+  if (isPlainRecord(plugins.slots) && plugins.slots.memory === 'openclaw-memory') {
+    delete plugins.slots.memory;
+    changed = true;
+    if (Object.keys(plugins.slots).length === 0) {
+      delete plugins.slots;
+    }
+  }
+
+  return changed;
+}
+
 function channelAppearsConfigured(listOutput: string | null, openclawId: string): boolean {
   if (!listOutput) return false;
   const target = openclawId.toLowerCase();
@@ -234,7 +278,7 @@ function formatChannelActionError(openclawId: string, action: 'install' | 'bind'
     return `OpenClaw is still loading channel "${openclawId}". Please wait a moment and retry.`;
   }
 
-  if (/spawn\s+npx\s+ENOENT/i.test(message)) {
+  if (isNpxEnoentLike(message)) {
     return 'OpenClaw could not launch required helper tools (npx not found in runtime PATH). Please rerun Setup to repair the runtime, then retry channel setup.';
   }
 
@@ -283,6 +327,73 @@ export function registerChannelConfigHandlers(deps: {
   buildCLIFlags: (channelDef: ChannelDef, config: Record<string, string>) => string;
   toOpenclawId: (channelId: string) => string;
 }) {
+  const OPENCLAW_CONFIG_PATH = path.join(deps.home, '.openclaw', 'openclaw.json');
+
+  const wrapOpenclawConfigPathCommand = (command: string, scopedConfigPath: string) => {
+    if (process.platform === 'win32') {
+      const escapedPath = scopedConfigPath.replace(/"/g, '""');
+      return `set "OPENCLAW_CONFIG_PATH=${escapedPath}" && ${command}`;
+    }
+    const escapedPath = scopedConfigPath.replace(/"/g, '\\"');
+    return `OPENCLAW_CONFIG_PATH="${escapedPath}" ${command}`;
+  };
+
+  const runCommandWithScopedConfig = async (command: string, timeoutMs: number) => {
+    let tempConfigPath: string | null = null;
+    try {
+      const raw = fs.readFileSync(OPENCLAW_CONFIG_PATH, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (!isPlainRecord(parsed)) {
+        return {
+          usedScopedConfig: false,
+          output: null as string | null,
+          error: null as string | null,
+        };
+      }
+
+      const isolated = JSON.parse(JSON.stringify(parsed));
+      const changed = disableOpenClawMemoryPlugin(isolated);
+      if (!changed) {
+        return {
+          usedScopedConfig: false,
+          output: null as string | null,
+          error: null as string | null,
+        };
+      }
+
+      tempConfigPath = path.join(
+        os.tmpdir(),
+        `awarenessclaw-channel-cmd-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+      );
+      fs.writeFileSync(tempConfigPath, JSON.stringify(isolated, null, 2));
+
+      try {
+        const output = await deps.runAsync(wrapOpenclawConfigPathCommand(command, tempConfigPath), timeoutMs);
+        return {
+          usedScopedConfig: true,
+          output,
+          error: null as string | null,
+        };
+      } catch (scopedErr: unknown) {
+        return {
+          usedScopedConfig: true,
+          output: null as string | null,
+          error: scopedErr instanceof Error ? scopedErr.message || String(scopedErr) : String(scopedErr || ''),
+        };
+      }
+    } catch {
+      return {
+        usedScopedConfig: false,
+        output: null as string | null,
+        error: null as string | null,
+      };
+    } finally {
+      if (tempConfigPath) {
+        try { fs.rmSync(tempConfigPath, { force: true }); } catch {}
+      }
+    }
+  };
+
   const bindChannelToMainAgent = async (openclawId: string) => {
     try {
       await deps.runAsync(`openclaw agents bind --agent main --bind ${openclawId} 2>&1`, CHANNEL_BIND_IDLE_TIMEOUT_MS);
@@ -314,8 +425,11 @@ export function registerChannelConfigHandlers(deps: {
     );
     let gatewayActive = isGatewayActiveOutput(statusOutput);
     if (!gatewayActive) {
-      const deepStatusOutput = await deps.readShellOutputAsync('openclaw status --deep 2>&1', CHANNEL_ADD_IDLE_TIMEOUT_MS);
-      gatewayActive = isGatewayActiveOutput(deepStatusOutput);
+      // Prefer gateway-only status check here. `openclaw status --deep` can load
+      // all plugins and trigger unrelated failures while pairing/connectivity is
+      // being confirmed.
+      const gatewayStatusOutput = await deps.readShellOutputAsync('openclaw gateway status 2>&1', CHANNEL_ADD_IDLE_TIMEOUT_MS);
+      gatewayActive = isGatewayActiveOutput(gatewayStatusOutput);
     }
 
     return {
@@ -453,7 +567,14 @@ export function registerChannelConfigHandlers(deps: {
         await deps.runAsync(`openclaw plugins install "${pluginPkg}" 2>&1`, 60000);
       } catch (err: any) {
         const installMessage = err?.message || String(err);
-        if (!isIgnorablePluginInstallError(installMessage)) {
+        if (process.platform === 'win32' && isNpxEnoentLike(installMessage)) {
+          const scopedInstall = await runCommandWithScopedConfig(`openclaw plugins install "${pluginPkg}" 2>&1`, 60000);
+          if (!scopedInstall.usedScopedConfig) {
+            pluginInstallError = installMessage;
+          } else if (scopedInstall.error && !isIgnorablePluginInstallError(scopedInstall.error)) {
+            pluginInstallError = scopedInstall.error;
+          }
+        } else if (!isIgnorablePluginInstallError(installMessage)) {
           pluginInstallError = installMessage;
         }
       }

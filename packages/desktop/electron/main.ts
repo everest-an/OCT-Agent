@@ -76,6 +76,8 @@ let gatewayRepairPromise: Promise<{ ok: boolean; error?: string }> | null = null
 let gatewayUserSessionLastLaunchAt = 0;
 
 const GATEWAY_USER_SESSION_RELAUNCH_COOLDOWN_MS = 15000;
+const DAEMON_FOREGROUND_BOOTSTRAP_TIMEOUT_MS = 240000;
+const DAEMON_WAIT_AFTER_BOOTSTRAP_MS = 90000;
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
@@ -162,7 +164,7 @@ function createWindow() {
   }
 
   mainWindow.on('close', (e: Event) => {
-    if (process.platform === 'darwin' && !isQuitting) {
+    if (!isQuitting && tray) {
       e.preventDefault();
       mainWindow?.hide();
     }
@@ -287,10 +289,34 @@ function isGatewayPermissionError(output: string | null) {
 }
 
 async function ensureLocalDaemonReadyForRuntime(send?: (ch: string, data: any) => void): Promise<boolean> {
+  const daemonProjectDir = path.join(HOME, '.openclaw');
+
   const isDaemonHealthStable = async () => {
     if (!(await checkDaemonHealth())) return false;
     await sleep(700);
     return checkDaemonHealth();
+  };
+
+  const bootstrapDaemonInForeground = async () => {
+    const daemonSpec = resolveBundledCache('awareness-sdk-local.tgz') || '@awareness-sdk/local@latest';
+    const daemonArgs = ['-y', daemonSpec, 'start', '--port', '37800', '--project', daemonProjectDir, '--background'];
+    const bundledNpxCli = getBundledNpmBin('npx');
+
+    try {
+      if (bundledNpxCli) {
+        await runSpawnAsync(process.execPath, [bundledNpxCli, ...daemonArgs], DAEMON_FOREGROUND_BOOTSTRAP_TIMEOUT_MS);
+        return true;
+      }
+
+      if (process.platform === 'win32') {
+        await runSpawnAsync('cmd.exe', ['/d', '/c', 'npx', ...daemonArgs], DAEMON_FOREGROUND_BOOTSTRAP_TIMEOUT_MS);
+      } else {
+        await runSpawnAsync('npx', daemonArgs, DAEMON_FOREGROUND_BOOTSTRAP_TIMEOUT_MS);
+      }
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   if (await isDaemonHealthStable()) return true;
@@ -333,6 +359,27 @@ async function ensureLocalDaemonReadyForRuntime(send?: (ch: string, data: any) =
           sleep,
         });
         if (warmed && await isDaemonHealthStable()) {
+          emit('Local memory service ready');
+          return { success: true };
+        }
+      }
+
+      emit('Local memory service is still warming up, applying deeper repair...');
+      try {
+        await forceStopLocalDaemon({ sleep });
+      } catch {
+        // best-effort cleanup before foreground bootstrap
+      }
+      clearAwarenessLocalNpxCache(HOME);
+
+      const foregroundBootstrapped = await bootstrapDaemonInForeground();
+      if (foregroundBootstrapped) {
+        const afterBootstrapReady = await waitForLocalDaemonReady(
+          DAEMON_WAIT_AFTER_BOOTSTRAP_MS,
+          'setup.install.daemonStatus.waiting',
+          { sendStatus: sendSetupDaemonStatus, sleep },
+        );
+        if (afterBootstrapReady && await isDaemonHealthStable()) {
           emit('Local memory service ready');
           return { success: true };
         }
@@ -620,7 +667,7 @@ async function prepareCliFallback(): Promise<void> {
 
   const ready = await ensureLocalDaemonReadyForRuntime(send);
   if (!ready) {
-    console.warn('[chat] Local daemon was not ready before CLI fallback; continuing anyway');
+    throw new Error('LOCAL_DAEMON_NOT_READY');
   }
 }
 
@@ -859,7 +906,7 @@ function createTray() {
 
   tray.setContextMenu(contextMenu);
 
-  // Click tray icon to show window (macOS convention)
+  // Click tray icon to show or focus the main window.
   tray.on('click', () => {
     if (mainWindow) {
       if (mainWindow.isVisible()) {
@@ -1057,9 +1104,7 @@ app.whenReady().then(() => {
   repairOpenClawConfigFile();
 
   createWindow();
-  if (process.platform === 'darwin') {
-    createTray();
-  }
+  createTray();
 
   // Best-effort: start Gateway early so it's ready when user sends first message
   startGatewayRepairInBackground().catch((err) => {
@@ -1089,6 +1134,7 @@ app.on('before-quit', () => {
 });
 
 app.on('window-all-closed', () => {
+  if (!isQuitting && tray) return;
   if (process.platform !== 'darwin') app.quit();
 });
 

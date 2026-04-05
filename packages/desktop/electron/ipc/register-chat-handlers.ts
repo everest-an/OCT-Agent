@@ -879,7 +879,15 @@ ${message}`;
       try {
         await deps.prepareCliFallback?.();
       } catch (prepareErr: any) {
-        console.warn('[chat] CLI fallback preparation failed:', prepareErr?.message || prepareErr);
+        const detail = prepareErr?.message || String(prepareErr);
+        console.warn('[chat] CLI fallback preparation failed:', detail);
+        if (/LOCAL_DAEMON_NOT_READY/i.test(detail)) {
+          return withWorkspaceFallbackMeta({
+            success: false,
+            error: 'Local memory service is still starting. Please wait 20-60 seconds, then retry.',
+            sessionId: sid,
+          });
+        }
       }
       const cliResult = await chatSendViaCliWithWebCompatibilityRetry({
         requestMessage: fullMessage,
@@ -1652,12 +1660,22 @@ async function chatSendViaCli(
     child.stderr?.on('data', (data: Buffer) => {
       flushChunk(data.toString(), true);
     });
-    child.on('exit', () => {
+    child.on('exit', (code: number | null) => {
       activeChatChild = null;
       flushRemainder(false);
       flushRemainder(true);
       send('chat:stream-end', {});
       const clean = collectedLines.join('\n').trim();
+
+      if (code !== 0) {
+        resolve({
+          success: false,
+          error: clean || `OpenClaw exited with code ${code ?? 'unknown'}`,
+          sessionId: sid,
+        });
+        return;
+      }
+
       const shouldFlagUnverifiedLocalFileOperation = looksLikeFilesystemMutationRequest(requestMessage)
         && looksLikeSuccessfulFilesystemMutationResponse(clean);
       const shouldFlagVpnDnsCompatibilityIssue = looksLikeWebOperationRequest(requestMessage)

@@ -272,6 +272,69 @@ describe('registerChannelSetupHandlers', () => {
     expect(String(result.error || '')).toContain('npx not found in runtime PATH');
   });
 
+  it('retries plugin install with command-scoped config on Windows npx ENOENT', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+
+    const runAsync = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('[openclaw] Uncaught exception: Error: spawn npx ENOENT'))
+      .mockResolvedValueOnce('plugin installed via scoped config')
+      .mockResolvedValueOnce('bound');
+    const channelLoginWithQR = vi.fn(async () => ({ success: true }));
+
+    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => undefined);
+    const rmSpy = vi.spyOn(fs, 'rmSync').mockImplementation(() => undefined as any);
+    vi.spyOn(fs, 'readFileSync').mockImplementation((filePath: any, encoding?: any) => {
+      if (String(filePath).includes('.openclaw') && String(filePath).includes('openclaw.json')) {
+        return JSON.stringify({
+          plugins: {
+            entries: {
+              'openclaw-memory': {
+                enabled: true,
+              },
+            },
+            allow: ['openclaw-memory', 'browser'],
+            slots: {
+              memory: 'openclaw-memory',
+            },
+          },
+          channels: {
+            'openclaw-weixin': {
+              enabled: true,
+            },
+          },
+        }) as any;
+      }
+      throw new Error(`unexpected readFileSync(${String(filePath)})`);
+    });
+
+    registerChannelSetupHandlers({
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any),
+      getChannel: () => ({ label: 'WeChat', openclawId: 'openclaw-weixin', pluginPackage: '@tencent-weixin/openclaw-weixin', setupFlow: 'qr-login', saveStrategy: 'json-direct' }),
+      runAsync,
+      safeShellExecAsync: vi.fn(async () => 'ok'),
+      readShellOutputAsync: vi.fn(async () => '[{"id":"openclaw-weixin","status":"linked"}]'),
+      channelLoginWithQR,
+      ensureLocalDaemonReadyForRuntime: vi.fn(async () => true),
+    });
+
+    const handler = getRegisteredSetupHandler();
+    const result = await handler({}, 'wechat');
+
+    expect(result).toMatchObject({ success: true });
+    expect(runAsync).toHaveBeenCalledWith('openclaw plugins install "@tencent-weixin/openclaw-weixin" 2>&1', 60000);
+    expect(runAsync).toHaveBeenCalledWith(expect.stringContaining('OPENCLAW_CONFIG_PATH='), 60000);
+    expect(channelLoginWithQR).toHaveBeenCalledTimes(1);
+
+    const isolatedWrite = writeSpy.mock.calls.find(([target]) => String(target).includes('awarenessclaw-channel-cmd'));
+    expect(isolatedWrite).toBeTruthy();
+    const isolatedConfig = JSON.parse(String(isolatedWrite?.[1] || '{}'));
+    expect(isolatedConfig.plugins?.entries?.['openclaw-memory']?.enabled).toBe(false);
+    expect(isolatedConfig.plugins?.allow || []).not.toContain('openclaw-memory');
+    expect(isolatedConfig.plugins?.slots?.memory).toBeUndefined();
+    expect(rmSpy).toHaveBeenCalledWith(expect.stringContaining('awarenessclaw-channel-cmd'), expect.objectContaining({ force: true }));
+  });
+
   it('retries with command-scoped config when Windows npx ENOENT persists', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
 
