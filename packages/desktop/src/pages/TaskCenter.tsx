@@ -517,14 +517,39 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
 
         {/* Board tab */}
         {activeTab === 'board' && (
-          <KanbanBoard
-            tasks={tasks}
-            t={t}
-            onMoveTask={handleMoveTask}
-            onRetryTask={handleRetryTask}
-            onCancelTask={handleCancelTask}
-            onViewDetail={handleViewDetail}
-          />
+          tasks.length === 0 ? (
+            /* Empty state — friendly welcome */
+            <div className="flex items-center justify-center h-64">
+              <div className="text-center space-y-4 max-w-sm">
+                <Target size={36} className="text-sky-400/50 mx-auto" />
+                <div>
+                  <p className="text-sm text-slate-300 font-medium">
+                    {t('taskCenter.emptyWelcome', 'No tasks yet')}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {t('taskCenter.emptyHint', 'Create your first task — tell AI what you want to build, review, or fix.')}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowCreateModal(true)}
+                  disabled={needsSetup}
+                  className="px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2 mx-auto"
+                >
+                  <Plus size={14} />
+                  {t('taskCenter.createFirst', 'Create a Task')}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <KanbanBoard
+              tasks={tasks}
+              t={t}
+              onMoveTask={handleMoveTask}
+              onRetryTask={handleRetryTask}
+              onCancelTask={handleCancelTask}
+              onViewDetail={handleViewDetail}
+            />
+          )
         )}
 
         {/* Workflows tab */}
