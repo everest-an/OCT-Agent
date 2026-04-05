@@ -14,5 +14,7 @@ Thumbs.db
 package-lock.json
 .awareness/
 packages/desktop/.awareness/
+packages/desktop/.clawhub/
+packages/desktop/skills/
 packages/desktop/main.js
 packages/desktop/.tmp-source-map-index.json
