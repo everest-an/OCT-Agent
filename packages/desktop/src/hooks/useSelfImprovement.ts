@@ -6,6 +6,9 @@ type LearningStatus = {
   highPriorityPendingCount: number;
   promotionProposalCount: number;
   readyForPromotionCount: number;
+  todayProcessedCount: number;
+  todayApprovedCount: number;
+  todayRejectedCount: number;
   learningsDir?: string;
 };
 
@@ -19,6 +22,8 @@ type PromotionProposal = {
   ruleText: string;
   evidenceCount: number;
   createdAt?: string;
+  approvedAt?: string;
+  rejectedAt?: string;
 };
 
 export type SelfImprovementState = {
@@ -84,6 +89,9 @@ export function useSelfImprovement(agentId: string): SelfImprovementState {
           highPriorityPendingCount: Number(status.highPriorityPendingCount || 0),
           promotionProposalCount: Number(status.promotionProposalCount || 0),
           readyForPromotionCount: Number(status.readyForPromotionCount || 0),
+          todayProcessedCount: Number(status.todayProcessedCount || 0),
+          todayApprovedCount: Number(status.todayApprovedCount || 0),
+          todayRejectedCount: Number(status.todayRejectedCount || 0),
           learningsDir: status.learningsDir,
         });
       }

@@ -823,21 +823,24 @@ export default function Memory() {
 
             {/* === TIMELINE TAB === */}
             {activeTab === 'timeline' && (
-              <TimelineTab
-                events={events}
-                displayedEvents={displayedEvents}
-                eventsTotal={eventsTotal}
-                eventsOffset={eventsOffset}
-                sourceView={sourceView}
-                selectedEventType={selectedEventType}
-                expandedEvent={expandedEvent}
-                searchQuery={searchQuery}
-                searchResults={searchResults}
-                setSourceView={setSourceView}
-                setSelectedEventType={setSelectedEventType}
-                setExpandedEvent={setExpandedEvent}
-                loadEvents={loadEvents}
-              />
+              <>
+                <SelfImprovementPanel {...selfImprovement} />
+                <TimelineTab
+                  events={events}
+                  displayedEvents={displayedEvents}
+                  eventsTotal={eventsTotal}
+                  eventsOffset={eventsOffset}
+                  sourceView={sourceView}
+                  selectedEventType={selectedEventType}
+                  expandedEvent={expandedEvent}
+                  searchQuery={searchQuery}
+                  searchResults={searchResults}
+                  setSourceView={setSourceView}
+                  setSelectedEventType={setSelectedEventType}
+                  setExpandedEvent={setExpandedEvent}
+                  loadEvents={loadEvents}
+                />
+              </>
             )}
 
             {/* === KNOWLEDGE CARDS TAB === */}
@@ -924,8 +927,6 @@ export default function Memory() {
                     );
                   }}
                 />
-
-                <SelfImprovementPanel {...selfImprovement} />
               </div>
             )}
           </>

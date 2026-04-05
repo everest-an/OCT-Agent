@@ -58,6 +58,9 @@ export type SelfImprovementStatus = {
   highPriorityPendingCount: number;
   promotionProposalCount: number;
   readyForPromotionCount: number;
+  todayProcessedCount: number;
+  todayApprovedCount: number;
+  todayRejectedCount: number;
 };
 
 export type SelfImprovementPromotionSummary = {
@@ -77,6 +80,7 @@ export type SelfImprovementPromotionProposal = {
   evidenceIds: string[];
   createdAt?: string;
   approvedAt?: string;
+  rejectedAt?: string;
 };
 
 // ---------------------------------------------------------------------------

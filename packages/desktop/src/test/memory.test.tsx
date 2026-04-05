@@ -99,7 +99,7 @@ describe('Memory Page', () => {
     expect(screen.getByText('OpenClaw Local')).toBeInTheDocument();
   });
 
-  it('renders self improvement panel and saves a learning entry from settings', async () => {
+  it('renders self improvement panel and saves a learning entry in timeline', async () => {
     const memoryLogLearning = vi.fn(() => Promise.resolve({
       success: true,
       id: 'LRN-20260405-001',
@@ -116,6 +116,9 @@ describe('Memory Page', () => {
         highPriorityPendingCount: 1,
         promotionProposalCount: 1,
         readyForPromotionCount: 1,
+        todayProcessedCount: 1,
+        todayApprovedCount: 1,
+        todayRejectedCount: 0,
       }),
       memoryPromotionList: () => Promise.resolve({
         success: true,
@@ -135,8 +138,6 @@ describe('Memory Page', () => {
     });
 
     await act(async () => { render(<Memory />); });
-    await waitFor(() => expect(screen.getByText('Settings')).toBeInTheDocument());
-    await act(async () => { fireEvent.click(screen.getByText('Settings')); });
     await waitFor(() => expect(screen.getByText('Self Improvement')).toBeInTheDocument());
 
     fireEvent.change(screen.getByPlaceholderText('One-line description of what happened'), {

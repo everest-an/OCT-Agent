@@ -28,6 +28,35 @@ type FileBackedMemoryEvent = {
   fts_content?: string;
 };
 
+async function recordSelfImprovementDecision(params: {
+  decision: 'approved' | 'rejected' | 'bulk_approved';
+  proposalId?: string;
+  target?: string;
+  summary?: string;
+  requestedCount?: number;
+  appliedCount?: number;
+}) {
+  const lines: string[] = [
+    `Decision: ${params.decision}`,
+  ];
+  if (params.proposalId) lines.push(`Proposal: ${params.proposalId}`);
+  if (params.target) lines.push(`Target: ${params.target}`);
+  if (params.summary) lines.push(`Summary: ${params.summary}`);
+  if (typeof params.requestedCount === 'number') lines.push(`Requested: ${params.requestedCount}`);
+  if (typeof params.appliedCount === 'number') lines.push(`Applied: ${params.appliedCount}`);
+
+  try {
+    await callMcp('awareness_record', {
+      action: 'remember',
+      event_type: 'self_improvement_promotion',
+      source: 'desktop',
+      content: lines.join('\n'),
+    });
+  } catch {
+    // best-effort only; approval workflow should not fail because indexing is unavailable
+  }
+}
+
 function parseFrontmatter(raw: string): { meta: Record<string, any>; body: string } {
   const match = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
   if (!match) return { meta: {}, body: raw.trim() };
@@ -285,6 +314,14 @@ export function registerMemoryHandlers() {
         agentId: payload.agentId || 'main',
         workspacePath: payload.workspacePath,
       });
+
+      await recordSelfImprovementDecision({
+        decision: 'approved',
+        proposalId: result.proposal.id,
+        target: result.proposal.target,
+        summary: result.proposal.summary,
+      });
+
       return { success: true, ...result };
     } catch (err: any) {
       return { success: false, error: err?.message || String(err) };
@@ -307,6 +344,14 @@ export function registerMemoryHandlers() {
         agentId: payload.agentId || 'main',
         workspacePath: payload.workspacePath,
       });
+
+      await recordSelfImprovementDecision({
+        decision: 'rejected',
+        proposalId: result.proposal.id,
+        target: result.proposal.target,
+        summary: result.proposal.summary,
+      });
+
       return { success: true, ...result };
     } catch (err: any) {
       return { success: false, error: err?.message || String(err) };
@@ -320,6 +365,13 @@ export function registerMemoryHandlers() {
         agentId: opts?.agentId || 'main',
         workspacePath: opts?.workspacePath,
       });
+
+      await recordSelfImprovementDecision({
+        decision: 'bulk_approved',
+        requestedCount: result.result.requestedCount,
+        appliedCount: result.result.appliedCount,
+      });
+
       return { success: true, ...result };
     } catch (err: any) {
       return { success: false, error: err?.message || String(err) };

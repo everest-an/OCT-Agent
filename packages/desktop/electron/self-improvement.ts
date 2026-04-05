@@ -86,6 +86,111 @@ class AsyncMutex {
 
 const appendMutex = new AsyncMutex();
 
+type AppliedRuleBlock = {
+  id: string;
+  raw: string;
+  patternKey: string;
+  pattern: string;
+  ruleText: string;
+};
+
+type PromotionTargetUpdatePlan = {
+  action: 'append' | 'replace' | 'skip';
+  nextTargetContent: string;
+};
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  return String(error || 'Unknown error');
+}
+
+function normalizeConflictText(value: string): string {
+  return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function parseAppliedRuleBlocks(targetContent: string): AppliedRuleBlock[] {
+  const blocks: AppliedRuleBlock[] = [];
+  const matcher = /<!--\s*promotion:\s*(PROMO-\d{8}-\d{3})\s*-->[\s\S]*?(?=(?:\n<!--\s*promotion:\s*PROMO-\d{8}-\d{3}\s*-->)|$)/g;
+
+  let match: RegExpExecArray | null = null;
+  while (true) {
+    match = matcher.exec(targetContent);
+    if (!match) break;
+
+    const raw = String(match[0] || '');
+    const id = String(match[1] || '').trim();
+    if (!id || !raw) continue;
+
+    const patternKey = (raw.match(/^- Pattern-Key:\s*([^\n]+)/im)?.[1] || '').trim();
+    const pattern = (raw.match(/^- Pattern:\s*([^\n]+)/im)?.[1] || '').trim();
+    const ruleText = (raw.match(/^- Rule:\s*([^\n]+)/im)?.[1] || '').trim();
+    blocks.push({ id, raw, patternKey, pattern, ruleText });
+  }
+
+  return blocks;
+}
+
+function planPromotionTargetUpdate(params: {
+  targetContent: string;
+  proposal: SelfImprovementPromotionProposal;
+  appliedAt: string;
+}): PromotionTargetUpdatePlan {
+  const marker = `promotion: ${params.proposal.id}`;
+  if (params.targetContent.includes(marker)) {
+    return {
+      action: 'skip',
+      nextTargetContent: params.targetContent,
+    };
+  }
+
+  const nextBlock = buildAppliedRuleBlock(params.proposal, params.appliedAt);
+  const existingBlocks = parseAppliedRuleBlocks(params.targetContent).filter((block) => block.id !== params.proposal.id);
+
+  const normalizedPatternKey = normalizeConflictText(params.proposal.patternKey);
+  const normalizedPattern = normalizeConflictText(params.proposal.summary);
+  const normalizedRule = normalizeConflictText(params.proposal.ruleText);
+
+  const samePatternBlock = existingBlocks.find((block) => {
+    if (normalizedPatternKey && block.patternKey) {
+      return normalizeConflictText(block.patternKey) === normalizedPatternKey;
+    }
+    if (!normalizedPattern) return false;
+    return normalizeConflictText(block.pattern) === normalizedPattern;
+  });
+
+  const sameRuleBlock = existingBlocks.find((block) => {
+    if (!normalizedRule) return false;
+    return normalizeConflictText(block.ruleText) === normalizedRule;
+  });
+
+  // Conflict strategy:
+  // - TOOLS.md: replace existing recurring rule blocks to keep safeguards concise.
+  // - AGENTS.md / SOUL.md: dedupe recurring rules to avoid behavior drift.
+  if (params.proposal.target === 'TOOLS.md') {
+    const replaceCandidate = samePatternBlock || sameRuleBlock;
+    if (replaceCandidate) {
+      return {
+        action: 'replace',
+        nextTargetContent: params.targetContent.replace(replaceCandidate.raw, nextBlock.trimEnd()),
+      };
+    }
+  } else if (samePatternBlock || sameRuleBlock) {
+    return {
+      action: 'skip',
+      nextTargetContent: params.targetContent,
+    };
+  }
+
+  const separator = params.targetContent.trim().length > 0 && !params.targetContent.endsWith('\n\n')
+    ? '\n'
+    : '';
+
+  return {
+    action: 'append',
+    nextTargetContent: `${params.targetContent}${separator}${nextBlock}`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // File helpers
 // ---------------------------------------------------------------------------
@@ -169,28 +274,28 @@ async function setPromotionProposalStatus(params: {
     throw new Error(`Promotion proposal not found: ${params.proposalId}`);
   }
 
-  if (proposal.status !== params.status) {
-    const approvedAt = params.status === 'approved' ? new Date().toISOString() : undefined;
-    const proposalIdPattern = escapeRegExp(proposal.id);
-    const statusMatcher = new RegExp(`(## \\[${proposalIdPattern}\\][\\s\\S]*?\\*\\*Status\\*\\*:\\s*)([^\\n]+)`, 'm');
-    let updatedContent = content.replace(statusMatcher, `$1${params.status}`);
+  let finalContent = content;
 
+  if (proposal.status !== params.status) {
+    const processedAt = new Date().toISOString();
+    const proposalIdPattern = escapeRegExp(proposal.id);
     const blockMatcher = new RegExp(`(^## \\[${proposalIdPattern}\\][\\s\\S]*?)(?=^## \\[PROMO-|(?![\\s\\S]))`, 'm');
-    const blockMatch = blockMatcher.exec(updatedContent);
+    const blockMatch = blockMatcher.exec(finalContent);
     if (blockMatch) {
-      const updatedBlock = updateProposalStatusBlock(blockMatch[1], params.status, approvedAt);
-      updatedContent = updatedContent.replace(blockMatch[1], updatedBlock);
+      const updatedBlock = updateProposalStatusBlock(blockMatch[1], params.status, processedAt);
+      finalContent = finalContent.replace(blockMatch[1], updatedBlock);
     }
 
-    await fs.promises.writeFile(params.proposalFilePath, updatedContent, 'utf8');
+    await fs.promises.writeFile(params.proposalFilePath, finalContent, 'utf8');
   }
 
-  const { rawBlock: _rawBlock, ...safeProposal } = proposal;
-  return {
-    ...safeProposal,
-    status: params.status,
-    ...(params.status === 'approved' ? { approvedAt: new Date().toISOString() } : {}),
-  };
+  const latest = parsePromotionBlocks(finalContent).find((item) => item.id === params.proposalId);
+  if (!latest) {
+    throw new Error(`Promotion proposal not found after update: ${params.proposalId}`);
+  }
+
+  const { rawBlock: _rawBlock, ...safeProposal } = latest;
+  return safeProposal;
 }
 
 // ---------------------------------------------------------------------------
@@ -388,31 +493,69 @@ export async function applySelfImprovementPromotionProposal(input: WorkspacePara
   targetFilePath: string;
   proposal: SelfImprovementPromotionProposal;
 }> {
-  const { rootDir, learningsDir } = await ensureSelfImprovementScaffold(input);
-  const proposalFilePath = path.join(learningsDir, 'PROMOTION_PROPOSALS.md');
+  await appendMutex.acquire();
+  try {
+    const { rootDir, learningsDir } = await ensureSelfImprovementScaffold(input);
+    const proposalFilePath = path.join(learningsDir, 'PROMOTION_PROPOSALS.md');
 
-  const list = await listSelfImprovementPromotionProposals(input);
-  const proposal = list.items.find((item) => item.id === input.proposalId);
-  if (!proposal) {
-    throw new Error(`Promotion proposal not found: ${input.proposalId}`);
+    const list = await listSelfImprovementPromotionProposals(input);
+    const proposal = list.items.find((item) => item.id === input.proposalId);
+    if (!proposal) {
+      throw new Error(`Promotion proposal not found: ${input.proposalId}`);
+    }
+
+    const targetFilePath = await ensureTargetFileExists(rootDir, proposal.target);
+    const [targetContent, proposalSnapshot] = await Promise.all([
+      fs.promises.readFile(targetFilePath, 'utf8'),
+      fs.promises.readFile(proposalFilePath, 'utf8'),
+    ]);
+
+    const updatePlan = planPromotionTargetUpdate({
+      targetContent,
+      proposal,
+      appliedAt: new Date().toISOString(),
+    });
+
+    let targetUpdated = false;
+    try {
+      if (updatePlan.nextTargetContent !== targetContent) {
+        await fs.promises.writeFile(targetFilePath, updatePlan.nextTargetContent, 'utf8');
+        targetUpdated = true;
+      }
+
+      const safeProposal = await setPromotionProposalStatus({
+        proposalFilePath,
+        proposalId: proposal.id,
+        status: 'approved',
+      });
+
+      return { rootDir, learningsDir, proposalFilePath, targetFilePath, proposal: safeProposal };
+    } catch (error) {
+      const rollbackErrors: string[] = [];
+
+      if (targetUpdated) {
+        try {
+          await fs.promises.writeFile(targetFilePath, targetContent, 'utf8');
+        } catch (restoreTargetError) {
+          rollbackErrors.push(`target restore failed: ${toErrorMessage(restoreTargetError)}`);
+        }
+      }
+
+      try {
+        await fs.promises.writeFile(proposalFilePath, proposalSnapshot, 'utf8');
+      } catch (restoreProposalError) {
+        rollbackErrors.push(`proposal restore failed: ${toErrorMessage(restoreProposalError)}`);
+      }
+
+      const message = toErrorMessage(error);
+      if (rollbackErrors.length > 0) {
+        throw new Error(`Failed to apply promotion proposal: ${message}. Rollback issues: ${rollbackErrors.join('; ')}`);
+      }
+      throw new Error(`Failed to apply promotion proposal: ${message}`);
+    }
+  } finally {
+    appendMutex.release();
   }
-
-  const targetFilePath = await ensureTargetFileExists(rootDir, proposal.target);
-  const targetContent = await fs.promises.readFile(targetFilePath, 'utf8');
-  const marker = `promotion: ${proposal.id}`;
-  if (!targetContent.includes(marker)) {
-    const appendText = buildAppliedRuleBlock(proposal, new Date().toISOString());
-    const separator = targetContent.trim().length > 0 && !targetContent.endsWith('\n\n') ? '\n' : '';
-    await fs.promises.writeFile(targetFilePath, `${targetContent}${separator}${appendText}`, 'utf8');
-  }
-
-  const safeProposal = await setPromotionProposalStatus({
-    proposalFilePath,
-    proposalId: proposal.id,
-    status: 'approved',
-  });
-
-  return { rootDir, learningsDir, proposalFilePath, targetFilePath, proposal: safeProposal };
 }
 
 export async function rejectSelfImprovementPromotionProposal(input: WorkspaceParams & {
@@ -496,6 +639,9 @@ export async function getSelfImprovementStatus(params?: WorkspaceParams): Promis
   let highPriorityPendingCount = 0;
   let promotionProposalCount = 0;
   let readyForPromotionCount = 0;
+  let todayProcessedCount = 0;
+  let todayApprovedCount = 0;
+  let todayRejectedCount = 0;
 
   for (const file of files) {
     try {
@@ -512,9 +658,24 @@ export async function getSelfImprovementStatus(params?: WorkspaceParams): Promis
     const proposals = parsePromotionBlocks(proposalContent);
     promotionProposalCount = proposals.length;
     readyForPromotionCount = proposals.filter((item) => item.status === 'proposed').length;
+
+    const todayPrefix = new Date().toISOString().slice(0, 10);
+    todayApprovedCount = proposals.filter((item) => item.approvedAt?.startsWith(todayPrefix)).length;
+    todayRejectedCount = proposals.filter((item) => item.rejectedAt?.startsWith(todayPrefix)).length;
+    todayProcessedCount = todayApprovedCount + todayRejectedCount;
   } catch {
     // no proposals file
   }
 
-  return { rootDir, learningsDir, pendingCount, highPriorityPendingCount, promotionProposalCount, readyForPromotionCount };
+  return {
+    rootDir,
+    learningsDir,
+    pendingCount,
+    highPriorityPendingCount,
+    promotionProposalCount,
+    readyForPromotionCount,
+    todayProcessedCount,
+    todayApprovedCount,
+    todayRejectedCount,
+  };
 }

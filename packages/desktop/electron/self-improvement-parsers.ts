@@ -131,27 +131,50 @@ export function parsePromotionBlocks(content: string): ParsedPromotionEntry[] {
     const evidenceIds = parseCommaList(body.match(/\*\*Evidence IDs\*\*:\s*([^\n]+)/i)?.[1] || '');
     const createdAt = (body.match(/\*\*Created\*\*:\s*([^\n]+)/i)?.[1] || '').trim() || undefined;
     const approvedAt = (body.match(/\*\*Approved\*\*:\s*([^\n]+)/i)?.[1] || '').trim() || undefined;
+    const rejectedAt = (body.match(/\*\*Rejected\*\*:\s*([^\n]+)/i)?.[1] || '').trim() || undefined;
 
     entries.push({
       id, status, target, patternKey,
       summary: extractSection(body, 'Pattern Summary') || '',
       ruleText: extractSection(body, 'Proposed Rule') || '',
-      evidenceCount, evidenceIds, createdAt, approvedAt, rawBlock,
+      evidenceCount, evidenceIds, createdAt, approvedAt, rejectedAt, rawBlock,
     });
   }
 
   return entries;
 }
 
-export function updateProposalStatusBlock(block: string, status: 'proposed' | 'approved' | 'rejected', approvedAt?: string): string {
+export function updateProposalStatusBlock(block: string, status: 'proposed' | 'approved' | 'rejected', processedAt?: string): string {
   let next = block.replace(/\*\*Status\*\*:\s*[^\n]+/i, `**Status**: ${status}`);
-  if (status === 'approved' && approvedAt) {
-    if (/\*\*Approved\*\*:/i.test(next)) {
-      next = next.replace(/\*\*Approved\*\*:\s*[^\n]+/i, `**Approved**: ${approvedAt}`);
-    } else {
-      next = next.replace(/\n---\s*$/, `\n**Approved**: ${approvedAt}\n\n---`);
+
+  if (status === 'approved') {
+    next = next.replace(/^\*\*Rejected\*\*:\s*[^\n]+\n?/gim, '');
+    if (processedAt) {
+      if (/\*\*Approved\*\*:/i.test(next)) {
+        next = next.replace(/\*\*Approved\*\*:\s*[^\n]+/i, `**Approved**: ${processedAt}`);
+      } else if (/\n---\s*$/m.test(next)) {
+        next = next.replace(/\n---\s*$/m, `\n**Approved**: ${processedAt}\n\n---`);
+      } else {
+        next = `${next.trimEnd()}\n**Approved**: ${processedAt}\n`;
+      }
     }
+    return next;
   }
+
+  if (status === 'rejected') {
+    next = next.replace(/^\*\*Approved\*\*:\s*[^\n]+\n?/gim, '');
+    if (processedAt) {
+      if (/\*\*Rejected\*\*:/i.test(next)) {
+        next = next.replace(/\*\*Rejected\*\*:\s*[^\n]+/i, `**Rejected**: ${processedAt}`);
+      } else if (/\n---\s*$/m.test(next)) {
+        next = next.replace(/\n---\s*$/m, `\n**Rejected**: ${processedAt}\n\n---`);
+      } else {
+        next = `${next.trimEnd()}\n**Rejected**: ${processedAt}\n`;
+      }
+    }
+    return next;
+  }
+
   return next;
 }
 
@@ -352,6 +375,7 @@ export function buildAppliedRuleBlock(proposal: SelfImprovementPromotionProposal
   return [
     `<!-- promotion: ${proposal.id} -->`,
     `### [${proposal.id}] Auto-promoted Rule`,
+    `- Pattern-Key: ${trimText(proposal.patternKey, 'n/a')}`,
     `- Pattern: ${trimText(proposal.summary)}`,
     `- Rule: ${trimText(proposal.ruleText)}`,
     `- Evidence: ${proposal.evidenceIds.join(', ') || 'n/a'}`,

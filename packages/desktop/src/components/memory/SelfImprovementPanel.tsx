@@ -26,7 +26,7 @@ export function SelfImprovementPanel(props: SelfImprovementPanelProps) {
             {t('memory.selfImprovement.desc', 'Official self-improving-agent workflow writes structured entries into .learnings so patterns can be promoted into AGENTS.md, SOUL.md, and TOOLS.md later.')}
           </p>
         </div>
-        <div className="grid min-w-[260px] gap-2 sm:grid-cols-3">
+        <div className="grid min-w-[300px] gap-2 sm:grid-cols-4">
           <div className="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3">
             <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">{t('memory.selfImprovement.pending', 'Pending')}</div>
             <div className="mt-1 text-sm font-medium text-slate-100">{learningStatus?.pendingCount ?? 0}</div>
@@ -40,6 +40,13 @@ export function SelfImprovementPanel(props: SelfImprovementPanelProps) {
             <div className="mt-1 text-sm font-medium text-cyan-300">{learningStatus?.promotionProposalCount ?? 0}</div>
             <div className="mt-1 text-[11px] text-slate-500">
               {t('memory.selfImprovement.ready', 'Ready')}: {learningStatus?.readyForPromotionCount ?? 0}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3">
+            <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">{t('memory.selfImprovement.todayProcessed', 'Today Processed')}</div>
+            <div className="mt-1 text-sm font-medium text-emerald-300">{learningStatus?.todayProcessedCount ?? 0}</div>
+            <div className="mt-1 text-[11px] text-slate-500">
+              A {learningStatus?.todayApprovedCount ?? 0} / R {learningStatus?.todayRejectedCount ?? 0}
             </div>
           </div>
         </div>

@@ -100,7 +100,7 @@ Object.defineProperty(window, 'electronAPI', {
     memoryGetCardEvolution: () => Promise.resolve({ chain: [] }),
     memoryEnableSlotReplacement: () => Promise.resolve({ success: true }),
     memoryGetSlotStatus: () => Promise.resolve({ slot: 'memory-core', isAwareness: false }),
-    memoryLearningStatus: () => Promise.resolve({ success: true, rootDir: '/Users/test/.openclaw/workspace', learningsDir: '/Users/test/.openclaw/workspace/.learnings', pendingCount: 0, highPriorityPendingCount: 0, promotionProposalCount: 0, readyForPromotionCount: 0 }),
+    memoryLearningStatus: () => Promise.resolve({ success: true, rootDir: '/Users/test/.openclaw/workspace', learningsDir: '/Users/test/.openclaw/workspace/.learnings', pendingCount: 0, highPriorityPendingCount: 0, promotionProposalCount: 0, readyForPromotionCount: 0, todayProcessedCount: 0, todayApprovedCount: 0, todayRejectedCount: 0 }),
     memoryPromotionList: () => Promise.resolve({ success: true, items: [] }),
     memoryPromotionApply: () => Promise.resolve({ success: true }),
     memoryPromotionReject: () => Promise.resolve({ success: true }),
