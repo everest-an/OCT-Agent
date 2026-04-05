@@ -53,7 +53,6 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
   backlog: { label: 'Backlog', color: 'text-slate-400', bg: 'bg-slate-800' },
   queued: { label: 'Queued', color: 'text-amber-400', bg: 'bg-amber-900/20' },
   running: { label: 'Running', color: 'text-sky-400', bg: 'bg-sky-900/20' },
-  review: { label: 'Review', color: 'text-purple-400', bg: 'bg-purple-900/20' },
   done: { label: 'Done', color: 'text-emerald-400', bg: 'bg-emerald-900/20' },
   failed: { label: 'Failed', color: 'text-red-400', bg: 'bg-red-900/20' },
 };

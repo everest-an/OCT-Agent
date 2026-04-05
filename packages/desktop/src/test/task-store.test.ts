@@ -136,13 +136,12 @@ describe('task-store', () => {
       expect(cols.done).toHaveLength(1);
       expect(cols.failed).toHaveLength(1);
       expect(cols.queued).toHaveLength(0);
-      expect(cols.review).toHaveLength(0);
     });
   });
 
   describe('KANBAN_COLUMNS', () => {
-    it('has 6 columns in correct order', () => {
-      expect(KANBAN_COLUMNS).toEqual(['backlog', 'queued', 'running', 'review', 'done', 'failed']);
+    it('has 5 columns in correct order', () => {
+      expect(KANBAN_COLUMNS).toEqual(['backlog', 'queued', 'running', 'done', 'failed']);
     });
   });
 

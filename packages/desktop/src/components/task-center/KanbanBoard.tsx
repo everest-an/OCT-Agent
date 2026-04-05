@@ -45,12 +45,10 @@ interface KanbanBoardProps {
 
 function tasksByColumn(tasks: readonly Task[]): Record<TaskStatus, readonly Task[]> {
   const result: Record<string, Task[]> = {
-    backlog: [], queued: [], running: [], review: [], done: [], failed: [],
+    backlog: [], queued: [], running: [], done: [], failed: [],
   };
   for (const t of tasks) {
-    // Migrate any 'review' tasks to 'done' (column removed)
-    const col = t.status === 'review' ? 'done' : t.status;
-    (result[col] ?? result.backlog).push(t);
+    (result[t.status] ?? result.backlog).push(t);
   }
   return result as Record<TaskStatus, readonly Task[]>;
 }

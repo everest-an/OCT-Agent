@@ -10,7 +10,7 @@
 // Types
 // ---------------------------------------------------------------------------
 
-export type TaskStatus = 'backlog' | 'queued' | 'running' | 'review' | 'done' | 'failed';
+export type TaskStatus = 'backlog' | 'queued' | 'running' | 'done' | 'failed';
 export type TaskPriority = 'low' | 'medium' | 'high';
 
 export interface Task {
@@ -257,7 +257,6 @@ export const KANBAN_COLUMNS: readonly TaskStatus[] = [
   'backlog',
   'queued',
   'running',
-  'review',
   'done',
   'failed',
 ] as const;
@@ -267,7 +266,6 @@ export function tasksByColumn(tasks: readonly Task[]): Record<TaskStatus, readon
     backlog: [],
     queued: [],
     running: [],
-    review: [],
     done: [],
     failed: [],
   };
