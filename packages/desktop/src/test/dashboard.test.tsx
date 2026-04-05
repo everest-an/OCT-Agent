@@ -228,6 +228,48 @@ describe('Dashboard (Chat)', () => {
     });
   });
 
+  it('clears stale project folder when backend reports workspace fallback', async () => {
+    const api = window.electronAPI as any;
+    const staleProjectRoot = 'E:\\Projects\\MissingProjectRoot';
+    localStorage.setItem('awareness-claw-project-root', staleProjectRoot);
+    api.chatSend = vi.fn(async () => ({
+      success: true,
+      text: 'normal reply',
+      sessionId: 'test-session',
+      workspacePathInvalid: true,
+      workspacePathIssue: 'missing',
+      workspacePathOriginal: staleProjectRoot,
+    }));
+
+    await act(async () => { render(<Dashboard />); });
+
+    const textarea = screen.getByPlaceholderText(/输入消息|Type a message/);
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'hello' } });
+    });
+
+    const buttons = screen.getAllByRole('button');
+    const sendBtn = buttons[buttons.length - 1];
+    await act(async () => { fireEvent.click(sendBtn); });
+
+    await waitFor(() => {
+      expect(api.chatSend).toHaveBeenCalledWith('hello', expect.any(String), expect.objectContaining({
+        workspacePath: staleProjectRoot,
+      }));
+    });
+
+    await waitFor(() => {
+      expect(localStorage.getItem('awareness-claw-project-root')).toBeNull();
+    });
+
+    await waitFor(() => {
+      const sessions = JSON.parse(localStorage.getItem('awareness-claw-sessions') || '[]');
+      const msgs = sessions[0]?.messages || [];
+      const assistantMsg = msgs.find((m: any) => m.role === 'assistant');
+      expect(String(assistantMsg?.content || '')).toMatch(/项目目录已经不可用|project folder is no longer available/i);
+    });
+  });
+
   it('updates the project folder label immediately after selection', async () => {
     const api = window.electronAPI as any;
     api.selectDirectory = vi.fn().mockResolvedValue({ directoryPath: 'E:\\Projects\\StuckRestart' });

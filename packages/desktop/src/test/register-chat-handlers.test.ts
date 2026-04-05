@@ -781,6 +781,133 @@ describe('registerChatHandlers', () => {
     );
   });
 
+  it('continues chat when the selected project folder is missing and marks workspace fallback metadata', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: {
+            role: 'assistant',
+            content: 'normal chat reply',
+          },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    const missingWorkspaceDir = path.join(os.tmpdir(), `awarenessclaw-missing-${Date.now()}`);
+
+    registerChatHandlers({
+      sendToRenderer: vi.fn(),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, 'hello', 'test-session', { workspacePath: missingWorkspaceDir });
+
+    expect(result).toMatchObject({
+      success: true,
+      text: 'normal chat reply',
+      sessionId: 'test-session',
+      workspacePathInvalid: true,
+      workspacePathIssue: 'missing',
+      workspacePathOriginal: missingWorkspaceDir,
+    });
+
+    const firstChatSendCall = ws.chatSend.mock.calls[0] as unknown as any[] | undefined;
+    const promptPayload = String(firstChatSendCall && firstChatSendCall.length > 1 ? firstChatSendCall[1] : '');
+    expect(promptPayload).toContain('[Project folder unavailable]');
+    expect(promptPayload).not.toContain('[Project working directory:');
+  });
+
+  it('uses home directory cwd for CLI fallback when selected project folder is missing', async () => {
+    const fakeChild = createCliFallbackChild('CLI fallback reply');
+    spawnMock.mockReturnValue(fakeChild as any);
+
+    const missingWorkspaceDir = path.join(os.tmpdir(), `awarenessclaw-missing-${Date.now()}`);
+
+    registerChatHandlers({
+      sendToRenderer: vi.fn(),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: false, error: 'Gateway failed to start.' })),
+      getGatewayWs: vi.fn(),
+      getConnectedGatewayWs: vi.fn(() => null),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const pending = handlers['chat:send']({}, 'hello from cli fallback', 'test-session', { workspacePath: missingWorkspaceDir });
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
+
+    const spawnOptions = spawnMock.mock.calls[0]?.[2] as Record<string, unknown> | undefined;
+    expect(String(spawnOptions?.cwd || '')).toBe(os.homedir());
+
+    fakeChild.emitOutput();
+    await expect(pending).resolves.toMatchObject({
+      success: true,
+      text: 'CLI fallback reply',
+      sessionId: 'test-session',
+      workspacePathInvalid: true,
+      workspacePathIssue: 'missing',
+      workspacePathOriginal: missingWorkspaceDir,
+    });
+  });
+
+  it('does not short-circuit filesystem requests when selected project folder is missing', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: {
+            role: 'assistant',
+            content: 'Please choose the project folder again before I edit project files.',
+          },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    const missingWorkspaceDir = path.join(os.tmpdir(), `awarenessclaw-missing-${Date.now()}`);
+
+    registerChatHandlers({
+      sendToRenderer: vi.fn(),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, 'create a file under src and update config', 'test-session', { workspacePath: missingWorkspaceDir });
+
+    expect(result).toMatchObject({
+      success: true,
+      sessionId: 'test-session',
+      workspacePathInvalid: true,
+      workspacePathIssue: 'missing',
+      workspacePathOriginal: missingWorkspaceDir,
+    });
+    expect(ws.chatSend).toHaveBeenCalledTimes(1);
+  });
+
   it('injects desktop path context for natural-language desktop requests', async () => {
     const ws = new FakeGatewayClient();
     ws.chatSend = vi.fn(async () => {

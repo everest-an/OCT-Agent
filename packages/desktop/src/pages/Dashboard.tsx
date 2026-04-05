@@ -1137,6 +1137,9 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
         workspacePath: projectRoot || undefined,
         agentId: config.selectedAgentId || 'main',
       });
+      if (result?.workspacePathInvalid && projectRoot) {
+        setProjectRoot('');
+      }
       const finalizedToolCalls = finalizeToolCalls(
         toolCallsRef.current,
         Boolean(result?.success && !result?.awaitingApproval),
@@ -1147,12 +1150,16 @@ export default function Dashboard({ isActive = true, onNavigate }: { isActive?: 
       const baseResponseText = result?.preferResultText
         ? (result.text || streamingRef.current.trim() || result.error || fallbackNoResponseText)
         : (streamingRef.current.trim() || result.text || result.error || fallbackNoResponseText);
+      const workspaceFallbackWarningText = result?.workspacePathInvalid
+        ? t('chat.workspace.invalidCleared', 'The selected project folder is no longer available. AwarenessClaw switched to normal chat mode. Choose a project folder again before requesting project file edits.')
+        : '';
       const vpnDnsWarningText = result?.vpnDnsCompatibilityIssue
         ? t('chat.vpnDnsCompatibilityWarning', 'Detected a VPN/DNS compatibility issue: public websites were resolved to special-use IP ranges, so web_fetch/browser may be blocked. In your VPN or proxy app, disable full DNS hijack or enable split DNS for public websites, then retry. Temporary workaround: use web_search plus exec-based download commands.')
         : '';
+      const appendedWarnings = [workspaceFallbackWarningText, vpnDnsWarningText].filter(Boolean);
       const responseText = result?.unverifiedLocalFileOperation
         ? t('chat.localFileChangeUnverified', 'AwarenessClaw did not verify this local file change. The agent answered as if it finished, but no completed tool result was recorded for the request, so the file was not confirmed on disk.')
-        : (vpnDnsWarningText ? `${baseResponseText}\n\n${vpnDnsWarningText}` : baseResponseText);
+        : (appendedWarnings.length > 0 ? `${baseResponseText}\n\n${appendedWarnings.join('\n\n')}` : baseResponseText);
 
       const assistantMsg: Message = {
         id: `msg-${Date.now()}`,

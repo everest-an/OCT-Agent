@@ -722,14 +722,29 @@ export function registerChatHandlers(deps: {
       deps.sendToRenderer(channel, payload);
     };
 
+    const requestedOptions: ChatSendOptions = options ? { ...options } : {};
+
     // Agent routing is done via the session key format, not a separate agentId param.
     // Gateway session keys: agent:<agentId>:main (operator), agent:<agentId>:webchat:<id> (desktop).
     // When a non-main agent is selected, prefix the session key so Gateway routes to the right agent.
-    const agentId = options?.agentId || 'main';
+    const agentId = requestedOptions.agentId || 'main';
     const rawSid = sessionId || `ac-${Date.now()}`;
     const sid = agentId !== 'main'
       ? `agent:${agentId}:webchat:${rawSid}`
       : rawSid;
+    let workspacePathInvalid = false;
+    let workspacePathIssue: 'missing' | 'not-directory' | undefined;
+    let workspacePathOriginal: string | undefined;
+    const withWorkspaceFallbackMeta = <T extends Record<string, any>>(result: T): T & {
+      workspacePathInvalid?: boolean;
+      workspacePathIssue?: 'missing' | 'not-directory';
+      workspacePathOriginal?: string;
+    } => ({
+      ...result,
+      workspacePathInvalid: workspacePathInvalid || undefined,
+      workspacePathIssue: workspacePathIssue || undefined,
+      workspacePathOriginal: workspacePathOriginal || undefined,
+    });
 
     let fullMessage = message;
     const shouldPreloadDesktopMemory = awarenessInitCompatibilityMode
@@ -787,7 +802,7 @@ export function registerChatHandlers(deps: {
     const documentsDir = path.join(homeDir, 'Documents');
     const downloadsDir = path.join(homeDir, 'Downloads');
     const hostOsLabel = getHostOsLabel(process.platform);
-    const hostApprovals = getExecApprovalSettings(homeDir, options?.agentId || 'main');
+    const hostApprovals = getExecApprovalSettings(homeDir, requestedOptions.agentId || 'main');
     fullMessage = `[Local machine context] You are running inside the AwarenessClaw Desktop app on the user's own computer. When the user asks about local files or folders on this machine, do not answer with a generic safety/privacy refusal. Use the available tools (especially exec/read/write/edit when appropriate) to inspect or modify the local filesystem if the request is allowed by the current host approval policy. Common ${hostOsLabel} folders for this user are: home=${homeDir}, desktop=${desktopDir}, documents=${documentsDir}, downloads=${downloadsDir}. If the user says "桌面", "desktop", or "我的桌面", resolve that to ${desktopDir}. If the user asks what files are there, inspect the directory first and report the actual result. For any local filesystem claim, do not guess. Never claim a file or folder change succeeded unless a tool result confirms it. After creating, editing, renaming, or deleting files/folders, run a follow-up verification step (for example list the directory, read the file, or stat the target) and include that verification in your reply. If a tool call is blocked, denied, or fails, say that plainly instead of pretending the action finished.
 
   [Current host exec approvals] security=${hostApprovals.security}, ask=${hostApprovals.ask}, askFallback=${hostApprovals.askFallback}, autoAllowSkills=${hostApprovals.autoAllowSkills ? 'on' : 'off'}. This current host approval state is authoritative for this turn. If earlier conversation turns claimed local filesystem access was blocked by allowlist/privacy rules, do not blindly repeat that claim. Re-evaluate the request against the current approval state above and use tools when allowed.
@@ -795,11 +810,11 @@ export function registerChatHandlers(deps: {
   [Web compatibility note] If web_fetch or browser reports private/internal/special-use IP blocking for a public HTTPS domain, treat it as a VPN/DNS compatibility issue instead of a final failure. Explain that compatibility issue briefly, then continue with a safe fallback flow (for example: use web_search for discovery and exec-based HTTP retrieval for the requested public URL when host approvals allow it).
 
   ${fullMessage}`;
-    if (options?.files && options.files.length > 0) {
+    if (requestedOptions.files && requestedOptions.files.length > 0) {
       const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'];
       const images: string[] = [];
       const others: string[] = [];
-      for (const filePath of options.files) {
+      for (const filePath of requestedOptions.files) {
         const ext = path.extname(filePath).toLowerCase();
         (imageExts.includes(ext) ? images : others).push(filePath);
       }
@@ -809,16 +824,37 @@ export function registerChatHandlers(deps: {
       fullMessage = `${parts.join('\n')}\n\n${fullMessage}`;
     }
 
-    const requestedWorkspace = options?.workspacePath?.trim();
+    const requestedWorkspace = requestedOptions.workspacePath?.trim();
     if (requestedWorkspace) {
+      workspacePathOriginal = requestedWorkspace;
       try {
         if (!fs.statSync(requestedWorkspace).isDirectory()) {
-          return { success: false, text: '', error: 'The selected project folder is not available.', sessionId: sid };
+          workspacePathInvalid = true;
+          workspacePathIssue = 'not-directory';
         }
       } catch {
-        return { success: false, text: '', error: 'The selected project folder could not be found.', sessionId: sid };
+        workspacePathInvalid = true;
+        workspacePathIssue = 'missing';
       }
-      fullMessage = `[Project working directory: ${requestedWorkspace}] Use this directory as the default root for file operations in this chat. When the user asks you to read, write, edit, or create project files, prefer absolute paths inside this directory or set your command cwd there. Do not treat this folder as the agent's home workspace; AGENTS.md, USER.md, SOUL.md, MEMORY.md, and other agent-scoped files still follow the configured agent workspace.\n\n${fullMessage}`;
+
+      if (workspacePathInvalid) {
+        requestedOptions.workspacePath = undefined;
+        send('chat:status', {
+          type: 'gateway',
+          message: workspacePathIssue === 'not-directory'
+            ? 'Selected project folder is unavailable. Continuing in normal chat mode without a project root.'
+            : 'Selected project folder could not be found. Continuing in normal chat mode without a project root.',
+        });
+        fullMessage = `[Project folder unavailable]
+The selected project folder "${requestedWorkspace}" is no longer accessible in this desktop session.
+Continue helping normally.
+If the user asks for project file operations in that project, ask them to choose the project folder again in the chat header before you proceed.
+Do not claim project file changes were completed inside that unavailable path.
+
+${fullMessage}`;
+      } else {
+        fullMessage = `[Project working directory: ${requestedWorkspace}] Use this directory as the default root for file operations in this chat. When the user asks you to read, write, edit, or create project files, prefer absolute paths inside this directory or set your command cwd there. Do not treat this folder as the agent's home workspace; AGENTS.md, USER.md, SOUL.md, MEMORY.md, and other agent-scoped files still follow the configured agent workspace.\n\n${fullMessage}`;
+      }
     }
 
     if (fullMessage !== message) {
@@ -849,7 +885,7 @@ ${message}`;
         requestMessage: fullMessage,
         originalUserMessage: message,
         sid,
-        options,
+        options: requestedOptions,
         send,
         deps,
       });
@@ -857,16 +893,17 @@ ${message}`;
         && (!cliResult.text || /^(No response|No reply from agent\.?)+$/i.test(String(cliResult.text).trim()));
       if (needsRetry && fullMessage !== message) {
         console.warn('[chat] CLI fallback returned empty response with metadata prompt; retrying with raw user message');
-        return chatSendViaCliWithWebCompatibilityRetry({
+        const retryResult = await chatSendViaCliWithWebCompatibilityRetry({
           requestMessage: message,
           originalUserMessage: message,
           sid,
-          options,
+          options: requestedOptions,
           send,
           deps,
         });
+        return withWorkspaceFallbackMeta(retryResult);
       }
-      return cliResult;
+      return withWorkspaceFallbackMeta(cliResult);
     }
 
     let fullResponseText = '';
@@ -1195,9 +1232,9 @@ ${message}`;
       send('chat:status', { type: 'thinking' });
 
       await ws.chatSend(sid, fullMessage, {
-        thinking: options?.thinkingLevel && options.thinkingLevel !== 'off' ? options.thinkingLevel : undefined,
+        thinking: requestedOptions.thinkingLevel && requestedOptions.thinkingLevel !== 'off' ? requestedOptions.thinkingLevel : undefined,
         verbose: 'full',
-        reasoning: options?.reasoningDisplay && options.reasoningDisplay !== 'off' ? options.reasoningDisplay : 'on',
+        reasoning: requestedOptions.reasoningDisplay && requestedOptions.reasoningDisplay !== 'off' ? requestedOptions.reasoningDisplay : 'on',
       });
 
       await chatDone;
@@ -1261,7 +1298,7 @@ ${message}`;
           requestMessage: retryPrompt,
           originalUserMessage: message,
           sid,
-          options,
+          options: requestedOptions,
           send,
           deps,
         });
@@ -1302,7 +1339,7 @@ ${message}`;
           }
 
           const retryPrompt = buildWebCompatibilityRetryPrompt(message, finalText);
-          const retryResult = await chatSendViaCli(retryPrompt, sid, options, send, deps);
+          const retryResult = await chatSendViaCli(retryPrompt, sid, requestedOptions, send, deps);
           usedCliCompatibilityRetry = true;
 
           if (!retryResult?.success) {
@@ -1406,7 +1443,7 @@ ${message}`;
       }
 
       if (!finalText && pendingApprovalRequestId) {
-        return {
+        return withWorkspaceFallbackMeta({
           success: true,
           text: '',
           sessionId: sid,
@@ -1414,17 +1451,17 @@ ${message}`;
           approvalRequestId: pendingApprovalRequestId,
           approvalCommand: pendingApprovalCommand,
           approvalDetail: pendingApprovalDetail,
-        };
+        });
       }
 
-      return {
+      return withWorkspaceFallbackMeta({
         success: true,
         text: finalText || 'No response',
         sessionId: sid,
         unverifiedLocalFileOperation: shouldFlagUnverifiedLocalFileOperation || undefined,
         vpnDnsCompatibilityIssue: shouldFlagVpnDnsCompatibilityIssue || undefined,
         preferResultText: preferResultText || undefined,
-      };
+      });
     } catch (err: any) {
       if (ws) {
         if (chatEventHandler) ws.removeListener('event:chat', chatEventHandler);
@@ -1447,7 +1484,7 @@ ${message}`;
           requestMessage: fullMessage,
           originalUserMessage: message,
           sid,
-          options,
+          options: requestedOptions,
           send,
           deps,
         });
@@ -1455,18 +1492,19 @@ ${message}`;
           && (!cliResult.text || /^(No response|No reply from agent\.?)+$/i.test(String(cliResult.text).trim()));
         if (needsRetry && fullMessage !== message) {
           console.warn('[chat] CLI fallback returned empty response with metadata prompt; retrying with raw user message');
-          return chatSendViaCliWithWebCompatibilityRetry({
+          const retryResult = await chatSendViaCliWithWebCompatibilityRetry({
             requestMessage: message,
             originalUserMessage: message,
             sid,
-            options,
+            options: requestedOptions,
             send,
             deps,
           });
+          return withWorkspaceFallbackMeta(retryResult);
         }
-        return cliResult;
+        return withWorkspaceFallbackMeta(cliResult);
       }
-      return { success: false, text: '', error: errorMsg, sessionId: sid };
+      return withWorkspaceFallbackMeta({ success: false, text: '', error: errorMsg, sessionId: sid });
     }
   });
 }
