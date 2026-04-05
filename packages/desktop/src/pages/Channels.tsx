@@ -106,6 +106,38 @@ export default function Channels({ onNavigate }: { onNavigate?: (page: Page) => 
       : t('channels.failedTimeoutHint', 'This is usually not a credential issue. Wait 20-60 seconds, then retry.')
   );
 
+  // Channels where users interact via an EXTERNAL app (phone/desktop), not this app's chat tab.
+  // For these, after connection success we show a usage hint instead of "Open Chat".
+  const EXTERNAL_CHANNELS = new Set([
+    'whatsapp', 'wechat', 'signal', 'imessage',
+    'telegram', 'discord', 'slack', 'line', 'googlechat',
+    'irc', 'msteams', 'nostr', 'tlon', 'mattermost',
+  ]);
+
+  const getPostConnectHint = (): string | null => {
+    if (!activeWizard) return null;
+    switch (activeWizard) {
+      case 'whatsapp':
+        return t('channels.postConnect.whatsapp', 'Open WhatsApp on your phone and send any message — your AI agent will reply automatically.');
+      case 'wechat':
+        return t('channels.postConnect.wechat', 'Open WeChat on your phone and send a message to the linked account — your AI agent will reply.');
+      case 'signal':
+        return t('channels.postConnect.signal', 'Open Signal on your phone and send a message — your AI agent will reply automatically.');
+      case 'imessage':
+        return t('channels.postConnect.imessage', 'Send an iMessage to this Mac (or let someone message you) — your AI agent will reply automatically.');
+      case 'telegram':
+        return t('channels.postConnect.telegram', 'Open Telegram and message your bot to start chatting with your AI agent.');
+      case 'discord':
+        return t('channels.postConnect.discord', 'Go to your Discord server and send a message in the configured channel — your AI agent will respond.');
+      case 'slack':
+        return t('channels.postConnect.slack', 'Open Slack and send a message in the configured channel — your AI agent will respond.');
+      case 'line':
+        return t('channels.postConnect.line', 'Open LINE on your phone and send a message to the linked account to chat with your AI agent.');
+      default:
+        return t('channels.postConnect.default', 'Your channel is now connected. Use the linked app to send messages — your AI agent will reply from there.');
+    }
+  };
+
   const translateStatus = (statusKey: string): string => {
     const [key, param] = statusKey.split('::');
     const translated = t(key, '');
@@ -778,16 +810,26 @@ export default function Channels({ onNavigate }: { onNavigate?: (page: Page) => 
                     )}
                   </div>
                   {testStatus === 'success' && (
-                    <div className="flex justify-end gap-2">
-                      <button onClick={closeWizard}
-                        className="px-5 py-2 border border-slate-600 hover:border-slate-400 text-slate-300 hover:text-white rounded-xl text-sm font-medium transition-colors">
-                        {t('channels.done')}
-                      </button>
-                      <button onClick={() => { closeWizard(); onNavigate?.('chat'); }}
-                        className="px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-sm font-medium transition-colors inline-flex items-center gap-1.5">
-                        <MessageSquare size={14} />
-                        {t('channels.openChat', 'Open Chat')}
-                      </button>
+                    <div className="flex flex-col gap-3">
+                      {activeWizard && EXTERNAL_CHANNELS.has(activeWizard) && (
+                        <div className="px-3 py-3 bg-emerald-900/20 border border-emerald-700/30 rounded-xl text-xs text-emerald-300 text-left leading-relaxed">
+                          <span className="font-semibold block mb-1">{t('channels.postConnect.nextStep', 'What\'s next?')}</span>
+                          {getPostConnectHint()}
+                        </div>
+                      )}
+                      <div className="flex justify-end gap-2">
+                        <button onClick={closeWizard}
+                          className="px-5 py-2 border border-slate-600 hover:border-slate-400 text-slate-300 hover:text-white rounded-xl text-sm font-medium transition-colors">
+                          {t('channels.done')}
+                        </button>
+                        {(!activeWizard || !EXTERNAL_CHANNELS.has(activeWizard)) && (
+                          <button onClick={() => { closeWizard(); onNavigate?.('chat'); }}
+                            className="px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-sm font-medium transition-colors inline-flex items-center gap-1.5">
+                            <MessageSquare size={14} />
+                            {t('channels.openChat', 'Open Chat')}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
                 </>
