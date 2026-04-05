@@ -217,6 +217,35 @@ export default function App() {
             setRuntimeReady(true);
             return;
           }
+
+          // Guard 1: User just finished setup — freshly-installed components may not be
+          // immediately detectable (Windows PATH not refreshed, AV scanning, etc.).
+          // Let them through; Doctor in Settings will repair silently in the background.
+          if (recentlyCompletedSetup) {
+            setStartupProgress(100);
+            setRuntimeReady(true);
+            return;
+          }
+
+          // Guard 2: User already has providers / API keys configured — they've been
+          // through setup before. A transient check failure (PATH cache, Defender scan)
+          // should NOT wipe out their session and redirect them to the wizard.
+          // Doctor in Settings handles non-critical repairs without wizard interruption.
+          try {
+            const existingCfg = await window.electronAPI?.readExistingConfig?.();
+            if (existingCfg?.hasProviders || existingCfg?.hasApiKey) {
+              setStartupProgress(100);
+              setRuntimeReady(true);
+              return;
+            }
+          } catch {
+            // If the guard check itself fails, assume the user is past first-time setup
+            // and let them through rather than stranding them in the wizard.
+            setStartupProgress(100);
+            setRuntimeReady(true);
+            return;
+          }
+
           localStorage.setItem('awareness-claw-setup-done', 'false');
           setSetupComplete(false);
           setStartupProgress(100);
