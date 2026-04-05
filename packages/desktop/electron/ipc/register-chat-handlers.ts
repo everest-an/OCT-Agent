@@ -1481,8 +1481,13 @@ ${message}`;
       }
       send('chat:stream-end', {});
       const errorMsg = err?.message || String(err);
-      if (errorMsg.includes('WebSocket') || errorMsg.includes('connect') || errorMsg.includes('timed out')) {
-        console.warn('[chat] WebSocket failed, falling back to CLI:', errorMsg);
+      if (errorMsg.includes('WebSocket') || errorMsg.includes('connect') || errorMsg.includes('timed out') || /pairing required/i.test(errorMsg)) {
+        console.warn('[chat] WebSocket/pairing failed, falling back to CLI:', errorMsg);
+        // For pairing-required failures, trigger a background reconnect+repair so the
+        // next chat message goes through Gateway cleanly (write-scope pre-warm).
+        if (/pairing required/i.test(errorMsg)) {
+          deps.getGatewayWs().catch(() => { /* background repair — don't block fallback */ });
+        }
         try {
           await deps.prepareCliFallback?.();
         } catch (prepareErr: any) {

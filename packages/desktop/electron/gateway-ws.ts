@@ -407,4 +407,17 @@ export class GatewayClient extends EventEmitter {
   get isConnected(): boolean {
     return this.connected && this.ws?.readyState === WebSocket.OPEN;
   }
+
+  /** Returns true if the client already holds write (operator.admin/write) scopes. */
+  get hasWriteScopes(): boolean {
+    return this.scopeSetEquals(this.requestedScopes, GatewayClient.WRITE_SCOPES);
+  }
+
+  /**
+   * Public wrapper for ensureWriteScopes — allows callers (e.g. getGatewayWs) to
+   * pre-warm write scopes at startup so the first chatSend is a no-op scope upgrade.
+   */
+  async warmUpWriteScopes(): Promise<void> {
+    await this.ensureWriteScopes();
+  }
 }

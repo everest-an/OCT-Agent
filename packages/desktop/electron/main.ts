@@ -803,6 +803,31 @@ async function getGatewayWs(options?: { onPairingRepairStart?: () => void; onPai
       await gatewayWsClient.connect();
     }
   }
+
+  // Pre-warm write scopes so the first chatSend's ensureWriteScopes() is a no-op.
+  // Without this, the scope upgrade on the first chat triggers a fresh WS reconnect
+  // that can hit "pairing required" again — and that error bypasses the pairing repair
+  // logic here in getGatewayWs because ensureWriteScopes calls connect() directly.
+  if (!gatewayWsClient.hasWriteScopes) {
+    try {
+      await gatewayWsClient.warmUpWriteScopes();
+    } catch (scopeErr: any) {
+      const scopeMsg = scopeErr?.message || '';
+      if (/pairing required/i.test(scopeMsg)) {
+        // Scope upgrade itself needs pairing — approve and retry once
+        const approvalOutput = await runAsync('openclaw devices approve --latest 2>&1', 30000).catch(() => '');
+        if (/Approved\s+/i.test(approvalOutput || '')) {
+          try {
+            await gatewayWsClient.warmUpWriteScopes();
+          } catch {
+            // Pre-warm failed even after approval; will retry on first chatSend
+          }
+        }
+      }
+      // Non-pairing scope errors are ignored — write scope pre-warm is best-effort
+    }
+  }
+
   return gatewayWsClient;
 }
 
