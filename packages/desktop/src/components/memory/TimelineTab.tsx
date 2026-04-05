@@ -130,8 +130,8 @@ export function TimelineTab({
 
         const contentPreview = event.fts_content || event.title || '';
         const hasLongContent = isCodeChange
-          ? (parsedCode ? parsedCode.diffLines.length > 3 : false)
-          : contentPreview.length > 200;
+          ? (parsedCode ? parsedCode.diffLines.length > 8 : false)
+          : contentPreview.length > 600;
 
         return (
           <div
@@ -176,13 +176,12 @@ export function TimelineTab({
               </h4>
             ) : null}
 
-            {/* Event content */}
+            {/* Event content — never truncate, only collapse very long content */}
             {isCodeChange && parsedCode ? (
-              // code_change: show diff lines in monospace, max 3 lines unless expanded
               parsedCode.diffLines.length > 0 && (
                 <div className="text-slate-400 leading-relaxed">
                   <div className="space-y-0.5">
-                    {(isExpanded ? parsedCode.diffLines : parsedCode.diffLines.slice(0, 3)).map((line, i) => (
+                    {(isExpanded || !hasLongContent ? parsedCode.diffLines : parsedCode.diffLines.slice(0, 8)).map((line, i) => (
                       <p key={i} className="text-xs font-mono truncate">{line}</p>
                     ))}
                   </div>
@@ -191,14 +190,14 @@ export function TimelineTab({
                       onClick={() => setExpandedEvent(isExpanded ? null : event.id)}
                       className="text-xs text-brand-400 hover:text-brand-300 mt-1"
                     >
-                      {isExpanded ? t('memory.collapseContent') : t('memory.expandContent')}
+                      {isExpanded ? t('memory.collapseContent') : `${t('memory.expandContent')} (${parsedCode.diffLines.length} lines)`}
                     </button>
                   )}
                 </div>
               )
             ) : contentPreview ? (
               <div className="text-sm text-slate-400 leading-relaxed">
-                <div className={isExpanded ? '' : 'line-clamp-3'}>
+                <div className={hasLongContent && !isExpanded ? 'line-clamp-6' : ''}>
                   {searchQuery ? (
                     <p><HighlightText text={contentPreview} query={searchQuery} /></p>
                   ) : (
