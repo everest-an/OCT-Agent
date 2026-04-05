@@ -189,6 +189,13 @@ export default function App() {
         if (cancelled) return;
 
         if (!result.ok && result.needsSetup) {
+          const setupBlockingIds = new Set(['node-installed', 'openclaw-installed', 'plugin-installed']);
+          const isSetupBlocking = !result.blockingId || setupBlockingIds.has(result.blockingId);
+          if (!isSetupBlocking) {
+            setStartupProgress(100);
+            setRuntimeReady(true);
+            return;
+          }
           localStorage.setItem('awareness-claw-setup-done', 'false');
           setSetupComplete(false);
           setStartupProgress(100);

@@ -1,5 +1,13 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { ipcMain } from 'electron';
 import { parseJsonShellOutput } from '../openclaw-shell-output';
+import {
+  enforceDesktopChannelSessionIsolation,
+  hardenWhatsAppDmPolicy,
+  migrateLegacyChannelConfig,
+} from '../openclaw-config';
 import {
   isIgnorablePluginInstallError,
   resolveChannelPluginInstallSpec,
@@ -13,9 +21,10 @@ export function registerChannelSetupHandlers(deps: {
   runAsync: (cmd: string, timeoutMs?: number) => Promise<string>;
   safeShellExecAsync: (cmd: string, timeoutMs?: number) => Promise<string | null>;
   readShellOutputAsync: (cmd: string, timeoutMs?: number) => Promise<string | null>;
-  channelLoginWithQR: (loginCmd: string, timeoutMs?: number) => Promise<{ success: boolean; output?: string; error?: string }>;
+  channelLoginWithQR: (loginCmd: string, timeoutMs?: number, extraEnv?: Record<string, string>) => Promise<{ success: boolean; output?: string; error?: string }>;
   ensureLocalDaemonReadyForRuntime?: () => Promise<boolean>;
 }) {
+  const OPENCLAW_CONFIG_PATH = path.join(os.homedir(), '.openclaw', 'openclaw.json');
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const CHANNEL_LOGIN_IDLE_TIMEOUT_MS = 180000;
@@ -125,6 +134,106 @@ export function registerChannelSetupHandlers(deps: {
     return setupFlow === 'add-then-login';
   };
 
+  const isPlainRecord = (value: unknown): value is Record<string, any> => (
+    !!value && typeof value === 'object' && !Array.isArray(value)
+  );
+
+  const disableOpenClawMemoryPlugin = (config: Record<string, any>) => {
+    const plugins = isPlainRecord(config.plugins) ? config.plugins : null;
+    if (!plugins) return false;
+
+    let changed = false;
+    const entries = isPlainRecord(plugins.entries) ? plugins.entries : null;
+    const memoryEntry = entries && isPlainRecord(entries['openclaw-memory'])
+      ? entries['openclaw-memory']
+      : null;
+    if (entries && memoryEntry && memoryEntry.enabled !== false) {
+      entries['openclaw-memory'] = {
+        ...memoryEntry,
+        enabled: false,
+      };
+      changed = true;
+    }
+
+    if (Array.isArray(plugins.allow)) {
+      const nextAllow = plugins.allow.filter((id: unknown) => String(id || '') !== 'openclaw-memory');
+      if (nextAllow.length !== plugins.allow.length) {
+        plugins.allow = nextAllow;
+        changed = true;
+      }
+    }
+
+    if (isPlainRecord(plugins.slots) && plugins.slots.memory === 'openclaw-memory') {
+      delete plugins.slots.memory;
+      changed = true;
+      if (Object.keys(plugins.slots).length === 0) {
+        delete plugins.slots;
+      }
+    }
+
+    return changed;
+  };
+
+  const runLoginWithScopedConfig = async (loginCmd: string, timeoutMs: number) => {
+    let tempConfigPath: string | null = null;
+    try {
+      const raw = fs.readFileSync(OPENCLAW_CONFIG_PATH, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (!isPlainRecord(parsed)) {
+        return {
+          usedScopedConfig: false,
+          result: await deps.channelLoginWithQR(loginCmd, timeoutMs),
+        };
+      }
+
+      const isolated = JSON.parse(JSON.stringify(parsed));
+      const changed = disableOpenClawMemoryPlugin(isolated);
+      if (!changed) {
+        return {
+          usedScopedConfig: false,
+          result: await deps.channelLoginWithQR(loginCmd, timeoutMs),
+        };
+      }
+
+      tempConfigPath = path.join(
+        os.tmpdir(),
+        `awarenessclaw-channel-login-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+      );
+      fs.writeFileSync(tempConfigPath, JSON.stringify(isolated, null, 2));
+
+      return {
+        usedScopedConfig: true,
+        result: await deps.channelLoginWithQR(loginCmd, timeoutMs, { OPENCLAW_CONFIG_PATH: tempConfigPath }),
+      };
+    } catch {
+      return {
+        usedScopedConfig: false,
+        result: await deps.channelLoginWithQR(loginCmd, timeoutMs),
+      };
+    } finally {
+      if (tempConfigPath) {
+        try { fs.rmSync(tempConfigPath, { force: true }); } catch {}
+      }
+    }
+  };
+
+  const sanitizeLegacyChannelConfigFile = (openclawId?: string) => {
+    void openclawId;
+    try {
+      const raw = fs.readFileSync(OPENCLAW_CONFIG_PATH, 'utf8');
+      const config = JSON.parse(raw);
+      let changed = migrateLegacyChannelConfig(config);
+      changed = enforceDesktopChannelSessionIsolation(config) || changed;
+      changed = hardenWhatsAppDmPolicy(config) || changed;
+      if (!changed) return false;
+
+      fs.writeFileSync(OPENCLAW_CONFIG_PATH, JSON.stringify(config, null, 2));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const isChannelLinked = (output: string | null, openclawId: string) => {
     if (!output) return false;
 
@@ -181,6 +290,14 @@ export function registerChannelSetupHandlers(deps: {
       return { success: false, error: `Invalid channel ID: ${channelId}` };
     }
 
+    const channelDef = deps.getChannel(safeChannelId);
+    const openclawId = channelDef?.openclawId || safeChannelId;
+    const channelLabel = channelDef?.label || safeChannelId;
+    const setupFlow = channelDef?.setupFlow || 'qr-login';
+    const saveStrategy = channelDef?.saveStrategy || 'cli';
+
+    sanitizeLegacyChannelConfigFile(openclawId);
+
     const sendStatus = (msg: string) => {
       const mainWindow = deps.getMainWindow();
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('channel:status', msg);
@@ -200,9 +317,6 @@ export function registerChannelSetupHandlers(deps: {
       }
     };
 
-    const channelDef = deps.getChannel(safeChannelId);
-    const openclawId = channelDef?.openclawId || safeChannelId;
-    const channelLabel = channelDef?.label || safeChannelId;
     const pluginPkg = (
       await resolveChannelPluginInstallSpec({
         pluginId: openclawId,
@@ -212,8 +326,6 @@ export function registerChannelSetupHandlers(deps: {
         readShellOutputAsync: deps.readShellOutputAsync,
       })
     ) || channelDef?.pluginPackage || `@openclaw/${openclawId}`;
-    const setupFlow = channelDef?.setupFlow || 'qr-login';
-    const saveStrategy = channelDef?.saveStrategy || 'cli';
     const pluginInstallCmd = `openclaw plugins install "${pluginPkg}" 2>&1`;
 
     sendStatus(`channels.status.configuring::${channelLabel}`);
@@ -283,6 +395,18 @@ export function registerChannelSetupHandlers(deps: {
       }
     }
 
+    if (!result.success && process.platform === 'win32' && isNpxEnoentLike(rawFailure)) {
+      // OpenClaw loads all enabled plugins for login. If memory plugin auto-start
+      // crashes in this environment, retry with a command-scoped config that
+      // disables only openclaw-memory to avoid cross-channel interruption.
+      sendStatus(`channels.status.connecting::${channelLabel}`);
+      const scoped = await runLoginWithScopedConfig(loginCmd, CHANNEL_LOGIN_IDLE_TIMEOUT_MS);
+      if (scoped.usedScopedConfig) {
+        result = scoped.result;
+        rawFailure = [result.error || '', result.output || ''].join('\n').trim();
+      }
+    }
+
     if (!result.success) {
       const repaired = await repairBlockingPlugins(rawFailure, sendStatus);
       if (repaired) {
@@ -300,6 +424,8 @@ export function registerChannelSetupHandlers(deps: {
     }
 
     if (result.success) {
+      sanitizeLegacyChannelConfigFile(openclawId);
+
       try {
         await bindToMainAgent(openclawId);
       } catch (bindErr: any) {

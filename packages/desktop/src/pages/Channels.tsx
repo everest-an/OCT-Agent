@@ -11,6 +11,8 @@ import {
 
 type WizardStep = 'intro' | 'token' | 'test';
 
+const PAIRING_APPROVAL_CHANNELS = new Set(['telegram', 'whatsapp']);
+
 // ---------------------------------------------------------------------------
 // DynamicConfigForm — renders config fields from registry definition
 // ---------------------------------------------------------------------------
@@ -71,8 +73,13 @@ export default function Channels() {
     const input = String(rawInput || '').trim();
     if (!input) return null;
 
-    const commandMatch = input.match(/openclaw\s+pairing\s+approve\s+[a-zA-Z0-9_-]+\s+([A-HJ-NP-Z2-9]{8})/i);
-    if (commandMatch?.[1]) return commandMatch[1].toUpperCase();
+    const commandMatch = input.match(/openclaw\s+pairing\s+approve\b([\s\S]*)/i);
+    if (commandMatch?.[1]) {
+      const commandCodes = Array.from(commandMatch[1].toUpperCase().matchAll(/\b([A-HJ-NP-Z2-9]{8})\b/g)).map((m) => m[1]);
+      if (commandCodes.length > 0) {
+        return commandCodes[commandCodes.length - 1];
+      }
+    }
 
     const labelMatch = input.match(/pairing\s*code\s*[:：]\s*([A-HJ-NP-Z2-9]{8})/i);
     if (labelMatch?.[1]) return labelMatch[1].toUpperCase();
@@ -129,6 +136,7 @@ export default function Channels() {
   // Get the active channel definition from registry
   const activeChannel = activeWizard ? getChannel(activeWizard) : undefined;
   const isOneClick = activeChannel?.connectionType === 'one-click';
+  const supportsPairingApproval = !!activeWizard && PAIRING_APPROVAL_CHANNELS.has(activeWizard);
 
   const loadConfiguredChannels = async (showLoading = true) => {
     if (!window.electronAPI) { setLoadingChannels(false); return; }
@@ -173,7 +181,7 @@ export default function Channels() {
 
   // Silent prefill: if hints/errors contain a pairing code, auto-populate input.
   useEffect(() => {
-    if (activeWizard !== 'telegram') return;
+    if (!supportsPairingApproval) return;
     if (pairingCode.trim()) return;
 
     const combinedHints = [testError, lastError, testNotice, channelProgress]
@@ -181,11 +189,10 @@ export default function Channels() {
       .join('\n');
     const detected = extractPairingCodeFromText(combinedHints);
     if (detected) setPairingCode(detected);
-  }, [activeWizard, pairingCode, testError, lastError, testNotice, channelProgress]);
+  }, [supportsPairingApproval, pairingCode, testError, lastError, testNotice, channelProgress]);
 
   useEffect(() => {
-    if (activeWizard !== 'telegram') return;
-    if (wizardStep === 'intro') return;
+    if (!supportsPairingApproval || !activeWizard) return;
     if (pairingCode.trim()) return;
     if (!window.electronAPI) return;
 
@@ -196,7 +203,7 @@ export default function Channels() {
       if (disposed || inFlight || pairingApproving) return;
       inFlight = true;
       try {
-        const result = await (window.electronAPI as any).channelPairingLatestCode?.('telegram');
+        const result = await (window.electronAPI as any).channelPairingLatestCode?.(activeWizard);
         if (!disposed && result?.success && result?.code) {
           setPairingCode(result.code);
           setPairingNotice(t('channels.pairing.latestFilled', 'Latest pending pairing code has been filled automatically.'));
@@ -215,7 +222,7 @@ export default function Channels() {
       disposed = true;
       clearInterval(timer);
     };
-  }, [activeWizard, wizardStep, pairingCode, pairingApproving, t]);
+  }, [supportsPairingApproval, activeWizard, pairingCode, pairingApproving, t]);
 
   const openWizard = async (channelId: string) => {
     setActiveWizard(channelId);
@@ -323,7 +330,7 @@ export default function Channels() {
 
     const rawPairingInput = pairingCode.trim();
     if (!rawPairingInput) {
-      setPairingError(t('channels.pairing.codeRequired', 'Please paste the pairing code from Telegram first.'));
+      setPairingError(t('channels.pairing.codeRequired', 'Please paste the pairing code first.'));
       return;
     }
 
@@ -364,13 +371,13 @@ export default function Channels() {
     }
   };
 
-  const renderTelegramPairingPanel = () => {
-    if (activeWizard !== 'telegram') return null;
+  const renderPairingApprovalPanel = () => {
+    if (!supportsPairingApproval) return null;
 
     return (
       <div className="p-3 bg-slate-800/50 border border-slate-700 rounded-lg space-y-2">
         <p className="text-xs text-slate-300">
-          {t('channels.pairing.help', 'Received a Telegram pairing prompt? Paste the 8-character code or the full "openclaw pairing approve ..." line here.')}
+          {t('channels.pairing.help', 'Received a pairing prompt? Paste the 8-character code or the full "openclaw pairing approve ..." line here.')}
         </p>
         <div className="flex gap-2">
           <input
@@ -630,6 +637,8 @@ export default function Channels() {
                     </div>
                   )}
 
+                  {supportsPairingApproval && configuredChannels.has(activeWizard) && renderPairingApprovalPanel()}
+
                   <div className="flex justify-end">
                     <button
                       onClick={() => {
@@ -659,7 +668,7 @@ export default function Channels() {
                     </div>
                   )}
                   {getTokenForm()}
-                  {renderTelegramPairingPanel()}
+                  {renderPairingApprovalPanel()}
                   <div className="flex justify-between">
                     <button onClick={() => setWizardStep('intro')} className="px-4 py-2 text-slate-400 hover:text-slate-200 flex items-center gap-1 text-sm">
                       <ChevronLeft size={14} /> {t('channels.back')}
@@ -741,7 +750,7 @@ export default function Channels() {
                             {testError}
                           </p>
                         )}
-                        {renderTelegramPairingPanel()}
+                        {renderPairingApprovalPanel()}
                         <button onClick={() => {
                           if (!isOneClick && testError) setLastError(testError);
                           setTestError(null);

@@ -291,4 +291,34 @@ describe('Channels Page', () => {
 
     expect(pairingInput.value).toBe('ABCD2345');
   });
+
+  it('supports WhatsApp pairing approval from configured channel wizard', async () => {
+    const api = window.electronAPI as any;
+    api.channelListConfigured = vi.fn().mockResolvedValue({ success: true, configured: ['telegram', 'whatsapp'] });
+    api.channelPairingLatestCode = vi.fn().mockResolvedValue({
+      success: true,
+      code: 'KGHQJ8SK',
+      codes: ['KGHQJ8SK'],
+    });
+    api.channelPairingApprove = vi.fn().mockResolvedValue({ success: true, connectivity: { ready: true } });
+    api.channelTest = vi.fn().mockResolvedValue({ success: true });
+
+    await act(async () => { render(<Channels />); });
+
+    const whatsappBtn = screen.getAllByText('WhatsApp')[0]?.closest('button');
+    expect(whatsappBtn).toBeTruthy();
+    await act(async () => { fireEvent.click(whatsappBtn as HTMLButtonElement); });
+
+    const pairingInput = await screen.findByPlaceholderText(/Paste code or full approve line/i) as HTMLInputElement;
+    await waitFor(() => {
+      expect(api.channelPairingLatestCode).toHaveBeenCalledWith('whatsapp');
+      expect(pairingInput.value).toBe('KGHQJ8SK');
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    });
+
+    expect(api.channelPairingApprove).toHaveBeenCalledWith('whatsapp', 'KGHQJ8SK');
+  });
 });

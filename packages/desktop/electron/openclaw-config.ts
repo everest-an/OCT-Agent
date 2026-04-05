@@ -275,12 +275,242 @@ export function writeExecApprovalSettings(
   }, null, 2));
 }
 
-export function migrateLegacyChannelConfig(config: Record<string, any>): void {
+export function migrateLegacyChannelConfig(config: Record<string, any>): boolean {
+  let changed = false;
+
   if (config?.channels?.telegram?.token) {
     if (!config.channels.telegram.botToken) {
       config.channels.telegram.botToken = config.channels.telegram.token;
     }
     delete config.channels.telegram.token;
+    changed = true;
   }
+
+  const whatsappConfig = config?.channels?.whatsapp;
+  if (
+    whatsappConfig
+    && typeof whatsappConfig === 'object'
+    && Object.prototype.hasOwnProperty.call(whatsappConfig, 'errorPolicy')
+  ) {
+    delete whatsappConfig.errorPolicy;
+    changed = true;
+  }
+
+  return changed;
+}
+
+const VALID_SESSION_DM_SCOPES = new Set([
+  'main',
+  'per-peer',
+  'per-channel-peer',
+  'per-account-channel-peer',
+]);
+
+export const DESKTOP_CHANNEL_DM_SCOPE_DEFAULT = 'per-channel-peer' as const;
+
+const DM_POLICY_COMPAT_CHANNELS = new Set([
+  'whatsapp',
+  'telegram',
+  'discord',
+  'slack',
+  'signal',
+  'imessage',
+  'bluebubbles',
+  'msteams',
+  'irc',
+  'line',
+  'googlechat',
+]);
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function normalizeDmPolicy(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function normalizeAllowFromEntries(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => String(entry ?? '').trim())
+    .filter((entry) => entry.length > 0);
+}
+
+function hasAllowFromEntries(value: unknown): boolean {
+  return normalizeAllowFromEntries(value).length > 0;
+}
+
+function hasAllowFromWildcard(value: unknown): boolean {
+  return normalizeAllowFromEntries(value).includes('*');
+}
+
+type DmPolicySource = 'dmPolicy' | 'dm.policy';
+
+function resolveDmPolicy(entry: Record<string, unknown>): {
+  policy: string;
+  source: DmPolicySource | null;
+} {
+  const topLevelPolicy = normalizeDmPolicy(entry.dmPolicy);
+  if (topLevelPolicy) {
+    return { policy: topLevelPolicy, source: 'dmPolicy' };
+  }
+
+  const dmConfig = asRecord(entry.dm);
+  const nestedPolicy = normalizeDmPolicy(dmConfig?.policy);
+  if (nestedPolicy) {
+    return { policy: nestedPolicy, source: 'dm.policy' };
+  }
+
+  return { policy: '', source: null };
+}
+
+function resolveAllowFrom(entry: Record<string, unknown>): unknown {
+  if (Array.isArray(entry.allowFrom)) return entry.allowFrom;
+  const dmConfig = asRecord(entry.dm);
+  if (Array.isArray(dmConfig?.allowFrom)) return dmConfig.allowFrom;
+  return undefined;
+}
+
+function setDmPolicy(
+  entry: Record<string, unknown>,
+  source: DmPolicySource,
+  policy: string,
+): boolean {
+  if (source === 'dm.policy') {
+    const dmConfig = asRecord(entry.dm) || {};
+    const changed = dmConfig.policy !== policy || entry.dm !== dmConfig;
+    dmConfig.policy = policy;
+    entry.dm = dmConfig;
+    return changed;
+  }
+
+  if (entry.dmPolicy === policy) return false;
+  entry.dmPolicy = policy;
+  return true;
+}
+
+function ensureAllowFromWildcard(
+  entry: Record<string, unknown>,
+  source: DmPolicySource,
+): boolean {
+  if (source === 'dm.policy') {
+    const dmConfig = asRecord(entry.dm) || {};
+    const current = normalizeAllowFromEntries(dmConfig.allowFrom);
+    if (current.includes('*') && entry.dm === dmConfig) return false;
+    if (!current.includes('*')) current.push('*');
+    dmConfig.allowFrom = current;
+    entry.dm = dmConfig;
+    return true;
+  }
+
+  const current = normalizeAllowFromEntries(entry.allowFrom);
+  if (current.includes('*')) return false;
+  current.push('*');
+  entry.allowFrom = current;
+  return true;
+}
+
+function hardenDmPolicyEntry(entry: Record<string, unknown>): boolean {
+  let changed = false;
+
+  const applyPolicyRule = (
+    target: Record<string, unknown>,
+    policyInfo: { policy: string; source: DmPolicySource | null },
+    effectiveAllowFrom: unknown,
+  ) => {
+    if (!policyInfo.source) return;
+
+    if (policyInfo.policy === 'allowlist' && !hasAllowFromEntries(effectiveAllowFrom)) {
+      changed = setDmPolicy(target, policyInfo.source, 'pairing') || changed;
+      return;
+    }
+
+    if (policyInfo.policy === 'open' && !hasAllowFromWildcard(effectiveAllowFrom)) {
+      changed = ensureAllowFromWildcard(target, policyInfo.source) || changed;
+    }
+  };
+
+  const topPolicy = resolveDmPolicy(entry);
+  const topAllowFrom = resolveAllowFrom(entry);
+  applyPolicyRule(entry, topPolicy, topAllowFrom);
+
+  const accounts = asRecord(entry.accounts);
+  if (!accounts) return changed;
+
+  for (const rawAccount of Object.values(accounts)) {
+    const account = asRecord(rawAccount);
+    if (!account) continue;
+
+    const accountPolicy = resolveDmPolicy(account);
+    const effectivePolicy = accountPolicy.policy || resolveDmPolicy(entry).policy;
+    const effectiveSource = accountPolicy.source || resolveDmPolicy(entry).source;
+    if (!effectivePolicy || !effectiveSource) continue;
+
+    const accountAllowFrom = resolveAllowFrom(account);
+    const effectiveAllowFrom = accountAllowFrom !== undefined ? accountAllowFrom : resolveAllowFrom(entry);
+
+    applyPolicyRule(
+      accountPolicy.source ? account : entry,
+      { policy: effectivePolicy, source: effectiveSource },
+      effectiveAllowFrom,
+    );
+  }
+
+  return changed;
+}
+
+export function enforceDesktopChannelSessionIsolation(config: Record<string, any>): boolean {
+  if (!config || typeof config !== 'object') return false;
+
+  const sessionConfig = (
+    config.session && typeof config.session === 'object' && !Array.isArray(config.session)
+  )
+    ? config.session
+    : {};
+
+  let changed = false;
+  if (sessionConfig !== config.session) {
+    config.session = sessionConfig;
+    changed = true;
+  }
+
+  const rawScope = typeof sessionConfig.dmScope === 'string'
+    ? sessionConfig.dmScope.trim().toLowerCase()
+    : '';
+
+  if (!rawScope || rawScope === 'main' || !VALID_SESSION_DM_SCOPES.has(rawScope)) {
+    if (sessionConfig.dmScope !== DESKTOP_CHANNEL_DM_SCOPE_DEFAULT) {
+      sessionConfig.dmScope = DESKTOP_CHANNEL_DM_SCOPE_DEFAULT;
+      changed = true;
+    }
+    return changed;
+  }
+
+  if (sessionConfig.dmScope !== rawScope) {
+    sessionConfig.dmScope = rawScope;
+    changed = true;
+  }
+
+  return changed;
+}
+
+export function hardenWhatsAppDmPolicy(config: Record<string, any>): boolean {
+  const channels = asRecord(config?.channels);
+  if (!channels) return false;
+  let changed = false;
+
+  // Legacy function name retained for compatibility. The hardening now applies
+  // to all known DM-policy channels to avoid one invalid channel config
+  // blocking unrelated channel operations.
+  for (const [channelId, rawChannelConfig] of Object.entries(channels)) {
+    if (!DM_POLICY_COMPAT_CHANNELS.has(String(channelId || '').toLowerCase())) continue;
+    const channelConfig = asRecord(rawChannelConfig);
+    if (!channelConfig) continue;
+    changed = hardenDmPolicyEntry(channelConfig) || changed;
+  }
+
+  return changed;
 }
 

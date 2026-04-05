@@ -358,8 +358,13 @@ export function registerRuntimeHealthHandlers(deps: {
         finalReport = await deps.doctor.runChecks(startupChecks);
       }
     }
-    const blocking = finalReport.checks.find((check: any) =>
-      ['node-installed', 'openclaw-installed', 'plugin-installed', 'daemon-running'].includes(check.id)
+    const setupBlocking = finalReport.checks.find((check: any) =>
+      ['node-installed', 'openclaw-installed', 'plugin-installed'].includes(check.id)
+      && check.status === 'fail'
+    );
+
+    const runtimeBlocking = finalReport.checks.find((check: any) =>
+      ['daemon-running'].includes(check.id)
       && check.status === 'fail'
     );
 
@@ -367,8 +372,12 @@ export function registerRuntimeHealthHandlers(deps: {
       .filter((check: any) => check.status === 'warn')
       .map((check: any) => check.message);
 
+    if (runtimeBlocking?.message) {
+      warnings.push(runtimeBlocking.message);
+    }
+
     const gatewayRunning = finalReport.checks.find((check: any) => check.id === 'gateway-running' && check.status === 'pass');
-    if (!blocking && gatewayRunning && deps.ensureGatewayAccess) {
+    if (!setupBlocking && !runtimeBlocking && gatewayRunning && deps.ensureGatewayAccess) {
       sendStartupStatus('Preparing local Gateway access...', 96);
       try {
         const gatewayAccess = await deps.ensureGatewayAccess(sendStartupStatus);
@@ -383,9 +392,10 @@ export function registerRuntimeHealthHandlers(deps: {
     }
 
     return {
-      ok: !blocking,
-      needsSetup: !!blocking,
-      blockingMessage: blocking?.message,
+      ok: !setupBlocking && !runtimeBlocking,
+      needsSetup: !!setupBlocking,
+      blockingMessage: setupBlocking?.message || runtimeBlocking?.message,
+      blockingId: setupBlocking?.id || runtimeBlocking?.id,
       fixed,
       warnings: [...warnings, ...residualWarnings],
     };

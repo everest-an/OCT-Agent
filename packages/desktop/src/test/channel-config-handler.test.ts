@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'fs';
 
 const { handleMock } = vi.hoisted(() => ({
   handleMock: vi.fn(),
@@ -132,8 +133,195 @@ describe('registerChannelConfigHandlers', () => {
     expect(result).toMatchObject({ success: true });
     expect(result.connectivity?.ready).toBe(true);
     expect(result.bindRetried).toBe(true);
-    expect(runAsync).toHaveBeenCalledWith('openclaw pairing approve telegram C4AVKKA9 2>&1', 30000);
+    expect(runAsync).toHaveBeenCalledWith('openclaw pairing approve --channel telegram C4AVKKA9 2>&1', 30000);
     expect(runAsync).toHaveBeenCalledWith('openclaw gateway restart 2>&1', 30000);
+  });
+
+  it('falls back to status --deep when channels status --probe is temporarily unreachable', async () => {
+    const runAsync = vi
+      .fn()
+      .mockResolvedValueOnce('approved')
+      .mockResolvedValueOnce('bind ok');
+
+    const readShellOutputAsync = vi
+      .fn()
+      .mockResolvedValueOnce('telegram pending: C4AVKKA9')
+      .mockResolvedValueOnce('Gateway not reachable: Error: gateway timeout after 10000ms')
+      .mockResolvedValueOnce('telegram configured enabled')
+      .mockResolvedValueOnce('OpenClaw status\n| Gateway | reachable | 2ms |');
+
+    registerChannelConfigHandlers({
+      home: 'C:/Users/test',
+      safeShellExecAsync: vi.fn(async () => null),
+      readShellOutputAsync,
+      runAsync,
+      discoverOpenClawChannels: vi.fn(),
+      parseCliHelp: vi.fn(() => ({ cliChannels: new Set<string>(), channelFields: new Map() })),
+      applyCliHelp: vi.fn(),
+      mergeCatalog: vi.fn(),
+      mergeChannelOptions: vi.fn(),
+      getAllChannels: vi.fn(() => []),
+      serializeRegistry: vi.fn(() => []),
+      getChannel: vi.fn(() => ({
+        id: 'telegram',
+        openclawId: 'telegram',
+        label: 'Telegram',
+        color: '#26A5E4',
+        iconType: 'svg',
+        connectionType: 'token',
+        configFields: [{ key: 'token' }],
+        saveStrategy: 'cli',
+        source: 'openclaw-dynamic',
+        order: 1,
+      })) as any,
+      buildCLIFlags: vi.fn(() => ''),
+      toOpenclawId: vi.fn((id: string) => id),
+    });
+
+    const handler = getRegisteredPairingApproveHandler();
+    const result = await handler({}, 'telegram', 'openclaw pairing approve telegram C4AVKKA9');
+
+    expect(result).toMatchObject({ success: true });
+    expect(result.connectivity?.ready).toBe(true);
+    expect(readShellOutputAsync).toHaveBeenCalledWith('openclaw status --deep 2>&1', 45000);
+  });
+
+  it('supports --channel syntax for WhatsApp pairing and keeps WhatsApp DM policy schema-safe', async () => {
+    const runAsync = vi
+      .fn()
+      .mockResolvedValueOnce('approved')
+      .mockResolvedValueOnce('bind ok');
+
+    const readShellOutputAsync = vi
+      .fn()
+      .mockResolvedValueOnce('openclaw pairing approve --channel whatsapp KGHQJ8SK')
+      .mockResolvedValueOnce('Runtime: running\nRPC probe: ok')
+      .mockResolvedValueOnce('whatsapp configured enabled');
+
+    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => undefined);
+    vi.spyOn(fs, 'readFileSync').mockImplementation((filePath: any, encoding?: any) => {
+      if (String(filePath).includes('.openclaw') && String(filePath).includes('openclaw.json')) {
+        return JSON.stringify({
+          channels: {
+            whatsapp: {
+              enabled: true,
+              dmPolicy: 'pairing',
+              errorPolicy: 'silent',
+            },
+          },
+        }) as any;
+      }
+      throw new Error(`unexpected readFileSync(${String(filePath)})`);
+    });
+
+    registerChannelConfigHandlers({
+      home: 'C:/Users/test',
+      safeShellExecAsync: vi.fn(async () => null),
+      readShellOutputAsync,
+      runAsync,
+      discoverOpenClawChannels: vi.fn(),
+      parseCliHelp: vi.fn(() => ({ cliChannels: new Set<string>(), channelFields: new Map() })),
+      applyCliHelp: vi.fn(),
+      mergeCatalog: vi.fn(),
+      mergeChannelOptions: vi.fn(),
+      getAllChannels: vi.fn(() => []),
+      serializeRegistry: vi.fn(() => []),
+      getChannel: vi.fn(() => ({
+        id: 'whatsapp',
+        openclawId: 'whatsapp',
+        label: 'WhatsApp',
+        color: '#25D366',
+        iconType: 'svg',
+        connectionType: 'one-click',
+        configFields: [],
+        saveStrategy: 'cli',
+        source: 'openclaw-dynamic',
+        order: 3,
+      })) as any,
+      buildCLIFlags: vi.fn(() => ''),
+      toOpenclawId: vi.fn((id: string) => id),
+    });
+
+    const handler = getRegisteredPairingApproveHandler();
+    const result = await handler({}, 'whatsapp', 'openclaw pairing approve --channel whatsapp KGHQJ8SK');
+
+    expect(result).toMatchObject({ success: true });
+    expect(runAsync).toHaveBeenCalledWith('openclaw pairing approve --channel whatsapp KGHQJ8SK --notify 2>&1', 30000);
+    expect(writeSpy).toHaveBeenCalled();
+    const writtenConfig = JSON.parse(String(writeSpy.mock.calls.at(-1)?.[1] || '{}'));
+    expect(writtenConfig.channels?.whatsapp?.errorPolicy).toBeUndefined();
+    expect(writtenConfig.channels?.whatsapp?.dmPolicy).toBe('pairing');
+    expect(writtenConfig.session?.dmScope).toBe('per-channel-peer');
+    expect(runAsync).not.toHaveBeenCalledWith('openclaw gateway restart 2>&1', 30000);
+  });
+
+  it('repairs invalid non-target channel DM policy before WhatsApp pairing approval', async () => {
+    const runAsync = vi
+      .fn()
+      .mockResolvedValueOnce('approved')
+      .mockResolvedValueOnce('bind ok');
+
+    const readShellOutputAsync = vi
+      .fn()
+      .mockResolvedValueOnce('openclaw pairing approve --channel whatsapp KGHQJ8SK')
+      .mockResolvedValueOnce('Runtime: running\nRPC probe: ok')
+      .mockResolvedValueOnce('whatsapp configured enabled');
+
+    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => undefined);
+    vi.spyOn(fs, 'readFileSync').mockImplementation((filePath: any, encoding?: any) => {
+      if (String(filePath).includes('.openclaw') && String(filePath).includes('openclaw.json')) {
+        return JSON.stringify({
+          channels: {
+            whatsapp: {
+              enabled: true,
+              dmPolicy: 'pairing',
+            },
+            telegram: {
+              enabled: true,
+              botToken: '123456:abc',
+              dmPolicy: 'allowlist',
+            },
+          },
+        }) as any;
+      }
+      throw new Error(`unexpected readFileSync(${String(filePath)})`);
+    });
+
+    registerChannelConfigHandlers({
+      home: 'C:/Users/test',
+      safeShellExecAsync: vi.fn(async () => null),
+      readShellOutputAsync,
+      runAsync,
+      discoverOpenClawChannels: vi.fn(),
+      parseCliHelp: vi.fn(() => ({ cliChannels: new Set<string>(), channelFields: new Map() })),
+      applyCliHelp: vi.fn(),
+      mergeCatalog: vi.fn(),
+      mergeChannelOptions: vi.fn(),
+      getAllChannels: vi.fn(() => []),
+      serializeRegistry: vi.fn(() => []),
+      getChannel: vi.fn(() => ({
+        id: 'whatsapp',
+        openclawId: 'whatsapp',
+        label: 'WhatsApp',
+        color: '#25D366',
+        iconType: 'svg',
+        connectionType: 'one-click',
+        configFields: [],
+        saveStrategy: 'cli',
+        source: 'openclaw-dynamic',
+        order: 3,
+      })) as any,
+      buildCLIFlags: vi.fn(() => ''),
+      toOpenclawId: vi.fn((id: string) => id),
+    });
+
+    const handler = getRegisteredPairingApproveHandler();
+    const result = await handler({}, 'whatsapp', 'openclaw pairing approve --channel whatsapp KGHQJ8SK');
+
+    expect(result).toMatchObject({ success: true });
+    expect(writeSpy).toHaveBeenCalled();
+    const writtenConfig = JSON.parse(String(writeSpy.mock.calls.at(-1)?.[1] || '{}'));
+    expect(writtenConfig.channels?.telegram?.dmPolicy).toBe('pairing');
   });
 
   it('returns latest pending pairing code for auto-fill', async () => {

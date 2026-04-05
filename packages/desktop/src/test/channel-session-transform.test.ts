@@ -38,6 +38,43 @@ describe('channel session transforms', () => {
     expect(toFrontendId).toHaveBeenCalledWith('openclaw-weixin');
   });
 
+  it('derives channel id from session key when origin metadata is missing', () => {
+    const toFrontendId = vi.fn((channel: string) => channel);
+    const result = mapChannelSessions([
+      {
+        key: 'agent:main:telegram:direct:alice',
+        sessionId: 'sid-1',
+        status: 'active',
+      },
+      {
+        key: 'agent:main:slack:team-a:group:dev-room',
+        sessionId: 'sid-2',
+      },
+      {
+        key: 'agent:main:main:direct:bob',
+        sessionId: 'sid-3',
+      },
+    ], toFrontendId);
+
+    expect(result).toHaveLength(2);
+    expect(result[0]).toMatchObject({
+      sessionKey: 'agent:main:telegram:direct:alice',
+      sessionId: 'sid-1',
+      channel: 'telegram',
+      displayName: 'agent:main:telegram:direct:alice',
+      status: 'active',
+    });
+    expect(result[1]).toMatchObject({
+      sessionKey: 'agent:main:slack:team-a:group:dev-room',
+      sessionId: 'sid-2',
+      channel: 'slack',
+      displayName: 'agent:main:slack:team-a:group:dev-room',
+      status: 'idle',
+    });
+    expect(toFrontendId).toHaveBeenCalledWith('telegram');
+    expect(toFrontendId).toHaveBeenCalledWith('slack');
+  });
+
   it('flattens array message content and preserves openclaw ids', () => {
     const result = mapChannelHistory([
       {

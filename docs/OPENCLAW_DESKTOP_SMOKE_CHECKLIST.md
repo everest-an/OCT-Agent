@@ -14,6 +14,8 @@
 
 如果要跑发布前或兼容性排查用的重度回归，请使用 [OPENCLAW_DESKTOP_DEEP_SMOKE_PLAN.md](OPENCLAW_DESKTOP_DEEP_SMOKE_PLAN.md)。那份文档覆盖了 browser、skills、memory、channels、多 Agent、thinking UI、权限审批、失败恢复等复杂链路。
 
+如果要做真机 WhatsApp 防打扰与配对闭环验证，请使用 [OPENCLAW_WHATSAPP_REAL_SMOKE_2026-04-05.md](OPENCLAW_WHATSAPP_REAL_SMOKE_2026-04-05.md)。这份脚本要求真实设备和真实联系人，重点覆盖“陌生联系人不被打扰、owner 可用、allowlist/pairing 可控、重连不回归”。
+
 ## 2. 执行前提
 
 - 本机已安装 OpenClaw，且版本基线为 `OpenClaw 2026.3.31 (213a704)` 或更新兼容版本

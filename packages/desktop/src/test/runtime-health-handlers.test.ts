@@ -108,4 +108,47 @@ describe('registerRuntimeHealthHandlers', () => {
     expect(result.fixed).toContain('Local Gateway access was approved automatically.');
     expect(result).toMatchObject({ ok: true, needsSetup: false });
   });
+
+  it('does not mark needsSetup when only daemon-running is still failing', async () => {
+    const runChecks = vi.fn()
+      .mockResolvedValueOnce({
+        checks: [
+          { id: 'daemon-running', label: 'Local Daemon', status: 'fail', fixable: 'auto', message: 'Local Daemon is not running' },
+          { id: 'gateway-running', label: 'Gateway', status: 'pass', fixable: 'none', message: 'Running' },
+          { id: 'plugin-installed', label: 'Awareness plugin', status: 'pass', fixable: 'none', message: 'Installed' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        checks: [
+          { id: 'daemon-running', label: 'Local Daemon', status: 'fail', fixable: 'auto', message: 'Local Daemon is not running' },
+          { id: 'gateway-running', label: 'Gateway', status: 'pass', fixable: 'none', message: 'Running' },
+          { id: 'plugin-installed', label: 'Awareness plugin', status: 'pass', fixable: 'none', message: 'Installed' },
+        ],
+      });
+
+    registerRuntimeHealthHandlers({
+      home: 'C:/Users/test',
+      app: {},
+      dirname: 'C:/test',
+      safeShellExec: vi.fn(() => null),
+      safeShellExecAsync: vi.fn(async () => null),
+      doctor: { runChecks, runFix: vi.fn(async () => ({ success: false, message: 'daemon retry failed' })) },
+      computeSha256: vi.fn(() => 'hash'),
+      checkDaemonHealth: vi.fn(async () => false),
+      waitForLocalDaemonReady: vi.fn(async () => false),
+      sendSetupDaemonStatus: vi.fn(),
+      sleep: vi.fn(async () => undefined),
+      recentDaemonStartup: () => false,
+      ensureGatewayAccess: vi.fn(async () => ({ ok: true })),
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: vi.fn() } }),
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['app:startup-ensure-runtime']();
+
+    expect(result.ok).toBe(false);
+    expect(result.needsSetup).toBe(false);
+    expect(result.blockingId).toBe('daemon-running');
+    expect(result.warnings.join('\n')).toContain('Local Daemon is not running');
+  });
 });

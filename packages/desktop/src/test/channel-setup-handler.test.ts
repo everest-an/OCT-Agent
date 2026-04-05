@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'fs';
 
 const { handleMock } = vi.hoisted(() => ({
   handleMock: vi.fn(),
@@ -74,6 +75,89 @@ describe('registerChannelSetupHandlers', () => {
     });
     expect(runAsync).toHaveBeenCalledWith('openclaw channels add --channel whatsapp 2>&1', 45000);
     expect(send).toHaveBeenCalledWith('channel:status', 'channels.status.awaitingConfirmation::WhatsApp');
+  });
+
+  it('keeps WhatsApp DM defaults schema-safe before setup', async () => {
+    const runAsync = vi.fn(async () => 'ok');
+    const channelLoginWithQR = vi.fn(async () => ({ success: true }));
+
+    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => undefined);
+    vi.spyOn(fs, 'readFileSync').mockImplementation((filePath: any, encoding?: any) => {
+      if (String(filePath).includes('.openclaw') && String(filePath).includes('openclaw.json')) {
+        return JSON.stringify({
+          channels: {
+            whatsapp: {
+              enabled: true,
+              dmPolicy: 'pairing',
+              errorPolicy: 'silent',
+            },
+          },
+        }) as any;
+      }
+      throw new Error(`unexpected readFileSync(${String(filePath)})`);
+    });
+
+    registerChannelSetupHandlers({
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any),
+      getChannel: () => ({ label: 'WhatsApp', openclawId: 'whatsapp', pluginPackage: '@openclaw/whatsapp', setupFlow: 'qr-login', saveStrategy: 'cli' }),
+      runAsync,
+      safeShellExecAsync: vi.fn(async () => 'ok'),
+      readShellOutputAsync: vi.fn(async () => '[{"id":"whatsapp","status":"linked"}]'),
+      channelLoginWithQR,
+    });
+
+    const handler = getRegisteredSetupHandler();
+    const result = await handler({}, 'whatsapp');
+
+    expect(result).toMatchObject({ success: true });
+    expect(writeSpy).toHaveBeenCalled();
+    const writtenConfig = JSON.parse(String(writeSpy.mock.calls.at(-1)?.[1] || '{}'));
+    expect(writtenConfig.channels?.whatsapp?.errorPolicy).toBeUndefined();
+    expect(writtenConfig.channels?.whatsapp?.dmPolicy).toBe('pairing');
+    expect(writtenConfig.session?.dmScope).toBe('per-channel-peer');
+    expect(runAsync).not.toHaveBeenCalledWith('openclaw gateway restart 2>&1', 30000);
+  });
+
+  it('sanitizes invalid non-target channel DM policy before setup login', async () => {
+    const runAsync = vi.fn(async () => 'ok');
+    const channelLoginWithQR = vi.fn(async () => ({ success: true }));
+
+    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => undefined);
+    vi.spyOn(fs, 'readFileSync').mockImplementation((filePath: any, encoding?: any) => {
+      if (String(filePath).includes('.openclaw') && String(filePath).includes('openclaw.json')) {
+        return JSON.stringify({
+          channels: {
+            whatsapp: {
+              enabled: true,
+              dmPolicy: 'pairing',
+            },
+            telegram: {
+              enabled: true,
+              botToken: '123456:abc',
+              dmPolicy: 'allowlist',
+            },
+          },
+        }) as any;
+      }
+      throw new Error(`unexpected readFileSync(${String(filePath)})`);
+    });
+
+    registerChannelSetupHandlers({
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any),
+      getChannel: () => ({ label: 'WhatsApp', openclawId: 'whatsapp', pluginPackage: '@openclaw/whatsapp', setupFlow: 'qr-login', saveStrategy: 'cli' }),
+      runAsync,
+      safeShellExecAsync: vi.fn(async () => 'ok'),
+      readShellOutputAsync: vi.fn(async () => '[{"id":"whatsapp","status":"linked"}]'),
+      channelLoginWithQR,
+    });
+
+    const handler = getRegisteredSetupHandler();
+    const result = await handler({}, 'whatsapp');
+
+    expect(result).toMatchObject({ success: true });
+    expect(writeSpy).toHaveBeenCalled();
+    const writtenConfig = JSON.parse(String(writeSpy.mock.calls.at(-1)?.[1] || '{}'));
+    expect(writtenConfig.channels?.telegram?.dmPolicy).toBe('pairing');
   });
 
   it('prepares local daemon on Windows before QR login', async () => {
@@ -186,6 +270,72 @@ describe('registerChannelSetupHandlers', () => {
 
     expect(result.success).toBe(false);
     expect(String(result.error || '')).toContain('npx not found in runtime PATH');
+  });
+
+  it('retries with command-scoped config when Windows npx ENOENT persists', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+
+    const ensureLocalDaemonReadyForRuntime = vi
+      .fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true);
+    const channelLoginWithQR = vi
+      .fn()
+      .mockResolvedValueOnce({ success: false, error: '[openclaw] Uncaught exception: Error: spawn npx ENOENT' })
+      .mockResolvedValueOnce({ success: false, error: '[openclaw] Uncaught exception: Error: spawn npx ENOENT' })
+      .mockResolvedValueOnce({ success: true });
+
+    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => undefined);
+    const rmSpy = vi.spyOn(fs, 'rmSync').mockImplementation(() => undefined as any);
+    vi.spyOn(fs, 'readFileSync').mockImplementation((filePath: any, encoding?: any) => {
+      if (String(filePath).includes('.openclaw') && String(filePath).includes('openclaw.json')) {
+        return JSON.stringify({
+          plugins: {
+            entries: {
+              'openclaw-memory': {
+                enabled: true,
+              },
+            },
+            allow: ['openclaw-memory', 'browser'],
+            slots: {
+              memory: 'openclaw-memory',
+            },
+          },
+          channels: {
+            'openclaw-weixin': {
+              enabled: true,
+            },
+          },
+        }) as any;
+      }
+      throw new Error(`unexpected readFileSync(${String(filePath)})`);
+    });
+
+    registerChannelSetupHandlers({
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any),
+      getChannel: () => ({ label: 'WeChat', openclawId: 'openclaw-weixin', pluginPackage: '@tencent-weixin/openclaw-weixin', setupFlow: 'qr-login', saveStrategy: 'json-direct' }),
+      runAsync: vi.fn(async () => 'ok'),
+      safeShellExecAsync: vi.fn(async () => 'ok'),
+      readShellOutputAsync: vi.fn(async () => '[{"id":"openclaw-weixin","status":"linked"}]'),
+      channelLoginWithQR,
+      ensureLocalDaemonReadyForRuntime,
+    });
+
+    const handler = getRegisteredSetupHandler();
+    const result = await handler({}, 'wechat');
+
+    expect(result).toMatchObject({ success: true });
+    expect(channelLoginWithQR).toHaveBeenCalledTimes(3);
+    const scopedEnv = channelLoginWithQR.mock.calls[2]?.[2] as Record<string, string> | undefined;
+    expect(scopedEnv?.OPENCLAW_CONFIG_PATH).toBeTruthy();
+
+    const isolatedWrite = writeSpy.mock.calls.find(([target]) => String(target).includes('awarenessclaw-channel-login'));
+    expect(isolatedWrite).toBeTruthy();
+    const isolatedConfig = JSON.parse(String(isolatedWrite?.[1] || '{}'));
+    expect(isolatedConfig.plugins?.entries?.['openclaw-memory']?.enabled).toBe(false);
+    expect(isolatedConfig.plugins?.allow || []).not.toContain('openclaw-memory');
+    expect(isolatedConfig.plugins?.slots?.memory).toBeUndefined();
+    expect(rmSpy).toHaveBeenCalledWith(expect.stringContaining('awarenessclaw-channel-login'), expect.objectContaining({ force: true }));
   });
 
   it('continues setup when plugin install reports already exists', async () => {

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import {
+  enforceDesktopChannelSessionIsolation,
   GATEWAY_DEFAULTS,
   migrateLegacyChannelConfig,
   normalizePluginAllow,
@@ -189,6 +190,7 @@ export function sanitizeDesktopAwarenessPluginConfig(config: Record<string, any>
   ensureDesktopDefaultToolPermissions(config);
   ensureDesktopBrowserAndWebDefaults(config);
   migrateLegacyChannelConfig(config);
+  enforceDesktopChannelSessionIsolation(config);
 
   config.gateway = {
     ...(config.gateway || {}),

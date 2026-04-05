@@ -3,7 +3,11 @@ import os from 'os';
 import path from 'path';
 import { ipcMain } from 'electron';
 import type { CatalogEntry, ChannelDef, ConfigField } from '../channel-registry';
-import { migrateLegacyChannelConfig } from '../openclaw-config';
+import {
+  enforceDesktopChannelSessionIsolation,
+  hardenWhatsAppDmPolicy,
+  migrateLegacyChannelConfig,
+} from '../openclaw-config';
 import {
   isIgnorablePluginInstallError,
   resolveChannelPluginInstallSpec,
@@ -53,6 +57,22 @@ function channelAppearsConfigured(listOutput: string | null, openclawId: string)
     });
 }
 
+function isGatewayActiveOutput(output: string | null): boolean {
+  if (!output) return false;
+  const lower = output.toLowerCase();
+  if (lower.includes('not reachable') || lower.includes('timeout after')) {
+    return false;
+  }
+
+  return (
+    /rpc probe:\s*ok/i.test(output)
+    || /runtime:\s*running/i.test(output)
+    || /\|\s*gateway\s*\|\s*reachable\b/i.test(output)
+    || /\bgateway\b[\s\S]{0,80}\breachable\b/i.test(output)
+    || /\bgateway\b[\s\S]{0,80}\bactive\b/i.test(output)
+  );
+}
+
 function sanitizePairingCode(pairingCode: string): string | null {
   const normalized = String(pairingCode || '').trim().toUpperCase().replace(/\s+/g, '');
   if (!normalized) return null;
@@ -69,9 +89,17 @@ function extractPairingCodeFromInput(rawInput: string): string | null {
   const input = String(rawInput || '').trim();
   if (!input) return null;
 
-  // 1) Exact command line format from Telegram prompt
-  const commandMatch = input.match(/openclaw\s+pairing\s+approve\s+[a-zA-Z0-9_-]+\s+([A-HJ-NP-Z2-9]{8})/i);
-  if (commandMatch?.[1]) return commandMatch[1].toUpperCase();
+  // 1) Any `openclaw pairing approve ...` form, including:
+  //    - openclaw pairing approve <channel> <CODE>
+  //    - openclaw pairing approve --channel <channel> <CODE>
+  //    - openclaw pairing approve <CODE>
+  const commandMatch = input.match(/openclaw\s+pairing\s+approve\b([\s\S]*)/i);
+  if (commandMatch?.[1]) {
+    const commandCodes = Array.from(commandMatch[1].toUpperCase().matchAll(/\b([A-HJ-NP-Z2-9]{8})\b/g)).map((m) => m[1]);
+    if (commandCodes.length > 0) {
+      return commandCodes[commandCodes.length - 1];
+    }
+  }
 
   // 2) "Pairing code: XXXXXXXX" format
   const labelMatch = input.match(/pairing\s*code\s*[:：]\s*([A-HJ-NP-Z2-9]{8})/i);
@@ -139,8 +167,12 @@ function extractPendingPairingCodes(output: string | null): string[] {
 
   const lines = output.split(/\r?\n/);
   for (const line of lines) {
-    const commandMatch = line.match(/openclaw\s+pairing\s+approve\s+[a-zA-Z0-9_-]+\s+([A-HJ-NP-Z2-9]{8})/i);
-    if (commandMatch?.[1]) addCode(sanitizePairingCode(commandMatch[1]));
+    if (/openclaw\s+pairing\s+approve/i.test(line)) {
+      const commandCodes = line.toUpperCase().match(/\b[A-HJ-NP-Z2-9]{8}\b/g) || [];
+      if (commandCodes.length > 0) {
+        addCode(sanitizePairingCode(commandCodes[commandCodes.length - 1]));
+      }
+    }
 
     const labelMatch = line.match(/pairing\s*code\s*[:=]\s*([A-HJ-NP-Z2-9]{8})/i);
     if (labelMatch?.[1]) addCode(sanitizePairingCode(labelMatch[1]));
@@ -170,7 +202,26 @@ function coerceTelegramCliConfig(channelDef: ChannelDef | undefined, config: Rec
 
 function normalizeTelegramConfigInFile(config: any) {
   migrateLegacyChannelConfig(config);
+  enforceDesktopChannelSessionIsolation(config);
+  hardenWhatsAppDmPolicy(config);
   return config;
+}
+
+function sanitizeLegacyChannelConfigInFile(home: string, openclawId?: string): boolean {
+  void openclawId;
+  try {
+    const configPath = path.join(home, '.openclaw', 'openclaw.json');
+    const existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    let changed = migrateLegacyChannelConfig(existing);
+    changed = enforceDesktopChannelSessionIsolation(existing) || changed;
+    changed = hardenWhatsAppDmPolicy(existing) || changed;
+    if (!changed) return false;
+
+    fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function formatChannelActionError(openclawId: string, action: 'install' | 'bind', rawError: string): string {
@@ -261,7 +312,12 @@ export function registerChannelConfigHandlers(deps: {
       listOutput.toLowerCase().includes(openclawId.toLowerCase())
       || listOutput.toLowerCase().includes(channelId.toLowerCase())
     );
-    const gatewayActive = !!statusOutput && /(running|active|connected|ready|ok)/i.test(statusOutput);
+    let gatewayActive = isGatewayActiveOutput(statusOutput);
+    if (!gatewayActive) {
+      const deepStatusOutput = await deps.readShellOutputAsync('openclaw status --deep 2>&1', CHANNEL_ADD_IDLE_TIMEOUT_MS);
+      gatewayActive = isGatewayActiveOutput(deepStatusOutput);
+    }
+
     return {
       listed,
       gatewayActive,
@@ -270,6 +326,8 @@ export function registerChannelConfigHandlers(deps: {
   };
 
   ipcMain.handle('channel:get-registry', async () => {
+    sanitizeLegacyChannelConfigInFile(deps.home);
+
     const stderrRedirect = process.platform === 'win32' ? '2>NUL' : '2>/dev/null';
     const dlog = (msg: string) => { try { fs.appendFileSync(path.join(os.homedir(), '.awareness-channel-debug.log'), `[${new Date().toISOString()}] ${msg}\n`); } catch { } };
     dlog(`ENTRY: channel:get-registry called. _discoveryDone=${discoveryDone}, HOME=${os.homedir()}`);
@@ -375,6 +433,9 @@ export function registerChannelConfigHandlers(deps: {
       if (!safeOpenclawId) {
         return { success: false, error: `Invalid OpenClaw channel ID: ${openclawId}` };
       }
+
+      sanitizeLegacyChannelConfigInFile(deps.home, safeOpenclawId);
+
       const pluginPkg = (
         await resolveChannelPluginInstallSpec({
           pluginId: safeOpenclawId,
@@ -449,6 +510,8 @@ export function registerChannelConfigHandlers(deps: {
         } catch {}
       }
 
+      sanitizeLegacyChannelConfigInFile(deps.home, safeOpenclawId);
+
       try { await deps.runAsync('openclaw gateway restart 2>&1', GATEWAY_RESTART_IDLE_TIMEOUT_MS); } catch {}
 
       try {
@@ -479,6 +542,10 @@ export function registerChannelConfigHandlers(deps: {
         return { success: false, error: `Invalid OpenClaw channel ID: ${openclawId}` };
       }
 
+      sanitizeLegacyChannelConfigInFile(deps.home, safeOpenclawId);
+
+      const pairingChannelName = channelDef?.label || safeChannelId;
+
       const safePairingCode = extractPairingCodeFromInput(pairingCode);
       if (!safePairingCode) {
         return {
@@ -500,17 +567,18 @@ export function registerChannelConfigHandlers(deps: {
         if (/no pending|none|empty/i.test(pendingOutput)) {
           return {
             success: false,
-            error: 'No pending pairing request found. Send a new Telegram message to get a fresh code, then try again.',
+            error: `No pending pairing request found. Send a new ${pairingChannelName} message to get a fresh code, then try again.`,
           };
         }
         return {
           success: false,
-          error: `Pairing code ${safePairingCode} is not in the current pending list. Please use the latest code shown by Telegram.`,
+          error: `Pairing code ${safePairingCode} is not in the current pending list. Please use the latest code shown by ${pairingChannelName}.`,
         };
       }
 
       try {
-        await deps.runAsync(`openclaw pairing approve ${safeOpenclawId} ${safePairingCode} 2>&1`, CHANNEL_PAIRING_IDLE_TIMEOUT_MS);
+        const notifyFlag = safeOpenclawId === 'whatsapp' ? ' --notify' : '';
+        await deps.runAsync(`openclaw pairing approve --channel ${safeOpenclawId} ${safePairingCode}${notifyFlag} 2>&1`, CHANNEL_PAIRING_IDLE_TIMEOUT_MS);
       } catch (approveErr: any) {
         const msg = (approveErr?.message || String(approveErr)).slice(0, 260);
         return {
@@ -528,6 +596,8 @@ export function registerChannelConfigHandlers(deps: {
           error: `Pairing approved, but channel binding failed: ${bindResult.error}`,
         };
       }
+
+      sanitizeLegacyChannelConfigInFile(deps.home, safeOpenclawId);
 
       const connectivity = await detectChannelConnectivity(safeOpenclawId, safeChannelId);
       if (connectivity.ready) {
@@ -568,6 +638,8 @@ export function registerChannelConfigHandlers(deps: {
         return { success: false, error: `Invalid OpenClaw channel ID: ${openclawId}` };
       }
 
+      const pairingChannelName = channelDef?.label || safeChannelId;
+
       const pendingOutput = await deps.readShellOutputAsync(`openclaw pairing list ${safeOpenclawId} 2>&1`, CHANNEL_PAIRING_IDLE_TIMEOUT_MS);
       if (!pendingOutput) {
         return { success: false, error: 'Could not read pending pairing requests yet.' };
@@ -577,7 +649,7 @@ export function registerChannelConfigHandlers(deps: {
       if (codes.length === 0) {
         return {
           success: false,
-          error: 'No pending pairing code found. Send a new Telegram message to generate one.',
+          error: `No pending pairing code found. Send a new ${pairingChannelName} message to generate one.`,
         };
       }
 

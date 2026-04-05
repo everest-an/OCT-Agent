@@ -18,6 +18,7 @@ export function createChannelLoginWithQR(deps: {
   return function channelLoginWithQR(
     loginCmd: string,
     timeoutMs = 180000,
+    extraEnv: Record<string, string> = {},
   ): Promise<{ success: boolean; output?: string; error?: string }> {
     const ep = deps.getEnhancedPath();
     const windowsPathext = (typeof process.env.PATHEXT === 'string' && process.env.PATHEXT.trim())
@@ -42,6 +43,7 @@ export function createChannelLoginWithQR(deps: {
             shell: 'cmd.exe',
             env: {
               ...process.env,
+              ...extraEnv,
               PATH: ep,
               PATHEXT: windowsPathext,
               ComSpec: process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe',
@@ -49,7 +51,13 @@ export function createChannelLoginWithQR(deps: {
               FORCE_COLOR: '0',
             },
           })
-        : spawn('/bin/bash', ['--norc', '--noprofile', '-c', `export PATH="${ep}"; ${loginCmd} 2>&1`]);
+        : spawn('/bin/bash', ['--norc', '--noprofile', '-c', `export PATH="${ep}"; ${loginCmd} 2>&1`], {
+            env: {
+              ...process.env,
+              ...extraEnv,
+              PATH: ep,
+            },
+          });
 
       let idleTimer: NodeJS.Timeout | null = null;
       const clearIdleTimer = () => {

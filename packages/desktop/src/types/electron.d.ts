@@ -9,6 +9,7 @@ export interface ElectronAPI {
   startupEnsureRuntime: () => Promise<{
     ok: boolean;
     needsSetup?: boolean;
+    blockingId?: string;
     blockingMessage?: string;
     fixed: string[];
     warnings: string[];
