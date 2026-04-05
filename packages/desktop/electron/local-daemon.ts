@@ -2,6 +2,10 @@ import fs from 'fs';
 import http from 'http';
 import path from 'path';
 
+function normalizeHomeDir(value: string) {
+  return String(value || '').trim().replace(/^['"]+|['"]+$/g, '');
+}
+
 export function clearAwarenessLocalNpxCache(homedir: string) {
   try {
     const npxCacheDir = path.join(homedir, '.npm', '_npx');
@@ -96,7 +100,8 @@ export async function startLocalDaemonDetached(options: {
   runSpawn: (cmd: string, args: string[], opts?: Record<string, unknown>) => any;
   getEnhancedPath: () => string;
 }) {
-  const projectDir = path.join(options.homedir, '.openclaw');
+  const homedir = normalizeHomeDir(options.homedir);
+  const projectDir = path.join(homedir, '.openclaw');
   const offlineTarball = options.resolveBundledCache('awareness-sdk-local.tgz');
   const npxArgs = ['-y', offlineTarball || '@awareness-sdk/local@latest', 'start', '--port', '37800', '--project', projectDir, '--background'];
 
@@ -116,6 +121,7 @@ export async function startLocalDaemonDetached(options: {
     const child = options.runSpawn(command, args, {
       detached: true,
       stdio: 'ignore',
+      cwd: homedir,
       env,
     });
 

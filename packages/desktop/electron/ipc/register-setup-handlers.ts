@@ -22,6 +22,15 @@ function formatElapsed(ms: number) {
   return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 }
 
+function stripWrappingQuotes(value: string) {
+  return String(value || '').trim().replace(/^['"]+|['"]+$/g, '');
+}
+
+function normalizeHomePath(value: string) {
+  const normalized = stripWrappingQuotes(value);
+  return normalized || value;
+}
+
 export function registerSetupHandlers(deps: {
   home: string;
   getEnhancedPath: () => string;
@@ -108,6 +117,57 @@ export function registerSetupHandlers(deps: {
       return deps.runAsync(processCommand, timeoutMs);
     }
   };
+
+  const runSpawnCommand = async (
+    cmd: string,
+    args: string[],
+    timeoutMs: number,
+    opts?: Record<string, unknown>,
+  ) => new Promise<string>((resolve, reject) => {
+    let child: any;
+    try {
+      child = deps.runSpawn(cmd, args, { stdio: 'pipe', ...(opts || {}) });
+    } catch (spawnErr) {
+      reject(spawnErr);
+      return;
+    }
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { child.kill(); } catch {}
+      reject(new Error('Command timed out'));
+    }, timeoutMs);
+
+    child.stdout?.on('data', (d: Buffer) => {
+      stdout += d.toString();
+    });
+    child.stderr?.on('data', (d: Buffer) => {
+      stderr += d.toString();
+    });
+
+    child.on('close', (code: number | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve(stdout.trim());
+      } else {
+        reject(new Error(stderr.trim() || stdout.trim().slice(-500) || `Exit code ${code}`));
+      }
+    });
+
+    child.on('error', (err: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
 
   ipcMain.handle('setup:detect-environment', async () => {
     const result: Record<string, unknown> = {
@@ -466,21 +526,23 @@ export function registerSetupHandlers(deps: {
     if (existingPromise) return existingPromise;
 
     const startupPromise = (async () => {
-      const daemonProjectDir = path.join(deps.home, '.openclaw');
-      const daemonSpec = deps.resolveBundledCache('awareness-sdk-local.tgz') || '@awareness-sdk/local@latest';
-      const bundledNpxCli = deps.getBundledNpmBin('npx');
+      const normalizedHomeDir = normalizeHomePath(deps.home);
+      const daemonProjectDir = path.join(normalizedHomeDir, '.openclaw');
+      const daemonSpec = stripWrappingQuotes(deps.resolveBundledCache('awareness-sdk-local.tgz') || '@awareness-sdk/local@latest');
+      const bundledNpxCli = stripWrappingQuotes(deps.getBundledNpmBin('npx') || '');
 
       const bootstrapDaemonInForeground = async (statusKey: string) => {
         deps.sendSetupDaemonStatus(statusKey);
+        const daemonArgs = ['-y', daemonSpec, 'start', '--port', '37800', '--project', daemonProjectDir, '--background'];
         try {
           if (bundledNpxCli) {
-            await runWithBundledNpmCli(
-              bundledNpxCli,
-              `-y "${daemonSpec}" start --port 37800 --project "${daemonProjectDir}" --background 2>&1`,
-              SETUP_DAEMON_BOOTSTRAP_TIMEOUT_MS,
-            );
+            await runSpawnCommand(process.execPath, [bundledNpxCli, ...daemonArgs], SETUP_DAEMON_BOOTSTRAP_TIMEOUT_MS, { cwd: normalizedHomeDir });
           } else {
-            await deps.runAsync(`npx -y "${daemonSpec}" start --port 37800 --project "${daemonProjectDir}" --background 2>&1`, SETUP_DAEMON_BOOTSTRAP_TIMEOUT_MS);
+            if (process.platform === 'win32') {
+              await runSpawnCommand('cmd.exe', ['/d', '/c', 'npx', ...daemonArgs], SETUP_DAEMON_BOOTSTRAP_TIMEOUT_MS, { cwd: normalizedHomeDir });
+            } else {
+              await runSpawnCommand('npx', daemonArgs, SETUP_DAEMON_BOOTSTRAP_TIMEOUT_MS, { cwd: normalizedHomeDir });
+            }
           }
           return true;
         } catch {
@@ -503,7 +565,7 @@ export function registerSetupHandlers(deps: {
         deps.sendSetupDaemonStatus('setup.install.daemonStatus.starting');
         deps.setDaemonStartupLastKickoff(Date.now());
         await deps.startLocalDaemonDetached({
-          homedir: deps.home,
+          homedir: normalizedHomeDir,
           resolveBundledCache: deps.resolveBundledCache,
           getBundledNpmBin: deps.getBundledNpmBin,
           runSpawn: deps.runSpawn,
@@ -527,10 +589,10 @@ export function registerSetupHandlers(deps: {
       try {
         deps.sendSetupDaemonStatus('setup.install.daemonStatus.repairing');
         await deps.forceStopLocalDaemon({ sleep: deps.sleep });
-        deps.clearAwarenessLocalNpxCache(deps.home);
+        deps.clearAwarenessLocalNpxCache(normalizedHomeDir);
         deps.setDaemonStartupLastKickoff(Date.now());
         await deps.startLocalDaemonDetached({
-          homedir: deps.home,
+          homedir: normalizedHomeDir,
           resolveBundledCache: deps.resolveBundledCache,
           getBundledNpmBin: deps.getBundledNpmBin,
           runSpawn: deps.runSpawn,
