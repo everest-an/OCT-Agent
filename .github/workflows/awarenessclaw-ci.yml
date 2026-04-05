@@ -26,7 +26,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate:
+  validate-build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -38,9 +38,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build desktop
         run: npm run build:desktop
@@ -48,12 +50,32 @@ jobs:
       - name: Build CLI smoke check
         run: npm run build:cli
 
-      - name: Run targeted desktop tests
-        run: |
-          cd packages/desktop
-          npx vitest run \
-            src/test/agents.test.tsx \
-            src/test/dashboard.test.tsx \
-            src/test/settings.test.tsx \
-            src/test/workspace.test.tsx \
-            --reporter=verbose
+  desktop-test-matrix:
+    name: Desktop tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run desktop tests
+        working-directory: packages/desktop
+        run: npm test
