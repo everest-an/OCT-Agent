@@ -143,10 +143,17 @@ function attachSubagentListener(deps: WorkflowHandlerDeps) {
 
       // For sub-agent events: forward lifecycle to renderer
       if (isSubagentSession(sessionKey)) {
+        // Support TWO payload formats (verified via Web Search):
+        //   New: payload.stream = "lifecycle", payload.data.phase = "start"|"end"|"error"
+        //   Old: payload.event = "subagent.spawned"|"agent.finished"|"agent.step_started"
         const stream: string = payload?.stream || '';
         const phase: string = payload?.data?.phase || '';
+        const eventName: string = payload?.event || payload?.state || '';
+        const status: string = payload?.status || payload?.data?.status || '';
 
         let taskEvent: string | null = null;
+
+        // New format (AgentEventPayload from src/infra/agent-events.ts)
         if (stream === 'lifecycle') {
           if (phase === 'start') taskEvent = 'started';
           else if (phase === 'end') taskEvent = 'completed';
@@ -155,14 +162,24 @@ function attachSubagentListener(deps: WorkflowHandlerDeps) {
           taskEvent = 'failed';
         }
 
+        // Old format (event name strings from OpenClaw docs)
+        if (!taskEvent) {
+          if (eventName === 'subagent.spawned' || eventName === 'agent.step_started') taskEvent = 'started';
+          else if (eventName === 'agent.finished') {
+            taskEvent = (status === 'failed' || status === 'timeout') ? 'failed' : 'completed';
+          }
+        }
+
         if (!taskEvent) return;
+
+        const resultText = payload?.data?.error || payload?.result || payload?.data?.result || '';
 
         win.webContents.send('task:status-update', {
           event: taskEvent,
           runId: payload?.runId || '',
-          agentId: '',
+          agentId: payload?.agentId || '',
           status: taskEvent,
-          result: payload?.data?.error || '',
+          result: typeof resultText === 'string' ? resultText : '',
           sessionKey,
         });
         return;
