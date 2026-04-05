@@ -234,16 +234,29 @@ export default function WorkflowList({
             {t('rules.createCustom', 'Create a custom rule')}
           </p>
         </div>
-        <textarea
-          value={customDesc}
-          onChange={(e) => setCustomDesc(e.target.value)}
-          placeholder={t('rules.customPlaceholder', 'Describe your automation in plain language...\ne.g. "After every commit, run a security check"')}
-          rows={2}
-          className="w-full rounded-lg bg-slate-900/50 border border-slate-700/50 px-3 py-2 text-xs text-slate-300 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500/30 resize-none"
-        />
-        <p className="text-[10px] text-slate-600 mt-2">
-          {t('rules.customHint', 'Coming soon — describe your rule and AI will set it up for you')}
-        </p>
+        <div className="flex gap-2">
+          <textarea
+            value={customDesc}
+            onChange={(e) => setCustomDesc(e.target.value)}
+            placeholder={t('rules.customPlaceholder', 'e.g. "After every commit, run a security check"')}
+            rows={2}
+            className="flex-1 rounded-lg bg-slate-900/50 border border-slate-700/50 px-3 py-2 text-xs text-slate-300 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500/30 resize-none"
+          />
+        </div>
+        {customDesc.trim() && (
+          <button
+            onClick={async () => {
+              // Save as a simple custom workflow that passes the description as the task
+              const name = customDesc.trim().slice(0, 30).replace(/[^a-zA-Z0-9\u4e00-\u9fff ]/g, '').trim() || 'custom-rule';
+              const yaml = `# ${customDesc.trim()}\nname: ${name.replace(/ /g, '-').toLowerCase()}\nargs:\n  task:\n    default: "${customDesc.trim().replace(/"/g, '\\"')}"\nsteps:\n  - id: execute\n    run: openclaw agent -m "$LOBSTER_ARG_TASK"\n`;
+              await window.electronAPI?.workflowSave?.(name, yaml);
+              setCustomDesc('');
+            }}
+            className="mt-2 text-xs text-sky-400 hover:text-sky-300 font-medium"
+          >
+            {t('rules.save', 'Save Rule')}
+          </button>
+        )}
       </div>
 
       {/* Empty state for no workflows */}

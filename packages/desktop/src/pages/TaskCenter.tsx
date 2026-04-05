@@ -151,27 +151,40 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
     }
   }, [workflowRuns]);
 
+  // Listen for sub-agent link info (maps parent runId → sub-agent sessionKey)
+  useEffect(() => {
+    const unsub = window.electronAPI?.onTaskSubagentLinked?.((data) => {
+      if (!data?.subagentSessionKey) return;
+      setTasks((prev) => {
+        // Find the task that was spawned with this parent runId
+        const idx = prev.findIndex((t) =>
+          t.runId === data.parentRunId || (t.sessionKey === data.parentSessionKey && t.status === 'queued')
+        );
+        if (idx < 0) return prev;
+        return updateTask(prev, prev[idx].id, {
+          subagentSessionKey: data.subagentSessionKey,
+          subagentRunId: data.subagentRunId,
+          status: 'running',
+          startedAt: new Date().toISOString(),
+        });
+      });
+    });
+    return unsub;
+  }, []);
+
   // Listen for sub-agent status updates from Gateway
-  // Events are now pre-mapped by the IPC handler to: started | completed | failed
+  // IPC handler only forwards sub-agent events (filtered by :subagent: sessionKey)
   useEffect(() => {
     const unsub = window.electronAPI?.onTaskStatusUpdate?.((data) => {
       if (!data) return;
 
-      // IPC handler already maps Gateway events (lifecycle:start/end, chat:final, etc.)
-      // to simple task events: 'started' | 'completed' | 'failed'
       const finalEvent = data.event as 'started' | 'completed' | 'failed';
       if (finalEvent !== 'started' && finalEvent !== 'completed' && finalEvent !== 'failed') return;
 
       setTasks((prev) => {
-        // 1. Try matching by runId
-        let updated = data.runId ? applySubAgentEvent(prev, data.runId, finalEvent, data.result || undefined) : prev;
-        if (updated !== prev) return updated;
-
-        // 2. Try matching by sessionKey
+        // 1. Match by sub-agent sessionKey (most reliable)
         if (data.sessionKey) {
-          const matchIdx = prev.findIndex((t) =>
-            (t.status === 'running' || t.status === 'queued') && t.sessionKey === data.sessionKey
-          );
+          const matchIdx = prev.findIndex((t) => t.subagentSessionKey === data.sessionKey);
           if (matchIdx >= 0) {
             return updateTask(prev, prev[matchIdx].id, {
               status: finalEvent === 'completed' ? 'done' : finalEvent === 'started' ? 'running' : 'failed',
@@ -181,13 +194,27 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
           }
         }
 
-        // 3. Fallback: if completed/failed and we have exactly 1 running task, it's likely that one
+        // 2. Match by sub-agent runId
+        if (data.runId) {
+          const matchIdx = prev.findIndex((t) => t.subagentRunId === data.runId);
+          if (matchIdx >= 0) {
+            return updateTask(prev, prev[matchIdx].id, {
+              status: finalEvent === 'completed' ? 'done' : finalEvent === 'started' ? 'running' : 'failed',
+              ...(finalEvent !== 'started' ? { completedAt: new Date().toISOString() } : {}),
+              ...(data.result ? (finalEvent === 'completed' ? { result: data.result } : { error: data.result }) : {}),
+            });
+          }
+        }
+
+        // 3. Fallback: if exactly 1 running/queued task, assign to it
         if (finalEvent === 'completed' || finalEvent === 'failed') {
-          const runningTasks = prev.filter((t) => t.status === 'running' || t.status === 'queued');
-          if (runningTasks.length === 1) {
-            return updateTask(prev, runningTasks[0].id, {
+          const activeTasks = prev.filter((t) => t.status === 'running' || t.status === 'queued');
+          if (activeTasks.length === 1) {
+            return updateTask(prev, activeTasks[0].id, {
               status: finalEvent === 'completed' ? 'done' : 'failed',
               completedAt: new Date().toISOString(),
+              subagentSessionKey: data.sessionKey || undefined,
+              subagentRunId: data.runId || undefined,
               ...(data.result ? (finalEvent === 'completed' ? { result: data.result } : { error: data.result }) : {}),
             });
           }
@@ -303,6 +330,16 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
 
   const handleViewDetail = useCallback((taskId: string) => {
     setDetailTaskId(taskId);
+  }, []);
+
+  const handleDeleteTask = useCallback((taskId: string) => {
+    setTasks((prev) => removeTask(prev, taskId));
+    if (detailTaskId === taskId) setDetailTaskId(null);
+  }, [detailTaskId]);
+
+  const handleClearCompleted = useCallback(() => {
+    setTasks((prev) => prev.filter((t) => t.status !== 'done' && t.status !== 'failed'));
+    setDetailTaskId(null);
   }, []);
 
   const handleEnableCollaboration = useCallback(async () => {
@@ -548,6 +585,8 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
               onRetryTask={handleRetryTask}
               onCancelTask={handleCancelTask}
               onViewDetail={handleViewDetail}
+              onDeleteTask={handleDeleteTask}
+              onClearCompleted={handleClearCompleted}
             />
           )
         )}
@@ -667,6 +706,7 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
             onClose={() => setDetailTaskId(null)}
             onRetry={() => { handleRetryTask(detailTaskId); setDetailTaskId(null); }}
             onCancel={() => { handleCancelTask(detailTaskId); setDetailTaskId(null); }}
+            onDelete={() => { handleDeleteTask(detailTaskId); }}
           />
         );
       })()}

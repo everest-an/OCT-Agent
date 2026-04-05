@@ -1,11 +1,13 @@
 /**
  * TaskDetailPanel — sliding side panel showing task details + sub-agent history.
+ * Includes a "continue conversation" input for sending follow-up messages.
+ * Close button is large and easy to click.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { X, Loader2, Clock, Bot, AlertTriangle, CheckCircle2, RotateCw } from 'lucide-react';
+import { X, Loader2, Clock, Bot, AlertTriangle, CheckCircle2, RotateCw, Send, Trash2 } from 'lucide-react';
 import AgentAvatar from '../AgentAvatar';
 import type { Task } from '../../lib/task-store';
 
@@ -15,13 +17,9 @@ interface TaskDetailPanelProps {
   onClose: () => void;
   onRetry?: () => void;
   onCancel?: () => void;
+  onDelete?: () => void;
 }
 
-/**
- * Extract readable text from OpenClaw message content.
- * content can be: string, or array of {type:"text",text:"..."} blocks.
- * Filters out internal context markers (<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>).
- */
 function extractMessageText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -29,18 +27,15 @@ function extractMessageText(content: unknown): string {
     .map((block: any) => {
       if (typeof block === 'string') return block;
       if (block?.type === 'text' && typeof block.text === 'string') return block.text;
-      if (block?.type === 'thinking' && typeof block.thinking === 'string') return `> *Thinking: ${block.thinking}*`;
       return '';
     })
     .filter(Boolean)
     .join('\n')
-    // Filter internal context noise
     .replace(/<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>[\s\S]*?(?:<<<END_OPENCLAW_INTERNAL_CONTEXT>>>|$)/g, '')
     .replace(/\[Internal task completion event\][\s\S]*?(?=\n\n|\n[A-Z]|$)/g, '')
     .trim();
 }
 
-/** Check if message is internal OpenClaw plumbing (not user-visible). */
 function isInternalMessage(msg: any): boolean {
   const text = extractMessageText(msg.content);
   if (!text) return true;
@@ -72,43 +67,69 @@ function durationStr(startedAt?: string, completedAt?: string): string {
   return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`;
 }
 
-export default function TaskDetailPanel({ t, task, onClose, onRetry, onCancel }: TaskDetailPanelProps) {
+export default function TaskDetailPanel({ t, task, onClose, onRetry, onCancel, onDelete }: TaskDetailPanelProps) {
   const [history, setHistory] = useState<any[] | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [followUp, setFollowUp] = useState('');
+  const [sending, setSending] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const cfg = STATUS_CONFIG[task.status] || STATUS_CONFIG.backlog;
+
+  // Use sub-agent sessionKey for history (falls back to main session)
+  const effectiveSessionKey = task.subagentSessionKey || task.sessionKey;
 
   // Load sub-agent session history
   useEffect(() => {
-    if (!task.sessionKey) return;
+    if (!effectiveSessionKey) return;
     setLoadingHistory(true);
-    window.electronAPI?.taskDetail?.(task.sessionKey)
+    window.electronAPI?.taskDetail?.(effectiveSessionKey)
       .then((result: any) => {
         if (result?.success) setHistory(result.messages || []);
       })
       .catch(() => {})
       .finally(() => setLoadingHistory(false));
-  }, [task.sessionKey]);
+  }, [effectiveSessionKey]);
+
+  // Scroll to bottom when history updates
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [history]);
+
+  // Send follow-up message to sub-agent session
+  async function handleSendFollowUp() {
+    if (!followUp.trim() || !effectiveSessionKey || sending) return;
+    setSending(true);
+    try {
+      await window.electronAPI?.taskSendMessage?.(effectiveSessionKey, followUp.trim());
+      setFollowUp('');
+      // Reload history after sending
+      const result = await window.electronAPI?.taskDetail?.(effectiveSessionKey);
+      if (result?.success) setHistory(result.messages || []);
+    } catch { /* ignore */ }
+    setSending(false);
+  }
 
   return (
-    <div className="fixed inset-y-0 right-0 w-96 z-40 bg-slate-900 border-l border-slate-700 shadow-2xl flex flex-col animate-in slide-in-from-right">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
-        <div className="flex items-center gap-2 min-w-0">
+    <div className="fixed inset-y-0 right-0 w-[420px] z-40 bg-slate-900 border-l border-slate-700 shadow-2xl flex flex-col animate-in slide-in-from-right">
+      {/* Header — large close button */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 flex-shrink-0">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
           <AgentAvatar name={task.agentName || task.agentId} emoji={task.agentEmoji || ''} size={18} />
           <h3 className="text-sm font-semibold text-slate-200 truncate">{task.title}</h3>
         </div>
         <button
           onClick={onClose}
-          className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200"
+          className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-100 transition-colors ml-2"
           aria-label={t('common.close', 'Close')}
-          title={t('common.close', 'Close')}
         >
-          <X size={16} />
+          <X size={20} />
         </button>
       </div>
 
       {/* Task metadata */}
-      <div className="px-4 py-3 border-b border-slate-800 space-y-2">
+      <div className="px-4 py-3 border-b border-slate-800 space-y-2 flex-shrink-0">
         <div className="flex items-center gap-2">
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cfg.color} ${cfg.bg}`}>
             {t(`kanban.${task.status}`, cfg.label)}
@@ -127,18 +148,6 @@ export default function TaskDetailPanel({ t, task, onClose, onRetry, onCancel }:
             <span className="text-slate-500">{t('taskCard.elapsed', 'Elapsed')}</span>
             <p className="text-slate-300">{durationStr(task.startedAt, task.completedAt)}</p>
           </div>
-          {task.model && (
-            <div>
-              <span className="text-slate-500">{t('taskCreate.model', 'Model')}</span>
-              <p className="text-slate-300">{task.model}</p>
-            </div>
-          )}
-          {task.runId && (
-            <div>
-              <span className="text-slate-500">Run ID</span>
-              <p className="text-slate-300 truncate text-[10px]">{task.runId}</p>
-            </div>
-          )}
         </div>
 
         {/* Action buttons */}
@@ -153,38 +162,43 @@ export default function TaskDetailPanel({ t, task, onClose, onRetry, onCancel }:
               <X size={11} /> {t('taskCard.cancel', 'Cancel')}
             </button>
           )}
+          {onDelete && (
+            <button onClick={onDelete} className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-700/30 hover:bg-slate-700/50 text-slate-400 text-xs font-medium border border-slate-700/40">
+              <Trash2 size={11} /> {t('taskCard.delete', 'Delete')}
+            </button>
+          )}
         </div>
       </div>
 
       {/* Result / Error */}
       {task.result && (
-        <div className="px-4 py-3 border-b border-slate-800">
+        <div className="px-4 py-3 border-b border-slate-800 flex-shrink-0">
           <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 mb-1">
             <CheckCircle2 size={11} />
             <span>{t('taskCard.result', 'Result')}</span>
           </div>
-          <pre className="text-xs text-slate-300 whitespace-pre-wrap bg-slate-950 rounded-lg px-3 py-2 max-h-40 overflow-y-auto">
-            {task.result}
-          </pre>
+          <div className="text-xs text-slate-300 bg-slate-950 rounded-lg px-3 py-2 max-h-40 overflow-y-auto prose prose-invert prose-sm max-w-none">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{task.result}</ReactMarkdown>
+          </div>
         </div>
       )}
       {task.error && (
-        <div className="px-4 py-3 border-b border-slate-800">
+        <div className="px-4 py-3 border-b border-slate-800 flex-shrink-0">
           <div className="flex items-center gap-1.5 text-[11px] text-red-400 mb-1">
             <AlertTriangle size={11} />
             <span>{t('taskCard.error', 'Error')}</span>
           </div>
-          <pre className="text-xs text-red-300/80 whitespace-pre-wrap bg-red-950/20 rounded-lg px-3 py-2 max-h-40 overflow-y-auto">
+          <pre className="text-xs text-red-300/80 whitespace-pre-wrap bg-red-950/20 rounded-lg px-3 py-2 max-h-24 overflow-y-auto">
             {task.error}
           </pre>
         </div>
       )}
 
       {/* Sub-agent conversation history */}
-      <div className="flex-1 overflow-y-auto px-4 py-3">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 min-h-0">
         <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mb-2">
           <Clock size={11} />
-          <span>{t('taskCard.history', 'Sub-agent history')}</span>
+          <span>{t('taskCard.history', 'Conversation')}</span>
         </div>
 
         {loadingHistory && (
@@ -195,7 +209,9 @@ export default function TaskDetailPanel({ t, task, onClose, onRetry, onCancel }:
 
         {!loadingHistory && (!history || history.length === 0) && (
           <div className="text-center py-8 text-[11px] text-slate-600">
-            {task.sessionKey ? t('taskCard.noHistory', 'No conversation history available') : t('taskCard.noSession', 'Task not yet started')}
+            {effectiveSessionKey
+              ? t('taskCard.noHistory', 'No conversation history yet')
+              : t('taskCard.noSession', 'Task not yet started')}
           </div>
         )}
 
@@ -227,6 +243,31 @@ export default function TaskDetailPanel({ t, task, onClose, onRetry, onCancel }:
           </div>
         )}
       </div>
+
+      {/* Follow-up input (continue conversation with sub-agent) */}
+      {effectiveSessionKey && (
+        <div className="flex-shrink-0 px-4 py-3 border-t border-slate-800">
+          <div className="flex gap-2">
+            <input
+              value={followUp}
+              onChange={(e) => setFollowUp(e.target.value)}
+              placeholder={t('taskDetail.followUp', 'Continue the conversation...')}
+              className="flex-1 rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendFollowUp(); }
+              }}
+              disabled={sending}
+            />
+            <button
+              onClick={handleSendFollowUp}
+              disabled={!followUp.trim() || sending}
+              className="px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50 transition-colors"
+            >
+              {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

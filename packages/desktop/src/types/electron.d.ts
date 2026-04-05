@@ -223,6 +223,8 @@ export interface ElectronAPI {
   workflowSave?: (fileName: string, content: string) => Promise<{ success: boolean; path?: string; error?: string }>;
   workflowDelete?: (yamlPath: string) => Promise<{ success: boolean; error?: string }>;
   onTaskStatusUpdate?: (callback: (data: { event: string; runId: string; agentId: string; status: string; result: string; sessionKey: string }) => void) => (() => void) | undefined;
+  onTaskSubagentLinked?: (callback: (data: { parentRunId: string; parentSessionKey: string; subagentSessionKey: string; subagentRunId: string }) => void) => (() => void) | undefined;
+  taskSendMessage?: (sessionKey: string, message: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 export interface EnvironmentInfo {

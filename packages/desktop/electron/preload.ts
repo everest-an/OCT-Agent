@@ -265,4 +265,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('task:status-update', listener);
     return () => ipcRenderer.removeListener('task:status-update', listener);
   },
+  onTaskSubagentLinked: (callback: (data: { parentRunId: string; parentSessionKey: string; subagentSessionKey: string; subagentRunId: string }) => void) => {
+    const listener = (_e: any, data: any) => callback(data);
+    ipcRenderer.on('task:subagent-linked', listener);
+    return () => ipcRenderer.removeListener('task:subagent-linked', listener);
+  },
+  taskSendMessage: (sessionKey: string, message: string) => ipcRenderer.invoke('task:send-message', sessionKey, message),
 });

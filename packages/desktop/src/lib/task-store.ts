@@ -32,6 +32,8 @@ export interface Task {
   readonly model?: string;
   readonly timeoutSeconds?: number;
   readonly workDir?: string;
+  readonly subagentSessionKey?: string;
+  readonly subagentRunId?: string;
 }
 
 export type WorkflowStepType = 'agent-send' | 'command' | 'approval';

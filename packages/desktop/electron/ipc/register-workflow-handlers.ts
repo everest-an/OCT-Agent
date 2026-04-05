@@ -127,43 +127,76 @@ function attachSubagentListener(deps: WorkflowHandlerDeps) {
   //   Sub-agent sessionKey format: agent:<id>:subagent:<uuid>
   //
   deps.getGatewayWs().then((ws) => {
+    // Helper: check if a sessionKey belongs to a sub-agent (format: agent:<id>:subagent:<uuid>)
+    const isSubagentSession = (key: string | undefined): boolean =>
+      typeof key === 'string' && key.includes(':subagent:');
+
     // 1. Agent lifecycle events (stream=lifecycle, data.phase=start/end/error)
-    //    This catches BOTH main agent and sub-agent runs.
-    //    Sub-agent runs have sessionKey containing ":subagent:".
+    //    CRITICAL: Only process sub-agent events. Main agent events (e.g. processing
+    //    the /subagents spawn command) must be ignored — otherwise the spawn confirmation
+    //    is misinterpreted as task completion.
     ws.on('event:agent', (payload: any) => {
       const win = deps.getMainWindow();
       if (!win || win.isDestroyed()) return;
 
-      const stream: string = payload?.stream || '';
-      const phase: string = payload?.data?.phase || '';
+      const sessionKey: string = payload?.sessionKey || '';
 
-      let taskEvent: string | null = null;
-      if (stream === 'lifecycle') {
-        if (phase === 'start') taskEvent = 'started';
-        else if (phase === 'end') taskEvent = 'completed';
-        else if (phase === 'error') taskEvent = 'failed';
-      } else if (stream === 'error') {
-        taskEvent = 'failed';
+      // For sub-agent events: forward lifecycle to renderer
+      if (isSubagentSession(sessionKey)) {
+        const stream: string = payload?.stream || '';
+        const phase: string = payload?.data?.phase || '';
+
+        let taskEvent: string | null = null;
+        if (stream === 'lifecycle') {
+          if (phase === 'start') taskEvent = 'started';
+          else if (phase === 'end') taskEvent = 'completed';
+          else if (phase === 'error') taskEvent = 'failed';
+        } else if (stream === 'error') {
+          taskEvent = 'failed';
+        }
+
+        if (!taskEvent) return;
+
+        win.webContents.send('task:status-update', {
+          event: taskEvent,
+          runId: payload?.runId || '',
+          agentId: '',
+          status: taskEvent,
+          result: payload?.data?.error || '',
+          sessionKey,
+        });
+        return;
       }
 
-      if (!taskEvent) return;
-
-      win.webContents.send('task:status-update', {
-        event: taskEvent,
-        runId: payload?.runId || '',
-        agentId: '',
-        status: taskEvent,
-        result: payload?.data?.error || '',
-        sessionKey: payload?.sessionKey || '',
-      });
+      // For main agent events: check if spawn response contains sub-agent info.
+      // Main agent's chat response to /subagents spawn includes:
+      //   "Spawned subagent <name> (session agent:<id>:subagent:<uuid>, run <runId>)."
+      // We parse this to link the task to the actual sub-agent session.
+      if (payload?.stream === 'assistant') {
+        const text: string = payload?.data?.text || '';
+        const spawnMatch = text.match(/session\s+(agent:\S+:subagent:\S+),\s+run\s+(\S+)\)/);
+        if (spawnMatch) {
+          win.webContents.send('task:subagent-linked', {
+            parentRunId: payload?.runId || '',
+            parentSessionKey: sessionKey,
+            subagentSessionKey: spawnMatch[1],
+            subagentRunId: spawnMatch[2].replace(/[).]$/, ''),
+          });
+        }
+      }
     });
 
     // 2. Chat completion events (state=final/error/aborted)
-    //    lifecycle:end fires first, then chat:final follows with result text.
-    //    We use chat:final to capture the actual response content.
+    //    CRITICAL: Only process sub-agent chat events. Main agent's chat:final
+    //    for the spawn command must NOT mark the task as completed.
     ws.on('event:chat', (payload: any) => {
       const win = deps.getMainWindow();
       if (!win || win.isDestroyed()) return;
+
+      const sessionKey: string = payload?.sessionKey || '';
+
+      // Only process sub-agent chat completions
+      if (!isSubagentSession(sessionKey)) return;
 
       const state: string = payload?.state || '';
       let taskEvent: string | null = null;
@@ -185,7 +218,7 @@ function attachSubagentListener(deps: WorkflowHandlerDeps) {
         agentId: '',
         status: taskEvent,
         result: resultText || payload?.errorMessage || '',
-        sessionKey: payload?.sessionKey || '',
+        sessionKey,
       });
     });
   }).catch(() => {
@@ -373,6 +406,17 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
       }
     },
   );
+
+  /** Send a follow-up message to a sub-agent session (task continuation). */
+  ipcMain.handle('task:send-message', async (_e, sessionKey: string, message: string) => {
+    try {
+      const ws = await deps.getGatewayWs();
+      await ws.chatSend(sessionKey, message);
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message?.slice(0, 200) || 'Send failed' };
+    }
+  });
 
   /** Cancel a running task (abort the sub-agent session). */
   ipcMain.handle('task:cancel', async (_e, sessionKey: string) => {
