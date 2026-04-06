@@ -8,6 +8,36 @@ import {
 export function createShellUtils(options: { home: string; app: any }) {
   const { home, app } = options;
 
+  // Track all children spawned by readShellOutputAsync so they can be force-killed
+  // on app quit and when the shell times out. Prevents orphaned openclaw processes.
+  const trackedShellChildren = new Set<import('child_process').ChildProcess>();
+
+  /**
+   * Kill a shell child and its entire process group.
+   * On Unix, requires the child to have been spawned with detached:true so it
+   * owns a fresh process group — then process.kill(-pid) signals every member.
+   * Falls back to child.kill() if the group kill throws.
+   */
+  function killChildProcessGroup(child: import('child_process').ChildProcess) {
+    if (process.platform !== 'win32' && child.pid != null) {
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        try { child.kill('SIGKILL'); } catch {}
+      }
+    } else {
+      try { child.kill(); } catch {}
+    }
+  }
+
+  /** Force-kill every tracked shell child. Called from before-quit. */
+  function killAllTrackedShellChildren() {
+    for (const child of trackedShellChildren) {
+      killChildProcessGroup(child);
+    }
+    trackedShellChildren.clear();
+  }
+
   function wrapWindowsCommand(cmd: string) {
     return process.platform === 'win32' ? `chcp 65001>nul & ${cmd}` : cmd;
   }
@@ -214,22 +244,28 @@ export function createShellUtils(options: { home: string; app: any }) {
       buildOpenClawShellFallbackAsync().then((fallback) => {
         const rewrittenCmd = rewriteOpenClawShellCommand(cmd, fallback);
         const shellCmd = process.platform === 'win32' ? wrapWindowsCommand(rewrittenCmd) : `export PATH="${enhancedPath}"; ${rewrittenCmd}`;
+        // Unix: detached:true creates a fresh process group owned by this child, so
+        // process.kill(-child.pid) on timeout kills bash AND openclaw AND any plugin
+        // sub-processes in one shot. Without this, child.kill() only kills bash and
+        // leaves openclaw hanging as an orphan (causing progressive system freeze).
         const child = process.platform === 'win32'
           ? spawn(shellCmd, [], { shell: 'cmd.exe', windowsHide: true, env: buildShellEnv({ NO_COLOR: '1', FORCE_COLOR: '0' }, enhancedPath), stdio: 'pipe' })
-          : spawn('/bin/bash', ['--norc', '--noprofile', '-c', shellCmd], { env: buildShellEnv({}, enhancedPath), stdio: 'pipe' });
+          : spawn('/bin/bash', ['--norc', '--noprofile', '-c', shellCmd], { env: buildShellEnv({}, enhancedPath), stdio: 'pipe', detached: true });
+        trackedShellChildren.add(child);
         let stdout = '';
         let stderr = '';
         let settled = false;
         const timer = setTimeout(() => {
           if (!settled) {
             settled = true;
-            child.kill();
+            killChildProcessGroup(child);
             resolve((stdout + stderr).trim() || null);
           }
         }, timeoutMs);
         child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
         child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
         child.on('close', () => {
+          trackedShellChildren.delete(child);
           if (!settled) {
             settled = true;
             clearTimeout(timer);
@@ -237,6 +273,7 @@ export function createShellUtils(options: { home: string; app: any }) {
           }
         });
         child.on('error', () => {
+          trackedShellChildren.delete(child);
           if (!settled) {
             settled = true;
             clearTimeout(timer);
@@ -532,6 +569,7 @@ export function createShellUtils(options: { home: string; app: any }) {
     getGatewayPort,
     getNodeInvocationCommand,
     getNodeVersion,
+    killAllTrackedShellChildren,
     readShellOutputAsync,
     resolveBundledCache,
     run,

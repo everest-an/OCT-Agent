@@ -65,7 +65,7 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
     setLoading(true);
     setError(null);
     if (!window.electronAPI) {
-      setAgents([{ id: 'main', name: 'Claw', emoji: '', isDefault: true, bindings: [] }]);
+      setAgents([{ id: 'main', name: 'Claw', emoji: '🦞', isDefault: true, bindings: [] }]);
       setLoading(false);
       return;
     }
@@ -251,10 +251,7 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
       <div className="px-6 py-4 border-b border-slate-800">
         <div className="flex items-center justify-between mb-2">
           <div>
-            <h1 className="text-lg font-semibold inline-flex items-center gap-2">
-              <Bot size={18} className="text-sky-300" />
-              {t('agents.title')}
-            </h1>
+            <h1 className="text-lg font-semibold">🤖 {t('agents.title')}</h1>
             <p className="text-xs text-slate-500">{t('agents.subtitle')}</p>
           </div>
           <div className="flex items-center gap-2">

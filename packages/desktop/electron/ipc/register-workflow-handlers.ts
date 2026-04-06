@@ -806,8 +806,27 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
         // This routes the task directly to the specified agent — no LLM orchestration needed.
         // (The /subagents spawn approach was removed: Gateway has no sessions.spawn RPC and
         //  sessions_spawn is not in alsoAllow, so the main-agent-orchestration approach never worked.)
-        const nonMainAgents = params.agents.filter(a => a.id !== 'main');
-        const agentsToSpawn = nonMainAgents.length > 0 ? nonMainAgents : [params.agents[0] || { id: 'main', name: 'Main' }];
+        // Resolve agents: if frontend only passed main (state was empty), read from config
+        let resolvedAgents = params.agents;
+        if (resolvedAgents.length === 0 || (resolvedAgents.length === 1 && resolvedAgents[0].id === 'main')) {
+          try {
+            const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
+            const raw = fs.readFileSync(configPath, 'utf-8');
+            const cfg = JSON.parse(raw);
+            const agentList: any[] = cfg?.agents?.list || [];
+            if (agentList.length > 0) {
+              resolvedAgents = agentList.map((a: any) => ({
+                id: a.id || 'main',
+                name: (a.identity?.name || a.name || a.id) as string,
+                emoji: (a.identity?.emoji || '') as string,
+              }));
+            }
+          } catch { /* keep params.agents */ }
+        }
+        const nonMainAgents = resolvedAgents.filter(a => a.id !== 'main');
+        const agentsToSpawn = nonMainAgents.length > 0 ? nonMainAgents
+          : resolvedAgents.length > 0 ? resolvedAgents
+          : [{ id: 'main', name: 'Main', emoji: '' }];
 
         const workDirPrefix = params.workDir ? `Working directory: ${params.workDir}. Task: ` : '';
         const taskMessage = `${workDirPrefix}${params.goal}`;
@@ -831,26 +850,48 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
           const key = payload?.sessionKey || '';
           const state = payload?.state || '';
 
-          // Only handle events for registered agent sessions
-          if (!mission.spawnedAgents.has(key)) return;
+          // Diagnostic: log ALL incoming chat events for this mission window
+          console.log(`[mission:chat-event] missionId=${params.missionId} key=${key} state=${state} registeredKeys=${JSON.stringify([...mission.spawnedAgents.keys()])}`);
+
+          // Only handle events for registered agent sessions.
+          // Use flexible matching: Gateway may normalize session keys
+          // (e.g. plain key "m123-0" ↔ "agent:main:webchat:m123-0"),
+          // so fall back to endsWith check if exact match fails.
+          let matchedKey: string | null = null;
+          if (mission.spawnedAgents.has(key)) {
+            matchedKey = key;
+          } else if (key) {
+            for (const [k] of mission.spawnedAgents) {
+              if (k.endsWith(key) || key.endsWith(k)) {
+                matchedKey = k;
+                break;
+              }
+            }
+          }
+          if (!matchedKey) return;
 
           // Reset idle timeout on activity from any registered agent
           resetIdleTimer();
 
-          const spawnedInfo = mission.spawnedAgents.get(key)!;
+          const spawnedInfo = mission.spawnedAgents.get(matchedKey)!;
 
           if (state === 'delta') {
             const fullText = extractMsgText(payload?.message?.content);
-            const lastText = agentLastText.get(key) || '';
+            const lastText = agentLastText.get(matchedKey) || '';
             if (fullText && fullText.length > lastText.length) {
               const newChunk = fullText.slice(lastText.length);
-              agentLastText.set(key, fullText);
+              const isFirstChunk = lastText === '';
+              agentLastText.set(matchedKey, fullText);
               const now = Date.now();
-              const lastTime = agentLastStreamTime.get(key) || 0;
+              const lastTime = agentLastStreamTime.get(matchedKey) || 0;
               if (now - lastTime >= STREAM_THROTTLE_MS) {
-                agentLastStreamTime.set(key, now);
+                agentLastStreamTime.set(matchedKey, now);
+                // Prefix with agent name on first chunk when multiple agents are running
+                const prefix = agentsToSpawn.length > 1 && isFirstChunk
+                  ? `\n\n**${spawnedInfo.agentName}:**\n`
+                  : '';
                 sendMissionProgress(params.missionId, {
-                  stepStream: { sessionKey: key, agentId: spawnedInfo.agentId, delta: newChunk },
+                  streamDelta: prefix + newChunk,
                 });
               }
             }
@@ -861,7 +902,7 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
             const text = extractMsgText(payload?.message?.content);
             sendMissionProgress(params.missionId, {
               stepUpdate: {
-                sessionKey: key,
+                sessionKey: matchedKey,
                 agentId: spawnedInfo.agentId,
                 status: 'done',
                 result: text.slice(0, 2000),
@@ -872,7 +913,7 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
           } else if (state === 'error' || state === 'aborted') {
             sendMissionProgress(params.missionId, {
               stepUpdate: {
-                sessionKey: key,
+                sessionKey: matchedKey,
                 agentId: spawnedInfo.agentId,
                 status: 'failed',
                 error: payload?.errorMessage || 'Step failed',
@@ -936,8 +977,13 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
           for (let i = 0; i < agentsToSpawn.length; i++) {
             const agent = agentsToSpawn[i];
             const pendingKey = `pending-${agent.id}`;
-            // Unique session key — Gateway routes to this specific agent
-            const agentSessionKey = `agent:${agent.id}:webchat:m${params.missionId.slice(-6)}-${i}`;
+            // Unique session key — Gateway routes to this specific agent.
+            // For the main agent, use a plain key (no agent: prefix) to match
+            // how regular chat sessions work (regular chat: sid = rawSid for main).
+            // For non-main agents, use the full webchat format.
+            const agentSessionKey = agent.id !== 'main'
+              ? `agent:${agent.id}:webchat:m${params.missionId.slice(-6)}-${i}`
+              : `m${params.missionId.slice(-6)}-${i}`;
 
             // Register real session key BEFORE chatSend so listener can match incoming events
             mRef.spawnedAgents.delete(pendingKey);
@@ -959,8 +1005,11 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
             });
 
             try {
-              await ws.chatSend(agentSessionKey, taskMessage);
+              console.log(`[mission:chatSend] sending to agentSessionKey=${agentSessionKey} agent=${agent.id}`);
+              const sendResult = await ws.chatSend(agentSessionKey, taskMessage);
+              console.log(`[mission:chatSend] success agentSessionKey=${agentSessionKey} result=${JSON.stringify(sendResult)?.slice(0, 200)}`);
             } catch (err: any) {
+              console.error(`[mission:chatSend] ERROR agentSessionKey=${agentSessionKey}:`, err?.message);
               // Immediately mark this agent failed if send fails
               sendMissionProgress(params.missionId, {
                 stepUpdate: {

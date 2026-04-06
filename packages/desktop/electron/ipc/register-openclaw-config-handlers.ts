@@ -194,7 +194,7 @@ export function registerOpenClawConfigHandlers(deps: {
 
   ipcMain.handle('openclaw-config:schema', async () => {
     try {
-      const output = await deps.safeShellExecAsync?.('openclaw config schema 2>&1', 20000);
+      const output = await deps.safeShellExecAsync?.('openclaw config schema 2>&1', 60000);
       const schema = parseJsonShellOutput<Record<string, any>>(output || null);
       if (!schema) {
         return { success: false, error: 'Failed to parse OpenClaw config schema.' };

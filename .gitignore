@@ -18,3 +18,4 @@ packages/desktop/.clawhub/
 packages/desktop/skills/
 packages/desktop/main.js
 packages/desktop/.tmp-source-map-index.json
+.mcp.json

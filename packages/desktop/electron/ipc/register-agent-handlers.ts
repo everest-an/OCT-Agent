@@ -104,6 +104,24 @@ function listMarkdownFilesFromDirectories(directories: string[]) {
 }
 
 /**
+ * Parse Name/Emoji fields from an IDENTITY.md file.
+ * Handles both `- **Name:** Claw` and `- **Name: ** Claw` variants.
+ */
+function readIdentityFromMarkdown(filePath: string): { name: string; emoji: string } {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const nameMatch = content.match(/\*\*Name[:\*]+\s*(.*)/i);
+    const emojiMatch = content.match(/\*\*Emoji[:\*]+\s*(.*)/i);
+    return {
+      name: nameMatch?.[1]?.trim() || '',
+      emoji: normalizeAgentEmoji(emojiMatch?.[1]?.trim()),
+    };
+  } catch {
+    return { name: '', emoji: '' };
+  }
+}
+
+/**
  * Fallback: read agent list directly from openclaw.json when CLI fails
  * (e.g. after OpenClaw upgrade introduces config schema changes).
  */
@@ -116,20 +134,39 @@ function readAgentsFromConfig(home: string): { success: boolean; agents: any[] }
     if (agentList.length === 0) {
       return { success: true, agents: [{ id: 'main', name: 'Main Agent', emoji: '', isDefault: true, bindings: [] }] };
     }
-    const agents = agentList.map((a: any) => ({
-      id: a.id || 'main',
-      name: a.identity?.name || a.name || a.id,
-      emoji: normalizeAgentEmoji(a.identity?.emoji),
-      model: a.model || null,
-      bindings: [],
-      isDefault: a.id === 'main',
-      workspace: a.workspace || null,
-      routes: [],
-    }));
+    const agents = agentList.map((a: any) => {
+      let name: string = a.identity?.name || a.name || '';
+      let emoji: string = normalizeAgentEmoji(a.identity?.emoji);
+      // openclaw.json often stores main agent without an identity block.
+      // Fall back to reading IDENTITY.md from the agent workspace directory.
+      if (!name || !emoji) {
+        const dirs = getAgentReadDirectories(home, a.id || 'main');
+        for (const dir of dirs) {
+          const mdPath = path.join(dir, 'IDENTITY.md');
+          if (fs.existsSync(mdPath)) {
+            const md = readIdentityFromMarkdown(mdPath);
+            if (!name && md.name) name = md.name;
+            if (!emoji && md.emoji) emoji = md.emoji;
+            if (name && emoji) break;
+          }
+        }
+      }
+      return {
+        id: a.id || 'main',
+        name: name || a.id || 'main',
+        emoji,
+        model: a.model || null,
+        bindings: Array.isArray(a.bindings) ? a.bindings : [],
+        isDefault: a.id === 'main',
+        workspace: a.workspace || null,
+        routes: Array.isArray(a.routes) ? a.routes : [],
+      };
+    });
     for (const agent of agentList) {
       const agentId = agent?.id || 'main';
       if (hasLegacyDefaultEmoji(agent?.identity?.emoji)) {
-        migrateLegacyDefaultIdentityFiles(home, agentId);
+        // Run file migration off the main thread — never block an IPC response with sync I/O
+        setImmediate(() => migrateLegacyDefaultIdentityFiles(home, agentId));
       }
     }
     return { success: true, agents };
@@ -147,6 +184,17 @@ export function registerAgentHandlers(deps: {
   runSpawnAsync: (cmd: string, args: string[], timeoutMs?: number) => Promise<string>;
 }) {
   ipcMain.handle('agents:list', async () => {
+    // Fast path: read agent list directly from openclaw.json (< 1ms, no CLI spawn).
+    // Spawning the OpenClaw CLI here loads all plugins and takes 15-30 seconds,
+    // which pegs the CPU and freezes the Electron renderer (macOS spawn lock-up).
+    // openclaw.json is the authoritative config — identity, bindings, and workspace
+    // paths are all stored there after any `agents add/bind/set-identity` call.
+    const fastResult = readAgentsFromConfig(deps.home);
+    if (fastResult.success && fastResult.agents.length > 0) {
+      return fastResult;
+    }
+
+    // Config was empty or unreadable — fall back to CLI as last resort.
     try {
       const output = await deps.readShellOutputAsync('openclaw agents list --json --bindings', 15000);
       if (output) {
@@ -169,7 +217,7 @@ export function registerAgentHandlers(deps: {
             for (const agent of list) {
               const agentId = agent?.id || agent?.name || 'main';
               if (hasLegacyDefaultEmoji(agent?.identityEmoji || agent?.emoji || '')) {
-                migrateLegacyDefaultIdentityFiles(deps.home, agentId);
+                setImmediate(() => migrateLegacyDefaultIdentityFiles(deps.home, agentId));
               }
             }
             const agents = list.map((a: any) => ({
@@ -186,7 +234,6 @@ export function registerAgentHandlers(deps: {
           }
         } catch {}
       }
-      // CLI failed or returned empty — fallback: read agents directly from openclaw.json
       return readAgentsFromConfig(deps.home);
     } catch {
       return readAgentsFromConfig(deps.home);
