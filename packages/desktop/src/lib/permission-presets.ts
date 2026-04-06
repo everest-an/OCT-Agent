@@ -29,9 +29,9 @@ export const PERMISSION_PRESET_VALUES: Record<PermissionPresetKey, PermissionPre
   standard: {
     alsoAllow: [...BASE_REQUIRED_TOOLS, ...STANDARD_ALLOWED_TOOLS, ...WEB_ALLOWED_TOOLS, ...UI_ALLOWED_TOOLS],
     denied: ['camera.snap', 'screen.record', 'contacts.add', 'calendar.add', 'sms.send'],
-    execSecurity: 'allowlist',
-    execAsk: 'on-miss',
-    execAskFallback: 'deny',
+    execSecurity: 'full',
+    execAsk: 'off',
+    execAskFallback: 'full',
     execAutoAllowSkills: false,
   },
   developer: {

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Check, Plus, Shield, X, Zap } from 'lucide-react';
+import { Check, Plus, Shield, Terminal, X, Zap } from 'lucide-react';
 import { SettingsSection } from './SettingsPrimitives';
 
 type PermissionState = {
@@ -161,6 +161,54 @@ export function SettingsPermissionsPanel({
             <p className="text-[10px] text-slate-600">{t('settings.permissions.hostExecPolicySummary', 'Host exec policy: {security} / ask: {ask} / fallback: {fallback}').replace('{security}', permissions.execSecurity).replace('{ask}', permissions.execAsk).replace('{fallback}', permissions.execAskFallback)}</p>
           </div>
         )}
+
+        {/* Shell Commands & Installation – friendly primary toggle */}
+        <div className="settings-glass-soft p-4 space-y-3">
+          <div className="flex items-start gap-3">
+            <Terminal size={14} className="mt-0.5 text-slate-400 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-medium text-slate-200">
+                {t('settings.permissions.shellExec', 'Shell Commands & Installation')}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-1">
+                {t('settings.permissions.shellExecDesc', 'Download files, extract archives, and install software (curl · wget · brew · apt · winget · npm · pip). Works on Windows (PowerShell), macOS, and Linux (bash/zsh).')}
+              </div>
+            </div>
+            <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${
+              permissions.execSecurity === 'full'
+                ? 'bg-emerald-500/15 text-emerald-300'
+                : permissions.execSecurity === 'allowlist'
+                ? 'bg-amber-500/15 text-amber-300'
+                : 'bg-rose-500/15 text-rose-300'
+            }`}>
+              {permissions.execSecurity === 'full'
+                ? t('settings.permissions.shellExec.alwaysAllow', 'Always allowed')
+                : permissions.execSecurity === 'allowlist'
+                ? t('settings.permissions.shellExec.askEach', 'Ask each time')
+                : t('settings.permissions.shellExec.blocked', 'Blocked')}
+            </span>
+          </div>
+          <div className="settings-pill-group w-full">
+            <button
+              onClick={() => { onSaveExecSecurity('deny'); onSaveExecAsk('on-miss'); }}
+              className={`settings-pill-button flex-1 text-[11px] ${permissions.execSecurity === 'deny' ? 'is-active' : ''}`}
+            >
+              {t('settings.permissions.shellExec.blocked', 'Blocked')}
+            </button>
+            <button
+              onClick={() => { onSaveExecSecurity('allowlist'); onSaveExecAsk('on-miss'); }}
+              className={`settings-pill-button flex-1 text-[11px] ${permissions.execSecurity === 'allowlist' ? 'is-active' : ''}`}
+            >
+              {t('settings.permissions.shellExec.askEach', 'Ask each time')}
+            </button>
+            <button
+              onClick={() => { onSaveExecSecurity('full'); onSaveExecAsk('off'); }}
+              className={`settings-pill-button flex-1 text-[11px] ${permissions.execSecurity === 'full' ? 'is-active' : ''}`}
+            >
+              {t('settings.permissions.shellExec.alwaysAllow', 'Always allowed')}
+            </button>
+          </div>
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
           <div className="settings-glass-soft p-3 space-y-2">
