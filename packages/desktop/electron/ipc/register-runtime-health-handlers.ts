@@ -312,8 +312,9 @@ export function registerRuntimeHealthHandlers(deps: {
       //
       // 'channel-bindings' intentionally excluded from startup auto-fix:
       // OpenClaw 4.5 loads all installed plugins on every CLI invocation (15-30s).
-      // Running agents bindings/bind repair work at startup can freeze the app.
-      // Channel bindings can be repaired later from Settings if needed.
+      // Running 'openclaw agents bindings --json' at startup blocks the main thread
+      // and causes the entire app to freeze. Channel bindings are not needed for
+      // the app to load; they can be repaired from Settings if needed.
     ]);
 
     if (process.platform === 'darwin') {

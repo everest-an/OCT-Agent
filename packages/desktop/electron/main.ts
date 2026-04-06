@@ -520,8 +520,8 @@ async function startGatewayInUserSession(send?: (ch: string, data: any) => void)
 async function startGatewayWithRepair(send?: (ch: string, data: any) => void): Promise<{ ok: boolean; error?: string }> {
   repairOpenClawConfigFile();
 
-  // Fast path: avoid the slow OpenClaw CLI status probe when the gateway is
-  // already up. OpenClaw 4.5 preloads plugins on each CLI invocation.
+  // Fast path: HTTP probe avoids the 15-30s CLI plugin preload when the
+  // gateway is already up. OpenClaw 4.5 loads all plugins on every CLI call.
   const port = getGatewayPort();
   const httpProbeOk = await new Promise<boolean>((resolve) => {
     const req = http.get(`http://127.0.0.1:${port}/healthz`, { timeout: 3000 }, (res) => {
@@ -536,7 +536,7 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
   });
   if (httpProbeOk) return { ok: true };
 
-  // Fallback: CLI probe still handles older installs and non-default states.
+  // Fallback: CLI check still handles non-default ports and older installs.
   const statusOutput = await readShellOutputAsync('openclaw gateway status 2>&1', 15000);
   if (isGatewayRunningOutput(statusOutput)) return { ok: true };
 
