@@ -964,14 +964,66 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
           }
         };
 
-        // Reset idle timer on agent lifecycle/tool events (tool calls don't emit event:chat)
-        // This prevents false timeouts while agents are actively doing work via tools.
+        // Helper: find which registered step an event belongs to.
+        // Returns { matchedKey, agentInfo } or null.
+        const findMissionStep = (key: string, runId: string) => {
+          const mission = activeMissions.get(params.missionId);
+          if (!mission) return null;
+          let mk: string | null = null;
+          if (runId && mission.runIdToKey.has(runId)) {
+            mk = mission.runIdToKey.get(runId)!;
+          } else if (mission.spawnedAgents.has(key)) {
+            mk = key;
+          } else if (key) {
+            for (const [k, v] of mission.spawnedAgents) {
+              if (k.endsWith(key) || key.endsWith(k)) { mk = k; break; }
+              if (v.agentId !== 'main' && key.includes(v.agentId)) { mk = k; break; }
+            }
+          }
+          if (!mk) return null;
+          return { matchedKey: mk, agentInfo: mission.spawnedAgents.get(mk)! };
+        };
+
+        // Reset idle timer on agent lifecycle/tool events (tool calls don't emit event:chat).
+        // Also updates step instruction with real-time tool activity so the user sees progress.
         const agentListener = (payload: any) => {
           const key = payload?.sessionKey || '';
           const runId = payload?.runId || '';
-          if (isMissionEvent(key, runId)) {
-            console.log(`[mission:agent-event] missionId=${params.missionId} key=${key} stream=${payload?.stream} phase=${payload?.data?.phase}`);
-            resetIdleTimer();
+          const found = findMissionStep(key, runId);
+          if (!found) return;
+
+          resetIdleTimer();
+
+          const stream: string = payload?.stream || '';
+          // Tool name: OpenClaw Gateway puts tool info in different fields depending on version
+          const toolName: string =
+            payload?.data?.tool?.name ||
+            payload?.data?.toolName ||
+            payload?.data?.name ||
+            '';
+          const phase: string = payload?.data?.phase || '';
+
+          console.log(`[mission:agent-event] missionId=${params.missionId} key=${key} stream=${stream} tool=${toolName} phase=${phase}`);
+
+          // Update step instruction so the user sees what the agent is actively doing
+          let instruction: string | null = null;
+          if (stream === 'tool' && toolName) {
+            instruction = `🔧 ${toolName}`;
+          } else if (stream === 'lifecycle' && phase === 'start') {
+            instruction = '⚡ Agent started...';
+          } else if (stream === 'assistant' && !toolName) {
+            // Agent is writing its response (pre-chat:delta)
+            instruction = '✍️ Writing response...';
+          }
+
+          if (instruction) {
+            sendMissionProgress(params.missionId, {
+              stepUpdate: {
+                sessionKey: found.matchedKey,
+                agentId: found.agentInfo.agentId,
+                instruction,
+              },
+            });
           }
         };
 
