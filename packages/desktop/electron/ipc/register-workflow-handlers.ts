@@ -751,7 +751,9 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
     missionId: string;
     cancelled: boolean;
     sessionKey: string;   // dedicated session for this mission
-    spawnedAgents: Map<string, { agentId: string; agentName: string; sessionKey: string }>;
+    spawnedAgents: Map<string, { agentId: string; agentName: string; sessionKey: string; runId?: string }>;
+    // Secondary index: runId → sessionKey (for reliable event matching)
+    runIdToKey: Map<string, string>;
   }>();
 
   /** Extract text content from a message. */
@@ -799,6 +801,7 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
           cancelled: false,
           sessionKey: params.missionId,
           spawnedAgents: new Map(),
+          runIdToKey: new Map(),
         });
 
         // Direct per-agent routing: create a dedicated webchat session for each agent.
@@ -849,16 +852,16 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
 
           const key = payload?.sessionKey || '';
           const state = payload?.state || '';
+          const eventRunId = payload?.runId || '';
 
           // Diagnostic: log ALL incoming chat events for this mission window
-          console.log(`[mission:chat-event] missionId=${params.missionId} key=${key} state=${state} registeredKeys=${JSON.stringify([...mission.spawnedAgents.keys()])}`);
+          console.log(`[mission:chat-event] missionId=${params.missionId} key=${key} runId=${eventRunId} state=${state} registeredRunIds=${JSON.stringify([...mission.runIdToKey.keys()])} registeredKeys=${JSON.stringify([...mission.spawnedAgents.keys()])}`);
 
-          // Only handle events for registered agent sessions.
-          // Use flexible matching: Gateway may normalize session keys
-          // (e.g. plain key "m123-0" ↔ "agent:main:webchat:m123-0"),
-          // so fall back to endsWith check if exact match fails.
+          // Match priority: 1) runId (most reliable), 2) exact sessionKey, 3) endsWith
           let matchedKey: string | null = null;
-          if (mission.spawnedAgents.has(key)) {
+          if (eventRunId && mission.runIdToKey.has(eventRunId)) {
+            matchedKey = mission.runIdToKey.get(eventRunId)!;
+          } else if (mission.spawnedAgents.has(key)) {
             matchedKey = key;
           } else if (key) {
             for (const [k] of mission.spawnedAgents) {
@@ -1007,7 +1010,18 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
             try {
               console.log(`[mission:chatSend] sending to agentSessionKey=${agentSessionKey} agent=${agent.id}`);
               const sendResult = await ws.chatSend(agentSessionKey, taskMessage);
-              console.log(`[mission:chatSend] success agentSessionKey=${agentSessionKey} result=${JSON.stringify(sendResult)?.slice(0, 200)}`);
+              const actualRunId: string = sendResult?.runId || '';
+              console.log(`[mission:chatSend] success agentSessionKey=${agentSessionKey} runId=${actualRunId} result=${JSON.stringify(sendResult)?.slice(0, 200)}`);
+              // Register runId → sessionKey mapping for reliable event matching
+              if (actualRunId) {
+                const mRef2 = activeMissions.get(params.missionId);
+                if (mRef2) {
+                  mRef2.runIdToKey.set(actualRunId, agentSessionKey);
+                  // Also store runId on the agent entry
+                  const agentEntry = mRef2.spawnedAgents.get(agentSessionKey);
+                  if (agentEntry) agentEntry.runId = actualRunId;
+                }
+              }
             } catch (err: any) {
               console.error(`[mission:chatSend] ERROR agentSessionKey=${agentSessionKey}:`, err?.message);
               // Immediately mark this agent failed if send fails
