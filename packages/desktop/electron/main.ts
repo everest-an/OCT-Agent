@@ -965,12 +965,25 @@ function readCurrentWorkspaceDir() {
   return getAgentWorkspaceDir(HOME);
 }
 
-const doctor = createDoctor({
-  shellExec: safeShellExecAsync,
-  shellRun: runAsync,
-  homedir: HOME,
-  platform: process.platform,
-});
+let doctorInstance: ReturnType<typeof createDoctor> | null = null;
+
+function getDoctor() {
+  if (!doctorInstance) {
+    doctorInstance = createDoctor({
+      shellExec: safeShellExecAsync,
+      shellRun: runAsync,
+      homedir: HOME,
+      platform: process.platform,
+    });
+  }
+  return doctorInstance;
+}
+
+const doctor = {
+  runAllChecks: () => getDoctor().runAllChecks(),
+  runChecks: (subset?: string[]) => getDoctor().runChecks(subset),
+  runFix: (checkId: string) => getDoctor().runFix(checkId),
+};
 
 // --- System Tray ---
 
@@ -1134,7 +1147,8 @@ registerChannelSetupHandlers({
   ensureLocalDaemonReadyForRuntime: () => ensureLocalDaemonReadyForRuntime(),
 });
 registerCronHandlers({
-  safeShellExecAsync,
+  readShellOutputAsync,
+  runSpawnAsync,
 });
 registerWorkflowHandlers({
   home: HOME,

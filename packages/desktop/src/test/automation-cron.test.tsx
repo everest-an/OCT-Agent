@@ -114,6 +114,162 @@ describe('Automation cron visual selector', () => {
     (window as any).electronAPI = origApi;
   });
 
+  it('displays structured cron jobs returned by modern OpenClaw', async () => {
+    const origApi = (window as any).electronAPI;
+    (window as any).electronAPI = {
+      ...origApi,
+      cronList: vi.fn(() => Promise.resolve({
+        jobs: [
+          {
+            id: 'modern-1',
+            name: 'Morning brief',
+            enabled: true,
+            schedule: { kind: 'cron', expr: '0 7 * * *', tz: 'America/Los_Angeles' },
+            payload: { kind: 'agentTurn', message: 'Summarize overnight updates.' },
+            state: { lastStatus: 'ok' },
+            sessionTarget: 'isolated',
+          },
+        ],
+      })),
+    };
+
+    render(<Automation />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Morning brief')).toBeInTheDocument();
+      expect(screen.getByText('Summarize overnight updates.')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('OK')).toBeInTheDocument();
+    expect(screen.getByText(/America\/Los_Angeles/)).toBeInTheDocument();
+
+    (window as any).electronAPI = origApi;
+  });
+
+  it('submits a modern cron add payload when creating a task', async () => {
+    const cronAddFn = vi.fn(() => Promise.resolve({ success: true }));
+    const origApi = (window as any).electronAPI;
+    localStorage.setItem('awareness-claw-active-session', 'session-existing');
+    (window as any).electronAPI = {
+      ...origApi,
+      cronAdd: cronAddFn,
+    };
+
+    render(<Automation />);
+    fireEvent.click(screen.getByText(/Add Task/));
+    fireEvent.change(screen.getByPlaceholderText(/to-do list/i), { target: { value: 'Check todos' } });
+    fireEvent.click(screen.getByText('Create'));
+
+    await waitFor(() => {
+      expect(cronAddFn).toHaveBeenCalledWith(expect.objectContaining({
+        cron: '0 9 * * *',
+        message: 'Check todos',
+        sessionTarget: 'session:session-existing',
+        timeoutSeconds: 120,
+        announce: false,
+      }));
+    });
+
+    (window as any).electronAPI = origApi;
+  });
+
+  it('falls back to isolated delivery when there is no active chat session', async () => {
+    const cronAddFn = vi.fn(() => Promise.resolve({ success: true }));
+    const origApi = (window as any).electronAPI;
+    localStorage.removeItem('awareness-claw-active-session');
+    (window as any).electronAPI = {
+      ...origApi,
+      cronAdd: cronAddFn,
+    };
+
+    render(<Automation />);
+    fireEvent.click(screen.getByText(/Add Task/));
+    fireEvent.change(screen.getByPlaceholderText(/to-do list/i), { target: { value: 'Check todos' } });
+    fireEvent.click(screen.getByText('Create'));
+
+    await waitFor(() => {
+      expect(cronAddFn).toHaveBeenCalledWith(expect.objectContaining({
+        cron: '0 9 * * *',
+        message: 'Check todos',
+        sessionTarget: 'isolated',
+        timeoutSeconds: 120,
+        announce: true,
+      }));
+    });
+
+    (window as any).electronAPI = origApi;
+  });
+
+  it('prevents duplicate cron creation while a task is being submitted', async () => {
+    let resolveAdd: ((value: { success: boolean }) => void) | null = null;
+    const cronAddFn = vi.fn(() => new Promise<{ success: boolean }>((resolve) => {
+      resolveAdd = resolve;
+    }));
+    const origApi = (window as any).electronAPI;
+    (window as any).electronAPI = {
+      ...origApi,
+      cronAdd: cronAddFn,
+    };
+
+    render(<Automation />);
+    fireEvent.click(screen.getByText(/Add Task/));
+    fireEvent.change(screen.getByPlaceholderText(/to-do list/i), { target: { value: 'Check todos' } });
+
+    const createButton = screen.getByRole('button', { name: 'Create' });
+    fireEvent.click(createButton);
+    fireEvent.click(createButton);
+
+    await waitFor(() => {
+      expect(cronAddFn).toHaveBeenCalledTimes(1);
+      expect(createButton).toBeDisabled();
+    });
+
+    resolveAdd?.({ success: true });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Create' })).not.toBeInTheDocument();
+    });
+
+    (window as any).electronAPI = origApi;
+  });
+
+  it('hides the managed heartbeat job from the scheduled task list', async () => {
+    const origApi = (window as any).electronAPI;
+    (window as any).electronAPI = {
+      ...origApi,
+      cronList: vi.fn(() => Promise.resolve({
+        jobs: [
+          {
+            id: 'heartbeat-1',
+            name: 'AwarenessClaw Heartbeat',
+            enabled: true,
+            schedule: { kind: 'cron', expr: '*/30 * * * *' },
+            payload: { kind: 'systemEvent', text: 'AwarenessClaw heartbeat check' },
+            sessionTarget: 'main',
+          },
+          {
+            id: 'job-1',
+            name: 'Daily brief',
+            enabled: true,
+            schedule: { kind: 'cron', expr: '0 9 * * *' },
+            payload: { kind: 'agentTurn', message: 'Summarize tasks' },
+            sessionTarget: 'isolated',
+          },
+        ],
+      })),
+    };
+
+    render(<Automation />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Daily brief')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('AwarenessClaw Heartbeat')).not.toBeInTheDocument();
+
+    (window as any).electronAPI = origApi;
+  });
+
   it('shows empty state when cronList returns no jobs', async () => {
     render(<Automation />);
 

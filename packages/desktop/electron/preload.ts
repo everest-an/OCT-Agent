@@ -94,7 +94,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Cron management
   cronList: () => ipcRenderer.invoke('cron:list'),
-  cronAdd: (expr: string, cmd: string) => ipcRenderer.invoke('cron:add', expr, cmd),
+  cronAdd: (job: any, legacyCommand?: string) => ipcRenderer.invoke('cron:add', job, legacyCommand),
   cronRemove: (id: string) => ipcRenderer.invoke('cron:remove', id),
 
   // Gateway management

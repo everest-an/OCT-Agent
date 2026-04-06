@@ -1,3 +1,48 @@
+export interface CronAddRequest {
+  name?: string;
+  description?: string;
+  cron: string;
+  message?: string;
+  systemEvent?: string;
+  sessionTarget?: 'main' | 'isolated' | 'current' | `session:${string}`;
+  wakeMode?: 'now' | 'next-heartbeat';
+  timeoutSeconds?: number;
+  announce?: boolean;
+  disabled?: boolean;
+}
+
+export interface CronJobRecord {
+  id?: string;
+  name?: string;
+  description?: string;
+  enabled?: boolean;
+  schedule?: {
+    kind?: string;
+    expr?: string;
+    at?: string;
+    everyMs?: number;
+    tz?: string;
+    staggerMs?: number;
+  };
+  payload?: {
+    kind?: string;
+    message?: string;
+    text?: string;
+    model?: string;
+  };
+  state?: {
+    nextRunAtMs?: number | null;
+    lastRunAtMs?: number | null;
+    lastStatus?: string | null;
+    runningAtMs?: number | null;
+  };
+  sessionTarget?: string;
+  agentId?: string;
+  expression?: string;
+  command?: string;
+  raw?: string;
+}
+
 export interface ElectronAPI {
   getPlatform: () => Promise<string>;
   openExternal: (url: string) => Promise<void>;
@@ -39,6 +84,9 @@ export interface ElectronAPI {
   filePreview?: (filePath: string) => Promise<unknown>;
   selectFile?: (options?: { filters?: Array<{ name: string; extensions: string[] }> }) => Promise<{ filePath: string | null }>;
   selectDirectory?: () => Promise<{ directoryPath: string | null }>;
+  cronList?: () => Promise<{ jobs: CronJobRecord[] | string[]; raw?: boolean; error?: string }>;
+  cronAdd?: (job: CronAddRequest | string, legacyCommand?: string) => Promise<{ success: boolean; output?: string; error?: string; compatibility?: string; job?: unknown }>;
+  cronRemove?: (id: string) => Promise<{ success: boolean; output?: string; error?: string }>;
   permissionsGet?: () => Promise<{
     success: boolean;
     profile: string;

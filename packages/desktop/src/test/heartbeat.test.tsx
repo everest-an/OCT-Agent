@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import Automation from '../pages/Automation';
 
@@ -45,5 +45,39 @@ describe('Automation - heartbeat persistence', () => {
     // Heartbeat should be enabled and interval should be 45
     const intervalText = screen.getByText('45 min');
     expect(intervalText).toBeInTheDocument();
+  });
+
+  it('creates a managed main-session heartbeat cron job', async () => {
+    const cronAddFn = vi.fn(() => Promise.resolve({ success: true }));
+    const origApi = (window as any).electronAPI;
+    (window as any).electronAPI = {
+      ...origApi,
+      cronAdd: cronAddFn,
+      cronList: vi.fn(() => Promise.resolve({ jobs: [] })),
+    };
+
+    await act(async () => { render(<Automation />); });
+
+    const toggles = screen.getAllByRole('button');
+    const heartbeatToggle = toggles.find((btn) => {
+      const parent = btn.closest('.flex.items-center.justify-between');
+      return parent?.textContent?.includes('Heartbeat Check');
+    });
+
+    if (heartbeatToggle) {
+      await act(async () => { fireEvent.click(heartbeatToggle); });
+    }
+
+    await waitFor(() => {
+      expect(cronAddFn).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'AwarenessClaw Heartbeat',
+        cron: '*/30 * * * *',
+        systemEvent: 'AwarenessClaw heartbeat check',
+        sessionTarget: 'main',
+        wakeMode: 'now',
+      }));
+    });
+
+    (window as any).electronAPI = origApi;
   });
 });
