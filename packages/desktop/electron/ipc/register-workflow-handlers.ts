@@ -996,7 +996,13 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
               sessionKey: agentSessionKey,
             });
 
-            // Transition step: waiting → running with real sessionKey
+            // Transition step: waiting → running with real sessionKey.
+            // Also update the mission-level sessionKey on the first agent so
+            // "View Full Chat" navigates to a real Gateway session (not the
+            // synthetic missionId which Gateway doesn't know about).
+            const missionPatchForFirstAgent = i === 0
+              ? { sessionKey: agentSessionKey }
+              : undefined;
             sendMissionProgress(params.missionId, {
               stepUpdate: {
                 sessionKey: pendingKey,
@@ -1005,6 +1011,7 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
                 startedAt: new Date().toISOString(),
                 newSessionKey: agentSessionKey,
               },
+              ...(missionPatchForFirstAgent ? { missionPatch: missionPatchForFirstAgent } : {}),
             });
 
             try {

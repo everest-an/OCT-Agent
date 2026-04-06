@@ -122,6 +122,8 @@ export class GatewayClient extends EventEmitter {
   private config: GatewayConfig = { port: 18789, token: '' };
   private destroyed = false;
   private requestedScopes: string[] = ['operator.read'];
+  /** Mutex: if a connect() is already in-flight, new callers await the same promise. */
+  private _connectInFlightPromise: Promise<void> | null = null;
 
   private static readonly CLIENT_ID = 'openclaw-control-ui';
   private static readonly CLIENT_MODE = 'ui';
@@ -132,6 +134,19 @@ export class GatewayClient extends EventEmitter {
   /** Connect to Gateway with device identity auth. Resolves when hello-ok received. */
   async connect(): Promise<void> {
     if (this.connected && this.ws?.readyState === WebSocket.OPEN) return;
+    // Concurrency guard: if a connect() call is already in-flight, join it instead of
+    // starting a second WebSocket. Without this, ensureWriteScopes() closing the old WS
+    // triggers scheduleReconnect() which races connect() → two WebSockets, second one
+    // overwrites this.ws, causing "invalid handshake: first request must be connect".
+    if (this._connectInFlightPromise) return this._connectInFlightPromise;
+
+    this._connectInFlightPromise = this._doConnect().finally(() => {
+      this._connectInFlightPromise = null;
+    });
+    return this._connectInFlightPromise;
+  }
+
+  private async _doConnect(): Promise<void> {
 
     this.config = readGatewayConfig();
     const identity = loadDeviceIdentity();
@@ -305,6 +320,10 @@ export class GatewayClient extends EventEmitter {
 
   private scheduleReconnect() {
     if (this.reconnectTimer || this.destroyed) return;
+    // Skip scheduling if a connect() is already in-flight (e.g. ensureWriteScopes just
+    // called connect() synchronously). The in-flight connect will either succeed or fail
+    // on its own; a redundant reconnect here would race and corrupt this.ws.
+    if (this._connectInFlightPromise) return;
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
       try { await this.connect(); } catch { /* will retry on next call */ }

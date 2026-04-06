@@ -258,14 +258,25 @@ export default function MissionDetail({
       {/* Bottom actions */}
       <div className="flex-shrink-0 px-4 py-3 border-t border-slate-800 flex gap-2">
         {/* Open main agent chat */}
-        {mission.sessionKey && (
-          <button
-            onClick={() => onOpenChat(mission.sessionKey!, mission.goal)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 text-xs font-medium border border-sky-600/30"
-          >
-            <ExternalLink size={11} /> {t('mission.openOrchestratorChat', 'View Full Chat')}
-          </button>
-        )}
+        {(() => {
+          // Prefer the mission-level sessionKey, but fall back to the first step's
+          // sessionKey if the mission key is still the synthetic local missionId
+          // (which Gateway doesn't know about). This happens briefly before the
+          // backend patches the mission with the real agent session key.
+          const isSyntheticKey = mission.sessionKey?.startsWith('mission-');
+          const fallbackKey = isSyntheticKey
+            ? mission.steps.find(s => s.sessionKey && !s.sessionKey.startsWith('pending-'))?.sessionKey
+            : undefined;
+          const chatSessionKey = fallbackKey || (isSyntheticKey ? undefined : mission.sessionKey);
+          return chatSessionKey ? (
+            <button
+              onClick={() => onOpenChat(chatSessionKey, mission.goal)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 text-xs font-medium border border-sky-600/30"
+            >
+              <ExternalLink size={11} /> {t('mission.openOrchestratorChat', 'View Full Chat')}
+            </button>
+          ) : null;
+        })()}
         {mission.status === 'failed' && onRetry && (
           <button
             onClick={onRetry}

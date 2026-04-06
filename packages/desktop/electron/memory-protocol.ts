@@ -1,7 +1,9 @@
 export const DESKTOP_MEMORY_SOURCE = 'desktop-memory-panel';
 export const MEMORY_SEARCH_RESULT_LIMIT = 15;
-export const MEMORY_CONTEXT_CARD_LIMIT = 50;
-export const MEMORY_CONTEXT_TASK_LIMIT = 20;
+// Keep in sync with the MCP server default (mcp-server.mjs max_cards default = 5).
+// Sending 50 cards caused 30 KB+ payloads that triggered upstream LLM timeouts.
+export const MEMORY_CONTEXT_CARD_LIMIT = 5;
+export const MEMORY_CONTEXT_TASK_LIMIT = 5;
 
 export function buildMemorySearchArgs(query: string) {
   const trimmedQuery = query.trim();
