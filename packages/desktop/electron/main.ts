@@ -258,6 +258,37 @@ function repairOpenClawConfigFile() {
     }
 
     sanitizeAwarenessPluginConfig(current);
+
+    // Ensure multi-agent collaboration is enabled by default.
+    // Users should not need to manually enable this from the Workflow page.
+    // Verified via https://docs.openclaw.ai/tools/subagents — these are the
+    // correct field names for agent-to-agent spawning in OpenClaw.
+    if (!current.tools) current.tools = {};
+    if (!current.tools.agentToAgent) current.tools.agentToAgent = {};
+    if (!current.tools.agentToAgent.enabled) {
+      current.tools.agentToAgent.enabled = true;
+      current.tools.agentToAgent.allow = ['*'];
+    }
+    if (!current.tools.alsoAllow) current.tools.alsoAllow = [];
+    for (const tool of ['sessions_spawn', 'agents_list']) {
+      if (!current.tools.alsoAllow.includes(tool)) {
+        current.tools.alsoAllow.push(tool);
+      }
+    }
+    if (!current.agents) current.agents = {};
+    if (!current.agents.defaults) current.agents.defaults = {};
+    if (!current.agents.defaults.subagents) current.agents.defaults.subagents = {};
+    if ((current.agents.defaults.subagents.maxSpawnDepth ?? 1) < 2) {
+      current.agents.defaults.subagents.maxSpawnDepth = 2;
+    }
+    // Per-agent allowAgents must be on each agent entry (schema rejects agents.defaults)
+    if (Array.isArray(current.agents?.list)) {
+      for (const agent of current.agents.list) {
+        if (!agent.subagents) agent.subagents = {};
+        if (!agent.subagents.allowAgents) agent.subagents.allowAgents = ['*'];
+      }
+    }
+
     fs.writeFileSync(configPath, JSON.stringify(current, null, 2));
 
     if (shouldMarkLegacyMigration) {
