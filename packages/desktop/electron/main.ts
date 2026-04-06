@@ -3,6 +3,7 @@ const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, dialog } = 
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import http from 'http';
 import https from 'https';
 import crypto from 'crypto';
 import { createDaemonWatchdog } from './daemon-watchdog';
@@ -518,6 +519,20 @@ async function startGatewayInUserSession(send?: (ch: string, data: any) => void)
 
 async function startGatewayWithRepair(send?: (ch: string, data: any) => void): Promise<{ ok: boolean; error?: string }> {
   repairOpenClawConfigFile();
+
+  // Fast path: HTTP probe avoids 15-30s CLI plugin preload (OpenClaw 4.5 loads all plugins on every CLI call)
+  const port = getGatewayPort();
+  const httpProbeOk = await new Promise<boolean>((resolve) => {
+    const req = http.get(`http://127.0.0.1:${port}/healthz`, { timeout: 3000 }, (res) => {
+      res.resume();
+      resolve(res.statusCode !== undefined && res.statusCode < 500);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+  });
+  if (httpProbeOk) return { ok: true };
+
+  // Fallback: CLI check (handles non-default port or pre-4.5 installs)
   const statusOutput = await readShellOutputAsync('openclaw gateway status 2>&1', 15000);
   if (isGatewayRunningOutput(statusOutput)) return { ok: true };
 
