@@ -304,7 +304,11 @@ export function registerRuntimeHealthHandlers(deps: {
       'openclaw-installed',
       'plugin-installed',
       'daemon-running',
-      'gateway-running',
+      // 'gateway-running' intentionally excluded from startup auto-fix:
+      // main.ts startGatewayRepairInBackground() already starts the gateway in
+      // parallel. Triggering openclaw gateway start here (20s CLI invocation)
+      // duplicates work and is the primary cause of the app appearing frozen on
+      // cold boot. The gateway is not runtime-blocking; the UI loads regardless.
       'channel-bindings',
     ]);
 

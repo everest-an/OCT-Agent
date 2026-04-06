@@ -399,15 +399,19 @@ async function buildContext(deps: DoctorDeps): Promise<Ctx> {
     ? path.join(npmRoot.trim(), 'openclaw')
     : null;
   const hasOpenClawPackage = !!openclawPackageDir && fs.existsSync(path.join(openclawPackageDir, 'package.json'));
-  let openclawVersion = openclawPath ? await deps.shellExec('openclaw --version', 8000) : null;
-  if (!openclawVersion && hasOpenClawPackage) {
+
+  // Fast path: read openclaw version from package.json directly (avoids 8-15s CLI
+  // plugin preload that openclaw --version triggers on every invocation).
+  // Falls back to CLI only when package.json is unavailable.
+  let openclawVersion: string | null = null;
+  if (hasOpenClawPackage) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(openclawPackageDir!, 'package.json'), 'utf8'));
+      if (pkg?.version) openclawVersion = `OpenClaw ${pkg.version}`;
+    } catch {}
+  }
+  if (!openclawVersion && openclawPath) {
     openclawVersion = await deps.shellExec('openclaw --version', 8000);
-    if (!openclawVersion) {
-      try {
-        const pkg = JSON.parse(fs.readFileSync(path.join(openclawPackageDir!, 'package.json'), 'utf8'));
-        if (pkg?.version) openclawVersion = `OpenClaw ${pkg.version}`;
-      } catch {}
-    }
   }
 
   const ctx: Ctx = {

@@ -23,20 +23,37 @@ describe('registerRuntimeHealthHandlers', () => {
     ipcHandleMock.mockReset();
   });
 
-  it('repairs the local daemon before repairing the gateway during startup', async () => {
+  it('repairs the local daemon during startup (gateway auto-fix is intentionally skipped — handled by startGatewayRepairInBackground)', async () => {
+    // The refactored startup handler calls runChecks 3 times:
+    //   1. fastChecks (node-installed, openclaw-installed, openclaw-command-health, plugin-installed)
+    //   2. slowChecks (daemon-running, gateway-running, channel-bindings)
+    //   3. recheck of only repaired items (daemon-running only — gateway is excluded from autoFixChecks)
+    //
+    // NOTE: gateway-running is intentionally excluded from autoFixChecks in the production handler.
+    // Gateway repair is done separately by startGatewayRepairInBackground() to avoid the 20s CLI freeze
+    // at startup. The UI loads regardless of gateway state.
     const runChecks = vi.fn()
+      // Call 1: fastChecks — all pass
       .mockResolvedValueOnce({
         checks: [
-          { id: 'gateway-running', label: 'Gateway', status: 'fail', fixable: 'auto', message: 'Gateway is not running' },
-          { id: 'daemon-running', label: 'Local Daemon', status: 'fail', fixable: 'auto', message: 'Local Daemon is not running' },
+          { id: 'node-installed', label: 'Node.js', status: 'pass', fixable: 'none', message: 'Installed' },
+          { id: 'openclaw-installed', label: 'OpenClaw', status: 'pass', fixable: 'none', message: 'Installed' },
+          { id: 'openclaw-command-health', label: 'OpenClaw health', status: 'pass', fixable: 'none', message: 'OK' },
           { id: 'plugin-installed', label: 'Awareness plugin', status: 'pass', fixable: 'none', message: 'Installed' },
         ],
       })
+      // Call 2: slowChecks — daemon failing, gateway also failing (but gateway won't be auto-fixed)
+      .mockResolvedValueOnce({
+        checks: [
+          { id: 'daemon-running', label: 'Local Daemon', status: 'fail', fixable: 'auto', message: 'Local Daemon is not running' },
+          { id: 'gateway-running', label: 'Gateway', status: 'fail', fixable: 'auto', message: 'Gateway is not running' },
+          { id: 'channel-bindings', label: 'Channel bindings', status: 'pass', fixable: 'none', message: 'OK' },
+        ],
+      })
+      // Call 3: recheck daemon-running only (gateway is not in autoFixChecks, not rechecked here)
       .mockResolvedValueOnce({
         checks: [
           { id: 'daemon-running', label: 'Local Daemon', status: 'pass', fixable: 'none', message: 'Running' },
-          { id: 'gateway-running', label: 'Gateway', status: 'pass', fixable: 'none', message: 'Running' },
-          { id: 'plugin-installed', label: 'Awareness plugin', status: 'pass', fixable: 'none', message: 'Installed' },
         ],
       });
     const runFix = vi.fn(async (checkId: string) => ({ id: checkId, success: true, message: `${checkId} fixed` }));
@@ -63,23 +80,28 @@ describe('registerRuntimeHealthHandlers', () => {
     const result = await handlers['app:startup-ensure-runtime']();
 
     expect(result).toMatchObject({ ok: true, needsSetup: false });
-    expect(runFix.mock.calls.map(([checkId]) => checkId)).toEqual(['daemon-running', 'gateway-running']);
+    // Only daemon-running is auto-fixed; gateway-running is intentionally skipped (handled by background repair)
+    expect(runFix.mock.calls.map(([checkId]) => checkId)).toEqual(['daemon-running']);
   });
 
   it('prepares gateway access during startup when the gateway is already healthy', async () => {
+    // All checks pass → no repairs needed → only 2 runChecks calls (fast + slow, no recheck)
     const runChecks = vi.fn()
+      // Call 1: fastChecks — all pass
       .mockResolvedValueOnce({
         checks: [
-          { id: 'daemon-running', label: 'Local Daemon', status: 'pass', fixable: 'none', message: 'Running' },
-          { id: 'gateway-running', label: 'Gateway', status: 'pass', fixable: 'none', message: 'Running' },
+          { id: 'node-installed', label: 'Node.js', status: 'pass', fixable: 'none', message: 'Installed' },
+          { id: 'openclaw-installed', label: 'OpenClaw', status: 'pass', fixable: 'none', message: 'Installed' },
+          { id: 'openclaw-command-health', label: 'OpenClaw health', status: 'pass', fixable: 'none', message: 'OK' },
           { id: 'plugin-installed', label: 'Awareness plugin', status: 'pass', fixable: 'none', message: 'Installed' },
         ],
       })
+      // Call 2: slowChecks — all pass
       .mockResolvedValueOnce({
         checks: [
           { id: 'daemon-running', label: 'Local Daemon', status: 'pass', fixable: 'none', message: 'Running' },
           { id: 'gateway-running', label: 'Gateway', status: 'pass', fixable: 'none', message: 'Running' },
-          { id: 'plugin-installed', label: 'Awareness plugin', status: 'pass', fixable: 'none', message: 'Installed' },
+          { id: 'channel-bindings', label: 'Channel bindings', status: 'pass', fixable: 'none', message: 'OK' },
         ],
       });
     const ensureGatewayAccess = vi.fn(async () => ({ ok: true, repaired: true, message: 'Local Gateway access was approved automatically.' }));
@@ -110,19 +132,30 @@ describe('registerRuntimeHealthHandlers', () => {
   });
 
   it('does not mark needsSetup when only daemon-running is still failing', async () => {
+    // Daemon fails → repair attempted but fails → recheck still shows daemon failing.
+    // Expected: ok=false, needsSetup=false (daemon is not a setup-blocker), blockingId='daemon-running'
     const runChecks = vi.fn()
+      // Call 1: fastChecks — all pass (plugin-installed pass = not a setup blocker)
       .mockResolvedValueOnce({
         checks: [
-          { id: 'daemon-running', label: 'Local Daemon', status: 'fail', fixable: 'auto', message: 'Local Daemon is not running' },
-          { id: 'gateway-running', label: 'Gateway', status: 'pass', fixable: 'none', message: 'Running' },
+          { id: 'node-installed', label: 'Node.js', status: 'pass', fixable: 'none', message: 'Installed' },
+          { id: 'openclaw-installed', label: 'OpenClaw', status: 'pass', fixable: 'none', message: 'Installed' },
+          { id: 'openclaw-command-health', label: 'OpenClaw health', status: 'pass', fixable: 'none', message: 'OK' },
           { id: 'plugin-installed', label: 'Awareness plugin', status: 'pass', fixable: 'none', message: 'Installed' },
         ],
       })
+      // Call 2: slowChecks — daemon failing, gateway and bindings pass
       .mockResolvedValueOnce({
         checks: [
           { id: 'daemon-running', label: 'Local Daemon', status: 'fail', fixable: 'auto', message: 'Local Daemon is not running' },
           { id: 'gateway-running', label: 'Gateway', status: 'pass', fixable: 'none', message: 'Running' },
-          { id: 'plugin-installed', label: 'Awareness plugin', status: 'pass', fixable: 'none', message: 'Installed' },
+          { id: 'channel-bindings', label: 'Channel bindings', status: 'pass', fixable: 'none', message: 'OK' },
+        ],
+      })
+      // Call 3: recheck daemon-running after failed repair — still failing
+      .mockResolvedValueOnce({
+        checks: [
+          { id: 'daemon-running', label: 'Local Daemon', status: 'fail', fixable: 'auto', message: 'Local Daemon is not running' },
         ],
       });
 

@@ -19,6 +19,10 @@ const SETUP_COMPLETED_AT_KEY = 'awareness-claw-setup-completed-at';
 const POST_SETUP_RUNTIME_GRACE_MS = 3 * 60 * 1000;
 const POST_SETUP_DAEMON_RECHECK_ATTEMPTS = 3;
 const POST_SETUP_DAEMON_RECHECK_DELAY_MS = 15000;
+// Max time to wait for startup checks before showing app anyway.
+// OpenClaw loads 10+ plugins per CLI invocation (~15-30s each).
+// Background gateway repair (startGatewayRepairInBackground) handles the rest.
+const STARTUP_CHECK_TIMEOUT_MS = 20_000;
 
 function estimateStartupProgress(message: string) {
   const text = message.toLowerCase();
@@ -189,7 +193,18 @@ export default function App() {
       }
 
       try {
-        let result = await window.electronAPI.startupEnsureRuntime();
+        // Race startup checks against a timeout so a cold boot (gateway not yet
+        // running, OpenClaw loading 10+ plugins per CLI call) never freezes the UI.
+        // Background repair in main.ts handles gateway startup; we just need to
+        // unblock the renderer quickly for already-configured users.
+        type StartupResult = { ok: boolean; needsSetup?: boolean; blockingId?: string; blockingMessage?: string; fixed: string[]; warnings: string[] };
+        const timeoutResult: StartupResult = { ok: true, fixed: [], warnings: [] };
+        let result = await Promise.race([
+          window.electronAPI.startupEnsureRuntime() as Promise<StartupResult>,
+          new Promise<StartupResult>((resolve) =>
+            setTimeout(() => resolve(timeoutResult), STARTUP_CHECK_TIMEOUT_MS)
+          ),
+        ]);
         if (cancelled) return;
 
         if (!result.ok && result.blockingId === 'daemon-running' && recentlyCompletedSetup) {
