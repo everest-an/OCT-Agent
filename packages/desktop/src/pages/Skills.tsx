@@ -31,6 +31,8 @@ interface LocalSkillStatus {
   eligible: boolean;
   disabled: boolean;
   blockedByAllowlist: boolean;
+  /** OS platforms this skill supports, from SKILL.md metadata.os */
+  supportedOs?: string[];
   missing?: {
     bins?: string[];
     anyBins?: string[];
@@ -124,6 +126,7 @@ function buildLocalDetail(skill: LocalSkillStatus): SkillDetail {
     blockedByAllowlist: skill.blockedByAllowlist,
     homepage: skill.homepage,
     primaryEnv: skill.primaryEnv,
+    supportedOs: skill.supportedOs,
     missing: skill.missing,
     install: skill.install,
   };
@@ -339,7 +342,12 @@ export default function Skills() {
         : Promise.resolve(null),
     ]);
     if (detailRes.success && detailRes.skill) {
-      setDetailSkill(prev => ({ ...prev, ...detailRes.skill }));
+      setDetailSkill(prev => ({
+        ...prev,
+        ...detailRes.skill,
+        // Prefer ClawHub API's supportedOs when available; fall back to local SKILL.md data.
+        supportedOs: detailRes.skill.supportedOs ?? prev?.supportedOs,
+      }));
     } else {
       const basic = fullList.find(s => s.slug === slug);
       if (basic) {
@@ -863,14 +871,24 @@ export default function Skills() {
                         {t('skills.viewOnClawHub', 'View on ClawHub (install guide & docs)')}
                       </button>
                     )}
-                    {/* Dynamic OS compatibility from ClawHub metadata */}
-                    {detailSkill.supportedOs && detailSkill.supportedOs.length > 0 && (
-                      <p className={`text-xs ${detailSkill.supportedOs.includes(
-                        typeof window !== 'undefined' ? (navigator.platform?.startsWith('Win') ? 'win32' : navigator.platform?.startsWith('Mac') ? 'darwin' : 'linux') : 'darwin'
-                      ) ? 'text-emerald-400' : 'text-amber-300'}`}>
-                        {t('skills.platformSupport', 'Platform')}: {detailSkill.supportedOs.map(os => OS_LABELS[os] || os).join(', ')}
-                      </p>
-                    )}
+                    {/* OS compatibility: from ClawHub API or local SKILL.md metadata.os */}
+                    {(() => {
+                      const osList = detailSkill.supportedOs;
+                      if (!osList || osList.length === 0) return null;
+                      const currentOs = navigator.platform?.startsWith('Win') ? 'win32'
+                        : navigator.platform?.startsWith('Mac') ? 'darwin' : 'linux';
+                      const compatible = osList.includes(currentOs);
+                      return (
+                        <p className={`text-xs flex items-center gap-1 ${compatible ? 'text-emerald-400' : 'text-amber-300'}`}>
+                          <span>{compatible ? '✓' : '⚠'}</span>
+                          <span>
+                            {compatible
+                              ? t('skills.osCompatible', 'Compatible with {os}').replace('{os}', OS_LABELS[currentOs] || currentOs)
+                              : t('skills.osIncompatible', 'Requires {os}').replace('{os}', osList.map(o => OS_LABELS[o] || o).join(', '))}
+                          </span>
+                        </p>
+                      );
+                    })()}
                     {detailSkill.missing && summarizeMissing({
                       name: detailSkill.name || detailSkill.slug,
                       description: detailSkill.description || '',

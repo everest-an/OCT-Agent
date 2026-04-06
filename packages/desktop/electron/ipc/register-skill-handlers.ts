@@ -73,6 +73,8 @@ type LocalSkillStatus = {
   eligible: boolean;
   disabled: boolean;
   blockedByAllowlist: boolean;
+  /** OS platforms this skill supports, sourced from SKILL.md metadata.os */
+  supportedOs?: string[];
   missing?: {
     bins?: string[];
     anyBins?: string[];
@@ -169,7 +171,9 @@ function parseOpenclawMetadata(frontmatter: string): ParsedOpenclawSkillMetadata
     const rawJson = metaContent.slice(jsonStart, jsonEnd + 1);
     const cleanedJson = rawJson.replace(/,(\s*[}\]])/g, '$1');
     const parsed = JSON.parse(cleanedJson);
-    return parsed?.openclaw && typeof parsed.openclaw === 'object' ? parsed.openclaw : {};
+    // Support both 'openclaw' (official namespace) and 'clawdbot' (ClawHub community namespace)
+    const ns = parsed?.openclaw ?? parsed?.clawdbot;
+    return ns && typeof ns === 'object' ? ns : {};
   } catch {
     return {};
   }
@@ -982,6 +986,9 @@ async function readSkillsFromFilesystem(
       eligible: !disabled && !blockedByAllowlist && !hasMissing,
       disabled,
       blockedByAllowlist,
+      // Expose the full OS list so the detail panel can show compatibility even for
+      // skills that ARE compatible with the current platform (osMissing would be []).
+      ...(record.requiresOs.length > 0 ? { supportedOs: record.requiresOs } : {}),
       ...(hasMissing ? { missing } : {}),
       ...(record.install.length > 0 ? { install: normalizeInstallOptionsForCurrentOs(record.install) } : {}),
     };
@@ -1102,10 +1109,28 @@ export function registerSkillHandlers(deps: {
       }
       report.skills = patchMissingBins(report.skills, verifiedBins);
 
+      // Merge ClawHub lock.json so skills installed via `clawhub install` show as
+      // installed by their ClawHub slug (e.g. "agentic-coding"). Without this merge,
+      // normalizeInstalledSkills keys by SKILL.md name ("Agentic Coding") which never
+      // matches the slug the frontend uses for installedSlugs.has() → install loop.
+      let lockSkills: Record<string, { version?: string; installedAt?: number }> = {};
+      try {
+        const lockRaw = fs.readFileSync(lockFile, 'utf8');
+        lockSkills = (JSON.parse(lockRaw) as { skills?: Record<string, unknown> }).skills as Record<string, { version?: string; installedAt?: number }> || {};
+      } catch {}
+
       return {
         success: true,
         report,
-        skills: normalizeInstalledSkills(report),
+        skills: {
+          ...normalizeInstalledSkills(report),
+          ...Object.fromEntries(
+            Object.entries(lockSkills).map(([slug, info]) => [
+              slug,
+              { slug, version: info?.version || 'local', installedAt: info?.installedAt || 0 },
+            ])
+          ),
+        },
       };
     } catch (statusErr: any) {
       try {
