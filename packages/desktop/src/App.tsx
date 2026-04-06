@@ -12,8 +12,6 @@ import Settings from './pages/Settings';
 import Sidebar, { type Page } from './components/Sidebar';
 import UpdateBanner from './components/UpdateBanner';
 import { useAppConfig } from './lib/store';
-import { useI18n } from './lib/i18n';
-import logoUrl from './assets/logo.png';
 
 const SETUP_COMPLETED_AT_KEY = 'awareness-claw-setup-completed-at';
 const POST_SETUP_RUNTIME_GRACE_MS = 3 * 60 * 1000;
@@ -24,41 +22,6 @@ const POST_SETUP_DAEMON_RECHECK_DELAY_MS = 15000;
 // Background gateway repair (startGatewayRepairInBackground) handles the rest.
 const STARTUP_CHECK_TIMEOUT_MS = 20_000;
 
-function estimateStartupProgress(message: string) {
-  const text = message.toLowerCase();
-  if (text.includes('checking')) return 10;
-  if (text.includes('repairing')) return 45;
-  if (text.includes('gateway access')) return 96;
-  if (text.includes('everything looks good')) return 85;
-  if (text.includes('finalizing')) return 92;
-  return 18;
-}
-
-function translateStartupMessage(message: string, t: (key: string, fallback?: string) => string) {
-  const exactMap: Record<string, string> = {
-    'Preparing AwarenessClaw...': 'startup.preparing',
-    'Checking your installation...': 'startup.checking',
-    'Finishing setup...': 'startup.finishing',
-    'Startup complete': 'startup.complete',
-    'Waiting for the local service to finish starting...': 'startup.waitingForLocalService',
-    'Everything looks good. Finalizing startup...': 'startup.everythingLooksGood',
-    'Finalizing startup...': 'startup.finalizing',
-    'Local service is still warming up...': 'startup.localServiceWarming',
-    'Preparing local Gateway access...': 'startup.preparingGatewayAccess',
-    'Approving local Gateway device access...': 'startup.approvingGatewayAccess',
-    'Local Gateway access is ready.': 'startup.gatewayAccessReady',
-  };
-
-  const mappedKey = exactMap[message];
-  if (mappedKey) return t(mappedKey, message);
-
-  const repairingMatch = message.match(/^Repairing\s+(.+)\.\.\.$/);
-  if (repairingMatch) {
-    return t('startup.repairingCheck', 'Repairing {0}...').replace('{0}', repairingMatch[1]);
-  }
-
-  return message;
-}
 
 /** Apply theme to document root */
 function useThemeEffect(theme: 'dark' | 'light' | 'system') {
@@ -108,11 +71,8 @@ function isZoomOutKey(event: KeyboardEvent): boolean {
 
 export default function App() {
   const { config } = useAppConfig();
-  const { t } = useI18n();
   const [setupComplete, setSetupComplete] = useState<boolean | null>(null);
   const [runtimeReady, setRuntimeReady] = useState<boolean | null>(null);
-  const [startupMessage, setStartupMessage] = useState('Preparing AwarenessClaw...');
-  const [startupProgress, setStartupProgress] = useState(8);
   const [currentPage, setCurrentPage] = useState<Page>('chat');
   // Channel to focus in Dashboard after "Open Chat" from Channels page
   const [pendingChannelId, setPendingChannelId] = useState<string | null>(null);
@@ -123,15 +83,6 @@ export default function App() {
   useEffect(() => {
     const done = localStorage.getItem('awareness-claw-setup-done');
     setSetupComplete(done === 'true');
-  }, []);
-
-  useEffect(() => {
-    if (!window.electronAPI?.onStartupStatus) return;
-    window.electronAPI.onStartupStatus((status) => {
-      if (status?.message) setStartupMessage(status.message);
-      if (typeof status?.progress === 'number') setStartupProgress(status.progress);
-      else if (status?.message) setStartupProgress(estimateStartupProgress(status.message));
-    });
   }, []);
 
   useEffect(() => {
@@ -170,33 +121,23 @@ export default function App() {
       return;
     }
 
+    // Existing users: show app immediately, run checks in background.
+    // New users (setupComplete === false) go directly to SetupWizard above.
+    setRuntimeReady(true);
+
     let cancelled = false;
-    setRuntimeReady(null);
-    setStartupMessage('Checking your installation...');
-    setStartupProgress(10);
 
     const recentSetupCompletedAt = Number(localStorage.getItem(SETUP_COMPLETED_AT_KEY) || '0');
     const recentlyCompletedSetup = recentSetupCompletedAt > 0
       && Date.now() - recentSetupCompletedAt < POST_SETUP_RUNTIME_GRACE_MS;
-    if (recentlyCompletedSetup) {
-      setStartupMessage('Finishing setup...');
-      setStartupProgress(18);
-    }
 
-    const ensureRuntime = async () => {
+    const runBackgroundChecks = async () => {
       if (!window.electronAPI?.startupEnsureRuntime) {
-        if (!cancelled) {
-          setStartupProgress(100);
-          setRuntimeReady(true);
-        }
+        localStorage.removeItem(SETUP_COMPLETED_AT_KEY);
         return;
       }
 
       try {
-        // Race startup checks against a timeout so a cold boot (gateway not yet
-        // running, OpenClaw loading 10+ plugins per CLI call) never freezes the UI.
-        // Background repair in main.ts handles gateway startup; we just need to
-        // unblock the renderer quickly for already-configured users.
         type StartupResult = { ok: boolean; needsSetup?: boolean; blockingId?: string; blockingMessage?: string; fixed: string[]; warnings: string[] };
         const timeoutResult: StartupResult = { ok: true, fixed: [], warnings: [] };
         let result = await Promise.race([
@@ -207,22 +148,15 @@ export default function App() {
         ]);
         if (cancelled) return;
 
+        // Post-setup daemon recheck: daemon may still be warming up after first install
         if (!result.ok && result.blockingId === 'daemon-running' && recentlyCompletedSetup) {
           for (let attempt = 0; attempt < POST_SETUP_DAEMON_RECHECK_ATTEMPTS; attempt += 1) {
             if (cancelled) return;
-
-            setStartupMessage('Local service is still warming up...');
-            setStartupProgress(94);
-
             await new Promise((resolve) => setTimeout(resolve, POST_SETUP_DAEMON_RECHECK_DELAY_MS));
             if (cancelled) return;
-
             result = await window.electronAPI.startupEnsureRuntime();
             if (cancelled) return;
-
-            if (result.ok || result.blockingId !== 'daemon-running') {
-              break;
-            }
+            if (result.ok || result.blockingId !== 'daemon-running') break;
           }
         }
 
@@ -230,46 +164,37 @@ export default function App() {
           const setupBlockingIds = new Set(['node-installed', 'openclaw-installed', 'plugin-installed']);
           const isSetupBlocking = !result.blockingId || setupBlockingIds.has(result.blockingId);
           if (!isSetupBlocking) {
-            setStartupProgress(100);
-            setRuntimeReady(true);
+            localStorage.removeItem(SETUP_COMPLETED_AT_KEY);
             return;
           }
 
-          // Guard 1: All install tasks just completed in the wizard (flag set after
-          // step 5/daemon is done). Freshly-installed components may not be immediately
-          // detectable on Windows (PATH not refreshed, AV scanning, etc.).
-          // Consume the flag once and let the user through; Doctor repairs in background.
+          // Guard 1: install tasks just completed in the wizard
+          // (Windows PATH not yet refreshed, AV scanning, etc.)
           const installTasksDone = localStorage.getItem('awareness-claw-install-tasks-done') === 'true';
           if (installTasksDone) {
             localStorage.removeItem('awareness-claw-install-tasks-done');
-            setStartupProgress(100);
-            setRuntimeReady(true);
+            localStorage.removeItem(SETUP_COMPLETED_AT_KEY);
             return;
           }
 
-          // Guard 2: User already has providers / API keys configured — they've been
-          // through setup before. A transient check failure (PATH cache, Defender scan)
-          // should NOT wipe out their session and redirect them to the wizard.
-          // Doctor in Settings handles non-critical repairs without wizard interruption.
+          // Guard 2: user already has providers / API keys — transient check failure
+          // should NOT redirect them back to the wizard; Doctor handles repairs.
           try {
             const existingCfg = await window.electronAPI?.readExistingConfig?.();
             if (existingCfg?.hasProviders || existingCfg?.hasApiKey) {
-              setStartupProgress(100);
-              setRuntimeReady(true);
+              localStorage.removeItem(SETUP_COMPLETED_AT_KEY);
               return;
             }
           } catch {
-            // If the guard check itself fails, assume the user is past first-time setup
-            // and let them through rather than stranding them in the wizard.
-            setStartupProgress(100);
-            setRuntimeReady(true);
+            localStorage.removeItem(SETUP_COMPLETED_AT_KEY);
             return;
           }
 
-          localStorage.setItem('awareness-claw-setup-done', 'false');
-          setSetupComplete(false);
-          setStartupProgress(100);
-          setRuntimeReady(true);
+          // Truly needs setup — redirect to wizard (rare: e.g. OS reinstall, no config)
+          if (!cancelled) {
+            localStorage.setItem('awareness-claw-setup-done', 'false');
+            setSetupComplete(false);
+          }
           return;
         }
 
@@ -277,19 +202,15 @@ export default function App() {
           console.warn('[startup] Local daemon still warming after post-setup rechecks:', result.blockingMessage || 'daemon-running');
         }
       } catch (err) {
-        console.warn('[startup] Runtime check failed:', err);
-        // Don't block app launch — user can still use the app and fix via Settings
+        console.warn('[startup] Background runtime check failed:', err);
       }
 
       if (!cancelled) {
         localStorage.removeItem(SETUP_COMPLETED_AT_KEY);
-        setStartupMessage('Startup complete');
-        setStartupProgress(100);
-        setRuntimeReady(true);
       }
     };
 
-    ensureRuntime();
+    runBackgroundChecks();
     return () => { cancelled = true; };
   }, [setupComplete]);
 
@@ -299,34 +220,8 @@ export default function App() {
     setSetupComplete(true);
   };
 
-  if (setupComplete === null || runtimeReady === null) {
-    const startupMessageText = translateStartupMessage(startupMessage, t);
-    return (
-      <div className="h-screen flex items-center justify-center bg-slate-900 px-6">
-        <div className="max-w-md text-center space-y-4">
-          <img src={logoUrl} alt="" className="w-12 h-12 animate-pulse-soft mx-auto" />
-          <div>
-            <h1 className="text-base font-semibold text-slate-100">{t('startup.title', 'Starting AwarenessClaw')}</h1>
-            <p className="text-sm text-slate-400 mt-2">{startupMessageText}</p>
-          </div>
-          <div className="space-y-2">
-            <div className="h-2 overflow-hidden rounded-full bg-slate-800 ring-1 ring-slate-700/80">
-              {/* eslint-disable-next-line react/forbid-dom-props */}
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-sky-500 via-blue-500 to-cyan-400 transition-all duration-500 ease-out"
-                style={{ width: `${Math.max(8, Math.min(100, startupProgress))}%` }}
-              />
-            </div>
-            <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.16em] text-slate-500">
-              <span>{t('startup.progress', 'Startup progress')}</span>
-              <span>{Math.round(Math.max(8, Math.min(100, startupProgress)))}%</span>
-            </div>
-          </div>
-          <p className="text-xs text-slate-500">{t('startup.hint', 'First launch or auto-repair can take a little longer while the app checks OpenClaw, Gateway, and memory services.')}</p>
-        </div>
-      </div>
-    );
-  }
+  // Render nothing while localStorage is being read (one frame, imperceptible)
+  if (setupComplete === null || runtimeReady === null) return null;
 
   if (!setupComplete) {
     return <SetupWizard onComplete={handleSetupComplete} />;

@@ -270,8 +270,9 @@ export default function Settings() {
       if (res?.issues) setSecurityIssues(res.issues);
     }).catch(() => {});
     setUsageStats(getUsageStats());
-    // Run doctor on mount
-    runDoctor();
+    // NOTE: Doctor is NOT auto-run on mount — each openclaw CLI call reloads all
+    // plugins (15-30 s), and running all checks in parallel saturates CPU/IO
+    // causing the entire machine to freeze. User must click "Run Diagnostics" manually.
 
     if (!api.openclawConfigSchema || !api.openclawConfigRead) {
       setWebLoading(false);
