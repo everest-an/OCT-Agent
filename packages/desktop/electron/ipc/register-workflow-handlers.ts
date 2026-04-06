@@ -64,7 +64,16 @@ function readSubagentConfig(home: string): {
   }
 }
 
-/** Write subagent config into openclaw.json (immutable merge). */
+/** Write subagent config into openclaw.json (immutable merge).
+ *
+ * Key setup steps for multi-agent spawn to work:
+ * 1. agents.defaults.subagents.maxSpawnDepth >= 2
+ * 2. tools.agentToAgent.enabled = true
+ * 3. tools.agentToAgent.allow = ["*"]
+ * 4. tools.alsoAllow includes "sessions_spawn"
+ * 5. main agent's agents.list[].subagents.allowAgents = ["*"]
+ *    (per-agent allow list — agents.defaults.subagents.allowAgents is rejected by schema)
+ */
 function writeSubagentConfig(
   home: string,
   patch: { maxSpawnDepth?: number; agentToAgentEnabled?: boolean },
@@ -84,6 +93,22 @@ function writeSubagentConfig(
       if (!cfg.tools) cfg.tools = {};
       if (!cfg.tools.agentToAgent) cfg.tools.agentToAgent = {};
       cfg.tools.agentToAgent.enabled = patch.agentToAgentEnabled;
+      cfg.tools.agentToAgent.allow = ['*'];
+
+      // Ensure sessions_spawn is in alsoAllow
+      if (!cfg.tools.alsoAllow) cfg.tools.alsoAllow = [];
+      if (!cfg.tools.alsoAllow.includes('sessions_spawn')) {
+        cfg.tools.alsoAllow.push('sessions_spawn');
+      }
+
+      // Set allowAgents=["*"] on every agent in agents.list
+      // (must be per-agent, NOT agents.defaults — schema rejects it there)
+      if (Array.isArray(cfg.agents?.list)) {
+        for (const agent of cfg.agents.list) {
+          if (!agent.subagents) agent.subagents = {};
+          agent.subagents.allowAgents = ['*'];
+        }
+      }
     }
 
     fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), 'utf-8');
@@ -691,6 +716,414 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
       return { status: 'running' };
     } catch {
       return { status: 'unknown' };
+    }
+  });
+
+  // =========================================================================
+  // Mission execution engine — AI-orchestrated multi-agent workflow
+  // =========================================================================
+  //
+  // The main agent is the orchestrator:
+  // 1. User submits a goal + workspace
+  // 2. We send ONE message to main agent with the goal + available agents list
+  // 3. Main agent decides which sub-agents to spawn and does it
+  // 4. We track sub-agent spawns + completions via Gateway events
+  // 5. Frontend dynamically shows steps as sub-agents are spawned
+  //
+  // This aligns with OpenClaw's design: agents are autonomous, main agent
+  // orchestrates via /subagents spawn.
+
+  /** In-flight missions tracked by sessionKey (main agent session for this mission). */
+  const activeMissions = new Map<string, {
+    missionId: string;
+    cancelled: boolean;
+    sessionKey: string;   // dedicated session for this mission
+    spawnedAgents: Map<string, { agentId: string; agentName: string; sessionKey: string }>;
+  }>();
+
+  /** Extract text content from a message. */
+  function extractMsgText(content: unknown): string {
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+      return content
+        .filter((c: any) => c?.type === 'text')
+        .map((c: any) => c.text || '')
+        .join('');
+    }
+    return '';
+  }
+
+  /** Send progress update to renderer. */
+  function sendMissionProgress(
+    missionId: string,
+    update: Record<string, unknown>,
+  ) {
+    const win = deps.getMainWindow();
+    if (!win || win.isDestroyed()) return;
+    win.webContents.send('mission:progress', { missionId, ...update });
+  }
+
+  /** Start a mission: send goal to main agent and let it orchestrate. */
+  ipcMain.handle(
+    'mission:start',
+    async (
+      _e,
+      params: {
+        missionId: string;
+        goal: string;
+        workDir?: string;
+        agents: Array<{ id: string; name?: string; emoji?: string }>;
+      },
+    ) => {
+      attachSubagentListener(deps);
+
+      try {
+        const ws = await deps.getGatewayWs();
+
+        // Use a dedicated session for this mission
+        const missionSessionKey = `ac-mission-${Date.now()}`;
+
+        // Register mission
+        activeMissions.set(params.missionId, {
+          missionId: params.missionId,
+          cancelled: false,
+          sessionKey: missionSessionKey,
+          spawnedAgents: new Map(),
+        });
+
+        // Build /subagents spawn commands for each relevant agent.
+        // We use slash commands directly (proven to work via E2E test)
+        // instead of asking the LLM to call sessions_spawn tool (which fails
+        // with "schema must be object or boolean" due to plugin tool schema conflicts).
+        //
+        // Filter to relevant agents only (skip main — it's the orchestrator)
+        const nonMainAgents = params.agents.filter(a => a.id !== 'main');
+        const agentsToSpawn = nonMainAgents.length > 0 ? nonMainAgents : [params.agents[0] || { id: 'main', name: 'Main' }];
+
+        const workDirPrefix = params.workDir ? `Working directory: ${params.workDir}. ` : '';
+
+        // CRITICAL: Register event listeners BEFORE sending the message.
+        // Gateway events fire immediately and we must not miss deltas.
+        // (This mirrors the working pattern in register-chat-handlers.ts)
+
+        // Track cumulative text for delta extraction (delta events carry FULL text, not chunks)
+        let lastMainText = '';
+        let lastStreamTime = 0;
+        const STREAM_THROTTLE_MS = 150;
+        const detectedSpawnKeys = new Set<string>();
+
+        /** Detect spawn confirmations in text and update pending steps with real sessionKey */
+        function detectSpawnInText(
+          text: string,
+          missionParams: { missionId: string; agents: Array<{ id: string; name?: string; emoji?: string }> },
+          missionState: { spawnedAgents: Map<string, any> },
+        ) {
+          const regex = /(?:Spawned subagent\s+)?(\S+)\s+\(session\s+(agent:(\S+):subagent:\S+),\s+run\s+(\S+)\)/g;
+          let match;
+          while ((match = regex.exec(text)) !== null) {
+            const subSessionKey = match[2];
+            if (detectedSpawnKeys.has(subSessionKey)) continue;
+            detectedSpawnKeys.add(subSessionKey);
+
+            const agentId = match[3];
+            const agent = missionParams.agents.find(a => a.id === agentId);
+            const pendingKey = `pending-${agentId}`;
+
+            // Register the real sessionKey
+            missionState.spawnedAgents.set(subSessionKey, {
+              agentId,
+              agentName: agent?.name || agentId,
+              sessionKey: subSessionKey,
+            });
+
+            // Update the pending step's sessionKey + status (if it exists)
+            if (missionState.spawnedAgents.has(pendingKey)) {
+              missionState.spawnedAgents.delete(pendingKey);
+              // Update existing step: match by agentId (most reliable) and set real sessionKey
+              sendMissionProgress(missionParams.missionId, {
+                stepUpdate: {
+                  agentId,                          // match by agentId (frontend fallback)
+                  sessionKey: pendingKey,            // match by old sessionKey
+                  status: 'running',
+                  startedAt: new Date().toISOString(),
+                  newSessionKey: subSessionKey,      // replace with real sessionKey
+                },
+              });
+            } else {
+              // No pending step — create a new one
+              sendMissionProgress(missionParams.missionId, {
+                newStep: {
+                  agentId,
+                  agentName: agent?.name || agentId,
+                  agentEmoji: agent?.emoji,
+                  sessionKey: subSessionKey,
+                  status: 'running',
+                  startedAt: new Date().toISOString(),
+                },
+              });
+            }
+          }
+        }
+
+        const chatListener = (payload: any) => {
+          const mission = activeMissions.get(params.missionId);
+          if (!mission || mission.cancelled) return;
+
+          const key = payload?.sessionKey || '';
+          const state = payload?.state || '';
+
+          // Reset idle timeout on any activity
+          resetIdleTimer();
+
+          // --- Main agent events ---
+          if (key === missionSessionKey) {
+            // Streaming delta — extract new text portion and forward
+            if (state === 'delta') {
+              const fullText = extractMsgText(payload?.message?.content);
+              if (fullText && fullText.length > lastMainText.length) {
+                const newChunk = fullText.slice(lastMainText.length);
+                lastMainText = fullText;
+                const now = Date.now();
+                if (now - lastStreamTime >= STREAM_THROTTLE_MS) {
+                  lastStreamTime = now;
+                  sendMissionProgress(params.missionId, { streamDelta: newChunk });
+                }
+              }
+              // Also check delta text for spawn confirmations
+              // (spawn confirmation may arrive as delta before final)
+              if (fullText) {
+                detectSpawnInText(fullText, params, mission);
+              }
+              return;
+            }
+
+            // Main agent chat:final — could be spawn confirmation OR real completion
+            if (state === 'final') {
+              const result = extractMsgText(payload?.message?.content);
+              // Check for spawn confirmations first
+              detectSpawnInText(result, params, mission);
+
+              // If text contains "Spawned subagent", this is a spawn confirmation,
+              // NOT mission completion. The mission continues while sub-agents work.
+              if (result.includes('Spawned subagent')) {
+                // Reset streaming text (spawn confirmation is not content to show)
+                lastMainText = '';
+                sendMissionProgress(params.missionId, { streamDelta: null });
+                return; // Don't mark mission as done
+              }
+
+              // Real completion (main agent's final response after all sub-agents done)
+              sendMissionProgress(params.missionId, {
+                streamDelta: null,
+                missionPatch: {
+                  status: 'done',
+                  completedAt: new Date().toISOString(),
+                  result: result.slice(0, 3000),
+                },
+              });
+              activeMissions.delete(params.missionId);
+              return;
+            }
+
+            if (state === 'error' || state === 'aborted') {
+              sendMissionProgress(params.missionId, {
+                streamDelta: null,
+                missionPatch: {
+                  status: 'failed',
+                  completedAt: new Date().toISOString(),
+                  error: payload?.errorMessage || 'Mission failed',
+                },
+              });
+              activeMissions.delete(params.missionId);
+              return;
+            }
+          }
+
+          // --- Sub-agent events ---
+          if (key.includes(':subagent:') && mission.spawnedAgents.has(key)) {
+            const spawnedInfo = mission.spawnedAgents.get(key);
+
+            // Sub-agent streaming
+            if (state === 'delta') {
+              const text = extractMsgText(payload?.message?.content);
+              if (text) {
+                sendMissionProgress(params.missionId, {
+                  stepStream: { sessionKey: key, agentId: spawnedInfo?.agentId, delta: text },
+                });
+              }
+              return;
+            }
+
+            if (state === 'final') {
+              const text = extractMsgText(payload?.message?.content);
+              sendMissionProgress(params.missionId, {
+                stepUpdate: {
+                  sessionKey: key,
+                  agentId: spawnedInfo?.agentId,
+                  status: 'done',
+                  result: text.slice(0, 2000),
+                  completedAt: new Date().toISOString(),
+                },
+              });
+            } else if (state === 'error' || state === 'aborted') {
+              sendMissionProgress(params.missionId, {
+                stepUpdate: {
+                  sessionKey: key,
+                  agentId: spawnedInfo?.agentId,
+                  status: 'failed',
+                  error: payload?.errorMessage || 'Step failed',
+                  completedAt: new Date().toISOString(),
+                },
+              });
+            }
+
+            // Check if ALL subagents are done — if so, mark mission complete
+            if (state === 'final' || state === 'error' || state === 'aborted') {
+              const realKeys = Array.from(mission.spawnedAgents.keys())
+                .filter(k => !k.startsWith('pending-'));
+              // We'll let the main agent's final event handle mission completion
+            }
+          }
+        };
+
+        // Sub-agent spawn detection
+        const agentListener = (payload: any) => {
+          const mission = activeMissions.get(params.missionId);
+          if (!mission || mission.cancelled) return;
+
+          // Detect spawn confirmation from main agent's assistant stream
+          if (payload?.stream === 'assistant' && payload?.sessionKey === missionSessionKey) {
+            const text = payload?.data?.text || '';
+            const spawnMatch = text.match(/session\s+(agent:(\S+):subagent:\S+),\s+run\s+(\S+)\)/);
+            if (spawnMatch) {
+              const subSessionKey = spawnMatch[1];
+              const agentId = spawnMatch[2];
+              const agent = params.agents.find(a => a.id === agentId);
+
+              mission.spawnedAgents.set(subSessionKey, {
+                agentId,
+                agentName: agent?.name || agentId,
+                sessionKey: subSessionKey,
+              });
+
+              // Tell frontend a new step was added
+              sendMissionProgress(params.missionId, {
+                newStep: {
+                  agentId,
+                  agentName: agent?.name || agentId,
+                  agentEmoji: agent?.emoji,
+                  sessionKey: subSessionKey,
+                  status: 'running',
+                  startedAt: new Date().toISOString(),
+                },
+              });
+            }
+          }
+        };
+
+        ws.on('event:chat', chatListener);
+        ws.on('event:agent', agentListener);
+
+        // NOW send spawn commands (after listeners are registered)
+        sendMissionProgress(params.missionId, {
+          missionPatch: {
+            status: 'running',
+            startedAt: new Date().toISOString(),
+            sessionKey: missionSessionKey,
+          },
+          streamDelta: `Spawning ${agentsToSpawn.length} agent(s)...`,
+        });
+
+        // Show all agents as pending steps immediately
+        const missionRef = activeMissions.get(params.missionId)!;
+        for (const agent of agentsToSpawn) {
+          const pendingKey = `pending-${agent.id}`;
+          missionRef.spawnedAgents.set(pendingKey, {
+            agentId: agent.id,
+            agentName: agent.name || agent.id,
+            sessionKey: pendingKey,
+          });
+          sendMissionProgress(params.missionId, {
+            newStep: {
+              agentId: agent.id,
+              agentName: agent.name || agent.id,
+              agentEmoji: (agent as any).emoji,
+              sessionKey: pendingKey,
+              status: 'waiting',
+            },
+          });
+        }
+
+        // Spawn all agents sequentially (each spawn uses the same mission session)
+        // Each agent gets a separate spawn command with a 2s gap to avoid overwhelming Gateway
+        const spawnAll = async () => {
+          for (const agent of agentsToSpawn) {
+            const taskDesc = `${workDirPrefix}${params.goal}`.replace(/"/g, '\\"');
+            const cmd = `/subagents spawn ${agent.id} "${taskDesc}"`;
+            try {
+              await ws.chatSend(missionSessionKey, cmd);
+            } catch { /* individual spawn failure handled by event listener */ }
+            // Wait 2s between spawns to let Gateway process
+            if (agentsToSpawn.indexOf(agent) < agentsToSpawn.length - 1) {
+              await new Promise(r => setTimeout(r, 2000));
+            }
+          }
+        };
+
+        spawnAll().catch((err: Error) => {
+          sendMissionProgress(params.missionId, {
+            streamDelta: null,
+            missionPatch: {
+              status: 'failed',
+              completedAt: new Date().toISOString(),
+              error: `Gateway error: ${err?.message?.slice(0, 200) || 'Send failed'}`,
+            },
+          });
+          activeMissions.delete(params.missionId);
+        });
+
+        // Idle timeout: only fail if no events received for 5 minutes
+        // (not total time — a long task running for 1 hour is fine as long as it's active)
+        let lastActivityTime = Date.now();
+        const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 min idle = timeout
+        const idleCheck = setInterval(() => {
+          const m = activeMissions.get(params.missionId);
+          if (!m || m.cancelled) { clearInterval(idleCheck); return; }
+          if (Date.now() - lastActivityTime > IDLE_TIMEOUT_MS) {
+            clearInterval(idleCheck);
+            sendMissionProgress(params.missionId, {
+              missionPatch: {
+                status: 'failed',
+                completedAt: new Date().toISOString(),
+                error: 'No activity for 5 minutes — mission stopped',
+              },
+            });
+            activeMissions.delete(params.missionId);
+          }
+        }, 30000); // check every 30s
+
+        // Reset idle timer whenever we get any event (called from chatListener)
+        const resetIdleTimer = () => { lastActivityTime = Date.now(); };
+
+        return { success: true, sessionKey: missionSessionKey };
+      } catch (err: any) {
+        activeMissions.delete(params.missionId);
+        return { success: false, error: err?.message?.slice(0, 300) || 'Failed to start mission' };
+      }
+    },
+  );
+
+  /** Cancel a running mission. */
+  ipcMain.handle('mission:cancel', async (_e, missionId: string) => {
+    const mission = activeMissions.get(missionId);
+    if (mission) {
+      mission.cancelled = true;
+      // Try to abort the main agent session
+      try {
+        const ws = await deps.getGatewayWs();
+        await ws.chatAbort(mission.sessionKey);
+      } catch { /* best-effort */ }
+      activeMissions.delete(missionId);
     }
   });
 }

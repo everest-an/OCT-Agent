@@ -36,9 +36,10 @@ describe('KanbanCard', () => {
     expect(screen.getByText('💻')).toBeTruthy();
   });
 
-  it('shows agent name', () => {
+  it('shows agent emoji (avatar represents the agent)', () => {
     render(<KanbanCard task={makeTask()} t={t} />);
-    expect(screen.getByText('Coder')).toBeTruthy();
+    // AgentAvatar renders the emoji, not the agent name text
+    expect(screen.getByText('💻')).toBeTruthy();
   });
 
   it('shows result preview for done tasks', () => {

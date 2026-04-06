@@ -1,39 +1,26 @@
 /**
- * TaskCenter — unified kanban + workflow page.
+ * TaskCenter — Multi-agent team workflow page.
  *
- * Board tab: 6-column drag-and-drop kanban (tasks = sub-agent runs)
- * Workflows tab: Lobster YAML templates (Phase 2)
- * History tab: completed task timeline (Phase 3)
- *
- * First-use onboarding: checks maxSpawnDepth, agent count, Lobster.
+ * Flow:
+ * 1. User types a goal + optionally picks a workspace
+ * 2. Main agent analyzes the task and auto-spawns relevant sub-agents
+ * 3. Steps appear dynamically as sub-agents are spawned
+ * 4. User sees each agent's progress in real-time
+ * 5. Click any step to see details or jump to chat
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { ArrowRight, AlertCircle, Bot, CheckCircle2, Loader2, Plus, Target, X, XCircle, Zap } from 'lucide-react';
+import { AlertCircle, Bot, FolderOpen, Loader2, Send, Sparkles, Zap } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
-import AgentAvatar from '../components/AgentAvatar';
 import {
-  loadTasks,
-  saveTasks,
-  createTask,
-  addTask,
-  updateTask,
-  queueTask,
-  removeTask,
-  applySubAgentEvent,
-  loadWorkflowRuns,
-  saveWorkflowRuns,
-  createWorkflowRun,
-  updateWorkflowRun,
-} from '../lib/task-store';
-import type { Task, TaskStatus, WorkflowRun } from '../lib/task-store';
-import KanbanBoard from '../components/task-center/KanbanBoard';
-import TaskCreateModal from '../components/task-center/TaskCreateModal';
-import TaskDetailPanel from '../components/task-center/TaskDetailPanel';
-import WorkflowList from '../components/task-center/WorkflowList';
-import WorkflowRunner from '../components/task-center/WorkflowRunner';
-
-type Tab = 'board' | 'workflows' | 'history';
+  loadMissions,
+  saveMissions,
+  updateMission,
+  removeMission,
+} from '../lib/mission-store';
+import type { Mission, MissionStep } from '../lib/mission-store';
+import MissionCard from '../components/task-center/MissionCard';
+import MissionDetail from '../components/task-center/MissionDetail';
 
 interface AgentInfo {
   id: string;
@@ -50,666 +37,344 @@ interface SetupStatus {
 
 import type { Page } from '../components/Sidebar';
 
+function uid(): string {
+  return `mission-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) => void }) {
   const { t } = useI18n();
-  const [activeTab, setActiveTab] = useState<Tab>('board');
-  const [tasks, setTasks] = useState<readonly Task[]>([]);
+  const [missions, setMissions] = useState<readonly Mission[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [goalInput, setGoalInput] = useState('');
+  const [workDir, setWorkDir] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
   const [setup, setSetup] = useState<SetupStatus>({ checked: false, maxSpawnDepth: 1, agentCount: 0, agentToAgentEnabled: false });
   const [enabling, setEnabling] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  // Streaming content per mission (accumulated delta text)
+  const [streamingText, setStreamingText] = useState<Record<string, string>>({});
 
-  // Workflow state
-  const [workflows, setWorkflows] = useState<any[]>([]);
-  const [workflowRuns, setWorkflowRuns] = useState<readonly WorkflowRun[]>([]);
-  const [activeWorkflowRun, setActiveWorkflowRun] = useState<WorkflowRun | null>(null);
-  const [lobsterStatus, setLobsterStatus] = useState<{ checked: boolean; installed: boolean; enabled: boolean }>({ checked: false, installed: false, enabled: false });
-  const [lobsterInstalling, setLobsterInstalling] = useState(false);
-  const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
-
-  // Load tasks from localStorage on mount
+  // Load on mount
+  useEffect(() => { setMissions(loadMissions()); }, []);
   useEffect(() => {
-    setTasks(loadTasks());
-  }, []);
-
-  // Persist tasks whenever they change
-  useEffect(() => {
-    if (tasks.length > 0 || localStorage.getItem('awareness-claw-tasks')) {
-      saveTasks(tasks);
+    if (missions.length > 0 || localStorage.getItem('awareness-claw-missions')) {
+      saveMissions(missions);
     }
-  }, [tasks]);
+  }, [missions]);
 
-  // Load agents
   useEffect(() => {
     window.electronAPI?.agentsList?.().then((result: any) => {
       const list = result?.agents || (Array.isArray(result) ? result : []);
       if (list.length > 0) {
-        setAgents(list.map((a: any) => ({
-          id: a.id || 'main',
-          name: a.name || a.id,
-          emoji: a.emoji,
-        })));
+        setAgents(list.map((a: any) => ({ id: a.id || 'main', name: a.name || a.id, emoji: a.emoji })));
       }
     }).catch(() => {});
   }, []);
 
-  // Check setup status
   useEffect(() => {
-    const check = async () => {
+    (async () => {
       try {
         const config = await window.electronAPI?.workflowConfig?.();
         const agentsResult = await window.electronAPI?.agentsList?.();
         const agentsList = (agentsResult as any)?.agents || (Array.isArray(agentsResult) ? agentsResult : []);
-        const agentCount = agentsList.length;
-        setSetup({
-          checked: true,
-          maxSpawnDepth: config?.maxSpawnDepth ?? 1,
-          agentCount,
-          agentToAgentEnabled: config?.agentToAgentEnabled ?? false,
-        });
-      } catch {
-        setSetup((s) => ({ ...s, checked: true }));
-      }
-    };
-    check();
+        setSetup({ checked: true, maxSpawnDepth: config?.maxSpawnDepth ?? 1, agentCount: agentsList.length, agentToAgentEnabled: config?.agentToAgentEnabled ?? false });
+      } catch { setSetup(s => ({ ...s, checked: true })); }
+    })();
   }, []);
 
-  // Load workflow templates + Lobster status (with localStorage cache)
+  // Listen for mission progress events from main process
   useEffect(() => {
-    window.electronAPI?.workflowList?.().then((result: any) => {
-      setWorkflows(result?.workflows || []);
-    }).catch(() => {});
+    const unsub = window.electronAPI?.onMissionProgress?.((data: any) => {
+      if (!data?.missionId) return;
 
-    // Check localStorage cache first for instant UI (avoid slow CLI on every visit)
-    const cachedLobster = localStorage.getItem('awareness-claw-lobster-installed');
-    if (cachedLobster === 'true') {
-      setLobsterStatus({ checked: true, installed: true, enabled: true });
-    }
-
-    // Then verify in background (updates cache if changed)
-    window.electronAPI?.workflowCheckLobster?.().then((result: any) => {
-      const installed = result?.installed ?? false;
-      const enabled = result?.enabled ?? false;
-      setLobsterStatus({ checked: true, installed, enabled });
-      if (installed) {
-        localStorage.setItem('awareness-claw-lobster-installed', 'true');
-      } else {
-        localStorage.removeItem('awareness-claw-lobster-installed');
-      }
-    }).catch(() => {
-      setLobsterStatus((s) => ({ ...s, checked: true }));
-    });
-
-    setWorkflowRuns(loadWorkflowRuns());
-  }, []);
-
-  // Persist workflow runs
-  useEffect(() => {
-    if (workflowRuns.length > 0 || localStorage.getItem('awareness-claw-workflow-runs')) {
-      saveWorkflowRuns(workflowRuns);
-    }
-  }, [workflowRuns]);
-
-  // Listen for sub-agent link info (maps parent runId → sub-agent sessionKey)
-  useEffect(() => {
-    const unsub = window.electronAPI?.onTaskSubagentLinked?.((data) => {
-      if (!data?.subagentSessionKey) return;
-      setTasks((prev) => {
-        // Find the task that was spawned with this parent runId
-        const idx = prev.findIndex((t) =>
-          t.runId === data.parentRunId || (t.sessionKey === data.parentSessionKey && t.status === 'queued')
-        );
+      setMissions(prev => {
+        let updated = [...prev];
+        const idx = updated.findIndex(m => m.id === data.missionId);
         if (idx < 0) return prev;
-        return updateTask(prev, prev[idx].id, {
-          subagentSessionKey: data.subagentSessionKey,
-          subagentRunId: data.subagentRunId,
-          status: 'running',
-          startedAt: new Date().toISOString(),
-        });
-      });
-    });
-    return unsub;
-  }, []);
 
-  // Listen for sub-agent status updates from Gateway
-  // IPC handler only forwards sub-agent events (filtered by :subagent: sessionKey)
-  useEffect(() => {
-    const unsub = window.electronAPI?.onTaskStatusUpdate?.((data) => {
-      if (!data) return;
+        const mission = updated[idx];
 
-      const finalEvent = data.event as 'started' | 'completed' | 'failed';
-      if (finalEvent !== 'started' && finalEvent !== 'completed' && finalEvent !== 'failed') return;
-
-      setTasks((prev) => {
-        // 1. Match by sub-agent sessionKey (most reliable)
-        if (data.sessionKey) {
-          const matchIdx = prev.findIndex((t) => t.subagentSessionKey === data.sessionKey);
-          if (matchIdx >= 0) {
-            return updateTask(prev, prev[matchIdx].id, {
-              status: finalEvent === 'completed' ? 'done' : finalEvent === 'started' ? 'running' : 'failed',
-              ...(finalEvent !== 'started' ? { completedAt: new Date().toISOString() } : {}),
-              ...(data.result ? (finalEvent === 'completed' ? { result: data.result } : { error: data.result }) : {}),
-            });
-          }
+        // Handle new step (sub-agent spawned dynamically)
+        if (data.newStep) {
+          const step: MissionStep = {
+            id: `step-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            agentId: data.newStep.agentId,
+            agentName: data.newStep.agentName || data.newStep.agentId,
+            agentEmoji: data.newStep.agentEmoji,
+            role: data.newStep.agentName || data.newStep.agentId,
+            instruction: '',
+            status: data.newStep.status || 'running',
+            sessionKey: data.newStep.sessionKey,
+            startedAt: data.newStep.startedAt,
+          };
+          updated[idx] = { ...mission, steps: [...mission.steps, step] };
         }
 
-        // 2. Match by sub-agent runId
-        if (data.runId) {
-          const matchIdx = prev.findIndex((t) => t.subagentRunId === data.runId);
-          if (matchIdx >= 0) {
-            return updateTask(prev, prev[matchIdx].id, {
-              status: finalEvent === 'completed' ? 'done' : finalEvent === 'started' ? 'running' : 'failed',
-              ...(finalEvent !== 'started' ? { completedAt: new Date().toISOString() } : {}),
-              ...(data.result ? (finalEvent === 'completed' ? { result: data.result } : { error: data.result }) : {}),
-            });
-          }
-        }
+        // Handle step update (sub-agent completed/failed/sessionKey rename)
+        if (data.stepUpdate) {
+          const su = data.stepUpdate;
+          const steps = updated[idx].steps.map(s => {
+            // Match by sessionKey (exact or pending-agentId format)
+            const matchBySession = s.sessionKey && s.sessionKey === su.sessionKey;
+            // Match by agentId (fallback — each agent appears once)
+            const matchByAgent = su.agentId && s.agentId === su.agentId;
+            if (!matchBySession && !matchByAgent) return s;
 
-        // 3. Fallback: if exactly 1 running/queued task, assign to it
-        if (finalEvent === 'completed' || finalEvent === 'failed') {
-          const activeTasks = prev.filter((t) => t.status === 'running' || t.status === 'queued');
-          if (activeTasks.length === 1) {
-            return updateTask(prev, activeTasks[0].id, {
-              status: finalEvent === 'completed' ? 'done' : 'failed',
-              completedAt: new Date().toISOString(),
-              subagentSessionKey: data.sessionKey || undefined,
-              subagentRunId: data.runId || undefined,
-              ...(data.result ? (finalEvent === 'completed' ? { result: data.result } : { error: data.result }) : {}),
-            });
-          }
-        }
-
-        return prev;
-      });
-    });
-    return unsub;
-  }, []);
-
-  // Poll running tasks for completion (fallback when Gateway events are missed)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTasks((prev) => {
-        const runningTasks = prev.filter((t) =>
-          (t.status === 'running' || t.status === 'queued') && t.sessionKey
-        );
-        if (runningTasks.length === 0) return prev;
-
-        // Poll each running task (fire-and-forget, updates state asynchronously)
-        for (const task of runningTasks) {
-          window.electronAPI?.taskPollStatus?.(task.sessionKey!).then((result) => {
-            if (result?.status === 'completed') {
-              setTasks((curr) => updateTask(curr, task.id, {
-                status: 'done',
-                completedAt: new Date().toISOString(),
-                result: result.result || undefined,
-              }));
+            const patch = { ...su };
+            // If renaming sessionKey from pending to real
+            if (patch.newSessionKey) {
+              patch.sessionKey = patch.newSessionKey;
+              delete patch.newSessionKey;
             }
-          }).catch(() => {});
+            // Remove match keys from patch to avoid overwriting
+            delete patch.agentId;
+            return { ...s, ...patch };
+          });
+          updated[idx] = { ...updated[idx], steps };
         }
-        return prev;
+
+        // Handle streaming delta (accumulate text)
+        if (data.streamDelta) {
+          setStreamingText(prev => ({
+            ...prev,
+            [data.missionId]: (prev[data.missionId] || '') + data.streamDelta,
+          }));
+        } else if (data.streamDelta === null) {
+          // Clear streaming when done
+          setStreamingText(prev => {
+            const next = { ...prev };
+            delete next[data.missionId];
+            return next;
+          });
+        }
+
+        // Handle mission-level update
+        if (data.missionPatch) {
+          updated[idx] = { ...updated[idx], ...data.missionPatch };
+        }
+
+        // Handle legacy stepIndex-based updates
+        if (data.stepIndex !== undefined && data.stepPatch) {
+          const steps = mission.steps.map((s, i) =>
+            i === data.stepIndex ? { ...s, ...data.stepPatch } : s
+          );
+          updated[idx] = { ...updated[idx], steps };
+        }
+
+        return updated;
       });
-    }, 15000); // Poll every 15 seconds
-    return () => clearInterval(interval);
-  }, []);
-
-  // ---- Task actions ----
-
-  const handleCreateTask = useCallback(async (params: {
-    title: string;
-    agentId: string;
-    priority: 'low' | 'medium' | 'high';
-    model?: string;
-    timeoutSeconds?: number;
-    workDir?: string;
-  }) => {
-    const agent = agents.find((a) => a.id === params.agentId);
-    const newTask = createTask({
-      ...params,
-      agentEmoji: agent?.emoji,
-      agentName: agent?.name,
     });
+    return unsub;
+  }, []);
 
-    // Add to backlog first
-    setTasks((prev) => addTask(prev, newTask));
+  // ---- Actions ----
 
-    // Immediately spawn via IPC
+  const handleStartMission = useCallback(async (goal: string) => {
+    if (!goal.trim() || creating) return;
+    setCreating(true);
+
     try {
-      const result = await window.electronAPI?.taskCreate?.({
-        title: params.title,
-        agentId: params.agentId,
-        model: params.model,
-        timeoutSeconds: params.timeoutSeconds,
-        workDir: params.workDir,
+      const missionId = uid();
+      // Create mission with NO pre-set steps (steps are added dynamically as agents spawn)
+      const mission: Mission = {
+        id: missionId,
+        goal: goal.trim(),
+        status: 'planning',
+        steps: [],
+        createdAt: new Date().toISOString(),
+        currentStepIndex: -1,
+        workDir: workDir || undefined,
+      };
+
+      setMissions(prev => [mission, ...prev]);
+      setGoalInput('');
+
+      const result = await window.electronAPI?.missionStart?.({
+        missionId,
+        goal: goal.trim(),
+        workDir: workDir || undefined,
+        agents: agents.length > 0 ? agents : [{ id: 'main', name: 'Main', emoji: '🤖' }],
       });
 
-      if (result?.success) {
-        setTasks((prev) => queueTask(prev, newTask.id, result.runId || `run-${Date.now()}`, result.sessionKey || ''));
-      } else {
-        setTasks((prev) => updateTask(prev, newTask.id, { status: 'failed', error: result?.error || 'Spawn failed' }));
+      if (!result?.success) {
+        setMissions(prev => updateMission(prev, missionId, {
+          status: 'failed',
+          error: result?.error || 'Failed to start',
+        }));
+      } else if (result.sessionKey) {
+        setMissions(prev => updateMission(prev, missionId, {
+          sessionKey: result.sessionKey,
+        }));
       }
-    } catch (err: any) {
-      setTasks((prev) => updateTask(prev, newTask.id, { status: 'failed', error: err?.message || 'Unknown error' }));
+    } catch { /* handled via progress events */ }
+    setCreating(false);
+  }, [agents, creating, workDir]);
+
+  const handlePickWorkDir = useCallback(async () => {
+    const result = await window.electronAPI?.taskPickDirectory?.();
+    if (result && !result.cancelled && result.path) {
+      setWorkDir(result.path);
     }
-  }, [agents]);
-
-  const handleMoveTask = useCallback((taskId: string, fromColumn: TaskStatus, toColumn: TaskStatus) => {
-    const task = tasks.find((t) => t.id === taskId);
-    if (!task) return;
-
-    // Backlog/Failed → Queued = trigger spawn
-    if ((fromColumn === 'backlog' || fromColumn === 'failed') && toColumn === 'queued') {
-      handleCreateTask({
-        title: task.title,
-        agentId: task.agentId,
-        priority: task.priority,
-        model: task.model,
-        timeoutSeconds: task.timeoutSeconds,
-      });
-      // Remove old task (a new one was created by handleCreateTask)
-      setTasks((prev) => removeTask(prev, taskId));
-      return;
-    }
-
-    // For other moves, just update status locally
-    setTasks((prev) => updateTask(prev, taskId, { status: toColumn }));
-  }, [tasks, handleCreateTask]);
-
-  const handleRetryTask = useCallback((taskId: string) => {
-    const task = tasks.find((t) => t.id === taskId);
-    if (!task) return;
-    handleMoveTask(taskId, task.status, 'queued');
-  }, [tasks, handleMoveTask]);
-
-  const handleCancelTask = useCallback(async (taskId: string) => {
-    const task = tasks.find((t) => t.id === taskId);
-    if (!task?.sessionKey) return;
-    await window.electronAPI?.taskCancel?.(task.sessionKey);
-    setTasks((prev) => updateTask(prev, taskId, { status: 'failed', error: 'Cancelled by user' }));
-  }, [tasks]);
-
-  const handleViewDetail = useCallback((taskId: string) => {
-    setDetailTaskId(taskId);
   }, []);
 
-  const handleDeleteTask = useCallback((taskId: string) => {
-    setTasks((prev) => removeTask(prev, taskId));
-    if (detailTaskId === taskId) setDetailTaskId(null);
-  }, [detailTaskId]);
+  const handleDeleteMission = useCallback((missionId: string) => {
+    setMissions(prev => removeMission(prev, missionId));
+    if (selectedMissionId === missionId) setSelectedMissionId(null);
+  }, [selectedMissionId]);
 
-  const handleClearCompleted = useCallback(() => {
-    setTasks((prev) => prev.filter((t) => t.status !== 'done' && t.status !== 'failed'));
-    setDetailTaskId(null);
-  }, []);
+  const handleOpenChat = useCallback((sessionKey: string, title: string) => {
+    window.dispatchEvent(new CustomEvent('open-task-session', { detail: { sessionKey, title } }));
+    onNavigate?.('chat');
+  }, [onNavigate]);
 
   const handleEnableCollaboration = useCallback(async () => {
     setEnabling(true);
-    setStatusMessage(null);
     try {
       const result = await window.electronAPI?.workflowEnableCollaboration?.();
-      if (result?.success && result?.config) {
-        const cfg = result.config;
-        setSetup((s) => ({
-          ...s,
-          maxSpawnDepth: cfg.maxSpawnDepth,
-          agentToAgentEnabled: cfg.agentToAgentEnabled,
-        }));
-        const gwNote = (result as any).gatewayRestarted
-          ? ''
-          : ` ${t('taskCenter.setup.restartHint', 'Gateway will apply changes on next restart.')}`;
-        setStatusMessage({ type: 'success', text: `${t('taskCenter.setup.enabled', 'Multi-agent collaboration enabled!')}${gwNote}` });
-      } else {
-        setStatusMessage({ type: 'error', text: (result as any)?.error || t('taskCenter.setup.failedGeneric', 'Failed to enable collaboration. Please try again.') });
+      const cfg = (result as any)?.config;
+      if (result?.success && cfg) {
+        setSetup(s => ({ ...s, maxSpawnDepth: cfg.maxSpawnDepth, agentToAgentEnabled: cfg.agentToAgentEnabled }));
       }
-    } catch {
-      setStatusMessage({ type: 'error', text: t('taskCenter.setup.failedGeneric', 'Failed to enable collaboration. Please try again.') });
-    }
+    } catch { /* ignore */ }
     setEnabling(false);
-  }, [t]);
-
-  // ---- Workflow actions ----
-
-  const handleRunWorkflow = useCallback(async (workflow: any, args: Record<string, string>) => {
-    const run = createWorkflowRun({
-      workflowId: workflow.id,
-      workflowName: workflow.name,
-      args,
-    });
-    setWorkflowRuns((prev) => [...prev, run]);
-    setActiveWorkflowRun(run);
-
-    try {
-      const result = await window.electronAPI?.workflowRun?.(workflow.yamlPath, args);
-      if (!result) {
-        setWorkflowRuns((prev) => updateWorkflowRun(prev, run.id, { status: 'failed' }));
-        setActiveWorkflowRun((r) => r?.id === run.id ? { ...r, status: 'failed' } : r);
-        return;
-      }
-
-      const newStatus = result.status === 'needs_approval' ? 'needs_approval' as const
-        : result.success ? 'completed' as const
-        : 'failed' as const;
-
-      const patch: Partial<WorkflowRun> = {
-        status: newStatus,
-        ...(newStatus === 'completed' || newStatus === 'failed' ? { completedAt: new Date().toISOString() } : {}),
-        ...((result as any)?.requiresApproval?.resumeToken ? { resumeToken: (result as any).requiresApproval.resumeToken } : {}),
-      };
-
-      setWorkflowRuns((prev) => updateWorkflowRun(prev, run.id, patch));
-      setActiveWorkflowRun((r) => r?.id === run.id ? { ...r, ...patch } : r);
-    } catch (err: any) {
-      setWorkflowRuns((prev) => updateWorkflowRun(prev, run.id, { status: 'failed' }));
-      setActiveWorkflowRun((r) => r?.id === run.id ? { ...r, status: 'failed' } : r);
-    }
   }, []);
-
-  const handleWorkflowApprove = useCallback(async (resumeToken: string) => {
-    if (!activeWorkflowRun) return;
-    try {
-      await window.electronAPI?.workflowApprove?.(resumeToken, true);
-      setWorkflowRuns((prev) => updateWorkflowRun(prev, activeWorkflowRun.id, { status: 'running', resumeToken: undefined }));
-      setActiveWorkflowRun((r) => r ? { ...r, status: 'running', resumeToken: undefined } : r);
-    } catch { /* ignore */ }
-  }, [activeWorkflowRun]);
-
-  const handleWorkflowReject = useCallback(async (resumeToken: string) => {
-    if (!activeWorkflowRun) return;
-    try {
-      await window.electronAPI?.workflowApprove?.(resumeToken, false);
-      setWorkflowRuns((prev) => updateWorkflowRun(prev, activeWorkflowRun.id, { status: 'cancelled', completedAt: new Date().toISOString() }));
-      setActiveWorkflowRun((r) => r ? { ...r, status: 'cancelled' } : r);
-    } catch { /* ignore */ }
-  }, [activeWorkflowRun]);
-
-  const handleInstallLobster = useCallback(async () => {
-    setLobsterInstalling(true);
-    setStatusMessage(null);
-    try {
-      const result = await window.electronAPI?.workflowInstallLobster?.();
-      if (result?.success) {
-        setLobsterStatus({ checked: true, installed: true, enabled: true });
-        localStorage.setItem('awareness-claw-lobster-installed', 'true');
-        const wfResult = await window.electronAPI?.workflowList?.();
-        setWorkflows(wfResult?.workflows || []);
-        setStatusMessage({ type: 'success', text: t('taskCenter.lobster.installed', 'Lobster workflow engine installed successfully!') });
-      } else {
-        setStatusMessage({ type: 'error', text: result?.error || t('taskCenter.lobster.installFailed', 'Failed to install Lobster. Please try again.') });
-      }
-    } catch {
-      setStatusMessage({ type: 'error', text: t('taskCenter.lobster.installFailed', 'Failed to install Lobster. Please try again.') });
-    }
-    setLobsterInstalling(false);
-  }, [t]);
 
   // ---- Render ----
 
   const needsSetup = setup.checked && setup.maxSpawnDepth < 2;
-  const needsAgents = setup.checked && setup.agentCount < 2;
+  const selectedMission = selectedMissionId ? missions.find(m => m.id === selectedMissionId) : null;
+
+  if (selectedMission) {
+    return (
+      <div className="h-full">
+        <MissionDetail
+          mission={selectedMission}
+          streamingText={streamingText[selectedMission.id] || ''}
+          onBack={() => setSelectedMissionId(null)}
+          onOpenChat={handleOpenChat}
+          onDelete={() => handleDeleteMission(selectedMission.id)}
+          t={t}
+        />
+      </div>
+    );
+  }
+
+  const activeMissions = missions.filter(m => m.status === 'running' || m.status === 'planning' || m.status === 'paused');
+  const completedMissions = missions.filter(m => m.status === 'done' || m.status === 'failed');
+  const workDirName = workDir ? workDir.split(/[/\\]/).filter(Boolean).pop() || workDir : '';
 
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="flex-shrink-0 px-6 pt-6 pb-4">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <Target size={24} className="text-sky-400" />
-            <div>
-              <h1 className="text-lg font-bold text-slate-100">{t('taskCenter.title')}</h1>
-              <p className="text-xs text-slate-500">{t('taskCenter.subtitle')}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowCreateModal(true)}
-              disabled={needsSetup}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Plus size={16} />
-              {t('taskCenter.newTask')}
-            </button>
-          </div>
+      <div className="flex-shrink-0 px-6 pt-6 pb-2">
+        <div className="flex items-center gap-3 mb-1">
+          <Sparkles size={22} className="text-sky-400" />
+          <h1 className="text-lg font-bold text-slate-100">{t('taskCenter.title', 'Team Tasks')}</h1>
         </div>
-
-        {/* Tabs */}
-        <div className="flex gap-1 bg-slate-800/50 rounded-lg p-1 w-fit">
-          {(['board', 'workflows', 'history'] as Tab[]).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`
-                px-4 py-1.5 rounded-md text-xs font-medium transition-all
-                ${activeTab === tab
-                  ? 'bg-slate-700 text-slate-100 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-300'
-                }
-              `}
-            >
-              {t(`taskCenter.tab.${tab}`)}
-            </button>
-          ))}
-        </div>
+        <p className="text-xs text-slate-500 ml-[34px]">{t('taskCenter.subtitle', 'Tell your AI team what to do — they will figure out the rest')}</p>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 min-h-0 px-6 pb-6">
-        {/* Status message toast */}
-        {statusMessage && (
-          <div className={`mb-3 px-4 py-2.5 rounded-lg flex items-center justify-between text-sm animate-in fade-in slide-in-from-top-2 ${
-            statusMessage.type === 'success' ? 'bg-emerald-900/30 border border-emerald-700/40 text-emerald-300' :
-            statusMessage.type === 'error' ? 'bg-red-900/30 border border-red-700/40 text-red-300' :
-            'bg-sky-900/30 border border-sky-700/40 text-sky-300'
-          }`}>
-            <span>{statusMessage.text}</span>
-            <button
-              onClick={() => setStatusMessage(null)}
-              className="ml-3 text-xs opacity-70 hover:opacity-100"
-              aria-label={t('common.close', 'Close')}
-              title={t('common.close', 'Close')}
-            >
-              <X size={12} />
+      <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6 space-y-5">
+        {/* Setup banner */}
+        {needsSetup && (
+          <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-700/30">
+            <div className="flex items-start gap-3">
+              <AlertCircle size={18} className="text-amber-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm text-amber-300 font-medium">{t('taskCenter.setup.title', 'Enable Team Mode')}</p>
+                <p className="text-xs text-amber-400/70 mt-1">{t('taskCenter.setup.desc', 'Allow your agents to work together.')}</p>
+                <button onClick={handleEnableCollaboration} disabled={enabling}
+                  className="mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 text-xs font-medium border border-amber-600/30">
+                  {enabling ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+                  {enabling ? t('taskCenter.setup.enabling', 'Enabling...') : t('taskCenter.setup.enable', 'Enable')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Need agents hint */}
+        {setup.checked && setup.agentCount < 2 && !needsSetup && (
+          <div className="p-4 rounded-xl bg-sky-950/20 border border-sky-700/30">
+            <div className="flex items-start gap-3">
+              <Bot size={18} className="text-sky-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm text-sky-300">{t('taskCenter.setup.needAgents', 'You have one agent. Add more for team workflows.')}</p>
+                <button onClick={() => onNavigate?.('agents')}
+                  className="mt-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 text-xs font-medium border border-sky-600/30">
+                  <Bot size={11} /> {t('taskCenter.setup.goToAgents', 'Manage Agents')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Goal input */}
+        <div className="rounded-xl bg-slate-800/30 border border-slate-700/30 p-4">
+          <div className="flex gap-2">
+            <textarea
+              value={goalInput}
+              onChange={e => setGoalInput(e.target.value)}
+              placeholder={t('taskCenter.goalPlaceholder', 'What do you want your team to do?')}
+              rows={2}
+              className="flex-1 rounded-lg bg-slate-900/50 border border-slate-700/50 px-3 py-2.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500/30 resize-none"
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleStartMission(goalInput); } }}
+              disabled={creating || needsSetup}
+            />
+            <button onClick={() => handleStartMission(goalInput)} disabled={!goalInput.trim() || creating || needsSetup}
+              className="self-end px-4 py-2.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50 transition-colors flex items-center gap-1.5">
+              {creating ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
             </button>
           </div>
-        )}
 
-        {/* Setup onboarding cards */}
-        {needsSetup && (
-          <div className="mb-4 p-4 rounded-xl bg-amber-950/20 border border-amber-700/30">
-            <div className="flex items-start gap-3">
-              <AlertCircle size={20} className="text-amber-400 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <h3 className="text-sm font-semibold text-amber-300">{t('taskCenter.setup.title')}</h3>
-                <p className="text-xs text-amber-400/70 mt-1">{t('taskCenter.setup.desc')}</p>
-                <button
-                  onClick={handleEnableCollaboration}
-                  disabled={enabling}
-                  className="mt-3 flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 text-sm font-medium transition-colors border border-amber-600/30"
-                >
-                  {enabling ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
-                  {enabling ? t('taskCenter.setup.enabling') : t('taskCenter.setup.enable')}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {!needsSetup && needsAgents && (
-          <div className="mb-4 p-4 rounded-xl bg-sky-950/20 border border-sky-700/30">
-            <div className="flex items-start gap-3">
-              <Bot size={20} className="text-sky-400 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <p className="text-sm text-sky-300">{t('taskCenter.setup.needAgents')}</p>
-                <button
-                  onClick={() => onNavigate?.('agents')}
-                  className="mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 text-xs font-medium transition-colors border border-sky-600/30"
-                >
-                  <Bot size={12} />
-                  {t('taskCenter.setup.goToAgents')}
-                  <ArrowRight size={12} />
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Board tab */}
-        {activeTab === 'board' && (
-          tasks.length === 0 ? (
-            /* Empty state — friendly welcome */
-            <div className="flex items-center justify-center h-64">
-              <div className="text-center space-y-4 max-w-sm">
-                <Target size={36} className="text-sky-400/50 mx-auto" />
-                <div>
-                  <p className="text-sm text-slate-300 font-medium">
-                    {t('taskCenter.emptyWelcome', 'No tasks yet')}
-                  </p>
-                  <p className="text-xs text-slate-500 mt-1">
-                    {t('taskCenter.emptyHint', 'Create your first task — tell AI what you want to build, review, or fix.')}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setShowCreateModal(true)}
-                  disabled={needsSetup}
-                  className="px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2 mx-auto"
-                >
-                  <Plus size={14} />
-                  {t('taskCenter.createFirst', 'Create a Task')}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <KanbanBoard
-              tasks={tasks}
-              t={t}
-              onMoveTask={handleMoveTask}
-              onRetryTask={handleRetryTask}
-              onCancelTask={handleCancelTask}
-              onViewDetail={handleViewDetail}
-              onDeleteTask={handleDeleteTask}
-              onClearCompleted={handleClearCompleted}
-            />
-          )
-        )}
-
-        {/* Workflows tab */}
-        {activeTab === 'workflows' && (
-          <div className="flex-1 min-h-0 flex flex-col gap-4">
-            {/* Active workflow run */}
-            {activeWorkflowRun && (
-              <WorkflowRunner
-                t={t}
-                run={activeWorkflowRun}
-                steps={workflows.find((w) => w.id === activeWorkflowRun.workflowId)?.steps || []}
-                onApprove={handleWorkflowApprove}
-                onReject={handleWorkflowReject}
-                onClose={() => setActiveWorkflowRun(null)}
-              />
+          {/* Workspace selector */}
+          <div className="flex items-center gap-2 mt-2.5">
+            <button onClick={handlePickWorkDir}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-700/30 hover:bg-slate-700/50 text-[11px] text-slate-400 hover:text-slate-300 transition-colors border border-slate-700/40">
+              <FolderOpen size={12} />
+              {workDirName || t('taskCenter.pickWorkDir', 'Select workspace')}
+            </button>
+            {workDir && (
+              <button onClick={() => setWorkDir('')} className="text-[10px] text-slate-600 hover:text-slate-400">✕</button>
             )}
-
-            {/* Workflow templates list */}
-            <WorkflowList
-              t={t}
-              workflows={workflows}
-              onRun={handleRunWorkflow}
-              lobsterInstalled={lobsterStatus.installed || lobsterStatus.enabled}
-              onInstallLobster={handleInstallLobster}
-              lobsterInstalling={lobsterInstalling}
-            />
           </div>
-        )}
+        </div>
 
-        {/* History tab — completed/failed tasks timeline */}
-        {activeTab === 'history' && (() => {
-          const historyTasks = tasks.filter((t) => t.status === 'done' || t.status === 'failed');
-          const sorted = [...historyTasks].sort((a, b) => {
-            const ta = a.completedAt || a.createdAt;
-            const tb = b.completedAt || b.createdAt;
-            return new Date(tb).getTime() - new Date(ta).getTime();
-          });
-
-          if (sorted.length === 0) {
-            return (
-              <div className="flex items-center justify-center h-64 text-slate-500 text-sm">
-                {t('taskCenter.empty')}
-              </div>
-            );
-          }
-
-          // Group by date
-          const groups: Record<string, Task[]> = {};
-          for (const task of sorted) {
-            const date = new Date(task.completedAt || task.createdAt).toLocaleDateString(undefined, {
-              month: 'short', day: 'numeric', year: 'numeric',
-            });
-            if (!groups[date]) groups[date] = [];
-            groups[date].push(task);
-          }
-
-          return (
-            <div className="space-y-4 overflow-y-auto flex-1 min-h-0">
-              {Object.entries(groups).map(([date, dateTasks]) => (
-                <div key={date}>
-                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">{date}</h3>
-                  <div className="space-y-1.5">
-                    {dateTasks.map((task) => (
-                      <button
-                        key={task.id}
-                        onClick={() => setDetailTaskId(task.id)}
-                        className="w-full text-left px-3 py-2.5 rounded-lg bg-slate-800/40 border border-slate-700/30 hover:bg-slate-800/70 hover:border-slate-600/40 transition-all group"
-                      >
-                        <div className="flex items-center gap-2">
-                          <AgentAvatar name={task.agentName || task.agentId} emoji={task.agentEmoji || ''} size={14} />
-                          <span className="text-sm text-slate-200 truncate flex-1">{task.title}</span>
-                          {task.status === 'done' ? (
-                            <span className="inline-flex items-center justify-center text-emerald-400 bg-emerald-900/20 px-1.5 py-0.5 rounded">
-                              <CheckCircle2 size={11} />
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center justify-center text-red-400 bg-red-900/20 px-1.5 py-0.5 rounded">
-                              <XCircle size={11} />
-                            </span>
-                          )}
-                        </div>
-                        {(task.result || task.error) && (
-                          <p className="text-[11px] text-slate-500 mt-1 line-clamp-1">
-                            {task.result || task.error}
-                          </p>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+        {/* Active missions */}
+        {activeMissions.length > 0 && (
+          <div>
+            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">{t('taskCenter.active', 'Active')}</h3>
+            <div className="space-y-2">
+              {activeMissions.map(m => (
+                <MissionCard key={m.id} mission={m} onClick={() => setSelectedMissionId(m.id)} t={t} />
               ))}
             </div>
-          );
-        })()}
+          </div>
+        )}
+
+        {/* Completed missions */}
+        {completedMissions.length > 0 && (
+          <div>
+            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">{t('taskCenter.completed', 'Completed')}</h3>
+            <div className="space-y-2">
+              {completedMissions.map(m => (
+                <MissionCard key={m.id} mission={m} onClick={() => setSelectedMissionId(m.id)} t={t} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Empty state */}
+        {missions.length === 0 && !needsSetup && (
+          <div className="flex items-center justify-center py-16">
+            <div className="text-center space-y-3 max-w-xs">
+              <Sparkles size={32} className="text-sky-400/40 mx-auto" />
+              <p className="text-sm text-slate-400">{t('taskCenter.emptyWelcome', 'Describe what you need and your AI team will handle it')}</p>
+              <p className="text-xs text-slate-600">{t('taskCenter.emptyHint', 'Try: "Review my code for security issues"')}</p>
+            </div>
+          </div>
+        )}
       </div>
-
-      {/* Create Task Modal */}
-      {showCreateModal && (
-        <TaskCreateModal
-          t={t}
-          agents={agents}
-          onClose={() => setShowCreateModal(false)}
-          onCreate={handleCreateTask}
-        />
-      )}
-
-      {/* Task Detail Panel */}
-      {detailTaskId && (() => {
-        const detailTask = tasks.find((t) => t.id === detailTaskId);
-        if (!detailTask) return null;
-        return (
-          <TaskDetailPanel
-            t={t}
-            task={detailTask}
-            onClose={() => setDetailTaskId(null)}
-            onRetry={() => { handleRetryTask(detailTaskId); setDetailTaskId(null); }}
-            onCancel={() => { handleCancelTask(detailTaskId); setDetailTaskId(null); }}
-            onDelete={() => { handleDeleteTask(detailTaskId); }}
-          />
-        );
-      })()}
     </div>
   );
 }

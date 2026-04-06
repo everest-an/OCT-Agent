@@ -513,6 +513,36 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     }
   }, [sessions, activeSessionId, t]);
 
+  // Listen for task session open requests (from TaskCenter "Continue in Chat")
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { sessionKey, title } = (e as CustomEvent).detail || {};
+      if (!sessionKey) return;
+
+      // Check if we already have a session for this task
+      const existing = sessions.find(s => s.id === sessionKey);
+      if (existing) {
+        setActiveSessionId(sessionKey);
+        return;
+      }
+
+      // Create a new session with the subagent's sessionKey as id
+      const taskSession: ChatSession = {
+        id: sessionKey,
+        title: title || 'Task Chat',
+        messages: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      setSessions(prev => [taskSession, ...prev]);
+      setActiveSessionId(sessionKey);
+      // History will auto-load via the chatLoadHistory effect below
+    };
+
+    window.addEventListener('open-task-session', handler);
+    return () => window.removeEventListener('open-task-session', handler);
+  }, [sessions]);
+
   // Listen for streaming chunks + status events
   useEffect(() => {
     if (!window.electronAPI) return;
@@ -1118,6 +1148,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
   const [queuedCount, setQueuedCount] = useState(0);
   const lastSentTextRef = useRef<string>('');
   const lastSentTimeRef = useRef<number>(0);
+  const isFirstMessageRef = useRef(false);
 
   const canSendMessage = useCallback((text: string) => {
     const trimmed = text.trim();
@@ -1133,12 +1164,16 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
       timestamp: Date.now(),
       files: files && files.length > 0 ? [...files] : undefined,
     };
-    updateSession(activeSessionId, s => ({
-      ...s,
-      messages: [...s.messages, userMsg],
-      title: s.messages.length === 0 ? userText.slice(0, 30) : s.title,
-      updatedAt: Date.now(),
-    }));
+    updateSession(activeSessionId, s => {
+      const isFirst = s.messages.length === 0;
+      isFirstMessageRef.current = isFirst;
+      return {
+        ...s,
+        messages: [...s.messages, userMsg],
+        title: isFirst ? userText.slice(0, 30) : s.title,
+        updatedAt: Date.now(),
+      };
+    });
   }, [activeSessionId, updateSession]);
 
   // Execute a single chat request (the actual send-and-wait logic)
@@ -1226,6 +1261,22 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         updatedAt: Date.now(),
       }));
       trackUsage(config.providerKey, config.modelId, trimmed, responseText);
+
+      // Async LLM title generation after first assistant reply (fire-and-forget)
+      // Fallback title (truncated user text) is already set in addUserMessageToSession
+      if (result?.success && isFirstMessageRef.current) {
+        isFirstMessageRef.current = false;
+        const sid = activeSessionId;
+        window.electronAPI?.chatGenerateTitle?.({
+          userMessage: options?.userText || trimmed,
+          assistantMessage: responseText.slice(0, 300),
+          language: config.language || undefined,
+        }).then(titleResult => {
+          if (titleResult?.success && titleResult.title) {
+            updateSession(sid, s => ({ ...s, title: titleResult.title! }));
+          }
+        }).catch(() => { /* keep fallback title */ });
+      }
       activeRunRef.current = false;
       if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
       toolCallsRef.current = [];
@@ -1245,7 +1296,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         setIsSending(false);
       }
     }
-  }, [activeSessionId, config.modelId, config.providerKey, config.selectedAgentId, config.thinkingLevel, projectRoot, t, updateSession]);
+  }, [activeSessionId, config.language, config.modelId, config.providerKey, config.selectedAgentId, config.thinkingLevel, projectRoot, t, updateSession]);
 
   // Process the next queued message (called after a run completes)
   const processNextQueued = useCallback(async () => {

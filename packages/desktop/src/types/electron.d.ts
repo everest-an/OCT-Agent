@@ -25,6 +25,7 @@ export interface ElectronAPI {
   saveConfig: (config: Record<string, unknown>) => Promise<{ success: boolean }>;
   openAuthUrl: (url: string) => Promise<void>;
   chatSend?: (message: string, sessionId?: string, options?: { thinkingLevel?: string; model?: string; files?: string[]; workspacePath?: string; agentId?: string }) => Promise<{ success: boolean; text?: string; error?: string; sessionId?: string; awaitingApproval?: boolean; approvalRequestId?: string; approvalCommand?: string; approvalDetail?: string; unverifiedLocalFileOperation?: boolean; vpnDnsCompatibilityIssue?: boolean; preferResultText?: boolean; workspacePathInvalid?: boolean; workspacePathIssue?: 'missing' | 'not-directory'; workspacePathOriginal?: string }>;
+  chatGenerateTitle?: (params: { userMessage: string; assistantMessage: string; language?: string }) => Promise<{ success: boolean; title?: string; error?: string }>;
   chatAbort?: (sessionId?: string) => Promise<{ success: boolean; error?: string }>;
   chatLoadHistory?: (sessionId: string) => Promise<{ success: boolean; messages?: unknown[]; error?: string }>;
   chatApprove?: (sessionId: string, approvalRequestId: string) => Promise<{ success: boolean; command?: string; error?: string }>;
@@ -225,6 +226,11 @@ export interface ElectronAPI {
   onTaskStatusUpdate?: (callback: (data: { event: string; runId: string; agentId: string; status: string; result: string; sessionKey: string }) => void) => (() => void) | undefined;
   onTaskSubagentLinked?: (callback: (data: { parentRunId: string; parentSessionKey: string; subagentSessionKey: string; subagentRunId: string }) => void) => (() => void) | undefined;
   taskSendMessage?: (sessionKey: string, message: string) => Promise<{ success: boolean; error?: string }>;
+
+  // Mission (multi-agent workflow)
+  missionStart?: (params: { missionId: string; goal: string; workDir?: string; agents: Array<{ id: string; name?: string; emoji?: string }> }) => Promise<{ success: boolean; sessionKey?: string; error?: string }>;
+  missionCancel?: (missionId: string) => Promise<void>;
+  onMissionProgress?: (callback: (data: any) => void) => (() => void) | undefined;
 }
 
 export interface EnvironmentInfo {

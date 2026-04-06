@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Chat
   chatSend: (message: string, sessionId?: string, options?: { thinkingLevel?: string; model?: string; files?: string[]; workspacePath?: string; agentId?: string }) => ipcRenderer.invoke('chat:send', message, sessionId, options),
+  chatGenerateTitle: (params: { userMessage: string; assistantMessage: string; language?: string }) => ipcRenderer.invoke('chat:generate-title', params),
   chatAbort: () => ipcRenderer.invoke('chat:abort'),
   chatLoadHistory: (sessionId: string) => ipcRenderer.invoke('chat:load-history', sessionId),
   chatApprove: (sessionId: string, approvalRequestId: string) => ipcRenderer.invoke('chat:approve', sessionId, approvalRequestId, 'allow-once'),
@@ -271,4 +272,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('task:subagent-linked', listener);
   },
   taskSendMessage: (sessionKey: string, message: string) => ipcRenderer.invoke('task:send-message', sessionKey, message),
+
+  // Mission (multi-agent workflow)
+  missionStart: (params: { missionId: string; goal: string; workDir?: string; agents: Array<{ id: string; name?: string; emoji?: string }> }) =>
+    ipcRenderer.invoke('mission:start', params),
+  missionCancel: (missionId: string) => ipcRenderer.invoke('mission:cancel', missionId),
+  onMissionProgress: (callback: (data: any) => void) => {
+    const listener = (_e: any, data: any) => callback(data);
+    ipcRenderer.on('mission:progress', listener);
+    return () => ipcRenderer.removeListener('mission:progress', listener);
+  },
 });
