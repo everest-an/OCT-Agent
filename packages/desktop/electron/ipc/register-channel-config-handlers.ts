@@ -319,6 +319,10 @@ export function registerChannelConfigHandlers(deps: {
     cliChannels: Set<string>,
     channelFields: Map<string, ConfigField[]>,
   ) => void;
+  parseChannelCapabilitiesJson?: (capabilitiesOutput: string) => {
+    channelFields: Map<string, ConfigField[]>;
+  };
+  applyChannelCapabilities?: (channelFields: Map<string, ConfigField[]>) => void;
   mergeCatalog: (entries: CatalogEntry[]) => void;
   mergeChannelOptions: (channelIds: string[]) => void;
   getAllChannels: () => Array<unknown>;
@@ -457,6 +461,65 @@ export function registerChannelConfigHandlers(deps: {
 
     const stderrRedirect = process.platform === 'win32' ? '2>NUL' : '2>/dev/null';
     const dlog = (msg: string) => { try { fs.appendFileSync(path.join(os.homedir(), '.awareness-channel-debug.log'), `[${new Date().toISOString()}] ${msg}\n`); } catch { } };
+    const enrichRuntimeMetadata = async (distDir?: string) => {
+      const debugLog = (msg: string) => { try { fs.appendFileSync(path.join(deps.home, '.awareness-channel-debug.log'), `[${new Date().toISOString()}] ${msg}\n`); } catch {} };
+
+      if (distDir) {
+        try {
+          const meta = JSON.parse(fs.readFileSync(path.join(distDir, 'cli-startup-metadata.json'), 'utf8'));
+          if (meta.channelOptions) {
+            deps.mergeChannelOptions(meta.channelOptions as string[]);
+            debugLog(`metadata merged: ${meta.channelOptions.length} options`);
+          }
+        } catch (e: any) {
+          debugLog(`metadata error: ${e.message}`);
+        }
+
+        try {
+          const catalog = JSON.parse(fs.readFileSync(path.join(distDir, 'channel-catalog.json'), 'utf8'));
+          if (catalog.entries) {
+            deps.mergeCatalog(catalog.entries as CatalogEntry[]);
+            debugLog(`catalog merged: ${catalog.entries.length} entries`);
+          }
+        } catch (e: any) {
+          debugLog(`catalog error: ${e.message}`);
+        }
+      }
+
+      if (deps.parseChannelCapabilitiesJson && deps.applyChannelCapabilities) {
+        try {
+          const scopedCapabilities = await runCommandWithScopedConfig('openclaw channels capabilities --channel all --json 2>&1', 15000);
+          let capabilitiesOutput = scopedCapabilities.output;
+          if (!capabilitiesOutput && !scopedCapabilities.usedScopedConfig) {
+            capabilitiesOutput = await deps.safeShellExecAsync(`openclaw channels capabilities --channel all --json ${stderrRedirect}`, 15000);
+          }
+          if (capabilitiesOutput) {
+            const { channelFields } = deps.parseChannelCapabilitiesJson(capabilitiesOutput);
+            if (channelFields.size > 0) {
+              deps.applyChannelCapabilities(channelFields);
+              debugLog(`capabilities fields applied for: ${[...channelFields.keys()].join(', ')}`);
+              return;
+            }
+          }
+        } catch (e: any) {
+          debugLog(`capabilities error: ${e.message}`);
+        }
+      }
+
+      try {
+        const helpOut = await deps.safeShellExecAsync(`openclaw channels add --help ${stderrRedirect}`, 5000);
+        if (helpOut) {
+          const { cliChannels, channelFields } = deps.parseCliHelp(helpOut);
+          if (cliChannels.size > 0 || channelFields.size > 0) {
+            deps.applyCliHelp(cliChannels, channelFields);
+            debugLog(`help fallback applied: channels=${cliChannels.size}, fields=${channelFields.size}`);
+          }
+        }
+      } catch (e: any) {
+        debugLog(`help fallback error: ${e.message}`);
+      }
+    };
+
     dlog(`ENTRY: channel:get-registry called. _discoveryDone=${discoveryDone}, HOME=${os.homedir()}`);
     if (!discoveryDone) {
       discoveryDone = true;
@@ -468,34 +531,7 @@ export function registerChannelConfigHandlers(deps: {
           const managedDist = getManagedRuntimeDist(deps.home);
           if (managedDist) {
             debugLog(`async managed distDir: ${managedDist} exists=true`);
-            try {
-              const helpOut = await deps.safeShellExecAsync(`openclaw channels add --help ${stderrRedirect}`, 5000);
-              if (helpOut) {
-                const { cliChannels, channelFields } = deps.parseCliHelp(helpOut);
-                if (cliChannels.size > 0) {
-                  deps.applyCliHelp(cliChannels, channelFields);
-                  debugLog(`async CLI channels: ${[...cliChannels].join(', ')}`);
-                }
-              }
-            } catch {}
-            try {
-              const catalog = JSON.parse(fs.readFileSync(path.join(managedDist, 'channel-catalog.json'), 'utf8'));
-              if (catalog.entries) {
-                deps.mergeCatalog(catalog.entries as CatalogEntry[]);
-                debugLog(`catalog merged: ${catalog.entries.length} entries`);
-              }
-            } catch (e: any) {
-              debugLog(`catalog error: ${e.message}`);
-            }
-            try {
-              const meta = JSON.parse(fs.readFileSync(path.join(managedDist, 'cli-startup-metadata.json'), 'utf8'));
-              if (meta.channelOptions) {
-                deps.mergeChannelOptions(meta.channelOptions as string[]);
-                debugLog(`metadata merged: ${meta.channelOptions.length} options`);
-              }
-            } catch (e: any) {
-              debugLog(`metadata error: ${e.message}`);
-            }
+            await enrichRuntimeMetadata(managedDist);
             debugLog(`Final channel count: ${deps.getAllChannels().length}`);
           } else {
             const globalRoot = await deps.safeShellExecAsync(`npm root -g ${stderrRedirect}`, 5000);
@@ -505,42 +541,21 @@ export function registerChannelConfigHandlers(deps: {
               const exists = fs.existsSync(distDir);
               debugLog(`async distDir: ${distDir} exists=${exists}`);
               if (exists) {
-              try {
-                const helpOut = await deps.safeShellExecAsync(`openclaw channels add --help ${stderrRedirect}`, 5000);
-                if (helpOut) {
-                  const { cliChannels, channelFields } = deps.parseCliHelp(helpOut);
-                  if (cliChannels.size > 0) {
-                    deps.applyCliHelp(cliChannels, channelFields);
-                    debugLog(`async CLI channels: ${[...cliChannels].join(', ')}`);
-                  }
-                }
-              } catch {}
-              try {
-                const catalog = JSON.parse(fs.readFileSync(path.join(distDir, 'channel-catalog.json'), 'utf8'));
-                if (catalog.entries) {
-                  deps.mergeCatalog(catalog.entries as CatalogEntry[]);
-                  debugLog(`catalog merged: ${catalog.entries.length} entries`);
-                }
-              } catch (e: any) {
-                debugLog(`catalog error: ${e.message}`);
+                await enrichRuntimeMetadata(distDir);
+                debugLog(`Final channel count: ${deps.getAllChannels().length}`);
               }
-              try {
-                const meta = JSON.parse(fs.readFileSync(path.join(distDir, 'cli-startup-metadata.json'), 'utf8'));
-                if (meta.channelOptions) {
-                  deps.mergeChannelOptions(meta.channelOptions as string[]);
-                  debugLog(`metadata merged: ${meta.channelOptions.length} options`);
-                }
-              } catch (e: any) {
-                debugLog(`metadata error: ${e.message}`);
-              }
-              debugLog(`Final channel count: ${deps.getAllChannels().length}`);
             }
-          }
           }
         } catch (e: any) {
           debugLog(`async fallback error: ${e.message}`);
         }
       } else {
+        const managedDist = getManagedRuntimeDist(deps.home);
+        const globalRoot = managedDist ? null : await deps.safeShellExecAsync(`npm root -g ${stderrRedirect}`, 5000);
+        const distDir = managedDist || (globalRoot ? path.join(globalRoot.trim(), 'openclaw', 'dist') : undefined);
+        if (distDir && fs.existsSync(distDir)) {
+          await enrichRuntimeMetadata(distDir);
+        }
         debugLog(`Sync discovery OK: ${deps.getAllChannels().length} channels`);
       }
     }

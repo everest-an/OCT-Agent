@@ -334,6 +334,8 @@ OpenClaw 的 chat 质量依赖 `~/.openclaw/workspace/` 下的 MD 文档：
 
 ## 技术债务 & Bug
 
+- [x] **OpenClaw 官方兼容修正（Channel registry metadata-first）**：channel registry 改为优先复用官方 `dist/channel-catalog.json`、`dist/cli-startup-metadata.json` 和 `openclaw channels capabilities --channel all --json`，用官方 setup credentials/schema 驱动通道字段；`openclaw channels add --help` 降级为 fallback，不再作为主数据源，减少未来 OpenClaw 升级导致的通道配置漂移（2026-04-06）
+- [x] **OpenClaw 官方兼容修正（Subagent + Skills fallback）**：`task:create` 的 CLI fallback 改为严格复用官方 `/subagents spawn <agent> "<task>" --model --thinking` 语义，不再把 `--model` 错传到顶层 `openclaw agent`；`skill:list-installed` 的磁盘 fallback 同步补齐 workspace/project/personal/managed/bundled/extra 来源优先级、`skills.entries` enabled/env/apiKey gating、`allowBundled` 限制与 `metadata.openclaw.skillKey` 解析（2026-04-06）
 - [x] ~~通道连接后消息无响应~~ — channel:setup 加 `--verbose` flag（非 TTY 无输出）+ 成功后自动 `openclaw agents bind --agent main --bind <channel>`（2026-03-31）
 - [x] ~~新建会话按钮样式粗糙~~ — 重设计为 Claude Desktop 风格（圆角+图标+hover动画+⌘N 快捷键提示），同时注册全局 ⌘N/Ctrl+N 键绑定（2026-03-31）
 - [x] ~~代码块无语言标签无复制按钮~~ — 新增 CodeBlock 组件（语言标签 + copy 按钮 + 圆角 header），所有 markdown 渲染路径统一使用（2026-03-31）

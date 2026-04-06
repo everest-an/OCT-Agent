@@ -52,7 +52,7 @@ describe('doctor', () => {
 
   it('warns when public canary domains resolve to special-use ranges', async () => {
     const home = createTempHome();
-    vi.spyOn(dns.promises, 'lookup').mockImplementation(async (hostname: string, _options: any) => {
+    vi.spyOn(dns.promises, 'lookup').mockImplementation(async (hostname: string) => {
       if (hostname === 'example.com') {
         return [{ address: '198.18.0.11', family: 4 }] as any;
       }
@@ -76,7 +76,7 @@ describe('doctor', () => {
 
   it('passes web DNS compatibility check when canary domains resolve to public IPs', async () => {
     const home = createTempHome();
-    vi.spyOn(dns.promises, 'lookup').mockImplementation(async (hostname: string, _options: any) => {
+    vi.spyOn(dns.promises, 'lookup').mockImplementation(async (hostname: string) => {
       if (hostname === 'example.com') {
         return [{ address: '93.184.216.34', family: 4 }] as any;
       }

@@ -150,7 +150,10 @@ function matchesLocalStatus(skill: LocalSkillStatus, filter: LocalStatusFilter) 
 function getLocalGroupLabel(source: string, t: TranslateFunc) {
   if (source === 'openclaw-bundled') return t('skills.group.builtin', 'Built-in Skills');
   if (source.includes('workspace')) return t('skills.group.workspace', 'Workspace Skills');
+  if (source === 'agents-skills-project') return t('skills.group.projectAgent', 'Project Agent Skills');
+  if (source === 'agents-skills-personal') return t('skills.group.personalAgent', 'Personal Agent Skills');
   if (source.includes('managed')) return t('skills.group.managed', 'Managed Skills');
+  if (source === 'openclaw-extra') return t('skills.group.extra', 'Extra Skills');
   return source;
 }
 

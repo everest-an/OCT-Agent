@@ -7,8 +7,9 @@
  *
  * Data sources:
  *   - OpenClaw dist/channel-catalog.json (labels, blurbs, npm packages)
- *   - OpenClaw dist/cli-startup-metadata.json (full channel ID list)
- *   - KNOWN_OVERRIDES below (our UX enhancements for channels we've verified)
+ *   - OpenClaw dist/cli-startup-metadata.json (official CLI-supported channel ids)
+ *   - openclaw channels capabilities --channel all --json (setup credentials)
+ *   - KNOWN_OVERRIDES below (small UX-only overrides for verified channels)
  */
 
 // ---------------------------------------------------------------------------
@@ -81,12 +82,30 @@ interface KnownOverride {
 }
 
 // ---------------------------------------------------------------------------
-// Dynamic CLI parsing — populated at runtime from `openclaw channels add --help`
+// Official runtime metadata — populated from OpenClaw metadata/capabilities
 // ---------------------------------------------------------------------------
 
 let _cliSupportedChannels = new Set<string>();
-// Dynamic config fields parsed from CLI help, keyed by channel ID
+// Dynamic config fields parsed from official metadata, keyed by channel ID
 let _dynamicConfigFields = new Map<string, ConfigField[]>();
+
+type ChannelCapabilityCredential = {
+  inputKey?: unknown;
+  credentialLabel?: unknown;
+  preferredEnvVar?: unknown;
+  inputPrompt?: unknown;
+};
+
+type ChannelCapabilitiesResponse = {
+  channels?: Array<{
+    plugin?: {
+      id?: unknown;
+      setupWizard?: {
+        credentials?: ChannelCapabilityCredential[];
+      };
+    };
+  }>;
+};
 
 /** Known channel name aliases in CLI help descriptions → channel ID */
 const CHANNEL_NAME_ALIASES: Record<string, string> = {
@@ -108,6 +127,187 @@ const SKIP_FLAGS = new Set([
   '--http-host', '--http-port', '--relay-urls', '--token-file',
   '--audience', '--audience-type',
 ]);
+
+function stripAnsi(text: string): string {
+  return text.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
+}
+
+function extractJsonPayload(raw: string): string {
+  const cleaned = stripAnsi(raw).trim();
+  for (let start = 0; start < cleaned.length; start += 1) {
+    const opener = cleaned[start];
+    if (opener !== '{' && opener !== '[') continue;
+
+    const stack: string[] = [opener];
+    let inString = false;
+    let escaped = false;
+
+    for (let end = start + 1; end < cleaned.length; end += 1) {
+      const ch = cleaned[end];
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (ch === '\\') {
+          escaped = true;
+          continue;
+        }
+        if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+
+      if (ch === '{' || ch === '[') {
+        stack.push(ch);
+        continue;
+      }
+
+      if (ch === '}' || ch === ']') {
+        const expected = ch === '}' ? '{' : '[';
+        if (stack[stack.length - 1] !== expected) break;
+        stack.pop();
+        if (stack.length === 0) {
+          const candidate = cleaned.slice(start, end + 1);
+          try {
+            JSON.parse(candidate);
+            return candidate;
+          } catch {
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  throw new Error('No JSON payload found');
+}
+
+function normalizeCliFlagFromKey(key: string): string {
+  return `--${key.replace(/([a-z0-9])([A-Z])/g, '$1-$2').replace(/_/g, '-').toLowerCase()}`;
+}
+
+function inferFieldType(parts: string[]): 'password' | 'text' {
+  return parts.some((part) => /token|password|secret|key/i.test(part)) ? 'password' : 'text';
+}
+
+function mergeDynamicConfigFields(
+  nextFields: Map<string, ConfigField[]>,
+  options?: { preferExisting?: boolean },
+): void {
+  const merged = new Map<string, ConfigField[]>();
+
+  const addFrom = (source: Map<string, ConfigField[]>) => {
+    for (const [channelId, fields] of source.entries()) {
+      if (!Array.isArray(fields) || fields.length === 0) continue;
+      if (!merged.has(channelId)) {
+        merged.set(channelId, fields);
+      }
+    }
+  };
+
+  if (options?.preferExisting) {
+    addFrom(_dynamicConfigFields);
+    addFrom(nextFields);
+  } else {
+    addFrom(nextFields);
+    addFrom(_dynamicConfigFields);
+  }
+
+  _dynamicConfigFields = merged;
+}
+
+function addCliSupportedChannels(channelIds: Iterable<string>): void {
+  for (const rawId of channelIds) {
+    const normalized = String(rawId || '').trim().toLowerCase();
+    if (normalized) {
+      _cliSupportedChannels.add(normalized);
+    }
+  }
+
+  refreshDynamicChannels();
+}
+
+function refreshDynamicChannels(): void {
+  if (_dynamicChannels.length > 0) {
+    _dynamicChannels = _dynamicChannels.map((channel) => (
+      channel.connectionType === 'one-click'
+        ? {
+            ...channel,
+            configFields: [],
+            saveStrategy: _cliSupportedChannels.has(channel.id) ? 'cli' : 'json-direct',
+          }
+        : {
+            ...channel,
+            configFields: _dynamicConfigFields.get(channel.id)?.length
+              ? _dynamicConfigFields.get(channel.id)!
+              : [{ ...DEFAULT_TOKEN_FIELD }],
+            connectionType: _dynamicConfigFields.get(channel.id)?.length
+              ? (_dynamicConfigFields.get(channel.id)!.length > 1 ? 'multi-field' : 'token')
+              : 'token',
+            saveStrategy: _cliSupportedChannels.has(channel.id) ? 'cli' : 'json-direct',
+          }
+    ));
+    _rebuildIndices();
+  }
+}
+
+export function parseChannelCapabilitiesJson(capabilitiesOutput: string): {
+  channelFields: Map<string, ConfigField[]>;
+} {
+  const parsed = JSON.parse(extractJsonPayload(capabilitiesOutput)) as ChannelCapabilitiesResponse;
+  const channelFields = new Map<string, ConfigField[]>();
+  const channels = Array.isArray(parsed?.channels) ? parsed.channels : [];
+
+  for (const entry of channels) {
+    const channelId = typeof entry?.plugin?.id === 'string' ? entry.plugin.id.trim().toLowerCase() : '';
+    if (!channelId) continue;
+
+    const credentials = Array.isArray(entry?.plugin?.setupWizard?.credentials)
+      ? entry.plugin.setupWizard.credentials
+      : [];
+    const fields: ConfigField[] = [];
+
+    for (const credential of credentials) {
+      const key = typeof credential?.inputKey === 'string' ? credential.inputKey.trim() : '';
+      if (!key) continue;
+
+      const label = typeof credential?.credentialLabel === 'string' && credential.credentialLabel.trim()
+        ? credential.credentialLabel.trim()
+        : key;
+      const preferredEnvVar = typeof credential?.preferredEnvVar === 'string' ? credential.preferredEnvVar.trim() : '';
+      const inputPrompt = typeof credential?.inputPrompt === 'string' ? credential.inputPrompt.trim() : '';
+      const placeholder = preferredEnvVar || inputPrompt || '';
+
+      fields.push({
+        key,
+        label,
+        placeholder,
+        type: inferFieldType([key, label, preferredEnvVar, inputPrompt]),
+        required: true,
+        cliFlag: normalizeCliFlagFromKey(key),
+      });
+    }
+
+    if (fields.length > 0) {
+      channelFields.set(channelId, fields);
+    }
+  }
+
+  return { channelFields };
+}
+
+export function applyChannelCapabilities(channelFields: Map<string, ConfigField[]>): void {
+  mergeDynamicConfigFields(channelFields, { preferExisting: false });
+  refreshDynamicChannels();
+}
 
 /**
  * Parse `openclaw channels add --help` output to extract:
@@ -212,8 +412,8 @@ export function parseCliHelp(helpOutput: string): {
 
 /** Apply parsed CLI help data to the registry */
 export function applyCliHelp(cliChannels: Set<string>, channelFields: Map<string, ConfigField[]>): void {
-  _cliSupportedChannels = cliChannels;
-  _dynamicConfigFields = channelFields;
+  addCliSupportedChannels(cliChannels);
+  mergeDynamicConfigFields(channelFields, { preferExisting: true });
 }
 
 // Legacy exports for backward compat
@@ -221,7 +421,8 @@ export function parseCliSupportedChannels(helpOutput: string): Set<string> {
   return parseCliHelp(helpOutput).cliChannels;
 }
 export function setCliSupportedChannels(channels: Set<string>): void {
-  _cliSupportedChannels = channels;
+  _cliSupportedChannels = new Set<string>();
+  addCliSupportedChannels(channels);
 }
 export function isCliSupported(id: string): boolean {
   return _cliSupportedChannels.has(id);
@@ -229,7 +430,7 @@ export function isCliSupported(id: string): boolean {
 
 // ---------------------------------------------------------------------------
 // KNOWN_OVERRIDES — only visual/UX overrides, NO configFields
-// Config fields are now dynamically parsed from CLI --help
+// Config fields are now dynamically parsed from official metadata/capabilities
 // ---------------------------------------------------------------------------
 
 const KNOWN_OVERRIDES: Record<string, KnownOverride> = {
@@ -305,7 +506,7 @@ function buildDynamicChannel(id: string, label: string, opts: {
   const override = KNOWN_OVERRIDES[id];
   const isOneClick = override?.connectionType === 'one-click';
 
-  // Config fields priority: dynamic CLI help > default token
+  // Config fields priority: official capabilities > CLI help fallback > default token
   const dynamicFields = _dynamicConfigFields.get(id);
   let configFields: ConfigField[];
   let connectionType: ChannelDef['connectionType'];
@@ -374,7 +575,7 @@ export function mergeCatalog(entries: CatalogEntry[]): void {
   _rebuildIndices();
 }
 
-/** Merge cli-startup-metadata channelOptions. Only adds IDs not already known. */
+/** Merge official startup metadata channel IDs. Only adds IDs not already known. */
 export function mergeChannelOptions(channelIds: string[]): void {
   const added: ChannelDef[] = [];
   for (const id of channelIds) {

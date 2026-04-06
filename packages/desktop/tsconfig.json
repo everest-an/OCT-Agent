@@ -16,9 +16,9 @@
     "noUnusedParameters": false,
     "resolveJsonModule": true,
     "noFallthroughCasesInSwitch": true,
-    "baseUrl": ".",
+    "forceConsistentCasingInFileNames": true,
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src"]

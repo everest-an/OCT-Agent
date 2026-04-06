@@ -4,8 +4,49 @@ import {
   toOpenclawId, toFrontendId, isOneClick, hasBrandIcon,
   buildCLIFlags, mergeCatalog, mergeChannelOptions,
   getBuiltinChannels, serializeRegistry, loadFromSerialized,
+  parseChannelCapabilitiesJson, applyChannelCapabilities,
   parseCliHelp, applyCliHelp,
 } from '../lib/channel-registry';
+
+const MOCK_CAPABILITIES_OUTPUT = `18:21:14+08:00 [plugins] Awareness memory plugin initialized (cloud)
+{
+  "channels": [
+    {
+      "plugin": {
+        "id": "discord",
+        "setupWizard": {
+          "credentials": [
+            {
+              "inputKey": "token",
+              "credentialLabel": "Discord bot token",
+              "preferredEnvVar": "DISCORD_BOT_TOKEN",
+              "inputPrompt": "Enter Discord bot token"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "plugin": {
+        "id": "slack",
+        "setupWizard": {
+          "credentials": [
+            {
+              "inputKey": "botToken",
+              "credentialLabel": "Slack bot token",
+              "preferredEnvVar": "SLACK_BOT_TOKEN"
+            },
+            {
+              "inputKey": "appToken",
+              "credentialLabel": "Slack app token",
+              "preferredEnvVar": "SLACK_APP_TOKEN"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}`;
 
 // Simulate the real `openclaw channels add --help` output
 const MOCK_CLI_HELP = `Usage: openclaw channels add [options]
@@ -123,6 +164,33 @@ Options:
 
       const nostrKey = channelFields.get('nostr')!.find(f => f.cliFlag === '--private-key')!;
       expect(nostrKey.type).toBe('password');
+    });
+  });
+
+  describe('parseChannelCapabilitiesJson', () => {
+    it('extracts official setup credentials even when logs precede the JSON payload', () => {
+      const { channelFields } = parseChannelCapabilitiesJson(MOCK_CAPABILITIES_OUTPUT);
+
+      expect(channelFields.get('discord')).toEqual([
+        expect.objectContaining({
+          key: 'token',
+          cliFlag: '--token',
+          type: 'password',
+          placeholder: 'DISCORD_BOT_TOKEN',
+        }),
+      ]);
+      expect(channelFields.get('slack')).toEqual([
+        expect.objectContaining({ key: 'botToken', cliFlag: '--bot-token' }),
+        expect.objectContaining({ key: 'appToken', cliFlag: '--app-token' }),
+      ]);
+    });
+
+    it('lets official capabilities override help-derived fallback fields', () => {
+      const { channelFields } = parseChannelCapabilitiesJson(MOCK_CAPABILITIES_OUTPUT);
+      applyChannelCapabilities(channelFields);
+
+      const slack = getChannel('slack')!;
+      expect(slack.configFields.map((field) => field.key)).toEqual(['botToken', 'appToken']);
     });
   });
 

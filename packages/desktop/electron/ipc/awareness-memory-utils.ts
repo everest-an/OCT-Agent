@@ -141,7 +141,10 @@ export function getMemoryCapturePolicy(homeDir: string): MemoryCapturePolicy {
     const memoryConfig = config?.plugins?.entries?.['openclaw-memory']?.config || {};
 
     const blockedSources = Array.isArray(memoryConfig?.blockedSources)
-      ? memoryConfig.blockedSources.filter((item: unknown): item is string => typeof item === 'string').map(item => item.trim()).filter(Boolean)
+      ? memoryConfig.blockedSources
+        .filter((item: unknown): item is string => typeof item === 'string')
+        .map((item: string) => item.trim())
+        .filter(Boolean)
       : [];
 
     return {

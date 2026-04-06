@@ -27,6 +27,45 @@ function normalizeAgentEmoji(value: unknown) {
   return trimmed.toLowerCase() === 'default' ? '' : trimmed;
 }
 
+function hasLegacyDefaultEmoji(value: unknown) {
+  return typeof value === 'string' && value.trim().toLowerCase() === 'default';
+}
+
+function sanitizeLegacyIdentityMarkdown(content: string) {
+  const newline = content.includes('\r\n') ? '\r\n' : '\n';
+  let changed = false;
+  const nextLines = content.split(/\r?\n/).map((line) => {
+    const updated = line
+      .replace(/^(\s*-\s*\*\*emoji\*\*:\s*)default(\s*)$/i, '$1$2')
+      .replace(/^(\s*-\s*\*\*emoji:\*\*\s*)default(\s*)$/i, '$1$2')
+      .replace(/^(\s*\*\*emoji\*\*:\s*)default(\s*)$/i, '$1$2')
+      .replace(/^(\s*\*\*emoji:\*\*\s*)default(\s*)$/i, '$1$2');
+    if (updated !== line) changed = true;
+    return updated;
+  });
+  return changed ? nextLines.join(newline) : content;
+}
+
+function migrateLegacyDefaultIdentityFiles(home: string, agentId: string) {
+  const seen = new Set<string>();
+  const identityPaths = getAgentReadDirectories(home, agentId)
+    .map((directory) => path.join(directory, 'IDENTITY.md'));
+
+  for (const filePath of identityPaths) {
+    if (seen.has(filePath) || !fs.existsSync(filePath)) continue;
+    seen.add(filePath);
+    try {
+      const current = fs.readFileSync(filePath, 'utf-8');
+      const updated = sanitizeLegacyIdentityMarkdown(current);
+      if (updated !== current) {
+        fs.writeFileSync(filePath, updated, 'utf-8');
+      }
+    } catch {
+      // Best-effort migration only; listing agents should still succeed.
+    }
+  }
+}
+
 function getAgentReadDirectories(home: string, agentId: string) {
   const slug = toAgentSlug(agentId);
   const globalWorkspaceDir = path.join(home, '.openclaw', 'workspace');
@@ -87,6 +126,12 @@ function readAgentsFromConfig(home: string): { success: boolean; agents: any[] }
       workspace: a.workspace || null,
       routes: [],
     }));
+    for (const agent of agentList) {
+      const agentId = agent?.id || 'main';
+      if (hasLegacyDefaultEmoji(agent?.identity?.emoji)) {
+        migrateLegacyDefaultIdentityFiles(home, agentId);
+      }
+    }
     return { success: true, agents };
   } catch {
     return { success: true, agents: [{ id: 'main', name: 'Main Agent', emoji: '', isDefault: true, bindings: [] }] };
@@ -121,6 +166,12 @@ export function registerAgentHandlers(deps: {
             list = [parsed];
           }
           if (list.length > 0) {
+            for (const agent of list) {
+              const agentId = agent?.id || agent?.name || 'main';
+              if (hasLegacyDefaultEmoji(agent?.identityEmoji || agent?.emoji || '')) {
+                migrateLegacyDefaultIdentityFiles(deps.home, agentId);
+              }
+            }
             const agents = list.map((a: any) => ({
               id: a.id || a.name || 'main',
               name: a.identityName || a.displayName || a.name || a.id,

@@ -67,6 +67,7 @@ describe('register-workflow-handlers', () => {
       home: '/mock/home',
       safeShellExecAsync: vi.fn().mockResolvedValue(null),
       runAsync: vi.fn().mockResolvedValue(''),
+      runSpawnAsync: vi.fn().mockResolvedValue(''),
       getGatewayWs: vi.fn().mockResolvedValue(mockGatewayWs),
       getMainWindow: vi.fn().mockReturnValue(null),
     });
@@ -148,6 +149,42 @@ describe('register-workflow-handlers', () => {
 
       const sentMessage = mockGatewayWs.chatSend.mock.calls[0][1];
       expect(sentMessage).toContain('--model claude-haiku');
+    });
+
+    it('uses safe CLI args when Gateway spawn fails', async () => {
+      const runSpawnAsync = vi.fn().mockResolvedValue('ok');
+
+      registerWorkflowHandlers({
+        home: '/mock/home',
+        safeShellExecAsync: vi.fn().mockResolvedValue(null),
+        runAsync: vi.fn().mockResolvedValue(''),
+        runSpawnAsync,
+        getGatewayWs: vi.fn().mockRejectedValue(new Error('gateway unavailable')),
+        getMainWindow: vi.fn().mockReturnValue(null),
+      });
+
+      handlers = collectHandlers();
+
+      const result = await handlers['task:create']({} as any, {
+        title: 'Review auth flow',
+        agentId: 'coder',
+        model: 'claude-haiku',
+        thinking: 'high',
+        workDir: '/tmp/project',
+      });
+
+      expect(result).toMatchObject({ success: true, fallback: 'cli' });
+      expect(runSpawnAsync).toHaveBeenCalledWith(
+        'openclaw',
+        expect.arrayContaining([
+          'agent',
+          '--thinking',
+          'off',
+          '-m',
+          '/subagents spawn coder "Working directory: /tmp/project\n\nReview auth flow" --model claude-haiku --thinking high',
+        ]),
+        120000,
+      );
     });
   });
 

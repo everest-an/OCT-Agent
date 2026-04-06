@@ -339,7 +339,8 @@ describe('registerChannelConfigHandlers', () => {
     expect(result).toMatchObject({ success: true });
     expect(runAsync).toHaveBeenCalledWith('openclaw pairing approve --channel whatsapp KGHQJ8SK --notify 2>&1', 30000);
     expect(writeSpy).toHaveBeenCalled();
-    const writtenConfig = JSON.parse(String(writeSpy.mock.calls.at(-1)?.[1] || '{}'));
+    const latestWrite = writeSpy.mock.calls[writeSpy.mock.calls.length - 1];
+    const writtenConfig = JSON.parse(String(latestWrite?.[1] || '{}'));
     expect(writtenConfig.channels?.whatsapp?.errorPolicy).toBeUndefined();
     expect(writtenConfig.channels?.whatsapp?.dmPolicy).toBe('pairing');
     expect(writtenConfig.session?.dmScope).toBe('per-channel-peer');
@@ -411,7 +412,8 @@ describe('registerChannelConfigHandlers', () => {
 
     expect(result).toMatchObject({ success: true });
     expect(writeSpy).toHaveBeenCalled();
-    const writtenConfig = JSON.parse(String(writeSpy.mock.calls.at(-1)?.[1] || '{}'));
+    const latestWrite = writeSpy.mock.calls[writeSpy.mock.calls.length - 1];
+    const writtenConfig = JSON.parse(String(latestWrite?.[1] || '{}'));
     expect(writtenConfig.channels?.telegram?.dmPolicy).toBe('pairing');
   });
 

@@ -3,6 +3,7 @@ import http from 'http';
 import https from 'https';
 import path from 'path';
 import { ipcMain, BrowserWindow } from 'electron';
+import { getAgentWorkspaceDir } from '../openclaw-config';
 
 const ANSI_REGEX = new RegExp(String.raw`\u001b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])`, 'g');
 
@@ -84,6 +85,9 @@ type LocalSkillStatus = {
     kind: string;
     label: string;
     bins: string[];
+    package?: string;
+    formula?: string;
+    module?: string;
   }>;
 };
 
@@ -93,30 +97,137 @@ type LocalSkillStatusReport = {
   skills: LocalSkillStatus[];
 };
 
-// Parse install specs from SKILL.md YAML frontmatter to recover formula/module/package
-// that OpenClaw CLI strips from `openclaw skills info --json` output.
-function parseInstallSpecsFromSkillMd(content: string): SkillInstallSpec[] {
-  // Extract YAML frontmatter between --- delimiters
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!match) return [];
-  const frontmatter = match[1];
+type ParsedOpenclawSkillMetadata = {
+  always?: boolean;
+  skillKey?: string;
+  primaryEnv?: string;
+  emoji?: string;
+  homepage?: string;
+  os?: string[];
+  requires?: {
+    bins?: string[];
+    anyBins?: string[];
+    env?: string[];
+    config?: string[];
+  };
+  install?: SkillInstallSpec[];
+};
 
-  // The metadata field in OpenClaw SKILL.md uses JSON-in-YAML format.
-  // Find the metadata block and extract the openclaw.install array.
-  const metaMatch = frontmatter.match(/metadata:\s*\n\s*(\{[\s\S]*\})\s*$/m);
-  if (!metaMatch) return [];
+type FallbackSkillRecord = {
+  name: string;
+  description: string;
+  source: string;
+  bundled: boolean;
+  skillKey: string;
+  emoji?: string;
+  homepage?: string;
+  primaryEnv?: string;
+  always: boolean;
+  requiresBins: string[];
+  requiresAnyBins: string[];
+  requiresEnv: string[];
+  requiresConfig: string[];
+  requiresOs: string[];
+  install: SkillInstallSpec[];
+};
+
+function readFrontmatter(content: string): string | null {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  return match?.[1] ?? null;
+}
+
+function parseFrontmatterValue(frontmatter: string, key: string): string | undefined {
+  const match = frontmatter.match(new RegExp(`^${key}:\\s*[\"']?(.+?)[\"']?\\s*$`, 'm'));
+  const value = match?.[1]?.trim();
+  return value || undefined;
+}
+
+function parseOpenclawMetadata(frontmatter: string): ParsedOpenclawSkillMetadata {
+  const metaIdx = frontmatter.indexOf('metadata:');
+  if (metaIdx < 0) return {};
+
+  const metaContent = frontmatter.slice(metaIdx + 'metadata:'.length);
+  const jsonStart = metaContent.indexOf('{');
+  if (jsonStart < 0) return {};
+
+  let depth = 0;
+  let jsonEnd = -1;
+  for (let i = jsonStart; i < metaContent.length; i += 1) {
+    const ch = metaContent[i];
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        jsonEnd = i;
+        break;
+      }
+    }
+  }
+  if (jsonEnd < 0) return {};
 
   try {
-    // OpenClaw uses JSON5-ish format (trailing commas) — strip them for JSON.parse
-    const cleaned = metaMatch[1].replace(/,(\s*[}\]])/g, '$1');
-    const metadata = JSON.parse(cleaned);
-    const install = metadata?.openclaw?.install;
+    const rawJson = metaContent.slice(jsonStart, jsonEnd + 1);
+    const cleanedJson = rawJson.replace(/,(\s*[}\]])/g, '$1');
+    const parsed = JSON.parse(cleanedJson);
+    return parsed?.openclaw && typeof parsed.openclaw === 'object' ? parsed.openclaw : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean);
+}
+
+function readOpenclawConfig(home: string): Record<string, any> {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(home, '.openclaw', 'openclaw.json'), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function getSkillConfigEntry(config: Record<string, any>, skillKey: string): Record<string, any> {
+  const entries = config?.skills?.entries;
+  if (!entries || typeof entries !== 'object') return {};
+  const entry = entries[skillKey];
+  return entry && typeof entry === 'object' ? entry : {};
+}
+
+function getConfigPathValue(config: Record<string, any>, pathStr: string): unknown {
+  return pathStr.split('.').reduce<unknown>((current, segment) => {
+    if (!current || typeof current !== 'object') return undefined;
+    return (current as Record<string, unknown>)[segment];
+  }, config);
+}
+
+function isConfigPathTruthy(config: Record<string, any>, pathStr: string): boolean {
+  return Boolean(getConfigPathValue(config, pathStr));
+}
+
+function resolveBundledAllowlist(config: Record<string, any>): string[] | undefined {
+  const allowlist = normalizeStringList(config?.skills?.allowBundled);
+  return allowlist.length > 0 ? allowlist : undefined;
+}
+
+function parseInstallSpecsFromSkillMd(content: string): SkillInstallSpec[] {
+  const frontmatter = readFrontmatter(content);
+  if (!frontmatter) return [];
+
+  try {
+    const metadata = parseOpenclawMetadata(frontmatter);
+    const install = metadata?.install;
     return Array.isArray(install) ? install : [];
   } catch {
     return [];
   }
 }
 
+// Parse install specs from SKILL.md YAML frontmatter to recover formula/module/package
+// that OpenClaw CLI strips from `openclaw skills info --json` output.
 type SkillInstallSpec = {
   id: string;
   kind: string;
@@ -610,138 +721,177 @@ function normalizeInstalledSkills(report: LocalSkillStatusReport) {
 // CLI bug (the process starts but produces zero output). When the CLI times out, we fall back
 // to reading SKILL.md files directly from the well-known skill directories on disk.
 
-function resolveBundledSkillsDirFromDisk(home: string): string | null {
-  const candidates = [
-    // User-installed npm global (most common on macOS)
+async function resolveBundledSkillsDirFromDisk(
+  home: string,
+  deps: { runSpawnAsync: (cmd: string, args: string[], timeoutMs?: number) => Promise<string> },
+): Promise<string | null> {
+  const envOverride = process.env.OPENCLAW_BUNDLED_SKILLS_DIR?.trim();
+  const candidates: string[] = [];
+
+  if (envOverride) {
+    candidates.push(envOverride);
+  }
+
+  candidates.push(
+    path.join(home, '.awareness-claw', 'openclaw-runtime', 'node_modules', 'openclaw', 'skills'),
+    path.join(home, '.awareness-claw', 'openclaw-runtime', 'lib', 'node_modules', 'openclaw', 'skills'),
+  );
+
+  try {
+    const npmRoot = (await deps.runSpawnAsync('npm', ['root', '-g'], 5000)).trim();
+    if (npmRoot) {
+      candidates.push(path.join(npmRoot, 'openclaw', 'skills'));
+    }
+  } catch {}
+
+  candidates.push(
     path.join(home, '.npm-global', 'lib', 'node_modules', 'openclaw', 'skills'),
-    // Homebrew prefix (M1/M2 Mac)
     '/opt/homebrew/lib/node_modules/openclaw/skills',
-    // Legacy Intel Mac / Ubuntu system npm
     '/usr/local/lib/node_modules/openclaw/skills',
     '/usr/lib/node_modules/openclaw/skills',
-    // Windows (APPDATA\npm)
-    path.join(process.env['APPDATA'] || '', 'npm', 'node_modules', 'openclaw', 'skills'),
-  ];
-  return candidates.find((d) => { try { return fs.statSync(d).isDirectory(); } catch { return false; } }) ?? null;
+    path.join(process.env.APPDATA || '', 'npm', 'node_modules', 'openclaw', 'skills'),
+  );
+
+  return candidates.find((dir) => {
+    try {
+      return fs.statSync(dir).isDirectory();
+    } catch {
+      return false;
+    }
+  }) ?? null;
 }
 
-function parseSkillMdAsLocalStatus(skillDir: string, source: string, bundled: boolean): LocalSkillStatus | null {
+function parseSkillMdAsLocalStatus(skillDir: string, source: string, bundled: boolean): FallbackSkillRecord | null {
   const skillMdPath = path.join(skillDir, 'SKILL.md');
   try {
     const content = fs.readFileSync(skillMdPath, 'utf8');
-    // Extract YAML frontmatter between --- delimiters
-    const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-    if (!fmMatch) return null;
-    const fmRaw = fmMatch[1];
+    const frontmatter = readFrontmatter(content);
+    if (!frontmatter) return null;
 
-    // name: field (may or may not be quoted)
-    const nameMatch = fmRaw.match(/^name:\s*["']?(.+?)["']?\s*$/m);
-    const name = (nameMatch?.[1] ?? path.basename(skillDir)).trim();
-
-    // description: field (may be multi-line quoted string — take the first line only)
-    const descMatch = fmRaw.match(/^description:\s*["']?(.*?)["']?\s*$/m);
-    let description = (descMatch?.[1] ?? '').trim();
+    const name = (parseFrontmatterValue(frontmatter, 'name') ?? path.basename(skillDir)).trim();
+    let description = (parseFrontmatterValue(frontmatter, 'description') ?? '').trim();
     if ((description.startsWith('"') && description.endsWith('"')) ||
         (description.startsWith("'") && description.endsWith("'"))) {
       description = description.slice(1, -1);
     }
 
-    // Extract the openclaw metadata JSON block (JSON5-ish with trailing commas)
-    let emoji = '📦';
-    let requiresBins: string[] = [];
-    let requiresAnyBins: string[] = [];
-    let requiresEnv: string[] = [];
-    let requiresConfig: string[] = [];
-    let requiresOs: string[] = [];
-    let install: LocalSkillStatus['install'] = [];
-    let homepage: string | undefined;
-    let primaryEnv: string | undefined;
-
-    const metaIdx = fmRaw.indexOf('metadata:');
-    if (metaIdx >= 0) {
-      const metaContent = fmRaw.slice(metaIdx + 'metadata:'.length);
-      const jsonStart = metaContent.indexOf('{');
-      if (jsonStart >= 0) {
-        let depth = 0;
-        let jsonEnd = -1;
-        for (let i = jsonStart; i < metaContent.length; i++) {
-          const ch = metaContent[i];
-          if (ch === '{') depth++;
-          else if (ch === '}') {
-            depth--;
-            if (depth === 0) { jsonEnd = i; break; }
-          }
-        }
-        if (jsonEnd >= 0) {
-          const rawJson = metaContent.slice(jsonStart, jsonEnd + 1);
-          // Remove trailing commas (JSON5 → strict JSON)
-          const cleanedJson = rawJson.replace(/,(\s*[}\]])/g, '$1');
-          try {
-            const meta = JSON.parse(cleanedJson);
-            const oc = meta?.openclaw ?? {};
-            emoji = oc.emoji ?? '📦';
-            homepage = typeof oc.homepage === 'string' ? oc.homepage : undefined;
-            primaryEnv = typeof oc.primaryEnv === 'string' ? oc.primaryEnv : undefined;
-            const req = oc.requires ?? {};
-            requiresBins = Array.isArray(req.bins) ? req.bins : [];
-            requiresAnyBins = Array.isArray(req.anyBins) ? req.anyBins : [];
-            requiresEnv = Array.isArray(req.env) ? req.env : [];
-            requiresConfig = Array.isArray(req.config) ? req.config : [];
-            requiresOs = Array.isArray(req.os) ? req.os : [];
-            if (Array.isArray(oc.install)) {
-              install = oc.install.map((spec: any, i: number) => ({
-                id: String(spec.id ?? `install-${i}`),
-                kind: String(spec.kind ?? 'brew'),
-                label: String(spec.label ?? ''),
-                bins: Array.isArray(spec.bins) ? spec.bins : [],
-                ...(spec.formula ? { formula: spec.formula } : {}),
-                ...(spec.module ? { module: spec.module } : {}),
-                ...(spec.package ? { package: spec.package } : {}),
-              }));
-            }
-          } catch { /* malformed JSON5 — skip metadata */ }
-        }
-      }
-    }
-
-    // Determine OS compatibility and overall eligibility
-    const osEligible = requiresOs.length === 0 || requiresOs.includes(process.platform);
-    const hasMissing = requiresBins.length > 0 || requiresAnyBins.length > 0
-      || requiresEnv.length > 0 || requiresConfig.length > 0 || !osEligible;
+    const metadata = parseOpenclawMetadata(frontmatter);
+    const skillKey = (metadata.skillKey || name).trim();
 
     return {
       name,
       description,
       source,
-      skillKey: name,
-      emoji,
-      ...(homepage ? { homepage } : {}),
-      ...(primaryEnv ? { primaryEnv } : {}),
+      skillKey,
+      emoji: metadata.emoji ?? '📦',
+      homepage: parseFrontmatterValue(frontmatter, 'homepage') || metadata.homepage,
+      primaryEnv: metadata.primaryEnv,
       bundled,
-      eligible: !hasMissing,
-      disabled: false,
-      blockedByAllowlist: false,
-      ...(hasMissing ? {
-        missing: {
-          bins: requiresBins,
-          anyBins: requiresAnyBins,
-          env: requiresEnv,
-          config: requiresConfig,
-          os: osEligible ? [] : requiresOs,
-        },
-      } : {}),
-      ...(install && install.length > 0 ? { install } : {}),
+      always: metadata.always === true,
+      requiresBins: normalizeStringList(metadata.requires?.bins),
+      requiresAnyBins: normalizeStringList(metadata.requires?.anyBins),
+      requiresEnv: normalizeStringList(metadata.requires?.env),
+      requiresConfig: normalizeStringList(metadata.requires?.config),
+      requiresOs: normalizeStringList(metadata.os),
+      install: Array.isArray(metadata.install) ? metadata.install : [],
     };
   } catch {
     return null;
   }
 }
 
-function readSkillsFromFilesystem(home: string): LocalSkillStatusReport {
-  const workspaceDir = path.join(home, '.openclaw', 'workspace');
+function resolveExtensionSkillDirs(home: string, config: Record<string, any>): string[] {
+  const extensionsDir = path.join(home, '.openclaw', 'extensions');
+  if (!fs.existsSync(extensionsDir)) return [];
+
+  const resolved: string[] = [];
+  const pluginEntries = config?.plugins?.entries && typeof config.plugins.entries === 'object'
+    ? config.plugins.entries
+    : {};
+
+  for (const extensionName of fs.readdirSync(extensionsDir)) {
+    const extensionDir = path.join(extensionsDir, extensionName);
+    const manifestPath = path.join(extensionDir, 'openclaw.plugin.json');
+    if (!fs.existsSync(manifestPath)) continue;
+    try {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      const pluginId = typeof manifest?.id === 'string' && manifest.id.trim() ? manifest.id.trim() : extensionName;
+      const enabled = pluginEntries[pluginId]?.enabled !== false;
+      if (!enabled) continue;
+      const skillDirs = Array.isArray(manifest?.skills) ? manifest.skills : [];
+      for (const rel of skillDirs) {
+        if (typeof rel === 'string' && rel.trim()) {
+          resolved.push(path.join(extensionDir, rel));
+        }
+      }
+    } catch {}
+  }
+
+  return resolved;
+}
+
+async function probeBinaryMap(
+  bins: Iterable<string>,
+  deps: { runSpawnAsync: (cmd: string, args: string[], timeoutMs?: number) => Promise<string> },
+  home: string,
+): Promise<Map<string, boolean>> {
+  const verifiedBins = loadVerifiedBins(home);
+  const results = new Map<string, boolean>();
+  const probe = process.platform === 'win32' ? 'where' : 'which';
+
+  for (const rawBin of bins) {
+    const bin = rawBin.trim();
+    if (!bin) continue;
+    if (verifiedBins[bin]) {
+      results.set(bin, true);
+      continue;
+    }
+    try {
+      await deps.runSpawnAsync(probe, [bin], 3000);
+      results.set(bin, true);
+      verifiedBins[bin] = { verifiedAt: Date.now() };
+    } catch {
+      results.set(bin, false);
+    }
+  }
+
+  if (Object.keys(verifiedBins).length > 0) {
+    saveVerifiedBins(home, verifiedBins);
+  }
+
+  return results;
+}
+
+function normalizeInstallOptionsForCurrentOs(install: SkillInstallSpec[]): LocalSkillStatus['install'] {
+  return install
+    .filter((spec) => {
+      const osList = normalizeStringList((spec as any).os);
+      return osList.length === 0 || osList.includes(process.platform);
+    })
+    .map((spec, index) => ({
+      id: String(spec.id ?? `install-${index}`),
+      kind: String(spec.kind ?? 'brew'),
+      label: String(spec.label ?? ''),
+      bins: Array.isArray(spec.bins) ? spec.bins : [],
+      ...(spec.package ? { package: spec.package } : {}),
+      ...(spec.formula ? { formula: spec.formula } : {}),
+      ...(spec.module ? { module: spec.module } : {}),
+    }));
+}
+
+async function readSkillsFromFilesystem(
+  home: string,
+  deps: { runSpawnAsync: (cmd: string, args: string[], timeoutMs?: number) => Promise<string> },
+): Promise<LocalSkillStatusReport> {
+  const config = readOpenclawConfig(home);
+  const workspaceDir = getAgentWorkspaceDir(home);
   const managedSkillsDir = path.join(home, '.openclaw', 'skills');
-  const skills: LocalSkillStatus[] = [];
-  const seenNames = new Set<string>();
+  const personalAgentsSkillsDir = path.join(home, '.agents', 'skills');
+  const projectAgentsSkillsDir = path.join(workspaceDir, '.agents', 'skills');
+  const extraDirs = normalizeStringList(config?.skills?.load?.extraDirs).map((dir) => path.resolve(home, dir));
+  const pluginSkillDirs = resolveExtensionSkillDirs(home, config);
+  const skillRecords: FallbackSkillRecord[] = [];
+  const allowBundled = resolveBundledAllowlist(config);
 
   function scanDir(dir: string, source: string, bundled: boolean) {
     if (!fs.existsSync(dir)) return;
@@ -752,23 +902,90 @@ function readSkillsFromFilesystem(home: string): LocalSkillStatusReport {
       try {
         if (!fs.statSync(skillDir).isDirectory()) continue;
         const skill = parseSkillMdAsLocalStatus(skillDir, source, bundled);
-        if (skill && !seenNames.has(skill.name)) {
-          seenNames.add(skill.name);
-          skills.push(skill);
+        if (skill) {
+          skillRecords.push(skill);
         }
       } catch { /* skip unreadable dirs */ }
     }
   }
 
-  // Load bundled skills (from openclaw npm package)
-  const bundledDir = resolveBundledSkillsDirFromDisk(home);
+  const bundledDir = await resolveBundledSkillsDirFromDisk(home, deps);
+  for (const dir of [...extraDirs, ...pluginSkillDirs]) {
+    scanDir(dir, 'openclaw-extra', false);
+  }
   if (bundledDir) scanDir(bundledDir, 'openclaw-bundled', true);
-
-  // Load managed skills
   scanDir(managedSkillsDir, 'openclaw-managed', false);
-
-  // Load workspace skills (user-installed via clawhub)
+  scanDir(personalAgentsSkillsDir, 'agents-skills-personal', false);
+  scanDir(projectAgentsSkillsDir, 'agents-skills-project', false);
   scanDir(path.join(workspaceDir, 'skills'), 'openclaw-workspace', false);
+
+  const merged = new Map<string, FallbackSkillRecord>();
+  for (const record of skillRecords) {
+    merged.set(record.name, record);
+  }
+
+  const allBins = new Set<string>();
+  for (const record of merged.values()) {
+    for (const bin of record.requiresBins) allBins.add(bin);
+    for (const bin of record.requiresAnyBins) allBins.add(bin);
+  }
+  const binAvailability = await probeBinaryMap(allBins, deps, home);
+
+  const skills = Array.from(merged.values()).map<LocalSkillStatus>((record) => {
+    const skillConfig = getSkillConfigEntry(config, record.skillKey);
+    const disabled = skillConfig?.enabled === false;
+    const blockedByAllowlist = Boolean(
+      record.bundled
+      && allowBundled
+      && !allowBundled.includes(record.skillKey)
+      && !allowBundled.includes(record.name),
+    );
+    const osMissing = record.requiresOs.length > 0 && !record.requiresOs.includes(process.platform)
+      ? [...record.requiresOs]
+      : [];
+    const binsMissing = record.always
+      ? []
+      : record.requiresBins.filter((bin) => !binAvailability.get(bin));
+    const anyBinsMissing = record.always || record.requiresAnyBins.length === 0
+      ? []
+      : record.requiresAnyBins.some((bin) => binAvailability.get(bin))
+        ? []
+        : [...record.requiresAnyBins];
+    const envMissing = record.always
+      ? []
+      : record.requiresEnv.filter((envName) => !(
+        process.env[envName]
+        || skillConfig?.env?.[envName]
+        || (skillConfig?.apiKey && record.primaryEnv === envName)
+      ));
+    const configMissing = record.always
+      ? []
+      : record.requiresConfig.filter((configPath) => !isConfigPathTruthy(config, configPath));
+    const missing = {
+      bins: binsMissing,
+      anyBins: anyBinsMissing,
+      env: envMissing,
+      config: configMissing,
+      os: osMissing,
+    };
+    const hasMissing = Object.values(missing).some((items) => items.length > 0);
+
+    return {
+      name: record.name,
+      description: record.description,
+      source: record.source,
+      skillKey: record.skillKey,
+      ...(record.emoji ? { emoji: record.emoji } : {}),
+      ...(record.homepage ? { homepage: record.homepage } : {}),
+      ...(record.primaryEnv ? { primaryEnv: record.primaryEnv } : {}),
+      bundled: record.bundled,
+      eligible: !disabled && !blockedByAllowlist && !hasMissing,
+      disabled,
+      blockedByAllowlist,
+      ...(hasMissing ? { missing } : {}),
+      ...(record.install.length > 0 ? { install: normalizeInstallOptionsForCurrentOs(record.install) } : {}),
+    };
+  });
 
   return { workspaceDir, managedSkillsDir, skills };
 }
@@ -836,7 +1053,7 @@ export function registerSkillHandlers(deps: {
 
   const clawhubApi = 'https://clawhub.ai/api/v1';
   const openclawDir = path.join(deps.home, '.openclaw');
-  const workspaceDir = path.join(openclawDir, 'workspace');
+  const workspaceDir = getAgentWorkspaceDir(deps.home);
   const lockFile = path.join(workspaceDir, '.clawhub', 'lock.json');
   const configPath = path.join(openclawDir, 'openclaw.json');
 
@@ -856,11 +1073,11 @@ export function registerSkillHandlers(deps: {
           };
         } catch {
           // JSON parse failed — fall back to filesystem
-          report = readSkillsFromFilesystem(deps.home);
+          report = await readSkillsFromFilesystem(deps.home, deps);
         }
       } else {
         // CLI timed out or returned empty — use filesystem fallback (avoids re-invoking hung CLI)
-        report = readSkillsFromFilesystem(deps.home);
+        report = await readSkillsFromFilesystem(deps.home, deps);
       }
 
       // OpenClaw checks binaries with its own limited PATH and may report false negatives.

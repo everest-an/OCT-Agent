@@ -751,7 +751,7 @@ export default function Settings() {
               await (window.electronAPI as any).setLoginItem(value);
             }
           }}
-          onDaemonAutostartChange={async (value) => {
+          onDaemonAutostartChange={async (value: boolean) => {
             const api = window.electronAPI as any;
             if (!api?.setDaemonAutostart) return;
             const result = await api.setDaemonAutostart(value);

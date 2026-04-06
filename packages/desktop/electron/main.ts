@@ -3,6 +3,7 @@ const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, dialog } = 
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import http from 'http';
 import https from 'https';
 import crypto from 'crypto';
 import { createDaemonWatchdog } from './daemon-watchdog';
@@ -518,6 +519,24 @@ async function startGatewayInUserSession(send?: (ch: string, data: any) => void)
 
 async function startGatewayWithRepair(send?: (ch: string, data: any) => void): Promise<{ ok: boolean; error?: string }> {
   repairOpenClawConfigFile();
+
+  // Fast path: avoid the slow OpenClaw CLI status probe when the gateway is
+  // already up. OpenClaw 4.5 preloads plugins on each CLI invocation.
+  const port = getGatewayPort();
+  const httpProbeOk = await new Promise<boolean>((resolve) => {
+    const req = http.get(`http://127.0.0.1:${port}/healthz`, { timeout: 3000 }, (res) => {
+      res.resume();
+      resolve(res.statusCode !== undefined && res.statusCode < 500);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+  if (httpProbeOk) return { ok: true };
+
+  // Fallback: CLI probe still handles older installs and non-default states.
   const statusOutput = await readShellOutputAsync('openclaw gateway status 2>&1', 15000);
   if (isGatewayRunningOutput(statusOutput)) return { ok: true };
 
@@ -718,7 +737,9 @@ async function prepareCliFallback(): Promise<void> {
 import {
   getChannel, getChannelByOpenclawId, toOpenclawId, toFrontendId,
   buildCLIFlags, getAllChannels, serializeRegistry,
-  mergeCatalog, mergeChannelOptions, parseCliHelp, applyCliHelp,
+  mergeCatalog, mergeChannelOptions,
+  parseChannelCapabilitiesJson, applyChannelCapabilities,
+  parseCliHelp, applyCliHelp,
   type CatalogEntry,
 } from './channel-registry';
 
@@ -771,17 +792,13 @@ function discoverOpenClawChannels(): void {
     debugLog(`dist found: ${distDir}`);
     console.log(`[channel-registry] Found OpenClaw at: ${distDir}`);
 
-    // Parse CLI help: extracts supported channel enum + per-channel config fields
+    // Load official CLI startup metadata first. This is OpenClaw's own precomputed
+    // list of CLI-supported channel ids and is more stable than parsing help text.
     try {
-      const helpOutput = safeShellExec(`openclaw channels add --help ${stderrRedirect}`);
-      if (helpOutput) {
-        const { cliChannels, channelFields } = parseCliHelp(helpOutput);
-        if (cliChannels.size > 0) {
-          applyCliHelp(cliChannels, channelFields);
-          debugLog(`CLI channels: ${[...cliChannels].join(', ')}; fields for: ${[...channelFields.keys()].join(', ')}`);
-        }
-      }
-    } catch { /* help not available */ }
+      const metaPath = path.join(distDir, 'cli-startup-metadata.json');
+      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      if (meta.channelOptions) mergeChannelOptions(meta.channelOptions);
+    } catch { /* metadata not found */ }
 
     // Load channel-catalog.json
     try {
@@ -789,13 +806,6 @@ function discoverOpenClawChannels(): void {
       const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
       if (catalog.entries) mergeCatalog(catalog.entries as CatalogEntry[]);
     } catch { /* catalog not found */ }
-
-    // Load cli-startup-metadata.json
-    try {
-      const metaPath = path.join(distDir, 'cli-startup-metadata.json');
-      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-      if (meta.channelOptions) mergeChannelOptions(meta.channelOptions);
-    } catch { /* metadata not found */ }
   } catch { /* openclaw not installed */ }
 }
 
@@ -1045,6 +1055,8 @@ registerChannelConfigHandlers({
   readShellOutputAsync,
   runAsync,
   discoverOpenClawChannels,
+  parseChannelCapabilitiesJson,
+  applyChannelCapabilities,
   parseCliHelp,
   applyCliHelp,
   mergeCatalog,
@@ -1081,6 +1093,7 @@ registerWorkflowHandlers({
   home: HOME,
   safeShellExecAsync,
   runAsync,
+  runSpawnAsync,
   getGatewayWs,
   getMainWindow: () => mainWindow,
 });

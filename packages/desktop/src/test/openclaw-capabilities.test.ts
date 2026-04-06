@@ -200,7 +200,7 @@ describe('desktop openclaw config merge', () => {
   });
 
   it('one-time legacy migration force-enables browser and keyless web defaults for old desktop installs', () => {
-    const config = {
+    const config: Record<string, any> = {
       browser: {
         enabled: false,
       },

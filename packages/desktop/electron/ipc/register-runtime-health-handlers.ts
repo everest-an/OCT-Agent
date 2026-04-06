@@ -309,7 +309,11 @@ export function registerRuntimeHealthHandlers(deps: {
       // parallel. Triggering openclaw gateway start here (20s CLI invocation)
       // duplicates work and is the primary cause of the app appearing frozen on
       // cold boot. The gateway is not runtime-blocking; the UI loads regardless.
-      'channel-bindings',
+      //
+      // 'channel-bindings' intentionally excluded from startup auto-fix:
+      // OpenClaw 4.5 loads all installed plugins on every CLI invocation (15-30s).
+      // Running agents bindings/bind repair work at startup can freeze the app.
+      // Channel bindings can be repaired later from Settings if needed.
     ]);
 
     if (process.platform === 'darwin') {

@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 const { handleMock, sendMock } = vi.hoisted(() => ({
   handleMock: vi.fn(),
@@ -20,16 +23,53 @@ import {
   registerSkillHandlers,
 } from '../../electron/ipc/register-skill-handlers';
 
+const tempDirs: string[] = [];
+
+function createTempDir(prefix: string) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
+function writeSkill(
+  rootDir: string,
+  skillName: string,
+  frontmatterExtra = '',
+  body = '# Skill\n',
+) {
+  const skillDir = path.join(rootDir, skillName);
+  fs.mkdirSync(skillDir, { recursive: true });
+  const lines = [
+    '---',
+    `name: ${skillName}`,
+    `description: ${skillName} description`,
+    frontmatterExtra,
+    '---',
+    '',
+    body,
+  ].filter(Boolean);
+  fs.writeFileSync(path.join(skillDir, 'SKILL.md'), lines.join('\n'));
+  return skillDir;
+}
+
+function getHandler<T extends (...args: any[]) => Promise<any>>(channel: string): T {
+  const match = handleMock.mock.calls.find(([registered]) => registered === channel);
+  if (!match) throw new Error(`${channel} handler not registered`);
+  return match[1] as T;
+}
+
 function getInstallDepsHandler() {
-  const match = handleMock.mock.calls.find(([channel]) => channel === 'skill:install-deps');
-  if (!match) throw new Error('skill:install-deps handler not registered');
-  return match[1] as (event: unknown, installSpecs: unknown, skillName?: string) => Promise<any>;
+  return getHandler<(event: unknown, installSpecs: unknown, skillName?: string) => Promise<any>>('skill:install-deps');
 }
 
 describe('registerSkillHandlers helpers', () => {
   beforeEach(() => {
     handleMock.mockReset();
     sendMock.mockReset();
+    delete process.env.OPENCLAW_BUNDLED_SKILLS_DIR;
+    while (tempDirs.length > 0) {
+      fs.rmSync(tempDirs.pop()!, { recursive: true, force: true });
+    }
   });
 
   it('parses winget ids from command search output', () => {
@@ -111,5 +151,124 @@ Name                  Id                          Version  Match        Source
       expect.any(Function),
     );
     expect(sendMock).toHaveBeenCalledWith('skill:install-progress', expect.objectContaining({ stage: 'matching' }));
+  });
+
+  it('falls back to filesystem using official precedence and config gating', async () => {
+    const home = createTempDir('awarenessclaw-skills-home-');
+    const workspaceDir = path.join(home, 'workspace-main');
+    const bundledDir = createTempDir('awarenessclaw-bundled-');
+    const extraDir = path.join(home, 'extra-skills');
+    const managedDir = path.join(home, '.openclaw', 'skills');
+    const personalDir = path.join(home, '.agents', 'skills');
+    const projectDir = path.join(workspaceDir, '.agents', 'skills');
+    const workspaceSkillsDir = path.join(workspaceDir, 'skills');
+    fs.mkdirSync(path.join(home, '.openclaw'), { recursive: true });
+    fs.mkdirSync(extraDir, { recursive: true });
+    fs.mkdirSync(managedDir, { recursive: true });
+    fs.mkdirSync(personalDir, { recursive: true });
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.mkdirSync(workspaceSkillsDir, { recursive: true });
+    process.env.OPENCLAW_BUNDLED_SKILLS_DIR = bundledDir;
+
+    writeSkill(bundledDir, 'shared-skill');
+    writeSkill(managedDir, 'shared-skill', '', '# Managed version\n');
+    writeSkill(projectDir, 'shared-skill', '', '# Project version\n');
+    writeSkill(workspaceSkillsDir, 'shared-skill', '', '# Workspace version\n');
+    writeSkill(bundledDir, 'blocked-bundled');
+    writeSkill(workspaceSkillsDir, 'env-skill', 'metadata: {"openclaw":{"primaryEnv":"ENV_KEY","requires":{"env":["ENV_KEY"]}}}');
+    writeSkill(workspaceSkillsDir, 'special-name', 'metadata: {"openclaw":{"skillKey":"special-key"}}');
+    writeSkill(extraDir, 'extra-only');
+
+    fs.writeFileSync(path.join(home, '.openclaw', 'openclaw.json'), JSON.stringify({
+      agents: {
+        defaults: {
+          workspace: workspaceDir,
+        },
+      },
+      skills: {
+        allowBundled: ['shared-skill'],
+        load: {
+          extraDirs: [extraDir],
+        },
+        entries: {
+          'env-skill': {
+            env: {
+              ENV_KEY: 'present',
+            },
+          },
+          'special-key': {
+            enabled: false,
+          },
+        },
+      },
+    }, null, 2));
+
+    registerSkillHandlers({
+      home,
+      runAsync: vi.fn(async () => ''),
+      runAsyncWithProgress: vi.fn(async () => ''),
+      runSpawnAsync: vi.fn(async (cmd: string, args: string[]) => {
+        if (cmd === 'npm' && args.join(' ') === 'root -g') return path.join(home, 'node_modules');
+        throw new Error('not found');
+      }),
+      readShellOutputAsync: vi.fn(async () => null),
+    });
+
+    const handler = getHandler<() => Promise<any>>('skill:list-installed');
+    const result = await handler();
+
+    expect(result.success).toBe(true);
+    const skills = result.report.skills as Array<Record<string, any>>;
+    expect(skills.find((skill) => skill.name === 'shared-skill')).toMatchObject({
+      source: 'openclaw-workspace',
+      bundled: false,
+    });
+    expect(skills.find((skill) => skill.name === 'blocked-bundled')).toMatchObject({
+      blockedByAllowlist: true,
+      eligible: false,
+    });
+    expect(skills.find((skill) => skill.name === 'env-skill')).toMatchObject({
+      eligible: true,
+      skillKey: 'env-skill',
+    });
+    expect(skills.find((skill) => skill.name === 'special-name')).toMatchObject({
+      skillKey: 'special-key',
+      disabled: true,
+      eligible: false,
+    });
+    expect(skills.find((skill) => skill.name === 'extra-only')).toMatchObject({
+      source: 'openclaw-extra',
+    });
+  });
+
+  it('merges install specs from single-line metadata in SKILL.md', async () => {
+    const home = createTempDir('awarenessclaw-skill-info-home-');
+    const skillRoot = createTempDir('awarenessclaw-skill-info-skill-');
+    const skillDir = writeSkill(
+      skillRoot,
+      'onepassword',
+      'metadata: {"openclaw":{"install":[{"id":"brew","kind":"brew","label":"Install 1Password CLI","formula":"1password-cli","bins":["op"]}]}}',
+    );
+
+    registerSkillHandlers({
+      home,
+      runAsync: vi.fn(async () => ''),
+      runAsyncWithProgress: vi.fn(async () => ''),
+      runSpawnAsync: vi.fn(async () => ''),
+      readShellOutputAsync: vi.fn(async () => JSON.stringify({
+        name: 'onepassword',
+        filePath: path.join(skillDir, 'SKILL.md'),
+        install: [{ id: 'brew', kind: 'brew', label: 'Install 1Password CLI', bins: ['op'] }],
+      })),
+    });
+
+    const handler = getHandler<(event: unknown, name: string) => Promise<any>>('skill:local-info');
+    const result = await handler({}, 'onepassword');
+
+    expect(result).toMatchObject({ success: true });
+    expect(result.info.install[0]).toMatchObject({
+      formula: '1password-cli',
+      bins: ['op'],
+    });
   });
 });

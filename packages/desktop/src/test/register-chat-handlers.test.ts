@@ -22,7 +22,7 @@ class FakeGatewayClient extends EventEmitter {
   isConnected = true;
   chatSend = vi.fn(async () => ({ status: 'started' }));
   chatAbort = vi.fn(async () => undefined);
-  chatHistory = vi.fn(async () => []);
+  chatHistory: ReturnType<typeof vi.fn> = vi.fn(async () => [] as any[]);
 }
 
 function getRegisteredHandlers() {
@@ -688,7 +688,7 @@ describe('registerChatHandlers', () => {
       expect.any(Object),
     );
     expect(runSpawn).toHaveBeenCalledTimes(1);
-    const [, retryArgs] = runSpawn.mock.calls[0] as [string, string[], Record<string, unknown>];
+    const [, retryArgs] = runSpawn.mock.calls[0] as unknown as [string, string[], Record<string, unknown>];
     const retryMessage = retryArgs[retryArgs.indexOf('-m') + 1] || '';
     expect(retryMessage).toContain('On Windows, prefer Invoke-WebRequest with -UseBasicParsing.');
     expect(retryMessage).toContain('Target public URL: https://example.com');
@@ -757,7 +757,7 @@ describe('registerChatHandlers', () => {
       preferResultText: true,
     });
     expect(runSpawn).toHaveBeenCalledTimes(1);
-    const [, retryArgs] = runSpawn.mock.calls[0] as [string, string[], Record<string, unknown>];
+    const [, retryArgs] = runSpawn.mock.calls[0] as unknown as [string, string[], Record<string, unknown>];
     const retryMessage = retryArgs[retryArgs.indexOf('-m') + 1] || '';
     expect(retryMessage).toContain('Do not call awareness_init on this retry.');
     expect(retryMessage).toContain('[Original runtime message]');
@@ -1130,7 +1130,7 @@ describe('registerChatHandlers', () => {
     const pending = handlers['chat:send']({}, 'create a file and verify it', 'test-session', { workspacePath: workspaceDir });
     await vi.waitFor(() => expect(runSpawn).toHaveBeenCalledTimes(1));
 
-    const [cmd, args, opts] = runSpawn.mock.calls[0] as [string, string[], Record<string, unknown>];
+    const [cmd, args, opts] = runSpawn.mock.calls[0] as unknown as [string, string[], Record<string, unknown>];
     expect(cmd).toBe('openclaw');
     expect(args).toEqual(expect.arrayContaining(['agent', '--session-id', 'test-session', '-m', '--verbose', 'full']));
     const messageArgIndex = args.indexOf('-m');

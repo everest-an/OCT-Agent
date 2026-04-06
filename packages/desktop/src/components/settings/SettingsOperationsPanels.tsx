@@ -289,8 +289,10 @@ export function SettingsSystemPanel({
   t,
   autoUpdate,
   autoStart,
+  daemonAutostart,
   onAutoUpdateChange,
   onAutoStartChange,
+  onDaemonAutostartChange,
   onRunDiagnostic,
   onExport,
   onImport,
@@ -299,8 +301,10 @@ export function SettingsSystemPanel({
   t: TFunction;
   autoUpdate: boolean;
   autoStart: boolean;
+  daemonAutostart: boolean;
   onAutoUpdateChange: (value: boolean) => void;
   onAutoStartChange: (value: boolean) => void;
+  onDaemonAutostartChange: (value: boolean) => void | Promise<void>;
   onRunDiagnostic: () => void;
   onExport: () => void;
   onImport: () => void;
@@ -318,6 +322,9 @@ export function SettingsSystemPanel({
       </SettingsRow>
       <SettingsRow label={t('settings.bootStart')} desc={t('settings.bootStart.desc')}>
         <SettingsToggle checked={autoStart} onChange={onAutoStartChange} />
+      </SettingsRow>
+      <SettingsRow label={t('settings.system.daemonAutostart', 'Start memory daemon at login')} desc={t('settings.system.daemonAutostart.desc', 'Launch the Awareness local daemon automatically when your computer starts')}>
+        <SettingsToggle checked={daemonAutostart} onChange={onDaemonAutostartChange} />
       </SettingsRow>
       <SettingsRow label={t('settings.diagnostic')} desc={t('settings.diagnostic.desc')}>
         <button

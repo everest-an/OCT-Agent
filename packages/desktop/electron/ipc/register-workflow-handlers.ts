@@ -20,6 +20,7 @@ interface WorkflowHandlerDeps {
   home: string;
   safeShellExecAsync: (cmd: string, timeoutMs?: number) => Promise<string | null>;
   runAsync: (cmd: string, timeoutMs?: number) => Promise<string>;
+  runSpawnAsync: (cmd: string, args: string[], timeoutMs?: number) => Promise<string>;
   getGatewayWs: () => Promise<GatewayClient>;
   getMainWindow: () => BrowserWindow | null;
 }
@@ -42,6 +43,23 @@ function workflowsDir(home: string): string {
   const dir = path.join(home, '.openclaw', 'awarenessclaw', 'workflows');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+function buildSubagentSpawnCommand(params: {
+  title: string;
+  agentId: string;
+  model?: string;
+  thinking?: string;
+  workDir?: string;
+}): string {
+  const rawDesc = params.workDir
+    ? `Working directory: ${params.workDir}\n\n${params.title}`
+    : params.title;
+  const escaped = rawDesc.replace(/"/g, '\\"');
+  let spawnCmd = `/subagents spawn ${params.agentId} "${escaped}"`;
+  if (params.model) spawnCmd += ` --model ${params.model}`;
+  if (params.thinking) spawnCmd += ` --thinking ${params.thinking}`;
+  return spawnCmd;
 }
 
 /** Read subagent config from openclaw.json. */
@@ -411,15 +429,7 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
       // Ensure sub-agent listener is attached
       attachSubagentListener(deps);
 
-      // Build the spawn command.
-      // If workDir is specified, prepend a working directory instruction so the agent knows where to operate.
-      const rawDesc = params.workDir
-        ? `Working directory: ${params.workDir}\n\n${params.title}`
-        : params.title;
-      const escaped = rawDesc.replace(/"/g, '\\"');
-      let spawnCmd = `/subagents spawn ${params.agentId} "${escaped}"`;
-      if (params.model) spawnCmd += ` --model ${params.model}`;
-      if (params.thinking) spawnCmd += ` --thinking ${params.thinking}`;
+      const spawnCmd = buildSubagentSpawnCommand(params);
 
       try {
         const ws = await deps.getGatewayWs();
@@ -437,10 +447,11 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
       } catch (err: any) {
         // Fallback to CLI
         try {
-          const escaped2 = params.title.replace(/"/g, '\\"').replace(/'/g, "'\\''");
-          let cliCmd = `openclaw agent --session-id "ac-task-${Date.now()}" -m '/subagents spawn ${params.agentId} "${escaped2}"'`;
-          if (params.model) cliCmd += ` --model ${params.model}`;
-          const output = await runAsync(cliCmd, params.timeoutSeconds ? params.timeoutSeconds * 1000 : 120000);
+          const output = await deps.runSpawnAsync(
+            'openclaw',
+            ['agent', '--session-id', `ac-task-${Date.now()}`, '--thinking', 'off', '-m', spawnCmd],
+            params.timeoutSeconds ? params.timeoutSeconds * 1000 : 120000,
+          );
           return { success: true, output, fallback: 'cli' };
         } catch (cliErr: any) {
           return { success: false, error: cliErr?.message?.slice(0, 300) || 'Spawn failed' };
