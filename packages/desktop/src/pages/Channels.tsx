@@ -17,7 +17,8 @@ const PAIRING_APPROVAL_CHANNELS = new Set(['telegram', 'whatsapp']);
 // DynamicConfigForm — renders config fields from registry definition
 // ---------------------------------------------------------------------------
 
-function DynamicConfigForm({ fields, values, onChange, t }: {
+function DynamicConfigForm({ channelId, fields, values, onChange, t }: {
+  channelId?: string;
   fields: ConfigField[];
   values: Record<string, string>;
   onChange: (key: string, val: string) => void;
@@ -29,7 +30,9 @@ function DynamicConfigForm({ fields, values, onChange, t }: {
       {fields.map(field => (
         <div key={field.key}>
           <label className="block text-sm font-medium text-slate-300 mb-2">
-            {t(field.label, field.label)}
+            {channelId
+              ? (t(`channels.${channelId}.${field.key}`, '') || t(field.label, field.label))
+              : t(field.label, field.label)}
           </label>
           {field.type === 'file' ? (
             <div className="flex gap-2">
@@ -532,6 +535,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
     if (!activeChannel || activeChannel.configFields.length === 0) return null;
     return (
       <DynamicConfigForm
+        channelId={activeChannel.id}
         fields={activeChannel.configFields}
         values={formValues}
         onChange={(key, val) => setFormValues(prev => ({ ...prev, [key]: val }))}

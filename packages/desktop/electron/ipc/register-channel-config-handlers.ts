@@ -90,6 +90,102 @@ function disableOpenClawMemoryPlugin(config: Record<string, any>) {
   return changed;
 }
 
+function setNestedValue(target: Record<string, any>, nestedPath: string, value: unknown) {
+  const parts = nestedPath.split('.').filter(Boolean);
+  if (parts.length === 0) return;
+
+  let cursor: Record<string, any> = target;
+  for (const part of parts.slice(0, -1)) {
+    if (!isPlainRecord(cursor[part])) cursor[part] = {};
+    cursor = cursor[part];
+  }
+  cursor[parts[parts.length - 1]] = value;
+}
+
+function getNestedValue(source: Record<string, any>, nestedPath: string): unknown {
+  const parts = nestedPath.split('.').filter(Boolean);
+  let cursor: unknown = source;
+  for (const part of parts) {
+    if (!isPlainRecord(cursor)) return undefined;
+    cursor = cursor[part];
+  }
+  return cursor;
+}
+
+function isAccountScopedField(field: ConfigField): boolean {
+  return typeof field.configPath === 'string' && field.configPath.length > 0;
+}
+
+function applyStoredChannelConfig(channelDef: ChannelDef | undefined, existingConfig: Record<string, any>, inputConfig: Record<string, string>) {
+  const nextConfig: Record<string, any> = isPlainRecord(existingConfig) ? { ...existingConfig } : {};
+  const fields = channelDef?.configFields || [];
+  const handledKeys = new Set<string>();
+
+  for (const field of fields) {
+    const value = inputConfig[field.key];
+    if (!value) continue;
+    handledKeys.add(field.key);
+
+    if (isAccountScopedField(field)) {
+      setNestedValue(nextConfig, `${field.configPath}.${field.key}`, value);
+    } else {
+      nextConfig[field.key] = value;
+    }
+  }
+
+  for (const [key, value] of Object.entries(inputConfig)) {
+    if (!value || handledKeys.has(key)) continue;
+    nextConfig[key] = value;
+  }
+
+  const accountScopedFields = fields.filter(isAccountScopedField);
+  if (accountScopedFields.length > 0) {
+    for (const field of accountScopedFields) {
+      delete nextConfig[field.key];
+    }
+
+    if (!fields.some((field) => field.key === 'token')) {
+      delete nextConfig.token;
+    }
+
+    setNestedValue(nextConfig, 'accounts.default.enabled', true);
+  }
+
+  return nextConfig;
+}
+
+function flattenStoredChannelConfig(channelDef: ChannelDef | undefined, storedConfig: Record<string, any>) {
+  if (!channelDef || !Array.isArray(channelDef.configFields) || channelDef.configFields.length === 0) {
+    return storedConfig;
+  }
+
+  const flattened: Record<string, any> = {};
+  for (const field of channelDef.configFields) {
+    const value = isAccountScopedField(field)
+      ? getNestedValue(storedConfig, `${field.configPath}.${field.key}`)
+      : storedConfig[field.key];
+    if (typeof value === 'string' && value) {
+      flattened[field.key] = value;
+    }
+  }
+
+  return flattened;
+}
+
+function hasRequiredChannelCredentials(channelDef: ChannelDef | undefined, storedConfig: Record<string, any>): boolean {
+  if (!channelDef || !Array.isArray(channelDef.configFields) || channelDef.configFields.length === 0) {
+    return Object.keys(storedConfig).some((key) => key !== 'enabled' && !!storedConfig[key]);
+  }
+
+  return channelDef.configFields.every((field) => {
+    if (field.required === false) return true;
+    const value = isAccountScopedField(field)
+      ? getNestedValue(storedConfig, `${field.configPath}.${field.key}`)
+      : storedConfig[field.key];
+    return typeof value === 'string' ? value.trim().length > 0 : !!value;
+  });
+}
+
 function channelAppearsConfigured(listOutput: string | null, openclawId: string): boolean {
   if (!listOutput) return false;
   const target = openclawId.toLowerCase();
@@ -612,7 +708,8 @@ export function registerChannelConfigHandlers(deps: {
         let existing: any = {};
         try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
         if (!existing.channels) existing.channels = {};
-        existing.channels[safeOpenclawId] = { ...existing.channels[safeOpenclawId], ...config, enabled: true };
+        existing.channels[safeOpenclawId] = applyStoredChannelConfig(channelDef, existing.channels[safeOpenclawId], config);
+        existing.channels[safeOpenclawId].enabled = true;
         normalizeTelegramConfigInFile(existing);
         fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
       } else {
@@ -900,11 +997,12 @@ export function registerChannelConfigHandlers(deps: {
       const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
       const existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       const ocId = deps.toOpenclawId(channelId);
+      const channelDef = deps.getChannel(channelId) || deps.getChannel(ocId);
       const channelConfig = existing?.channels?.[channelId] || existing?.channels?.[ocId];
       if (!channelConfig || !channelConfig.enabled) {
         return { success: false, error: 'Channel not configured' };
       }
-      const hasCredentials = Object.keys(channelConfig).some((key) => key !== 'enabled' && channelConfig[key]);
+      const hasCredentials = hasRequiredChannelCredentials(channelDef, channelConfig);
       if (!hasCredentials) {
         return { success: false, error: 'No credentials found' };
       }
@@ -935,9 +1033,10 @@ export function registerChannelConfigHandlers(deps: {
       const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
       const existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       const ocId = deps.toOpenclawId(channelId);
+      const channelDef = deps.getChannel(channelId) || deps.getChannel(ocId);
       const channelConfig = existing?.channels?.[channelId] || existing?.channels?.[ocId];
       if (channelConfig) {
-        return { success: true, config: channelConfig };
+        return { success: true, config: flattenStoredChannelConfig(channelDef, channelConfig) };
       }
       return { success: false };
     } catch {

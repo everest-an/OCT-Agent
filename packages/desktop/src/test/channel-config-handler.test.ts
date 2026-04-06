@@ -31,6 +31,12 @@ function getRegisteredPairingLatestCodeHandler() {
   return match[1] as (event: unknown, channelId: string) => Promise<any>;
 }
 
+function getRegisteredReadConfigHandler() {
+  const match = handleMock.mock.calls.find(([channel]) => channel === 'channel:read-config');
+  if (!match) throw new Error('channel:read-config handler not registered');
+  return match[1] as (event: unknown, channelId: string) => Promise<any>;
+}
+
 describe('registerChannelConfigHandlers', () => {
   beforeEach(() => {
     handleMock.mockReset();
@@ -503,5 +509,127 @@ describe('registerChannelConfigHandlers', () => {
 
     expect(result).toMatchObject({ success: true });
     expect(runAsync).toHaveBeenCalledWith('openclaw plugins install "@openclaw/telegram@beta" 2>&1', 60000);
+  });
+
+  it('stores account-scoped json-direct channel credentials under accounts.default', async () => {
+    let storedConfigText = JSON.stringify({ channels: { feishu: { token: 'legacy-token', enabled: true } } });
+    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation((filePath: any, data: any) => {
+      if (String(filePath).includes('.openclaw') && String(filePath).includes('openclaw.json')) {
+        storedConfigText = String(data);
+      }
+      return undefined;
+    });
+    vi.spyOn(fs, 'readFileSync').mockImplementation((filePath: any) => {
+      if (String(filePath).includes('.openclaw') && String(filePath).includes('openclaw.json')) {
+        return storedConfigText as any;
+      }
+      throw new Error(`unexpected readFileSync(${String(filePath)})`);
+    });
+
+    registerChannelConfigHandlers({
+      home: 'C:/Users/test',
+      safeShellExecAsync: vi.fn(async () => null),
+      readShellOutputAsync: vi.fn(async () => null),
+      runAsync: vi
+        .fn()
+        .mockResolvedValueOnce('plugin installed')
+        .mockResolvedValueOnce('gateway restarted')
+        .mockResolvedValueOnce('bound'),
+      discoverOpenClawChannels: vi.fn(),
+      parseCliHelp: vi.fn(() => ({ cliChannels: new Set<string>(), channelFields: new Map() })),
+      applyCliHelp: vi.fn(),
+      mergeCatalog: vi.fn(),
+      mergeChannelOptions: vi.fn(),
+      getAllChannels: vi.fn(() => []),
+      serializeRegistry: vi.fn(() => []),
+      getChannel: vi.fn(() => ({
+        id: 'feishu',
+        openclawId: 'feishu',
+        label: 'Feishu',
+        color: '#3370FF',
+        iconType: 'svg',
+        connectionType: 'multi-field',
+        saveStrategy: 'json-direct',
+        pluginPackage: '@openclaw/feishu',
+        configFields: [
+          { key: 'appId', label: 'appId', cliFlag: '--app-id', configPath: 'accounts.default' },
+          { key: 'appSecret', label: 'appSecret', cliFlag: '--app-secret', type: 'password', configPath: 'accounts.default' },
+        ],
+        source: 'openclaw-dynamic',
+        order: 8,
+      })) as any,
+      buildCLIFlags: vi.fn(() => ''),
+      toOpenclawId: vi.fn((id: string) => id),
+    });
+
+    const handler = getRegisteredSaveHandler();
+    const result = await handler({}, 'feishu', { appId: 'cli_abc', appSecret: 'secret_xyz' });
+
+    expect(result).toMatchObject({ success: true });
+    const latestWrite = writeSpy.mock.calls[writeSpy.mock.calls.length - 1];
+    const writtenConfig = JSON.parse(String(latestWrite?.[1] || '{}'));
+    expect(writtenConfig.channels.feishu.enabled).toBe(true);
+    expect(writtenConfig.channels.feishu.token).toBeUndefined();
+    expect(writtenConfig.channels.feishu.accounts.default.enabled).toBe(true);
+    expect(writtenConfig.channels.feishu.accounts.default.appId).toBe('cli_abc');
+    expect(writtenConfig.channels.feishu.accounts.default.appSecret).toBe('secret_xyz');
+  });
+
+  it('flattens account-scoped credentials when reading config back to the form', async () => {
+    vi.spyOn(fs, 'readFileSync').mockImplementation((filePath: any) => {
+      if (String(filePath).includes('.openclaw') && String(filePath).includes('openclaw.json')) {
+        return JSON.stringify({
+          channels: {
+            feishu: {
+              enabled: true,
+              accounts: {
+                default: {
+                  enabled: true,
+                  appId: 'cli_abc',
+                  appSecret: 'secret_xyz',
+                },
+              },
+            },
+          },
+        }) as any;
+      }
+      throw new Error(`unexpected readFileSync(${String(filePath)})`);
+    });
+
+    registerChannelConfigHandlers({
+      home: 'C:/Users/test',
+      safeShellExecAsync: vi.fn(async () => null),
+      readShellOutputAsync: vi.fn(async () => null),
+      runAsync: vi.fn(async () => 'ok'),
+      discoverOpenClawChannels: vi.fn(),
+      parseCliHelp: vi.fn(() => ({ cliChannels: new Set<string>(), channelFields: new Map() })),
+      applyCliHelp: vi.fn(),
+      mergeCatalog: vi.fn(),
+      mergeChannelOptions: vi.fn(),
+      getAllChannels: vi.fn(() => []),
+      serializeRegistry: vi.fn(() => []),
+      getChannel: vi.fn(() => ({
+        id: 'feishu',
+        openclawId: 'feishu',
+        label: 'Feishu',
+        color: '#3370FF',
+        iconType: 'svg',
+        connectionType: 'multi-field',
+        saveStrategy: 'json-direct',
+        configFields: [
+          { key: 'appId', label: 'appId', cliFlag: '--app-id', configPath: 'accounts.default' },
+          { key: 'appSecret', label: 'appSecret', cliFlag: '--app-secret', type: 'password', configPath: 'accounts.default' },
+        ],
+        source: 'openclaw-dynamic',
+        order: 8,
+      })) as any,
+      buildCLIFlags: vi.fn(() => ''),
+      toOpenclawId: vi.fn((id: string) => id),
+    });
+
+    const handler = getRegisteredReadConfigHandler();
+    const result = await handler({}, 'feishu');
+
+    expect(result).toEqual({ success: true, config: { appId: 'cli_abc', appSecret: 'secret_xyz' } });
   });
 });

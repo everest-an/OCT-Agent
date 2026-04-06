@@ -24,6 +24,7 @@ export interface ConfigField {
   hint?: string;
   required?: boolean;
   cliFlag: string;
+  configPath?: string;
 }
 
 export interface ChannelDef {
@@ -96,14 +97,24 @@ type ChannelCapabilityCredential = {
   inputPrompt?: unknown;
 };
 
+type JsonSchemaNode = {
+  type?: unknown;
+  properties?: Record<string, JsonSchemaNode>;
+  additionalProperties?: JsonSchemaNode | boolean;
+  anyOf?: JsonSchemaNode[];
+  oneOf?: JsonSchemaNode[];
+};
+
 type ChannelCapabilitiesResponse = {
   channels?: Array<{
     plugin?: {
       id?: unknown;
+      [key: string]: unknown;
       setupWizard?: {
         credentials?: ChannelCapabilityCredential[];
       };
     };
+    [key: string]: unknown;
   }>;
 };
 
@@ -196,6 +207,106 @@ function normalizeCliFlagFromKey(key: string): string {
 
 function inferFieldType(parts: string[]): 'password' | 'text' {
   return parts.some((part) => /token|password|secret|key/i.test(part)) ? 'password' : 'text';
+}
+
+function isPlainRecord(value: unknown): value is Record<string, any> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function getAccountsPropertySchema(candidate: unknown): Record<string, JsonSchemaNode> | null {
+  if (!isPlainRecord(candidate)) return null;
+
+  const directAccounts = isPlainRecord(candidate.accounts) ? candidate.accounts as JsonSchemaNode : null;
+  const nestedAccounts = isPlainRecord(candidate.properties?.accounts) ? candidate.properties.accounts as JsonSchemaNode : null;
+  const accountsNode = directAccounts || nestedAccounts;
+  if (!accountsNode || !isPlainRecord(accountsNode.additionalProperties)) return null;
+
+  const properties = accountsNode.additionalProperties.properties;
+  return isPlainRecord(properties) ? properties as Record<string, JsonSchemaNode> : null;
+}
+
+function findAccountsPropertySchema(candidate: unknown, seen = new Set<object>()): Record<string, JsonSchemaNode> | null {
+  if (!isPlainRecord(candidate)) return null;
+  if (seen.has(candidate)) return null;
+  seen.add(candidate);
+
+  const direct = getAccountsPropertySchema(candidate);
+  if (direct) return direct;
+
+  for (const value of Object.values(candidate)) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const found = findAccountsPropertySchema(item, seen);
+        if (found) return found;
+      }
+      continue;
+    }
+
+    const found = findAccountsPropertySchema(value, seen);
+    if (found) return found;
+  }
+
+  return null;
+}
+
+function isAccountCredentialKey(key: string, properties: Record<string, JsonSchemaNode>): boolean {
+  if (key === 'enabled' || key === 'name') return false;
+  if (/token|secret|password|webhook|private.?key/i.test(key)) return true;
+  if (key === 'appId') return true;
+
+  if (/id$/i.test(key)) {
+    const base = key.replace(/id$/i, '').toLowerCase();
+    return Object.keys(properties).some((otherKey) => {
+      if (otherKey === key) return false;
+      const lower = otherKey.toLowerCase();
+      return lower.startsWith(base) && /(secret|token|password|key)/i.test(otherKey);
+    });
+  }
+
+  return false;
+}
+
+function getPreferredAccountCredentialKeys(channelId: string): string[] | null {
+  switch (channelId) {
+    case 'feishu':
+      return ['appId', 'appSecret'];
+    default:
+      return null;
+  }
+}
+
+function extractAccountScopedCredentialFields(channelId: string, candidate: unknown): ConfigField[] {
+  const accountProperties = findAccountsPropertySchema(candidate);
+  if (!accountProperties) return [];
+
+  const preferredKeys = getPreferredAccountCredentialKeys(channelId);
+  if (preferredKeys) {
+    return preferredKeys
+      .filter((key) => key in accountProperties)
+      .map((key) => ({
+        key,
+        label: key,
+        type: inferFieldType([key]),
+        required: true,
+        cliFlag: normalizeCliFlagFromKey(key),
+        configPath: 'accounts.default',
+      }));
+  }
+
+  const fields: ConfigField[] = [];
+  for (const [key] of Object.entries(accountProperties)) {
+    if (!isAccountCredentialKey(key, accountProperties)) continue;
+    fields.push({
+      key,
+      label: key,
+      type: inferFieldType([key]),
+      required: true,
+      cliFlag: normalizeCliFlagFromKey(key),
+      configPath: 'accounts.default',
+    });
+  }
+
+  return fields;
 }
 
 function mergeDynamicConfigFields(
@@ -294,6 +405,10 @@ export function parseChannelCapabilitiesJson(capabilitiesOutput: string): {
         required: true,
         cliFlag: normalizeCliFlagFromKey(key),
       });
+    }
+
+    if (fields.length === 0) {
+      fields.push(...extractAccountScopedCredentialFields(channelId, entry?.plugin || entry));
     }
 
     if (fields.length > 0) {
@@ -556,22 +671,28 @@ export interface CatalogEntry {
 export function mergeCatalog(entries: CatalogEntry[]): void {
   const builtinIds = new Set(BUILTIN_CHANNELS.map(c => c.id));
   const builtinOcIds = new Set(BUILTIN_CHANNELS.map(c => c.openclawId));
-  const added: ChannelDef[] = [];
+  const merged = new Map<string, ChannelDef>();
+  let catalogIndex = 0;
+
+  for (const channel of _dynamicChannels) {
+    if (builtinIds.has(channel.id) || builtinOcIds.has(channel.openclawId)) continue;
+    merged.set(channel.id, channel);
+  }
 
   for (const entry of entries) {
     const ch = entry.openclaw?.channel;
     if (!ch?.id) continue;
     if (builtinIds.has(ch.id) || builtinOcIds.has(ch.id)) continue;
 
-    added.push(buildDynamicChannel(ch.id, ch.label || ch.id, {
+    merged.set(ch.id, buildDynamicChannel(ch.id, ch.label || ch.id, {
       description: ch.blurb || ch.selectionLabel || '',
       npmSpec: entry.openclaw?.install?.npmSpec,
       docsSlug: ch.docsPath?.replace(/^\/channels\//, '') || ch.id,
-      catalogOrder: ch.order ?? added.length,
+      catalogOrder: ch.order ?? catalogIndex++,
     }));
   }
 
-  _dynamicChannels = added;
+  _dynamicChannels = [...merged.values()];
   _rebuildIndices();
 }
 

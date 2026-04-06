@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import {
   getAllChannels, getChannel, getChannelByOpenclawId,
   toOpenclawId, toFrontendId, isOneClick, hasBrandIcon,
@@ -42,6 +42,34 @@ const MOCK_CAPABILITIES_OUTPUT = `18:21:14+08:00 [plugins] Awareness memory plug
               "preferredEnvVar": "SLACK_APP_TOKEN"
             }
           ]
+        }
+      }
+    },
+    {
+      "plugin": {
+        "id": "feishu",
+        "config": {
+          "schema": {
+            "properties": {
+              "accounts": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": { "type": "boolean" },
+                    "name": { "type": "string" },
+                    "appId": { "type": "string" },
+                    "appSecret": { "anyOf": [{ "type": "string" }] },
+                    "verificationToken": { "type": "string" },
+                    "encryptKey": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "setupWizard": {
+          "credentials": []
         }
       }
     }
@@ -183,6 +211,10 @@ Options:
         expect.objectContaining({ key: 'botToken', cliFlag: '--bot-token' }),
         expect.objectContaining({ key: 'appToken', cliFlag: '--app-token' }),
       ]);
+      expect(channelFields.get('feishu')).toEqual([
+        expect.objectContaining({ key: 'appId', configPath: 'accounts.default', type: 'text' }),
+        expect.objectContaining({ key: 'appSecret', configPath: 'accounts.default', type: 'password' }),
+      ]);
     });
 
     it('lets official capabilities override help-derived fallback fields', () => {
@@ -191,6 +223,10 @@ Options:
 
       const slack = getChannel('slack')!;
       expect(slack.configFields.map((field) => field.key)).toEqual(['botToken', 'appToken']);
+
+      const feishu = getChannel('feishu')!;
+      expect(feishu.connectionType).toBe('multi-field');
+      expect(feishu.configFields.map((field) => field.key)).toEqual(['appId', 'appSecret']);
     });
   });
 
@@ -219,6 +255,24 @@ Options:
 
     it('nostr uses json-direct (NOT in --channel enum)', () => {
       expect(getChannel('nostr')!.saveStrategy).toBe('json-direct');
+    });
+
+    it('preserves startup-metadata-only channels when catalog merges later', async () => {
+      vi.resetModules();
+      const freshRegistry = await import('../lib/channel-registry');
+
+      const parsed = freshRegistry.parseCliHelp(MOCK_CLI_HELP);
+      freshRegistry.applyCliHelp(parsed.cliChannels, parsed.channelFields);
+      freshRegistry.mergeChannelOptions(['telegram', 'qqbot']);
+      freshRegistry.mergeCatalog([
+        { name: '@openclaw/feishu', openclaw: { channel: { id: 'feishu', label: 'Feishu' }, install: { npmSpec: '@openclaw/feishu' } } },
+        { name: '@openclaw/discord', openclaw: { channel: { id: 'discord', label: 'Discord' }, install: { npmSpec: '@openclaw/discord' } } },
+      ]);
+
+      expect(freshRegistry.getChannel('telegram')).toBeDefined();
+      expect(freshRegistry.getChannel('telegram')!.saveStrategy).toBe('cli');
+      expect(freshRegistry.getChannel('qqbot')).toBeDefined();
+      expect(freshRegistry.getChannel('feishu')).toBeDefined();
     });
   });
 
