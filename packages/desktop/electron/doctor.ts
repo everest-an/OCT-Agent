@@ -629,6 +629,23 @@ async function fixLaunchAgentPath(ctx: Ctx): Promise<FixResult> {
 
 async function checkGatewayRunning(ctx: Ctx): Promise<CheckResult> {
   if (!ctx.openclawPath) return { id: 'gateway-running', label: 'Gateway', status: 'skipped', message: 'Skipped (OpenClaw not installed)', fixable: 'none' };
+
+  // Fast path: probe Gateway HTTP port directly (avoids 15-20s plugin preload from CLI)
+  const port = getGatewayPort(ctx.deps.homedir);
+  const probeOk = await new Promise<boolean>((resolve) => {
+    const req = http.get(`http://127.0.0.1:${port}/healthz`, { timeout: 3000 }, (res) => {
+      res.resume();
+      resolve(res.statusCode !== undefined && res.statusCode < 500);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+  });
+
+  if (probeOk) {
+    return { id: 'gateway-running', label: 'Gateway', status: 'pass', message: 'Running', fixable: 'none' };
+  }
+
+  // Fallback: try CLI only if HTTP probe failed (Gateway may be on non-default port)
   const output = await ctx.deps.shellExec('openclaw gateway status 2>&1', 15000);
   if (isGatewayRunningOutput(output)) {
     return { id: 'gateway-running', label: 'Gateway', status: 'pass', message: 'Running', fixable: 'none' };
@@ -999,18 +1016,28 @@ const CHECK_ORDER = [
 export function createDoctor(deps: DoctorDeps) {
   async function runChecks(subset?: string[]): Promise<DoctorReport> {
     const ctx = await buildContext(deps);
-    const checks: CheckResult[] = [];
     const order = subset || CHECK_ORDER;
-    for (const id of order) {
-      const entry = CHECK_REGISTRY[id];
-      if (!entry) continue;
-      try {
-        const result = await entry.check(ctx);
-        checks.push(result);
-      } catch {
-        checks.push({ id, label: id, status: 'fail', message: 'Check failed unexpectedly', fixable: 'none' });
-      }
-    }
+    const entries = order
+      .map((id) => ({ id, entry: CHECK_REGISTRY[id] }))
+      .filter((e) => e.entry);
+
+    // Run all checks in parallel — they only read ctx, no side effects
+    const results = await Promise.all(
+      entries.map(async ({ id, entry }) => {
+        try {
+          return await entry!.check(ctx);
+        } catch {
+          return { id, label: id, status: 'fail' as CheckStatus, message: 'Check failed unexpectedly', fixable: 'none' as Fixability };
+        }
+      }),
+    );
+
+    // Preserve original order
+    const checkMap = new Map(results.map((r) => [r.id, r]));
+    const checks = order
+      .filter((id) => checkMap.has(id))
+      .map((id) => checkMap.get(id)!);
+
     const summary = { pass: 0, warn: 0, fail: 0, skipped: 0 };
     for (const c of checks) summary[c.status]++;
     return { timestamp: Date.now(), checks, summary };
