@@ -842,9 +842,25 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
 
         // Idle timeout state — declared before chatListener so the closure captures correctly
         let lastActivityTime = Date.now();
-        const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+        // 15 minutes: agents doing tool calls (web search, file editing) don't emit
+        // event:chat — they only emit event:agent. Give them enough time to finish.
+        const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
         const resetIdleTimer = () => { lastActivityTime = Date.now(); };
         let idleCheckHandle: ReturnType<typeof setInterval> | null = null;
+
+        // Helper: check if an event (key + runId) belongs to this mission
+        const isMissionEvent = (key: string, runId: string): boolean => {
+          const mission = activeMissions.get(params.missionId);
+          if (!mission) return false;
+          if (runId && mission.runIdToKey.has(runId)) return true;
+          if (mission.spawnedAgents.has(key)) return true;
+          for (const [k, v] of mission.spawnedAgents) {
+            if (k.endsWith(key) || key.endsWith(k)) return true;
+            // agentId-based fallback: handles agent:<id>:main vs agent:<id>:webchat:<sid>
+            if (v.agentId !== 'main' && key.includes(v.agentId)) return true;
+          }
+          return false;
+        };
 
         const chatListener = (payload: any) => {
           const mission = activeMissions.get(params.missionId);
@@ -857,15 +873,21 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
           // Diagnostic: log ALL incoming chat events for this mission window
           console.log(`[mission:chat-event] missionId=${params.missionId} key=${key} runId=${eventRunId} state=${state} registeredRunIds=${JSON.stringify([...mission.runIdToKey.keys()])} registeredKeys=${JSON.stringify([...mission.spawnedAgents.keys()])}`);
 
-          // Match priority: 1) runId (most reliable), 2) exact sessionKey, 3) endsWith
+          // Match priority: 1) runId, 2) exact key, 3) endsWith, 4) agentId in key
           let matchedKey: string | null = null;
           if (eventRunId && mission.runIdToKey.has(eventRunId)) {
             matchedKey = mission.runIdToKey.get(eventRunId)!;
           } else if (mission.spawnedAgents.has(key)) {
             matchedKey = key;
           } else if (key) {
-            for (const [k] of mission.spawnedAgents) {
+            for (const [k, v] of mission.spawnedAgents) {
               if (k.endsWith(key) || key.endsWith(k)) {
+                matchedKey = k;
+                break;
+              }
+              // 4th fallback: agentId embedded in sessionKey
+              // Handles agent:<id>:main vs our agent:<id>:webchat:<sid>
+              if (v.agentId !== 'main' && key.includes(v.agentId)) {
                 matchedKey = k;
                 break;
               }
@@ -930,6 +952,7 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
           if ((state === 'final' || state === 'error' || state === 'aborted') && finishedCount >= agentsToSpawn.length) {
             if (idleCheckHandle) clearInterval(idleCheckHandle);
             ws.off('event:chat', chatListener);
+            ws.off('event:agent', agentListener);
             sendMissionProgress(params.missionId, {
               streamDelta: null,
               missionPatch: {
@@ -941,7 +964,19 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
           }
         };
 
+        // Reset idle timer on agent lifecycle/tool events (tool calls don't emit event:chat)
+        // This prevents false timeouts while agents are actively doing work via tools.
+        const agentListener = (payload: any) => {
+          const key = payload?.sessionKey || '';
+          const runId = payload?.runId || '';
+          if (isMissionEvent(key, runId)) {
+            console.log(`[mission:agent-event] missionId=${params.missionId} key=${key} stream=${payload?.stream} phase=${payload?.data?.phase}`);
+            resetIdleTimer();
+          }
+        };
+
         ws.on('event:chat', chatListener);
+        ws.on('event:agent', agentListener);
 
         // Notify frontend: mission is now running
         sendMissionProgress(params.missionId, {
@@ -1063,17 +1098,26 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
           activeMissions.delete(params.missionId);
         });
 
-        // Idle timeout: fail if no events received for 5 minutes
+        // Idle timeout: fail if no chat OR agent events received for 15 minutes.
+        // Agents typically spend several minutes doing tool calls (generating event:agent)
+        // before producing a final chat:final event.
         idleCheckHandle = setInterval(() => {
           const m = activeMissions.get(params.missionId);
-          if (!m || m.cancelled) { if (idleCheckHandle) clearInterval(idleCheckHandle); return; }
+          if (!m || m.cancelled) {
+            if (idleCheckHandle) clearInterval(idleCheckHandle);
+            ws.off('event:chat', chatListener);
+            ws.off('event:agent', agentListener);
+            return;
+          }
           if (Date.now() - lastActivityTime > IDLE_TIMEOUT_MS) {
             if (idleCheckHandle) clearInterval(idleCheckHandle);
+            ws.off('event:chat', chatListener);
+            ws.off('event:agent', agentListener);
             sendMissionProgress(params.missionId, {
               missionPatch: {
                 status: 'failed',
                 completedAt: new Date().toISOString(),
-                error: 'No activity for 5 minutes — mission stopped',
+                error: 'No activity for 15 minutes — mission stopped',
               },
             });
             activeMissions.delete(params.missionId);
