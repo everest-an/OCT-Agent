@@ -59,6 +59,35 @@ function listMarkdownFilesFromDirectories(directories: string[]) {
   });
 }
 
+/**
+ * Fallback: read agent list directly from openclaw.json when CLI fails
+ * (e.g. after OpenClaw upgrade introduces config schema changes).
+ */
+function readAgentsFromConfig(home: string): { success: boolean; agents: any[] } {
+  try {
+    const configPath = path.join(home, '.openclaw', 'openclaw.json');
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    const cfg = JSON.parse(raw);
+    const agentList: any[] = cfg?.agents?.list || [];
+    if (agentList.length === 0) {
+      return { success: true, agents: [{ id: 'main', name: 'Main Agent', emoji: '', isDefault: true, bindings: [] }] };
+    }
+    const agents = agentList.map((a: any) => ({
+      id: a.id || 'main',
+      name: a.identity?.name || a.name || a.id,
+      emoji: a.identity?.emoji || '',
+      model: a.model || null,
+      bindings: [],
+      isDefault: a.id === 'main',
+      workspace: a.workspace || null,
+      routes: [],
+    }));
+    return { success: true, agents };
+  } catch {
+    return { success: true, agents: [{ id: 'main', name: 'Main Agent', emoji: '', isDefault: true, bindings: [] }] };
+  }
+}
+
 export function registerAgentHandlers(deps: {
   home: string;
   safeShellExecAsync: (cmd: string, timeoutMs?: number) => Promise<string | null>;
@@ -101,9 +130,10 @@ export function registerAgentHandlers(deps: {
           }
         } catch {}
       }
-      return { success: true, agents: [{ id: 'main', name: 'Main Agent', emoji: '', isDefault: true, bindings: [] }] };
+      // CLI failed or returned empty — fallback: read agents directly from openclaw.json
+      return readAgentsFromConfig(deps.home);
     } catch {
-      return { success: true, agents: [{ id: 'main', name: 'Main Agent', emoji: '', isDefault: true, bindings: [] }] };
+      return readAgentsFromConfig(deps.home);
     }
   });
 

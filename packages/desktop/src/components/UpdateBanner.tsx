@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Download, ArrowRight, Loader2, Check, AlertCircle } from 'lucide-react';
+import { X, Download, ArrowRight, Loader2, Check, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { useAppConfig } from '../lib/store';
 
@@ -9,6 +9,7 @@ interface UpdateInfo {
   latestVersion: string;
   component: 'openclaw' | 'plugin' | 'desktop';
   label: string;
+  changelog?: string;
 }
 
 const DISMISS_KEY = 'awareness-claw-update-dismissed';
@@ -22,6 +23,7 @@ export default function UpdateBanner() {
   const [showModal, setShowModal] = useState(false);
   const [upgrading, setUpgrading] = useState<string | null>(null);
   const [upgradeResults, setUpgradeResults] = useState<Record<string, { success: boolean; error?: string }>>({});
+  const [expandedChangelog, setExpandedChangelog] = useState<string | null>(null);
 
   // Upgrade progress state
   const [upgradePhase, setUpgradePhase] = useState<string | null>(null);
@@ -77,6 +79,7 @@ export default function UpdateBanner() {
           latestVersion: u.latestVersion,
           component: u.component,
           label: u.label,
+          changelog: u.changelog || undefined,
         }));
         setUpdates(mapped);
         // Auto-show modal for first time (strong reminder)
@@ -227,6 +230,26 @@ export default function UpdateBanner() {
                         {u.currentVersion} <ArrowRight size={10} className="inline" /> <span className="text-brand-400">{u.latestVersion}</span>
                       </span>
                     </div>
+
+                    {/* Changelog toggle */}
+                    {u.changelog && !upgrading && (
+                      <div className="mt-1.5">
+                        <button
+                          onClick={() => setExpandedChangelog(expandedChangelog === u.component ? null : u.component)}
+                          className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-300 transition-colors"
+                        >
+                          {expandedChangelog === u.component ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                          {t('update.changelog', "What's new")}
+                        </button>
+                        {expandedChangelog === u.component && (
+                          <div className="mt-1.5 px-2.5 py-2 rounded-lg bg-slate-900/80 border border-slate-700/30 max-h-48 overflow-y-auto">
+                            <pre className="text-[10px] text-slate-400 leading-relaxed whitespace-pre-wrap font-mono">
+                              {u.changelog}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Progress detail for active component */}
                     {upgrading === u.component && upgradePhase && (

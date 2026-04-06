@@ -5,6 +5,45 @@ import { enableDaemonAutostart, disableDaemonAutostart, isDaemonAutostartEnabled
 
 const OPENCLAW_INSTALL_TIMEOUT_MS = 300000;
 
+/**
+ * Extract changelog entries between currentVersion and latestVersion from a CHANGELOG.md file.
+ * Returns the text of all version sections newer than currentVersion.
+ */
+function extractChangelog(changelogPath: string, currentVersion: string, latestVersion: string): string {
+  try {
+    if (!fs.existsSync(changelogPath)) return '';
+    const content = fs.readFileSync(changelogPath, 'utf-8');
+    const lines = content.split('\n');
+    const result: string[] = [];
+    let capturing = false;
+    let foundAny = false;
+
+    for (const line of lines) {
+      // Match version headers like "## [0.6.1] - 2026-04-05"
+      const vMatch = line.match(/^## \[(\d+\.\d+\.\d+)\]/);
+      if (vMatch) {
+        const ver = vMatch[1];
+        if (ver === currentVersion) {
+          // Stop — we've reached the current installed version
+          break;
+        }
+        capturing = true;
+        foundAny = true;
+      }
+      if (capturing) {
+        result.push(line);
+      }
+    }
+
+    if (!foundAny) return '';
+    // Trim to max ~800 chars to avoid bloating IPC
+    const text = result.join('\n').trim();
+    return text.length > 800 ? text.slice(0, 800) + '\n...' : text;
+  } catch {
+    return '';
+  }
+}
+
 export function registerAppRuntimeHandlers(deps: {
   home: string;
   safeShellExecAsync: (cmd: string, timeoutMs?: number) => Promise<string | null>;
@@ -97,6 +136,7 @@ export function registerAppRuntimeHandlers(deps: {
             label: 'OpenClaw',
             currentVersion: current,
             latestVersion: latestOC.trim(),
+            changelog: `${current} → ${latestOC.trim()}`,
           });
         }
       }
@@ -124,11 +164,17 @@ export function registerAppRuntimeHandlers(deps: {
       if (installedVersion) {
         const latestPlugin = await deps.safeShellExecAsync('npm view @awareness-sdk/openclaw-memory version', 10000);
         if (latestPlugin && latestPlugin.trim() !== installedVersion) {
+          const pluginChangelog = extractChangelog(
+            path.join(deps.home, '.openclaw', 'extensions', 'openclaw-memory', 'CHANGELOG.md'),
+            installedVersion,
+            latestPlugin.trim(),
+          );
           updates.push({
             component: 'plugin',
             label: 'Awareness Memory Plugin',
             currentVersion: installedVersion,
             latestVersion: latestPlugin.trim(),
+            changelog: pluginChangelog || undefined,
           });
         }
       }
@@ -140,11 +186,27 @@ export function registerAppRuntimeHandlers(deps: {
       if (daemonCurrent) {
         const latestDaemon = await deps.safeShellExecAsync('npm view @awareness-sdk/local version', 10000);
         if (latestDaemon && latestDaemon.trim() !== daemonCurrent) {
+          // Try to find daemon CHANGELOG in npx cache
+          let daemonChangelog = '';
+          try {
+            const npxCacheDir = path.join(deps.home, '.npm', '_npx');
+            if (fs.existsSync(npxCacheDir)) {
+              const entries = fs.readdirSync(npxCacheDir);
+              for (const entry of entries) {
+                const cl = path.join(npxCacheDir, entry, 'node_modules', '@awareness-sdk', 'local', 'CHANGELOG.md');
+                if (fs.existsSync(cl)) {
+                  daemonChangelog = extractChangelog(cl, daemonCurrent, latestDaemon.trim());
+                  break;
+                }
+              }
+            }
+          } catch {}
           updates.push({
             component: 'daemon',
             label: 'Awareness Local Daemon',
             currentVersion: daemonCurrent,
             latestVersion: latestDaemon.trim(),
+            changelog: daemonChangelog || undefined,
           });
         }
       }
@@ -241,6 +303,26 @@ export function registerAppRuntimeHandlers(deps: {
         }
 
         progress('openclaw:verify', 'done', newSemver);
+
+        // Post-upgrade: auto-fix config schema changes (prevents agent list breakage)
+        progress('openclaw:doctor-fix', 'running');
+        try {
+          await deps.runAsync('openclaw doctor --fix 2>&1', 30000);
+          progress('openclaw:doctor-fix', 'done');
+        } catch {
+          progress('openclaw:doctor-fix', 'skipped', 'doctor fix skipped');
+        }
+
+        // Post-upgrade: restart gateway so new version takes effect
+        progress('openclaw:gateway-restart', 'running');
+        try {
+          await deps.runAsync('openclaw gateway restart 2>&1', 20000);
+          progress('openclaw:gateway-restart', 'done');
+        } catch {
+          // Gateway may not be running — that's fine
+          progress('openclaw:gateway-restart', 'skipped');
+        }
+
         progress('complete', 'done');
         return { success: true, version: newSemver, previousVersion: preSemver };
       } else if (component === 'plugin') {

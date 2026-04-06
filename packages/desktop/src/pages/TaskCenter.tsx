@@ -46,7 +46,7 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
   const [missions, setMissions] = useState<readonly Mission[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [goalInput, setGoalInput] = useState('');
-  const [workDir, setWorkDir] = useState('');
+  const [workDir, setWorkDir] = useState(() => localStorage.getItem('awareness-claw-project-root') || '');
   const [creating, setCreating] = useState(false);
   const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
   const [setup, setSetup] = useState<SetupStatus>({ checked: false, maxSpawnDepth: 1, agentCount: 0, agentToAgentEnabled: false });
@@ -214,6 +214,8 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
     const result = await window.electronAPI?.taskPickDirectory?.();
     if (result && !result.cancelled && result.path) {
       setWorkDir(result.path);
+      // Sync to global workspace so Dashboard and other pages share the same value
+      localStorage.setItem('awareness-claw-project-root', result.path);
     }
   }, []);
 
@@ -335,7 +337,7 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
               {workDirName || t('taskCenter.pickWorkDir', 'Select workspace')}
             </button>
             {workDir && (
-              <button onClick={() => setWorkDir('')} className="text-[10px] text-slate-600 hover:text-slate-400">✕</button>
+              <button onClick={() => { setWorkDir(''); localStorage.removeItem('awareness-claw-project-root'); }} className="text-[10px] text-slate-600 hover:text-slate-400">✕</button>
             )}
           </div>
         </div>

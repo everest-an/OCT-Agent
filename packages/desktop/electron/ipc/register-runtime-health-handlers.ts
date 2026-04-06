@@ -312,24 +312,44 @@ export function registerRuntimeHealthHandlers(deps: {
       autoFixChecks.add('launchagent-path');
     }
 
-    const startupChecks = [
+    // Split checks into fast (no external CLI) and slow (needs OpenClaw CLI) groups
+    const fastChecks = [
       'node-installed', 'openclaw-installed', 'openclaw-command-health',
-      'plugin-installed', 'daemon-running', 'gateway-running', 'channel-bindings',
+      'plugin-installed',
       ...(process.platform === 'darwin' ? ['launchagent-path'] : []),
     ];
-
-    if (deps.recentDaemonStartup() && !(await deps.checkDaemonHealth())) {
-      sendStartupStatus('Waiting for the local service to finish starting...', 22);
-      await deps.waitForLocalDaemonReady(90000, 'setup.install.daemonStatus.waiting', { sendStatus: deps.sendSetupDaemonStatus, sleep: deps.sleep });
-    }
+    const slowChecks = ['daemon-running', 'gateway-running', 'channel-bindings'];
+    const startupChecks = [...fastChecks, ...slowChecks];
 
     sendStartupStatus('Checking your installation...', 10);
-    const initialReport = await deps.doctor.runChecks(startupChecks);
-    const checksToRepair = initialReport.checks.filter((check: any) =>
+
+    // Run fast checks immediately (no waiting for daemon)
+    // If daemon was recently started, run daemon health check in parallel with fast checks
+    const daemonRecentlyStarted = deps.recentDaemonStartup();
+    const [fastReport, daemonHealthy] = await Promise.all([
+      deps.doctor.runChecks(fastChecks),
+      daemonRecentlyStarted ? deps.checkDaemonHealth() : Promise.resolve(true),
+    ]);
+
+    sendStartupStatus('Checking services...', 30);
+
+    // If daemon is still warming up from recent start, give it a shorter grace period
+    // (reduced from 90s to 30s — enough for most systems, avoids long freeze)
+    if (daemonRecentlyStarted && !daemonHealthy) {
+      sendStartupStatus('Waiting for memory service to start...', 35);
+      await deps.waitForLocalDaemonReady(30000, 'setup.install.daemonStatus.waiting', { sendStatus: deps.sendSetupDaemonStatus, sleep: deps.sleep });
+    }
+
+    // Now run slow checks (daemon, gateway, channel-bindings)
+    const slowReport = await deps.doctor.runChecks(slowChecks);
+
+    // Merge results
+    const allChecks = [...fastReport.checks, ...slowReport.checks];
+    const checksToRepair = allChecks.filter((check: any) =>
       autoFixChecks.has(check.id)
       && check.fixable === 'auto'
       && (check.status === 'fail' || check.status === 'warn')
-      && !(check.id === 'daemon-running' && deps.recentDaemonStartup())
+      && !(check.id === 'daemon-running' && daemonRecentlyStarted)
     ).sort((left: any, right: any) => {
       const leftPriority = startupRepairPriority.get(left.id) ?? 999;
       const rightPriority = startupRepairPriority.get(right.id) ?? 999;
@@ -348,27 +368,41 @@ export function registerRuntimeHealthHandlers(deps: {
       else warnings.push(fix.message || check.message);
     }
 
+    // Final verification: only re-check items that were repaired (not all checks again)
     sendStartupStatus('Finalizing startup...', 92);
-    let finalReport = await deps.doctor.runChecks(startupChecks);
-    if (deps.recentDaemonStartup()) {
-      const daemonBlocking = finalReport.checks.find((check: any) => check.id === 'daemon-running' && check.status === 'fail');
-      if (daemonBlocking) {
+    const repairedIds = checksToRepair.map((c: any) => c.id);
+    let finalChecks = allChecks;
+    if (repairedIds.length > 0) {
+      const recheck = await deps.doctor.runChecks(repairedIds);
+      // Merge rechecked results back into allChecks
+      const recheckMap = new Map(recheck.checks.map((c: any) => [c.id, c]));
+      finalChecks = allChecks.map((c: any) => recheckMap.get(c.id) || c);
+    }
+
+    // If daemon is still not ready after repairs, one last short wait
+    if (daemonRecentlyStarted) {
+      const daemonStillFailing = finalChecks.find((check: any) => check.id === 'daemon-running' && check.status === 'fail');
+      if (daemonStillFailing) {
         sendStartupStatus('Local service is still warming up...', 94);
-        await deps.waitForLocalDaemonReady(60000, 'setup.install.daemonStatus.waiting', { sendStatus: deps.sendSetupDaemonStatus, sleep: deps.sleep });
-        finalReport = await deps.doctor.runChecks(startupChecks);
+        await deps.waitForLocalDaemonReady(30000, 'setup.install.daemonStatus.waiting', { sendStatus: deps.sendSetupDaemonStatus, sleep: deps.sleep });
+        const daemonRecheck = await deps.doctor.runChecks(['daemon-running']);
+        if (daemonRecheck.checks[0]) {
+          finalChecks = finalChecks.map((c: any) => c.id === 'daemon-running' ? daemonRecheck.checks[0] : c);
+        }
       }
     }
-    const setupBlocking = finalReport.checks.find((check: any) =>
+
+    const setupBlocking = finalChecks.find((check: any) =>
       ['node-installed', 'openclaw-installed', 'plugin-installed'].includes(check.id)
       && check.status === 'fail'
     );
 
-    const runtimeBlocking = finalReport.checks.find((check: any) =>
+    const runtimeBlocking = finalChecks.find((check: any) =>
       ['daemon-running'].includes(check.id)
       && check.status === 'fail'
     );
 
-    const residualWarnings = finalReport.checks
+    const residualWarnings = finalChecks
       .filter((check: any) => check.status === 'warn')
       .map((check: any) => check.message);
 
@@ -376,7 +410,7 @@ export function registerRuntimeHealthHandlers(deps: {
       warnings.push(runtimeBlocking.message);
     }
 
-    const gatewayRunning = finalReport.checks.find((check: any) => check.id === 'gateway-running' && check.status === 'pass');
+    const gatewayRunning = finalChecks.find((check: any) => check.id === 'gateway-running' && check.status === 'pass');
     if (!setupBlocking && !runtimeBlocking && gatewayRunning && deps.ensureGatewayAccess) {
       sendStartupStatus('Preparing local Gateway access...', 96);
       try {

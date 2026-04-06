@@ -356,22 +356,45 @@ async function getUnboundChannels(ctx: Ctx): Promise<string[] | null> {
   return enabledChannels.filter((channelId) => !boundChannels.has(channelId));
 }
 
+// Context cache — avoid re-running shell commands on every runChecks/runFix call
+let _ctxCache: { ctx: Ctx; ts: number } | null = null;
+const CTX_CACHE_TTL_MS = 30_000; // 30s — fresh enough for startup, invalidated by fixes
+
+function invalidateCtxCache() { _ctxCache = null; }
+
 async function buildContext(deps: DoctorDeps): Promise<Ctx> {
+  // Return cached context if fresh
+  if (_ctxCache && Date.now() - _ctxCache.ts < CTX_CACHE_TTL_MS) {
+    // Always re-read config (cheap, local file) but keep shell results cached
+    const configPath = path.join(deps.homedir, '.openclaw', 'openclaw.json');
+    let config: any = null;
+    try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+    return { ..._ctxCache.ctx, config, deps };
+  }
+
   const configPath = path.join(deps.homedir, '.openclaw', 'openclaw.json');
   let config: any = null;
   try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
 
   const findCommand = deps.platform === 'win32' ? 'where' : 'which -a';
-  const nodeLookup = await deps.shellExec(`${findCommand} node`, 3000);
+
+  // Run all independent shell lookups in parallel
+  const [nodeLookup, openclawLookup, npmRoot, npmPrefix] = await Promise.all([
+    deps.shellExec(`${findCommand} node`, 3000),
+    deps.shellExec(`${findCommand} openclaw`, 3000),
+    deps.shellExec('npm root -g', 5000),
+    deps.shellExec('npm config get prefix', 5000),
+  ]);
+
   const nodePath = pickFirstCommandPath(nodeLookup);
+  // node --version is fast and depends on nodePath, run separately
   const nodeVersion = nodePath ? await deps.shellExec('node --version', 3000) : null;
-  const openclawLookup = await deps.shellExec(`${findCommand} openclaw`, 3000);
+
   const openclawCandidatesRaw = parseCommandPaths(openclawLookup);
   const openclawCandidates = deps.platform === 'win32'
     ? normalizeWindowsCommandCandidates(openclawCandidatesRaw)
     : openclawCandidatesRaw;
   const openclawPath = openclawCandidates[0] || null;
-  const npmRoot = await deps.shellExec('npm root -g', 5000);
   const openclawPackageDir = npmRoot
     ? path.join(npmRoot.trim(), 'openclaw')
     : null;
@@ -386,9 +409,8 @@ async function buildContext(deps: DoctorDeps): Promise<Ctx> {
       } catch {}
     }
   }
-  const npmPrefix = await deps.shellExec('npm config get prefix', 5000);
 
-  return {
+  const ctx: Ctx = {
     nodeVersion: nodeVersion?.trim() || null,
     nodePath: nodePath?.trim() || null,
     openclawVersion: openclawVersion?.trim() || null,
@@ -398,6 +420,9 @@ async function buildContext(deps: DoctorDeps): Promise<Ctx> {
     npmPrefix: npmPrefix?.trim() || null,
     configPath, config, deps,
   };
+
+  _ctxCache = { ctx, ts: Date.now() };
+  return ctx;
 }
 
 // --- Check functions ---
@@ -998,10 +1023,16 @@ export function createDoctor(deps: DoctorDeps) {
   async function runFix(checkId: string): Promise<FixResult> {
     const entry = CHECK_REGISTRY[checkId];
     if (!entry?.fix) return { id: checkId, success: false, message: 'No auto-fix available' };
+    // Invalidate cache before fix — state is about to change
+    invalidateCtxCache();
     const ctx = await buildContext(deps);
     try {
-      return await entry.fix(ctx);
+      const result = await entry.fix(ctx);
+      // Invalidate again after fix — ensure next check sees new state
+      invalidateCtxCache();
+      return result;
     } catch (err: any) {
+      invalidateCtxCache();
       return { id: checkId, success: false, message: err.message?.slice(0, 200) || 'Fix failed' };
     }
   }
