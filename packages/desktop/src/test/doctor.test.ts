@@ -566,7 +566,7 @@ describe('doctor — infrastructure checks', () => {
           if (cmd.includes('which -a openclaw')) return '/usr/local/bin/openclaw';
           if (cmd === 'openclaw --version') return 'OpenClaw 2026.4.2 (abc)';
           if (cmd === 'npm config get prefix') return '/usr/local';
-          if (cmd.includes('openclaw gateway status')) return 'Gateway running on port 18790';
+          if (cmd.includes('openclaw gateway status')) return 'Runtime: running\nListening: 18790';
           return null;
         },
       });
@@ -765,40 +765,14 @@ describe('doctor — launchagent checks (macOS)', () => {
 describe('doctor — sequential execution', () => {
   afterEach(() => { vi.restoreAllMocks(); invalidateCtxCache(); });
 
-  it('runs checks one at a time, not in parallel', async () => {
+  it('results are returned in the exact order checks were requested', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-'));
     try {
-      const executionOrder: string[] = [];
-      let concurrentlyRunning = 0;
-      let maxConcurrent = 0;
-
-      const slowShellExec = async (cmd: string) => {
-        concurrentlyRunning++;
-        maxConcurrent = Math.max(maxConcurrent, concurrentlyRunning);
-        await new Promise(r => setTimeout(r, 5)); // slight delay to expose parallelism
-        executionOrder.push(cmd);
-        concurrentlyRunning--;
-        if (cmd.includes('which -a node')) return '/usr/local/bin/node';
-        if (cmd === 'node --version') return 'v23.11.0';
-        if (cmd.includes('which -a openclaw')) return '/usr/local/bin/openclaw';
-        if (cmd === 'npm root -g') return path.join(home, 'npm-global', 'node_modules');
-        if (cmd === 'npm config get prefix') return '/usr/local';
-        return null;
-      };
-
-      mockHttpGet(null); // make HTTP-based checks fail fast
-
-      const { doctor } = createDoctorWithMocks(home, { shellExec: slowShellExec });
-      await doctor.runChecks(['node-installed', 'openclaw-installed', 'config-permissions']);
-
-      // With sequential execution, max concurrent is 1 (context build may parallelise its own lookups,
-      // but checks themselves must be sequential)
-      // We verify that checks resolved in order by confirming no concurrency among check invocations.
-      // The buildContext itself does parallel lookups internally — that's fine and intentional.
-      expect(maxConcurrent).toBeGreaterThanOrEqual(1);
-      // The important property: results are returned in the specified order
-      const report = await doctor.runChecks(['node-installed', 'plugin-installed', 'config-permissions']);
-      expect(report.checks.map((c: any) => c.id)).toEqual(['node-installed', 'plugin-installed', 'config-permissions']);
+      mockHttpGet(200);
+      const { doctor } = createDoctorWithMocks(home);
+      const requestedOrder = ['node-installed', 'plugin-installed', 'gateway-running'];
+      const report = await doctor.runChecks(requestedOrder);
+      expect(report.checks.map((c: any) => c.id)).toEqual(requestedOrder);
     } finally { fs.rmSync(home, { recursive: true, force: true }); }
   });
 
@@ -824,22 +798,37 @@ describe('doctor — sequential execution', () => {
     } finally { fs.rmSync(home, { recursive: true, force: true }); }
   });
 
-  it('continues running remaining checks if one throws', async () => {
+  it('continues running remaining checks if one check function throws unexpectedly', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-'));
     try {
-      mockHttpGet(null);
-      const { doctor } = createDoctorWithMocks(home, {
-        shellExec: async (cmd: string) => {
-          if (cmd.includes('which -a node')) throw new Error('unexpected error');
-          return null;
-        },
+      // Make http.get throw on the first call (daemon-running) but succeed on the second (gateway-running).
+      // This exercises the per-check try-catch in runChecks.
+      let httpCallCount = 0;
+      vi.spyOn(http, 'get').mockImplementation((_url: any, _opts: any, cb?: any) => {
+        httpCallCount++;
+        if (httpCallCount === 1) {
+          throw new Error('http.get catastrophic failure');
+        }
+        const resCb = typeof _opts === 'function' ? _opts : cb;
+        const fakeRes: any = {
+          statusCode: 200,
+          resume: () => {},
+          on: (evt: string, handler: any) => {
+            if (evt === 'end') handler();
+            return fakeRes;
+          },
+        };
+        if (resCb) resCb(fakeRes);
+        const fakeReq: any = { on: () => fakeReq, destroy: () => {} };
+        return fakeReq;
       });
-      const report = await doctor.runChecks(['node-installed', 'plugin-installed']);
-      // node-installed threw → should become a 'fail' result, not crash the whole run
+
+      const { doctor } = createDoctorWithMocks(home);
+      // daemon-running throws → captured as 'fail'; gateway-running should still execute
+      const report = await doctor.runChecks(['daemon-running', 'gateway-running']);
       expect(report.checks).toHaveLength(2);
-      expect(report.checks[0]).toMatchObject({ id: 'node-installed', status: 'fail' });
-      // plugin-installed still ran
-      expect(report.checks[1].id).toBe('plugin-installed');
+      expect(report.checks[0]).toMatchObject({ id: 'daemon-running', status: 'fail' });
+      expect(report.checks[1].id).toBe('gateway-running');
     } finally { fs.rmSync(home, { recursive: true, force: true }); }
   });
 });
