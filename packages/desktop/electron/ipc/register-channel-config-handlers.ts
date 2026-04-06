@@ -12,6 +12,7 @@ import {
   isIgnorablePluginInstallError,
   resolveChannelPluginInstallSpec,
 } from './channel-plugin-spec';
+import { clearChannelStatusCache } from './register-channel-list-handlers';
 
 let discoveryDone = false;
 
@@ -414,15 +415,27 @@ export function registerChannelConfigHandlers(deps: {
   };
 
   const detectChannelConnectivity = async (openclawId: string, channelId: string) => {
-    const [statusOutput, listOutput] = await Promise.all([
-      deps.readShellOutputAsync('openclaw channels status --probe 2>&1', CHANNEL_ADD_IDLE_TIMEOUT_MS),
-      deps.readShellOutputAsync('openclaw channels list 2>&1', CHANNEL_ADD_IDLE_TIMEOUT_MS),
-    ]);
+    // Fast path: check openclaw.json directly to skip the slow `openclaw channels list`
+    // CLI call (which triggers full plugin preload on every invocation).
+    let listedFromFile = false;
+    try {
+      const raw = fs.readFileSync(OPENCLAW_CONFIG_PATH, 'utf8');
+      const cfg = JSON.parse(raw);
+      listedFromFile = cfg?.channels?.[openclawId]?.enabled === true;
+    } catch { /* fall through to CLI check */ }
 
-    const listed = !!listOutput && (
-      listOutput.toLowerCase().includes(openclawId.toLowerCase())
-      || listOutput.toLowerCase().includes(channelId.toLowerCase())
-    );
+    // Still probe the gateway status — this is lighter than `channels list`.
+    const statusOutput = await deps.readShellOutputAsync('openclaw channels status --probe 2>&1', CHANNEL_ADD_IDLE_TIMEOUT_MS);
+
+    let listed = listedFromFile;
+    if (!listedFromFile) {
+      const listOutput = await deps.readShellOutputAsync('openclaw channels list 2>&1', CHANNEL_ADD_IDLE_TIMEOUT_MS);
+      listed = !!listOutput && (
+        listOutput.toLowerCase().includes(openclawId.toLowerCase())
+        || listOutput.toLowerCase().includes(channelId.toLowerCase())
+      );
+    }
+
     let gatewayActive = isGatewayActiveOutput(statusOutput);
     if (!gatewayActive) {
       // Prefer gateway-only status check here. `openclaw status --deep` can load
@@ -631,6 +644,25 @@ export function registerChannelConfigHandlers(deps: {
         } catch {}
       }
 
+      // Defensive: ensure channels[id].enabled = true in openclaw.json.
+      // For json-direct channels enabled:true is already written above.
+      // For cli-strategy channels, `openclaw channels add` should set it, but
+      // some bundled channel stubs omit the flag — write it defensively.
+      if (saveStrategy !== 'json-direct') {
+        try {
+          const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
+          const existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+          if (isPlainRecord(existing)) {
+            if (!isPlainRecord(existing.channels)) existing.channels = {};
+            if (!isPlainRecord(existing.channels[safeOpenclawId])) existing.channels[safeOpenclawId] = {};
+            if (!existing.channels[safeOpenclawId].enabled) {
+              existing.channels[safeOpenclawId].enabled = true;
+              fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
+            }
+          }
+        } catch { /* non-fatal */ }
+      }
+
       sanitizeLegacyChannelConfigInFile(deps.home, safeOpenclawId);
 
       try { await deps.runAsync('openclaw gateway restart 2>&1', GATEWAY_RESTART_IDLE_TIMEOUT_MS); } catch {}
@@ -642,6 +674,10 @@ export function registerChannelConfigHandlers(deps: {
         const combined = pluginInstallError ? `${pluginInstallError}\n${bindMsg}` : bindMsg;
         return { success: false, error: formatChannelActionError(safeOpenclawId, 'bind', combined) };
       }
+
+      // Flush the channel list cache so the next channel:list-configured call
+      // returns fresh data immediately without waiting for the CLI refresh.
+      clearChannelStatusCache();
 
       return { success: true };
     } catch (err: any) {
@@ -832,6 +868,11 @@ export function registerChannelConfigHandlers(deps: {
 
       // 4. Restart gateway so channel stops receiving messages
       try { await deps.runAsync('openclaw gateway restart 2>&1', 20000); } catch { /* best-effort */ }
+
+      // 5. Flush the channel list cache so the removed channel disappears immediately.
+      // Without this, the cached CLI result (valid for 60 s) would union with the
+      // fresh file read and re-add the removed channel on the next list call.
+      clearChannelStatusCache();
 
       return { success: true };
     } catch (err: any) {

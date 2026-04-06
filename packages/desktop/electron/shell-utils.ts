@@ -109,7 +109,7 @@ export function createShellUtils(options: { home: string; app: any }) {
     try {
       const enhancedPath = getEnhancedPath();
       if (process.platform === 'win32') {
-        return execSync(wrapWindowsCommand(cmd), { encoding: 'utf8', timeout: timeoutMs, stdio: 'pipe', shell: 'cmd.exe', env: buildShellEnv({ NO_COLOR: '1', FORCE_COLOR: '0' }, enhancedPath) }).trim();
+        return execSync(wrapWindowsCommand(cmd), { encoding: 'utf8', timeout: timeoutMs, stdio: 'pipe', shell: 'cmd.exe', windowsHide: true, env: buildShellEnv({ NO_COLOR: '1', FORCE_COLOR: '0' }, enhancedPath) }).trim();
       }
       return execSync(`/bin/bash --norc --noprofile -c 'export PATH="${enhancedPath}"; ${cmd.replace(/'/g, "'\\''")}'`, {
         encoding: 'utf8', timeout: timeoutMs, stdio: 'pipe', env: buildShellEnv({}, enhancedPath),
@@ -124,7 +124,7 @@ export function createShellUtils(options: { home: string; app: any }) {
       const enhancedPath = getEnhancedPath();
       const shellCmd = process.platform === 'win32' ? wrapWindowsCommand(cmd) : `export PATH="${enhancedPath}"; ${cmd}`;
       const child = process.platform === 'win32'
-        ? spawn(shellCmd, [], { shell: 'cmd.exe', env: buildShellEnv({ NO_COLOR: '1', FORCE_COLOR: '0' }, enhancedPath), stdio: 'pipe' })
+        ? spawn(shellCmd, [], { shell: 'cmd.exe', windowsHide: true, env: buildShellEnv({ NO_COLOR: '1', FORCE_COLOR: '0' }, enhancedPath), stdio: 'pipe' })
         : spawn('/bin/bash', ['--norc', '--noprofile', '-c', shellCmd], { env: buildShellEnv({}, enhancedPath), stdio: 'pipe' });
       let stdout = '';
       let settled = false;
@@ -215,7 +215,7 @@ export function createShellUtils(options: { home: string; app: any }) {
         const rewrittenCmd = rewriteOpenClawShellCommand(cmd, fallback);
         const shellCmd = process.platform === 'win32' ? wrapWindowsCommand(rewrittenCmd) : `export PATH="${enhancedPath}"; ${rewrittenCmd}`;
         const child = process.platform === 'win32'
-          ? spawn(shellCmd, [], { shell: 'cmd.exe', env: buildShellEnv({ NO_COLOR: '1', FORCE_COLOR: '0' }, enhancedPath), stdio: 'pipe' })
+          ? spawn(shellCmd, [], { shell: 'cmd.exe', windowsHide: true, env: buildShellEnv({ NO_COLOR: '1', FORCE_COLOR: '0' }, enhancedPath), stdio: 'pipe' })
           : spawn('/bin/bash', ['--norc', '--noprofile', '-c', shellCmd], { env: buildShellEnv({}, enhancedPath), stdio: 'pipe' });
         let stdout = '';
         let stderr = '';
@@ -273,7 +273,7 @@ export function createShellUtils(options: { home: string; app: any }) {
     const enhancedPath = getEnhancedPath();
     const rewrittenCmd = rewriteOpenClawShellCommand(cmd, buildOpenClawShellFallbackSync());
     if (process.platform === 'win32') {
-      return execSync(rewrittenCmd, { encoding: 'utf8', timeout: 180000, stdio: 'pipe', shell: 'cmd.exe', env: buildShellEnv({}, enhancedPath), ...opts } as any);
+      return execSync(rewrittenCmd, { encoding: 'utf8', timeout: 180000, stdio: 'pipe', shell: 'cmd.exe', windowsHide: true, env: buildShellEnv({}, enhancedPath), ...opts } as any);
     }
     return execSync(`/bin/bash --norc --noprofile -c 'export PATH="${enhancedPath}"; ${rewrittenCmd.replace(/'/g, "'\\''")}'`, {
       encoding: 'utf8', timeout: 180000, stdio: 'pipe', env: buildShellEnv({}, enhancedPath), ...opts,
@@ -414,7 +414,7 @@ export function createShellUtils(options: { home: string; app: any }) {
         const shellCmdRaw = process.platform === 'win32' ? wrapWindowsCommand(rewrittenCommand) : `export PATH="${enhancedPath}"; ${rewrittenCommand}`;
         const shellCmd = rewriteNpx(shellCmdRaw);
         const child = process.platform === 'win32'
-          ? spawn(shellCmd, [], { shell: 'cmd.exe', env: buildShellEnv({ NO_COLOR: '1', FORCE_COLOR: '0' }, enhancedPath), stdio: 'pipe' })
+          ? spawn(shellCmd, [], { shell: 'cmd.exe', windowsHide: true, env: buildShellEnv({ NO_COLOR: '1', FORCE_COLOR: '0' }, enhancedPath), stdio: 'pipe' })
           : spawn('/bin/bash', ['--norc', '--noprofile', '-c', shellCmd], { env: buildShellEnv({}, enhancedPath), stdio: 'pipe' });
         let stdout = '';
         let stderr = '';
@@ -469,7 +469,7 @@ export function createShellUtils(options: { home: string; app: any }) {
         const shellCmdRaw = process.platform === 'win32' ? wrapWindowsCommand(rewrittenCommand) : `export PATH="${enhancedPath}"; ${rewrittenCommand}`;
         const shellCmd = rewriteNpx(shellCmdRaw);
         const child = process.platform === 'win32'
-          ? spawn(shellCmd, [], { shell: 'cmd.exe', env: buildShellEnv({ NO_COLOR: '1', FORCE_COLOR: '0' }, enhancedPath), stdio: 'pipe' })
+          ? spawn(shellCmd, [], { shell: 'cmd.exe', windowsHide: true, env: buildShellEnv({ NO_COLOR: '1', FORCE_COLOR: '0' }, enhancedPath), stdio: 'pipe' })
           : spawn('/bin/bash', ['--norc', '--noprofile', '-c', shellCmd], { env: buildShellEnv({}, enhancedPath), stdio: 'pipe' });
         let stdout = '';
         let stderr = '';

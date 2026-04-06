@@ -41,6 +41,7 @@ export function createChannelLoginWithQR(deps: {
         ? spawn(deps.wrapWindowsCommand(loginCmd), [], {
             cwd: os.homedir(),
             shell: 'cmd.exe',
+            windowsHide: true,
             env: {
               ...process.env,
               ...extraEnv,

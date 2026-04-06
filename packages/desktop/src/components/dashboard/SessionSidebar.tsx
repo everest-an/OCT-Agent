@@ -20,6 +20,7 @@ export function SessionSidebar({
   activeSessionId,
   channelSessions,
   activeChannelKey,
+  unreadCounts = {},
   renamingId,
   renameValue,
   onRenameValueChange,
@@ -38,6 +39,7 @@ export function SessionSidebar({
   activeSessionId: string;
   channelSessions: ChannelSession[];
   activeChannelKey: string | null;
+  unreadCounts?: Record<string, number>;
   renamingId: string | null;
   renameValue: string;
   onRenameValueChange: (value: string) => void;
@@ -80,7 +82,9 @@ export function SessionSidebar({
                 <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M13.65 2.35A8 8 0 1 0 16 8h-2a6 6 0 1 1-1.76-4.24L10 6h6V0l-2.35 2.35z" fill="currentColor"/></svg>
               </button>
             </div>
-            {channelSessions.map((channelSession) => (
+            {channelSessions.map((channelSession) => {
+              const unread = unreadCounts[channelSession.sessionKey] || 0;
+              return (
               <div
                 key={channelSession.sessionKey}
                 onClick={() => onSelectChannel(channelSession.sessionKey)}
@@ -90,9 +94,16 @@ export function SessionSidebar({
               >
                 <ChannelIcon channelId={channelSession.channel} size={16} />
                 <span className="truncate flex-1 text-xs">{channelSession.displayName || channelSession.channel}</span>
-                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${channelSession.status === 'running' ? 'bg-green-400 animate-pulse' : 'bg-slate-400'}`} />
+                {unread > 0 ? (
+                  <span className="flex-shrink-0 min-w-[18px] h-[18px] px-1 bg-brand-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center leading-none">
+                    {unread > 99 ? '99+' : unread}
+                  </span>
+                ) : (
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${channelSession.status === 'running' ? 'bg-green-400 animate-pulse' : 'bg-slate-400'}`} />
+                )}
               </div>
-            ))}
+              );
+            })}
             <div className="px-3 pt-2.5 pb-1">
               <span className="text-[10px] uppercase tracking-wider text-slate-600 font-medium">{t('chat.sidebar.local', 'Local')}</span>
             </div>

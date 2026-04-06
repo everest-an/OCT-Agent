@@ -1,4 +1,4 @@
-import { ChevronRight, Loader2, MessageSquare, Send } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Loader2, MessageSquare, Send } from 'lucide-react';
 import ChannelIcon from '../ChannelIcon';
 import { useI18n } from '../../lib/i18n';
 
@@ -23,6 +23,7 @@ export function ChannelConversationView({
   channelReplyText,
   channelReplying,
   messagesEndRef,
+  gatewayRunning,
   onBack,
   onReplyTextChange,
   onReplySubmit,
@@ -34,12 +35,37 @@ export function ChannelConversationView({
   channelReplyText: string;
   channelReplying: boolean;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
+  /** Whether the OpenClaw Gateway is currently running — if false, show a warning */
+  gatewayRunning?: boolean;
   onBack: () => void;
   onReplyTextChange: (value: string) => void;
   onReplySubmit: () => void;
 }) {
   const { t } = useI18n();
   const currentSession = channelSessions.find((session) => session.sessionKey === activeChannelKey);
+
+  // Per-channel hint for empty state
+  const getEmptyHint = () => {
+    const ch = currentSession?.channel || '';
+    const label = currentSession?.displayName || ch;
+    switch (ch) {
+      case 'whatsapp':
+        return t('channels.empty.whatsapp', `Open WhatsApp on your phone → send any message to start chatting with your AI agent.`);
+      case 'wechat':
+      case 'openclaw-weixin':
+        return t('channels.empty.wechat', `Open WeChat on your phone → send a message to the linked account.`);
+      case 'signal':
+        return t('channels.empty.signal', `Open Signal on your phone → send a message to start the conversation.`);
+      case 'telegram':
+        return t('channels.empty.telegram', `Open Telegram → find your bot → send /start or any message.`);
+      case 'discord':
+        return t('channels.empty.discord', `Head to Discord → type in the configured channel to chat with your agent.`);
+      case 'slack':
+        return t('channels.empty.slack', `Open Slack → send a message in the configured channel.`);
+      default:
+        return t('channels.empty.default', `Send a message via ${label} to start the conversation.`);
+    }
+  };
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -58,6 +84,14 @@ export function ChannelConversationView({
         )}
       </div>
 
+      {/* Gateway offline warning */}
+      {gatewayRunning === false && (
+        <div className="mx-4 mt-2 px-3 py-2 bg-amber-900/20 border border-amber-700/40 rounded-lg flex items-start gap-2 text-xs text-amber-300">
+          <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
+          <span>{t('channels.gatewayOffline', 'Gateway is not running — messages from your phone will not arrive. Go to Settings → Gateway to start it.')}</span>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
         <div className="max-w-3xl mx-auto space-y-4 w-full">
           {channelLoading ? (
@@ -66,11 +100,11 @@ export function ChannelConversationView({
               <span className="text-sm">{t('channels.loadingHistory', 'Loading history...')}</span>
             </div>
           ) : channelMessages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-slate-500 space-y-3">
-              {currentSession && <ChannelIcon channelId={currentSession.channel} size={32} />}
-              <MessageSquare size={24} className="opacity-40" />
-              <span className="text-sm">{t('channels.noMessages', 'No messages yet')}</span>
-              <span className="text-xs text-slate-600">{t('channels.noMessagesHint', 'Send a message to start the conversation')}</span>
+            <div className="flex flex-col items-center justify-center py-12 text-slate-500 space-y-3 max-w-xs mx-auto text-center">
+              {currentSession && <ChannelIcon channelId={currentSession.channel} size={40} />}
+              <MessageSquare size={24} className="opacity-30" />
+              <p className="text-sm font-medium text-slate-400">{t('channels.noMessages', 'No messages yet')}</p>
+              <p className="text-xs text-slate-500 leading-relaxed">{getEmptyHint()}</p>
             </div>
           ) : (
             channelMessages.map((message) => (

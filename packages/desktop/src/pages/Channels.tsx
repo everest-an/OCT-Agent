@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Check, CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, Loader2, Pencil, Radio, Unplug, X } from 'lucide-react';
+import { Check, CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, Loader2, MessageSquare, Pencil, Radio, Unplug, X } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { useExternalNavigator } from '../lib/useExternalNavigator';
 import PasswordInput from '../components/PasswordInput';
@@ -65,7 +65,13 @@ function DynamicConfigForm({ fields, values, onChange, t }: {
 // Main Channels page
 // ---------------------------------------------------------------------------
 
-export default function Channels() {
+type Page = 'chat' | 'memory' | 'channels' | 'models' | 'skills' | 'automation' | 'agents' | 'settings';
+
+export default function Channels({ onNavigate, onOpenChannelChat }: {
+  onNavigate?: (page: Page) => void;
+  /** Navigate to chat tab and open the session for a specific channel (e.g. 'whatsapp') */
+  onOpenChannelChat?: (channelId: string) => void;
+}) {
   const { t } = useI18n();
   const { openExternal, isOpening } = useExternalNavigator();
 
@@ -103,6 +109,38 @@ export default function Channels() {
       ? t('channels.failedTimeoutHintTelegram', 'This is usually not a bad token. Wait 20-60 seconds, then retry. If Telegram sent a pairing code, approve it first.')
       : t('channels.failedTimeoutHint', 'This is usually not a credential issue. Wait 20-60 seconds, then retry.')
   );
+
+  // Channels where users interact via an EXTERNAL app (phone/desktop), not this app's chat tab.
+  // For these, after connection success we show a usage hint instead of "Open Chat".
+  const EXTERNAL_CHANNELS = new Set([
+    'whatsapp', 'wechat', 'signal', 'imessage',
+    'telegram', 'discord', 'slack', 'line', 'googlechat',
+    'irc', 'msteams', 'nostr', 'tlon', 'mattermost',
+  ]);
+
+  const getPostConnectHint = (): string | null => {
+    if (!activeWizard) return null;
+    switch (activeWizard) {
+      case 'whatsapp':
+        return t('channels.postConnect.whatsapp', 'Open WhatsApp on your phone and send any message — your AI agent will reply automatically.');
+      case 'wechat':
+        return t('channels.postConnect.wechat', 'Open WeChat on your phone and send a message to the linked account — your AI agent will reply.');
+      case 'signal':
+        return t('channels.postConnect.signal', 'Open Signal on your phone and send a message — your AI agent will reply automatically.');
+      case 'imessage':
+        return t('channels.postConnect.imessage', 'Send an iMessage to this Mac (or let someone message you) — your AI agent will reply automatically.');
+      case 'telegram':
+        return t('channels.postConnect.telegram', 'Open Telegram and message your bot to start chatting with your AI agent.');
+      case 'discord':
+        return t('channels.postConnect.discord', 'Go to your Discord server and send a message in the configured channel — your AI agent will respond.');
+      case 'slack':
+        return t('channels.postConnect.slack', 'Open Slack and send a message in the configured channel — your AI agent will respond.');
+      case 'line':
+        return t('channels.postConnect.line', 'Open LINE on your phone and send a message to the linked account to chat with your AI agent.');
+      default:
+        return t('channels.postConnect.default', 'Your channel is now connected. Use the linked app to send messages — your AI agent will reply from there.');
+    }
+  };
 
   const translateStatus = (statusKey: string): string => {
     const [key, param] = statusKey.split('::');
@@ -176,6 +214,10 @@ export default function Channels() {
     });
     (window.electronAPI as any).onChannelStatus?.((statusKey: string) => {
       setChannelProgress(statusKey);
+      // QR scan done — backend is now binding/confirming; clear QR so status messages show
+      if (statusKey.includes('binding') || statusKey.includes('confirming') || statusKey.includes('awaitingConfirmation')) {
+        setAsciiQR(null);
+      }
     });
   }, []);
 
@@ -311,6 +353,10 @@ export default function Channels() {
       if (result.success && result.pendingConfirmation) {
         setTestNotice(t('channels.pendingConfirmation', 'Login completed. OpenClaw is still confirming the channel. This can take a few seconds.'));
       }
+      if (result.success) {
+        // Backend has flushed the channel list cache; refresh the displayed list.
+        await loadConfiguredChannels(false);
+      }
       if (!result.success) {
         setTestError(result.error || t('channels.setupFailed', 'Setup failed. Check Gateway in Settings.'));
       }
@@ -318,6 +364,11 @@ export default function Channels() {
       const config = buildConfig()!;
       const saveResult = await (window.electronAPI as any).channelSave(activeWizard, config);
       if (!saveResult.success) { setTestStatus('error'); setTestError(saveResult.error || t('channels.saveFailed', 'Could not save. Please try again.')); return; }
+
+      // Refresh the channel list immediately after a successful save so the
+      // sidebar shows the newly-connected channel without waiting for the next
+      // poll cycle.
+      await loadConfiguredChannels(false);
 
       const testResult = await (window.electronAPI as any).channelTest(activeWizard);
       setTestStatus(testResult.success ? 'success' : 'error');
@@ -697,7 +748,7 @@ export default function Channels() {
                                   ? t('channels.guide.wechat.scan', 'Scan QR with WeChat to link')
                                   : t('channels.signal.scanHint', 'Open Signal → Settings → Linked Devices → Link New Device')}
                             </p>
-                            <div className="bg-white rounded-xl p-3 overflow-x-auto">
+                            <div className="flex justify-center bg-white rounded-xl p-3">
                               <pre className="text-black text-[10px] leading-none font-mono whitespace-pre select-text">{asciiQR}</pre>
                             </div>
                             <p className="text-xs text-slate-500 text-center">{t('channels.qr.waiting', 'Waiting for scan...')}</p>
@@ -763,12 +814,31 @@ export default function Channels() {
                     )}
                   </div>
                   {testStatus === 'success' && (
-                    <div className="flex justify-end">
-                      <button onClick={closeWizard}
-                        className="px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-sm font-medium transition-colors inline-flex items-center gap-1.5">
-                        <Check size={14} />
-                        {t('channels.done')}
-                      </button>
+                    <div className="flex flex-col gap-3">
+                      {activeWizard && EXTERNAL_CHANNELS.has(activeWizard) && (
+                        <div className="px-3 py-3 bg-emerald-900/20 border border-emerald-700/30 rounded-xl text-xs text-emerald-300 text-left leading-relaxed">
+                          <span className="font-semibold block mb-1">{t('channels.postConnect.nextStep', 'What\'s next?')}</span>
+                          {getPostConnectHint()}
+                        </div>
+                      )}
+                      <div className="flex justify-end gap-2">
+                        <button onClick={closeWizard}
+                          className="px-5 py-2 border border-slate-600 hover:border-slate-400 text-slate-300 hover:text-white rounded-xl text-sm font-medium transition-colors">
+                          {t('channels.done')}
+                        </button>
+                        <button onClick={() => {
+                          closeWizard();
+                          if (activeWizard && onOpenChannelChat) {
+                            onOpenChannelChat(activeWizard);
+                          } else {
+                            onNavigate?.('chat');
+                          }
+                        }}
+                          className="px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-sm font-medium transition-colors inline-flex items-center gap-1.5">
+                          <MessageSquare size={14} />
+                          {t('channels.openChat', 'Open Chat')}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </>
