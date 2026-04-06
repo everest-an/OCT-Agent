@@ -73,6 +73,7 @@ let isQuitting = false;
 let daemonStartupPromise: Promise<{ success: boolean; alreadyRunning?: boolean; error?: string }> | null = null;
 let daemonStartupLastKickoff = 0;
 let gatewayWsClient: GatewayClient | null = null;
+let gatewayWsConnectPromise: Promise<GatewayClient> | null = null;
 let gatewayRepairPromise: Promise<{ ok: boolean; error?: string }> | null = null;
 let gatewayUserSessionLastLaunchAt = 0;
 
@@ -830,57 +831,72 @@ async function getGatewayWs(options?: { onPairingRepairStart?: () => void; onPai
     });
   }
 
-  if (!gatewayWsClient.isConnected) {
+  // Already connected — fast path (most common case)
+  if (gatewayWsClient.isConnected) return gatewayWsClient;
+
+  // Connection mutex: if a connect() is already in flight, await the same promise
+  // instead of creating a second WebSocket. Concurrent callers (e.g. attachSubagentListener
+  // + mission:start IPC handler) would otherwise race on new WebSocket(), causing
+  // "WebSocket was closed before the connection was established".
+  if (gatewayWsConnectPromise) return gatewayWsConnectPromise;
+
+  gatewayWsConnectPromise = (async () => {
     try {
-      await gatewayWsClient.connect();
-    } catch (err: any) {
-      const message = err?.message || '';
-      if (!/pairing required/i.test(message)) throw err;
+      try {
+        await gatewayWsClient!.connect();
+      } catch (err: any) {
+        const message = err?.message || '';
+        if (!/pairing required/i.test(message)) throw err;
 
-      options?.onPairingRepairStart?.();
+        options?.onPairingRepairStart?.();
 
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('chat:status', {
-          type: 'gateway',
-          message: 'Approving local Gateway device access...',
-        });
-      }
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('chat:status', {
+            type: 'gateway',
+            message: 'Approving local Gateway device access...',
+          });
+        }
 
-      const approvalOutput = await runAsync('openclaw devices approve --latest 2>&1', 30000).catch(() => '');
-      if (!/Approved\s+/i.test(approvalOutput || '')) {
-        throw err;
-      }
-
-      options?.onPairingRepair?.();
-      await gatewayWsClient.connect();
-    }
-  }
-
-  // Pre-warm write scopes so the first chatSend's ensureWriteScopes() is a no-op.
-  // Without this, the scope upgrade on the first chat triggers a fresh WS reconnect
-  // that can hit "pairing required" again — and that error bypasses the pairing repair
-  // logic here in getGatewayWs because ensureWriteScopes calls connect() directly.
-  if (!gatewayWsClient.hasWriteScopes) {
-    try {
-      await gatewayWsClient.warmUpWriteScopes();
-    } catch (scopeErr: any) {
-      const scopeMsg = scopeErr?.message || '';
-      if (/pairing required/i.test(scopeMsg)) {
-        // Scope upgrade itself needs pairing — approve and retry once
         const approvalOutput = await runAsync('openclaw devices approve --latest 2>&1', 30000).catch(() => '');
-        if (/Approved\s+/i.test(approvalOutput || '')) {
-          try {
-            await gatewayWsClient.warmUpWriteScopes();
-          } catch {
-            // Pre-warm failed even after approval; will retry on first chatSend
+        if (!/Approved\s+/i.test(approvalOutput || '')) {
+          throw err;
+        }
+
+        options?.onPairingRepair?.();
+        await gatewayWsClient!.connect();
+      }
+
+      // Pre-warm write scopes so the first chatSend's ensureWriteScopes() is a no-op.
+      // Without this, the scope upgrade on the first chat triggers a fresh WS reconnect
+      // that can hit "pairing required" again — and that error bypasses the pairing repair
+      // logic here in getGatewayWs because ensureWriteScopes calls connect() directly.
+      if (!gatewayWsClient!.hasWriteScopes) {
+        try {
+          await gatewayWsClient!.warmUpWriteScopes();
+        } catch (scopeErr: any) {
+          const scopeMsg = scopeErr?.message || '';
+          if (/pairing required/i.test(scopeMsg)) {
+            const approvalOutput = await runAsync('openclaw devices approve --latest 2>&1', 30000).catch(() => '');
+            if (/Approved\s+/i.test(approvalOutput || '')) {
+              try {
+                await gatewayWsClient!.warmUpWriteScopes();
+              } catch {
+                // Pre-warm failed even after approval; will retry on first chatSend
+              }
+            }
           }
+          // Non-pairing scope errors are ignored — write scope pre-warm is best-effort
         }
       }
-      // Non-pairing scope errors are ignored — write scope pre-warm is best-effort
-    }
-  }
 
-  return gatewayWsClient;
+      return gatewayWsClient!;
+    } finally {
+      // Clear the mutex so future disconnects can reconnect normally
+      gatewayWsConnectPromise = null;
+    }
+  })();
+
+  return gatewayWsConnectPromise;
 }
 
 async function ensureGatewayAccessForStartup(
