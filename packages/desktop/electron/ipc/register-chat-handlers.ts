@@ -5,648 +5,53 @@ import path from 'path';
 import { ipcMain } from 'electron';
 import type { GatewayClient } from '../gateway-ws';
 import { getExecApprovalSettings } from '../openclaw-config';
-import { readJsonFileWithBom } from '../json-file';
-import { buildMemoryInitArgs } from '../memory-protocol';
 
-type ChatSendOptions = {
-  thinkingLevel?: string;
-  reasoningDisplay?: string;
-  model?: string;
-  files?: string[];
-  workspacePath?: string;
-  agentId?: string;
-};
-
-type MemoryCapturePolicy = {
-  autoCapture: boolean;
-  blockedSources: string[];
-};
-
-let activeChatChild: ReturnType<typeof spawn> | null = null;
-let awarenessInitCompatibilityMode = false;
-let lastAwarenessInitCompatibilityError = '';
-
-const CHAT_TIMEOUT_MS = 120000;
-const MCP_MEMORY_BOOTSTRAP_TIMEOUT_MS = 2500;
-const MEMORY_BOOTSTRAP_MAX_CHARS = 4000;
-
-function normalizeDesktopRole(role: unknown): 'user' | 'assistant' {
-  return role === 'user' ? 'user' : 'assistant';
-}
-
-function normalizeContentBlocks(message: any): any[] {
-  return Array.isArray(message?.content)
-    ? message.content.filter((block: any) => block && typeof block === 'object')
-    : [];
-}
-
-function extractAssistantText(message: any): string {
-  if (!message) return '';
-  if (Array.isArray(message.content)) {
-    return message.content
-      .map((contentBlock: any) => contentBlock?.type === 'text' ? (contentBlock.text || '') : '')
-      .join('');
-  }
-  if (typeof message.content === 'string') {
-    return message.content;
-  }
-  return '';
-}
-
-function extractAssistantThinking(message: any): string {
-  if (!message) return '';
-  if (Array.isArray(message.content)) {
-    const parts = message.content
-      .map((contentBlock: any) => {
-        if (contentBlock?.type === 'thinking') return contentBlock.thinking || contentBlock.text || '';
-        if (contentBlock?.type === 'reasoning') return contentBlock.reasoning || contentBlock.text || '';
-        return '';
-      })
-      .filter((part: string) => Boolean(part?.trim()));
-    if (parts.length > 0) return parts.join('\n');
-  }
-  if (typeof message.content === 'string' && message.content.startsWith('Reasoning:')) {
-    return message.content.replace(/^Reasoning:\s*/, '').trim();
-  }
-  return '';
-}
-
-function truncateDetail(text: string, maxChars = 600): string {
-  if (!Number.isFinite(maxChars) || maxChars <= 0) return text;
-  return text.length > maxChars ? `${text.slice(0, maxChars - 1)}…` : text;
-}
-
-function extractToolDetail(value: unknown, maxChars = 10000): string | undefined {
-  if (value == null) return undefined;
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    return trimmed ? truncateDetail(trimmed, maxChars) : undefined;
-  }
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-  if (Array.isArray(value)) {
-    const parts = value
-      .map((entry) => extractToolDetail(entry, maxChars))
-      .filter((entry): entry is string => Boolean(entry));
-    return parts.length > 0 ? truncateDetail(parts.join('\n'), maxChars) : undefined;
-  }
-  if (typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    const directKeys = ['text', 'output', 'stdout', 'stderr', 'message', 'detail', 'summary'];
-    for (const key of directKeys) {
-      const extracted = extractToolDetail(record[key], maxChars);
-      if (extracted) return extracted;
-    }
-    if (Array.isArray(record.content)) {
-      const contentParts = (record.content as unknown[])
-        .map((entry) => {
-          if (entry && typeof entry === 'object') {
-            const block = entry as Record<string, unknown>;
-            return extractToolDetail(block.text ?? block.content ?? block.output, maxChars);
-          }
-          return extractToolDetail(entry, maxChars);
-        })
-        .filter((entry): entry is string => Boolean(entry));
-      if (contentParts.length > 0) return truncateDetail(contentParts.join('\n'), maxChars);
-    }
-    try {
-      return truncateDetail(JSON.stringify(record), maxChars);
-    } catch {
-      return undefined;
-    }
-  }
-  return undefined;
-}
-
-function extractToolArgs(block: Record<string, unknown>): unknown {
-  return block.input ?? block.arguments ?? block.args ?? {};
-}
-
-function extractToolOutput(block: Record<string, unknown>): string | undefined {
-  if (Array.isArray(block.content)) {
-    const contentText = extractToolDetail(block.content, Number.POSITIVE_INFINITY);
-    if (contentText) return contentText;
-  }
-  return extractToolDetail(block.result ?? block.output ?? block.stdout ?? block.stderr ?? block.text ?? block.message, Number.POSITIVE_INFINITY);
-}
-
-function buildToolCallsFromBlocks(contentBlocks: any[]): Array<Record<string, unknown>> {
-  const toolCalls = new Map<string, Record<string, unknown>>();
-  for (const rawBlock of contentBlocks) {
-    const block = rawBlock as Record<string, unknown>;
-    const type = String(block.type || '');
-    if (type === 'tool_use' || type === 'toolcall' || type === 'tool_call') {
-      const toolId = String(block.id || block.toolCallId || `tool-${toolCalls.size + 1}`);
-      const args = extractToolArgs(block);
-      toolCalls.set(toolId, {
-        id: toolId,
-        name: String(block.name || 'tool'),
-        status: 'running',
-        timestamp: Date.now(),
-        detail: extractToolDetail(args, Number.POSITIVE_INFINITY),
-        args,
-      });
-      continue;
-    }
-
-    if (type === 'tool_result' || type === 'toolresult' || type === 'tool_result_block') {
-      const toolId = String(block.tool_use_id || block.toolCallId || block.id || `tool-result-${toolCalls.size + 1}`);
-      const existing = toolCalls.get(toolId);
-      toolCalls.set(toolId, {
-        id: toolId,
-        name: String(block.name || existing?.name || 'tool'),
-        status: block.is_error || block.isError ? 'failed' : 'completed',
-        timestamp: Date.now(),
-        detail: existing?.detail,
-        args: existing?.args,
-        output: extractToolOutput(block),
-      });
-    }
-  }
-
-  return [...toolCalls.values()];
-}
-
-function buildDesktopMessage(msg: any) {
-  const contentBlocks = normalizeContentBlocks(msg);
-  const toolCalls = buildToolCallsFromBlocks(contentBlocks);
-  return {
-    id: msg.__openclaw?.id || `gw-${msg.timestamp || Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    role: normalizeDesktopRole(msg.role),
-    content: extractAssistantText(msg),
-    timestamp: msg.timestamp || Date.now(),
-    model: msg.model,
-    thinking: extractAssistantThinking(msg) || undefined,
-    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-    contentBlocks: contentBlocks.length > 0 ? contentBlocks : undefined,
-  };
-}
-
-function mergeToolResultIntoAssistantMessage(
-  assistantMessage: Record<string, any>,
-  block: Record<string, unknown>,
-) {
-  const toolId = String(block.tool_use_id || block.toolCallId || block.id || '');
-  if (!toolId) return;
-
-  const existingToolCalls = Array.isArray(assistantMessage.toolCalls) ? assistantMessage.toolCalls : [];
-  const output = extractToolOutput(block);
-  const nextToolCalls = existingToolCalls.map((toolCall: Record<string, unknown>) => (
-    toolCall.id === toolId
-      ? {
-          ...toolCall,
-          status: block.is_error || block.isError ? 'failed' : 'completed',
-          output: output || toolCall.output,
-        }
-      : toolCall
-  ));
-  assistantMessage.toolCalls = nextToolCalls;
-  assistantMessage.contentBlocks = [
-    ...(Array.isArray(assistantMessage.contentBlocks) ? assistantMessage.contentBlocks : []),
-    block,
-  ];
-}
-
-function buildDesktopHistory(rawMessages: any[]): Array<Record<string, any>> {
-  const desktopMessages: Array<Record<string, any>> = [];
-  const assistantMessageByToolId = new Map<string, Record<string, any>>();
-
-  for (const rawMessage of rawMessages || []) {
-    const desktopMessage = buildDesktopMessage(rawMessage);
-    const contentBlocks = normalizeContentBlocks(rawMessage);
-    const toolResultBlocks = contentBlocks.filter((block: any) => {
-      const type = String(block?.type || '');
-      return type === 'tool_result' || type === 'toolresult' || type === 'tool_result_block';
-    });
-
-    if (desktopMessage.role === 'assistant') {
-      desktopMessages.push(desktopMessage);
-      for (const toolCall of desktopMessage.toolCalls || []) {
-        if (toolCall?.id) assistantMessageByToolId.set(String(toolCall.id), desktopMessage);
-      }
-      continue;
-    }
-
-    let mergedToolResultCount = 0;
-    for (const block of toolResultBlocks) {
-      const toolId = String(block.tool_use_id || block.toolCallId || block.id || '');
-      const assistantMessage = assistantMessageByToolId.get(toolId);
-      if (!assistantMessage) continue;
-      mergeToolResultIntoAssistantMessage(assistantMessage, block);
-      mergedToolResultCount += 1;
-    }
-
-    const hasOwnVisibleContent = Boolean(desktopMessage.content?.trim()) || Boolean(desktopMessage.thinking?.trim());
-    const hasUnmergedBlocks = contentBlocks.length > mergedToolResultCount;
-    if (hasOwnVisibleContent || hasUnmergedBlocks) {
-      desktopMessages.push(desktopMessage);
-    }
-  }
-
-  return desktopMessages;
-}
-
-function extractAssistantEventText(data: Record<string, unknown>): string | undefined {
-  return extractToolDetail(
-    data.thinking
-    ?? data.reasoning
-    ?? data.text
-    ?? data.delta
-    ?? data.content,
-    Number.POSITIVE_INFINITY,
-  );
-}
-
-type NormalizedAgentEvent = {
-  stream: 'assistant' | 'tool' | 'lifecycle';
-  phase?: string;
-  runId?: unknown;
-  sessionKey?: string;
-  seq?: unknown;
-  toolCallId?: string;
-  toolName?: string;
-  args?: unknown;
-  partialResult?: unknown;
-  result?: unknown;
-  isError?: boolean;
-  text?: string;
-  thinking?: string;
-  raw?: unknown;
-};
-
-function normalizeAgentGatewayEvent(eventName: string, payload: any): NormalizedAgentEvent | null {
-  if (!payload || typeof payload !== 'object') return null;
-
-  const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload;
-  const sessionKey = typeof payload?.sessionKey === 'string'
-    ? payload.sessionKey
-    : typeof data?.sessionKey === 'string'
-      ? data.sessionKey
-      : '';
-
-  if (typeof payload?.stream === 'string') {
-    if (payload.stream === 'tool') {
-      const toolCallId = typeof data?.toolCallId === 'string' ? data.toolCallId : '';
-      const toolName = typeof data?.name === 'string'
-        ? data.name
-        : typeof data?.tool === 'string'
-          ? data.tool
-          : undefined;
-      return {
-        stream: 'tool',
-        phase: typeof data?.phase === 'string' ? data.phase : '',
-        runId: payload?.runId,
-        sessionKey,
-        seq: payload?.seq,
-        toolCallId,
-        toolName,
-        args: data?.args,
-        partialResult: data?.partialResult,
-        result: data?.result,
-        isError: Boolean(data?.isError),
-        raw: data,
-      };
-    }
-
-    if (payload.stream === 'assistant') {
-      const assistantText = extractAssistantEventText(data);
-      if (!assistantText) return null;
-      const isThinking = Boolean(data?.thinking || data?.reasoning)
-        || (typeof data?.phase === 'string' && data.phase === 'thinking');
-      return {
-        stream: 'assistant',
-        phase: isThinking ? 'thinking' : 'text',
-        runId: payload?.runId,
-        sessionKey,
-        seq: payload?.seq,
-        text: !isThinking && typeof data?.text === 'string' ? data.text : assistantText,
-        thinking: isThinking ? assistantText : undefined,
-        raw: data,
-      };
-    }
-
-    if (payload.stream === 'lifecycle') {
-      return {
-        stream: 'lifecycle',
-        phase: typeof data?.phase === 'string' ? data.phase : '',
-        runId: payload?.runId,
-        sessionKey,
-        seq: payload?.seq,
-        raw: data,
-      };
-    }
-  }
-
-  const nestedEvent = typeof payload?.event === 'string' ? payload.event : '';
-
-  if (eventName === 'agent:assistant') {
-    const assistantText = extractAssistantEventText(data);
-    if (!assistantText) return null;
-    const isThinking = Boolean(data?.thinking || data?.reasoning)
-      || (typeof data?.phase === 'string' && data.phase === 'thinking');
-    return {
-      stream: 'assistant',
-      phase: isThinking ? 'thinking' : 'text',
-      runId: payload?.runId,
-      sessionKey,
-      seq: payload?.seq,
-      text: !isThinking && typeof data?.text === 'string' ? data.text : assistantText,
-      thinking: isThinking ? assistantText : undefined,
-      raw: data,
-    };
-  }
-
-  if (eventName === 'agent:lifecycle') {
-    return {
-      stream: 'lifecycle',
-      phase: nestedEvent || (typeof data?.phase === 'string' ? data.phase : ''),
-      runId: payload?.runId,
-      sessionKey,
-      seq: payload?.seq,
-      raw: payload,
-    };
-  }
-
-  if (eventName === 'agent:tool' || nestedEvent === 'tool.call' || nestedEvent === 'tool.output') {
-    const toolCallId = typeof data?.toolCallId === 'string'
-      ? data.toolCallId
-      : typeof data?.id === 'string'
-        ? data.id
-        : '';
-    const toolName = typeof data?.name === 'string'
-      ? data.name
-      : typeof data?.tool === 'string'
-        ? data.tool
-        : undefined;
-    const phase = nestedEvent === 'tool.call'
-      ? 'start'
-      : data?.partialResult != null || data?.delta != null || data?.chunk != null
-        ? 'update'
-        : 'result';
-    return {
-      stream: 'tool',
-      phase,
-      runId: payload?.runId,
-      sessionKey,
-      seq: payload?.seq,
-      toolCallId,
-      toolName,
-      args: data?.args ?? data?.input ?? data?.arguments,
-      partialResult: data?.partialResult ?? data?.delta ?? data?.chunk,
-      result: data?.result ?? data?.output ?? data?.stdout ?? data?.stderr ?? data?.content,
-      isError: Boolean(data?.isError || data?.error),
-      raw: payload,
-    };
-  }
-
-  if (eventName === 'agent' && nestedEvent) {
-    if (nestedEvent.startsWith('agent.')) {
-      return {
-        stream: 'lifecycle',
-        phase: nestedEvent,
-        runId: payload?.runId,
-        sessionKey,
-        seq: payload?.seq,
-        raw: payload,
-      };
-    }
-  }
-
-}
-
-function getHostOsLabel(platform: NodeJS.Platform): string {
-  if (platform === 'win32') return 'Windows';
-  if (platform === 'darwin') return 'macOS';
-  return 'Linux';
-}
-
-function looksLikePathReference(text: string): boolean {
-  return /[a-zA-Z]:\\|\\\\|\/[A-Za-z0-9._-]|\.[A-Za-z0-9]{1,8}\b/.test(text);
-}
-
-function looksLikeFilesystemMutationRequest(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-
-  const hasMutationVerb = /(create|write|save|edit|modify|update|append|rename|move|delete|remove|overwrite|mkdir|touch|生成|写入|保存|创建|新建|编辑|修改|更新|追加|重命名|移动|删除|移除|覆盖)/i.test(trimmed);
-  if (!hasMutationVerb) return false;
-
-  const hasFilesystemContext = /(file|folder|directory|path|txt|md|json|csv|docx?|log|文件|文件夹|目录|路径|文档|文本)/i.test(trimmed);
-  return hasFilesystemContext || looksLikePathReference(trimmed);
-}
-
-function looksLikeFilesystemToolName(toolName: string | undefined): boolean {
-  const normalized = String(toolName || '').trim().toLowerCase();
-  if (!normalized) return false;
-  return /(^|[_.:-])(exec|bash|powershell|read|write|edit|replace|rename|move|delete|remove|mkdir|touch|cat|ls|stat|file)([_.:-]|$)/.test(normalized);
-}
-
-function looksLikeSuccessfulFilesystemMutationResponse(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  if (/(did not|didn't|unable|can't|cannot|could not|failed|not able|was not|were not|没能|无法|不能|失败|未能|未成功)/i.test(trimmed)) {
-    return false;
-  }
-
-  const hasSuccessVerb = /(saved|created|wrote|written|updated|edited|renamed|deleted|removed|moved|overwritten|placed|put|listed|found|contains?|there (?:is|are)|saving|writing|保存|创建|写入|写好|写好了|更新|修改|重命名|删除|移除|移动|放在|放到|列出|读取|看到|找到了|包含|目前有|如下|已保存|已创建|已写入|已更新|已读取|已列出)/i.test(trimmed);
-  if (!hasSuccessVerb) return false;
-
-  const hasFilesystemContext = /(file|folder|directory|path|txt|md|json|csv|docx?|log|文件|文件夹|目录|路径|文档|文本)/i.test(trimmed);
-  return hasFilesystemContext || looksLikePathReference(trimmed);
-}
-
-function looksLikeWebOperationRequest(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  return /(https?:\/\/|\bwww\.|\burl\b|\bwebsite\b|\bweb ?page\b|\bbrowser\b|\bbrowse\b|\bweb\b|\bsearch\b|\bfetch\b|\bdownload\b|网页|网站|浏览|搜索|抓取|下载)/i.test(trimmed);
-}
-
-function looksLikeSpecialUseIpWebBlock(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  return /(private\s*[,/ ]\s*internal\s*[,/ ]\s*(or\s+)?special-use\s+ip|private\/internal\/special-use\s+ip|special-use\s+ip\s+address)/i.test(trimmed);
-}
-
-function extractFirstHttpUrl(text: string): string | null {
-  const match = text.match(/https?:\/\/[^\s)\]"'>]+/i);
-  return match?.[0] || null;
-}
-
-function hasMeaningfulAgentText(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  if (/^no response$/i.test(trimmed)) return false;
-  if (/^blocked$/i.test(trimmed)) return false;
-  return true;
-}
-
-function looksLikeAwarenessInitCompatibilityError(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  return /schema must be object or boolean/i.test(trimmed);
-}
-
-function parseMcpTextPayload(mcpResponse: any) {
-  const textPayload = mcpResponse?.result?.content?.[0]?.text;
-  if (!textPayload || typeof textPayload !== 'string') return {};
-  try {
-    return JSON.parse(textPayload);
-  } catch {
-    return {};
-  }
-}
-
-function buildAwarenessInitSkipInstruction(errorDetail?: string): string {
-  const summary = errorDetail ? `Latest compatibility failure: ${truncateDetail(errorDetail, 240)}` : '';
-  return [
-    '[Awareness memory compatibility note]',
-    'Desktop has already detected that awareness_init can fail in the current OpenClaw wrapper path.',
-    'Do not call awareness_init for this turn unless the user explicitly asks you to refresh memory bootstrap state.',
-    'Continue with the main task even if Awareness memory bootstrap is unavailable.',
-    'If you need targeted memory, use awareness_recall or awareness_lookup instead of awareness_init.',
-    summary,
-  ].filter(Boolean).join('\n');
-}
-
-function buildDesktopMemoryBootstrapSummary(memoryPayload: Record<string, any>): string {
-  const renderedContext = typeof memoryPayload?.rendered_context === 'string'
-    ? memoryPayload.rendered_context.trim()
-    : '';
-  if (renderedContext) {
-    return truncateDetail(renderedContext, MEMORY_BOOTSTRAP_MAX_CHARS);
-  }
-
-  const sections: string[] = [];
-  const knowledgeCards = Array.isArray(memoryPayload?.knowledge_cards)
-    ? memoryPayload.knowledge_cards.slice(0, 5)
-    : [];
-  if (knowledgeCards.length > 0) {
-    sections.push([
-      'Knowledge cards:',
-      ...knowledgeCards.map((card: any) => `- ${String(card?.title || card?.summary || card?.content || '').trim()}`),
-    ].join('\n'));
-  }
-
-  const openTasks = Array.isArray(memoryPayload?.open_tasks)
-    ? memoryPayload.open_tasks.slice(0, 5)
-    : [];
-  if (openTasks.length > 0) {
-    sections.push([
-      'Open tasks:',
-      ...openTasks.map((task: any) => `- ${String(task?.title || task?.summary || task?.content || '').trim()}`),
-    ].join('\n'));
-  }
-
-  const recentSessions = Array.isArray(memoryPayload?.recent_sessions)
-    ? memoryPayload.recent_sessions.slice(0, 3)
-    : [];
-  if (recentSessions.length > 0) {
-    sections.push([
-      'Recent sessions:',
-      ...recentSessions.map((entry: any) => `- ${String(entry?.summary || entry?.title || entry?.content || '').trim()}`),
-    ].join('\n'));
-  }
-
-  return truncateDetail(sections.filter(Boolean).join('\n\n'), MEMORY_BOOTSTRAP_MAX_CHARS);
-}
-
-function buildDesktopMemoryBootstrapSection(memoryPayload: Record<string, any>, compatibilityError?: string): string {
-  const contextSummary = buildDesktopMemoryBootstrapSummary(memoryPayload);
-  const sections = [
-    compatibilityError ? buildAwarenessInitSkipInstruction(compatibilityError) : '',
-    [
-      '[Awareness memory bootstrap loaded by Desktop]',
-      'Desktop already loaded the current Awareness memory context for this turn.',
-      'Treat the block below as the result of awareness_init and do not call awareness_init again on this turn.',
-      'If more memory is needed, use awareness_recall or awareness_lookup instead.',
-      contextSummary,
-    ].filter(Boolean).join('\n'),
-  ].filter(Boolean);
-  return sections.join('\n\n');
-}
-
-function buildAwarenessInitCompatibilityRetryPrompt(runtimeMessage: string, failureDetail: string): string {
-  return [
-    '[Automatic compatibility retry]',
-    'Previous attempt hit the known Awareness memory bootstrap compatibility failure in awareness_init.',
-    'Do not call awareness_init on this retry.',
-    'Continue with the main task directly. If memory is needed, rely on the preloaded desktop memory context already present in the runtime metadata or use awareness_recall / awareness_lookup instead.',
-    `Compatibility failure: ${truncateDetail(failureDetail, 400)}`,
-    '',
-    '[Original runtime message]',
-    runtimeMessage,
-  ].join('\n');
-}
-
-function shouldRetryAfterAwarenessInitFailure(originalRequest: string, finalText: string): boolean {
-  if (looksLikeWebOperationRequest(originalRequest) || looksLikeFilesystemMutationRequest(originalRequest)) {
-    return true;
-  }
-
-  const trimmed = finalText.trim();
-  if (!trimmed) return true;
-  if (/^BROWSER_UNAVAILABLE$/i.test(trimmed)) return true;
-  if (/^INIT_FAILED$/i.test(trimmed)) return true;
-  if (/^No response$/i.test(trimmed)) return true;
-  return false;
-}
-
-async function tryBuildDesktopMemoryBootstrapSection(
-  callMcpStrict: (toolName: string, args: Record<string, any>, timeoutMs?: number) => Promise<any>,
-  userMessage: string,
-): Promise<string> {
-  const mcpResponse = await callMcpStrict(
-    'awareness_init',
-    buildMemoryInitArgs(userMessage),
-    MCP_MEMORY_BOOTSTRAP_TIMEOUT_MS,
-  );
-  const memoryPayload = parseMcpTextPayload(mcpResponse);
-  return buildDesktopMemoryBootstrapSection(memoryPayload, awarenessInitCompatibilityMode ? lastAwarenessInitCompatibilityError : undefined);
-}
-
-function getMemoryCapturePolicy(homeDir: string): MemoryCapturePolicy {
-  const defaultPolicy: MemoryCapturePolicy = { autoCapture: true, blockedSources: [] };
-
-  try {
-    const configPath = path.join(homeDir, '.openclaw', 'openclaw.json');
-    const config = readJsonFileWithBom<Record<string, any>>(configPath) || {};
-    const memoryConfig = config?.plugins?.entries?.['openclaw-memory']?.config || {};
-
-    const blockedSources = Array.isArray(memoryConfig?.blockedSources)
-      ? memoryConfig.blockedSources.filter((item: unknown): item is string => typeof item === 'string').map(item => item.trim()).filter(Boolean)
-      : [];
-
-    return {
-      autoCapture: memoryConfig?.autoCapture !== false,
-      blockedSources,
-    };
-  } catch {
-    return defaultPolicy;
-  }
-}
-
-function buildWebCompatibilityRetryPrompt(originalRequest: string, blockedResponse: string): string {
-  const targetUrl = extractFirstHttpUrl(originalRequest);
-  const urlHint = targetUrl ? `Target public URL: ${targetUrl}` : '';
-
-  return `[Automatic compatibility retry]
-Previous attempt was blocked because web_fetch/browser treated the resolved address as private/internal/special-use (common with VPN DNS hijack/split routing).
-
-Retry this request without using web_fetch or browser.
-- Use web_search for discovery when needed.
-- For public URL retrieval, use exec-based HTTP commands.
-- On Windows, prefer Invoke-WebRequest with -UseBasicParsing.
-- On macOS/Linux, prefer curl -L.
-- If the user requested download/save, verify file existence and size after writing.
-
-${urlHint}
-Original request:
-${originalRequest}
-
-Previous blocked response:
-${blockedResponse}`;
-}
+// Extracted modules — pure copy/paste, no logic changes
+import type { ChatSendOptions, MemoryCapturePolicy } from './chat-types';
+import { chatState, CHAT_TIMEOUT_MS } from './chat-types';
+import {
+  normalizeDesktopRole,
+  normalizeContentBlocks,
+  extractAssistantText,
+  extractAssistantThinking,
+  truncateDetail,
+  extractToolDetail,
+  extractToolArgs,
+  extractToolOutput,
+  buildToolCallsFromBlocks,
+  buildDesktopMessage,
+  mergeToolResultIntoAssistantMessage,
+  buildDesktopHistory,
+} from './chat-message-builders';
+import type { NormalizedAgentEvent } from './gateway-event-normalizer';
+import { normalizeAgentGatewayEvent } from './gateway-event-normalizer';
+import {
+  getHostOsLabel,
+  looksLikePathReference,
+  looksLikeFilesystemMutationRequest,
+  looksLikeFilesystemToolName,
+  looksLikeSuccessfulFilesystemMutationResponse,
+  looksLikeWebOperationRequest,
+  looksLikeSpecialUseIpWebBlock,
+  extractFirstHttpUrl,
+  hasMeaningfulAgentText,
+  looksLikeAwarenessInitCompatibilityError,
+} from './chat-detection';
+import {
+  parseMcpTextPayload,
+  buildAwarenessInitSkipInstruction,
+  buildDesktopMemoryBootstrapSection,
+  buildAwarenessInitCompatibilityRetryPrompt,
+  shouldRetryAfterAwarenessInitFailure,
+  tryBuildDesktopMemoryBootstrapSection,
+  getMemoryCapturePolicy,
+  buildWebCompatibilityRetryPrompt,
+} from './awareness-memory-utils';
+import { chatSendViaCli, chatSendViaCliWithWebCompatibilityRetry } from './chat-cli-executor';
+
+// --- Helper functions extracted to ./chat-message-builders.ts, ./gateway-event-normalizer.ts,
+// --- ./chat-detection.ts, ./awareness-memory-utils.ts, ./chat-cli-executor.ts ---
+// --- (pure copy/paste extraction, no logic changes) ---
 
 export function registerChatHandlers(deps: {
   sendToRenderer: (channel: string, payload: any) => void;
@@ -674,9 +79,9 @@ export function registerChatHandlers(deps: {
       }
     }
 
-    if (activeChatChild) {
-      try { activeChatChild.kill('SIGTERM'); } catch { /* already dead */ }
-      activeChatChild = null;
+    if (chatState.activeChatChild) {
+      try { chatState.activeChatChild.kill('SIGTERM'); } catch { /* already dead */ }
+      chatState.activeChatChild = null;
       return { success: true };
     }
 
@@ -747,7 +152,7 @@ export function registerChatHandlers(deps: {
     });
 
     let fullMessage = message;
-    const shouldPreloadDesktopMemory = awarenessInitCompatibilityMode
+    const shouldPreloadDesktopMemory = chatState.awarenessInitCompatibilityMode
       || looksLikeWebOperationRequest(message)
       || looksLikeFilesystemMutationRequest(message);
 
@@ -759,12 +164,12 @@ export function registerChatHandlers(deps: {
         }
       } catch (memoryBootstrapErr: any) {
         const detail = memoryBootstrapErr?.message || String(memoryBootstrapErr);
-        if (awarenessInitCompatibilityMode) {
+        if (chatState.awarenessInitCompatibilityMode) {
           fullMessage = `${buildAwarenessInitSkipInstruction(detail)}\n\n${fullMessage}`;
         }
       }
-    } else if (awarenessInitCompatibilityMode) {
-      fullMessage = `${buildAwarenessInitSkipInstruction(lastAwarenessInitCompatibilityError)}\n\n${fullMessage}`;
+    } else if (chatState.awarenessInitCompatibilityMode) {
+      fullMessage = `${buildAwarenessInitSkipInstruction(chatState.lastAwarenessInitCompatibilityError)}\n\n${fullMessage}`;
     }
 
     // Bootstrap dual mechanism:
@@ -963,8 +368,8 @@ ${message}`;
         if (!looksLikeAwarenessInitCompatibilityError(normalizedDetail)) return;
         awarenessInitCompatibilityIssue = true;
         awarenessInitFailureDetail = normalizedDetail || 'schema must be object or boolean';
-        awarenessInitCompatibilityMode = true;
-        lastAwarenessInitCompatibilityError = awarenessInitFailureDetail;
+        chatState.awarenessInitCompatibilityMode = true;
+        chatState.lastAwarenessInitCompatibilityError = awarenessInitFailureDetail;
       };
 
       const processAssistantContentBlocks = (blocks: any[]) => {
@@ -1262,8 +667,8 @@ ${message}`;
       if (looksLikeAwarenessInitCompatibilityError(finalText)) {
         awarenessInitCompatibilityIssue = true;
         awarenessInitFailureDetail = finalText;
-        awarenessInitCompatibilityMode = true;
-        lastAwarenessInitCompatibilityError = finalText;
+        chatState.awarenessInitCompatibilityMode = true;
+        chatState.lastAwarenessInitCompatibilityError = finalText;
       }
       let shouldFlagVpnDnsCompatibilityIssue = looksLikeWebOperationRequest(message)
         && looksLikeSpecialUseIpWebBlock(finalText);
@@ -1519,279 +924,5 @@ ${message}`;
       }
       return withWorkspaceFallbackMeta({ success: false, text: '', error: errorMsg, sessionId: sid });
     }
-  });
-}
-
-async function chatSendViaCliWithWebCompatibilityRetry(params: {
-  requestMessage: string;
-  originalUserMessage: string;
-  sid: string;
-  options: ChatSendOptions | undefined;
-  send: (channel: string, payload: any) => void;
-  deps: {
-    getEnhancedPath: () => string;
-    prepareCliFallback?: () => Promise<void>;
-    runSpawn?: (cmd: string, args: string[], opts?: Record<string, unknown>) => ReturnType<typeof spawn>;
-    wrapWindowsCommand: (command: string) => string;
-    stripAnsi: (output: string) => string;
-    spawnChatProcess?: typeof spawn;
-  };
-}): Promise<any> {
-  const { requestMessage, originalUserMessage, sid, options, send, deps } = params;
-  const first = await chatSendViaCli(requestMessage, sid, options, send, deps);
-
-  if (first?.localRuntimeMissing && deps.prepareCliFallback) {
-    send('chat:status', {
-      type: 'gateway',
-      message: 'Local memory service is recovering. Retrying automatically...',
-    });
-
-    try {
-      await deps.prepareCliFallback?.();
-    } catch (prepareErr: any) {
-      const detail = prepareErr?.message || String(prepareErr || '');
-      if (/LOCAL_DAEMON_NOT_READY/i.test(detail)) {
-        return {
-          success: false,
-          error: 'Local memory service is still starting. Please wait 20-60 seconds, then retry.',
-          sessionId: sid,
-        };
-      }
-      return {
-        success: false,
-        error: 'OpenClaw could not start the local helper runtime automatically. Please rerun Setup to repair your runtime, then retry.',
-        sessionId: sid,
-      };
-    }
-
-    const repairedRetry = await chatSendViaCli(requestMessage, sid, options, send, deps);
-    if (repairedRetry?.success) {
-      send('chat:status', {
-        type: 'gateway',
-        message: 'Local memory service recovered. Continuing your request.',
-      });
-    }
-    return repairedRetry;
-  }
-
-  if (!first?.vpnDnsCompatibilityIssue) {
-    return first;
-  }
-
-  send('chat:status', {
-    type: 'gateway',
-    message: 'Detected VPN/DNS compatibility mode. Retrying with exec-based web access...',
-  });
-
-  const retryPrompt = buildWebCompatibilityRetryPrompt(
-    originalUserMessage || requestMessage,
-    String(first?.text || ''),
-  );
-  const retry = await chatSendViaCli(retryPrompt, sid, options, send, deps);
-  if (!retry?.success) {
-    send('chat:stream-end', {});
-  }
-  const retryText = String(retry?.text || '').trim();
-
-  if (retry?.success && hasMeaningfulAgentText(retryText)) {
-    return {
-      ...retry,
-      preferResultText: true,
-    };
-  }
-
-  return first;
-}
-
-async function chatSendViaCli(
-  requestMessage: string,
-  sid: string,
-  options: ChatSendOptions | undefined,
-  send: (channel: string, payload: any) => void,
-  deps: {
-    getEnhancedPath: () => string;
-    prepareCliFallback?: () => Promise<void>;
-    runSpawn?: (cmd: string, args: string[], opts?: Record<string, unknown>) => ReturnType<typeof spawn>;
-    wrapWindowsCommand: (command: string) => string;
-    stripAnsi: (output: string) => string;
-    spawnChatProcess?: typeof spawn;
-  },
-): Promise<any> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const collectedLines: string[] = [];
-    const rawOutputLines: string[] = [];
-    let stdoutRemainder = '';
-    let stderrRemainder = '';
-    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-    const finalize = (result: any) => {
-      if (settled) return;
-      settled = true;
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-        timeoutHandle = null;
-      }
-      resolve(result);
-    };
-    const thinkingFlag = options?.thinkingLevel && options.thinkingLevel !== 'off'
-      ? ` --thinking ${options.thinkingLevel}` : '';
-    const sanitizedAgentId = options?.agentId && options.agentId !== 'main'
-      && /^[a-z][a-z0-9-]{0,63}$/.test(options.agentId) && !options.agentId.endsWith('-')
-      ? options.agentId : '';
-    const agentFlag = sanitizedAgentId ? ` --agent "${sanitizedAgentId}"` : '';
-    const escapedMsg = requestMessage.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\\$').replace(/`/g, '\\`');
-    // Note: openclaw CLI does not support --reasoning flag; reasoning is controlled via
-    // openclaw.json agents.defaults.reasoningDefault (set in syncToOpenClaw)
-    const command = `openclaw agent --session-id "${sid}" -m "${escapedMsg}" --verbose full${thinkingFlag}${agentFlag}`;
-    const openclawArgs = ['agent', '--session-id', sid, '-m', requestMessage, '--verbose', 'full'];
-    if (options?.thinkingLevel && options.thinkingLevel !== 'off') {
-      openclawArgs.push('--thinking', options.thinkingLevel);
-    }
-    if (sanitizedAgentId) {
-      openclawArgs.push('--agent', sanitizedAgentId);
-    }
-    const cwd = options?.workspacePath || os.homedir();
-    const spawnChatProcess = deps.spawnChatProcess || spawn;
-    const child = deps.runSpawn
-      ? deps.runSpawn('openclaw', openclawArgs, { cwd, stdio: 'pipe', windowsHide: true })
-      : (() => {
-          const enhancedPath = deps.getEnhancedPath();
-          return process.platform === 'win32'
-            ? spawnChatProcess(deps.wrapWindowsCommand(command), [], { cwd, shell: 'cmd.exe', env: { ...process.env, PATH: enhancedPath, NO_COLOR: '1', FORCE_COLOR: '0' } })
-            : spawnChatProcess('/bin/bash', ['--norc', '--noprofile', '-c', `export PATH="${enhancedPath}"; ${command}`], { cwd, env: { ...process.env, PATH: enhancedPath } });
-        })();
-
-    const isNoiseLine = (line: string) => {
-      const trimmed = line.trim();
-      if (!trimmed) return true;
-      if (trimmed.startsWith('[')) return true;
-      if (/^at\s+ChildProcess\._handle\.onexit\b/i.test(trimmed)) return true;
-      if (/^at\s+onErrorNT\b/i.test(trimmed)) return true;
-      if (/^at\s+process\.processTicksAndRejections\b/i.test(trimmed)) return true;
-      if (/^at\s+.*\(node:internal\//i.test(trimmed)) return true;
-      if (trimmed.startsWith('Config')) return true;
-      if (trimmed.startsWith('Registered')) return true;
-      if (trimmed.includes('plugin')) return true;
-      if (/^gateway connect failed:/i.test(trimmed)) return true;
-      if (/^Gateway agent failed; falling back to embedded:/i.test(trimmed)) return true;
-      if (/^Gateway target:/i.test(trimmed)) return true;
-      if (/^Source:/i.test(trimmed)) return true;
-      if (/^Bind:/i.test(trimmed)) return true;
-      if (/^Config:\s+/i.test(trimmed)) return true;
-      return false;
-    };
-
-    const rememberRawLine = (line: string) => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
-      rawOutputLines.push(trimmed);
-    };
-
-    const flushChunk = (chunk: string, fromStderr: boolean) => {
-      const normalized = deps.stripAnsi(chunk).replace(/\r/g, '');
-      const current = fromStderr ? stderrRemainder : stdoutRemainder;
-      const merged = `${current}${normalized}`;
-      const lines = merged.split('\n');
-      const trailing = lines.pop() ?? '';
-      if (fromStderr) stderrRemainder = trailing;
-      else stdoutRemainder = trailing;
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        rememberRawLine(trimmed);
-        if (!isNoiseLine(trimmed)) {
-          collectedLines.push(trimmed);
-          send('chat:stream', `${trimmed}\n`);
-        }
-      }
-    };
-
-    const flushRemainder = (fromStderr: boolean) => {
-      const line = (fromStderr ? stderrRemainder : stdoutRemainder).trim();
-      if (fromStderr) stderrRemainder = '';
-      else stdoutRemainder = '';
-      if (!line) return;
-      rememberRawLine(line);
-      if (!isNoiseLine(line)) {
-        collectedLines.push(line);
-        send('chat:stream', `${line}\n`);
-      }
-    };
-
-    activeChatChild = child;
-    child.stdout?.on('data', (data: Buffer) => {
-      flushChunk(data.toString(), false);
-    });
-    child.stderr?.on('data', (data: Buffer) => {
-      flushChunk(data.toString(), true);
-    });
-    child.on('exit', (code: number | null) => {
-      activeChatChild = null;
-      flushRemainder(false);
-      flushRemainder(true);
-      send('chat:stream-end', {});
-      const clean = collectedLines.join('\n').trim();
-      const rawCombined = rawOutputLines.join('\n');
-
-      if (code !== 0) {
-        if (/spawn\s+npx(?:\.cmd)?\s+ENOENT/i.test(`${rawCombined}\n${clean}`)) {
-          finalize({
-            success: false,
-            error: 'OpenClaw could not start the local helper runtime. Please rerun Setup to repair your runtime, then retry.',
-            sessionId: sid,
-            localRuntimeMissing: true,
-          });
-          return;
-        }
-
-        finalize({
-          success: false,
-          error: clean || `OpenClaw exited with code ${code ?? 'unknown'}`,
-          sessionId: sid,
-        });
-        return;
-      }
-
-      const shouldFlagUnverifiedLocalFileOperation = looksLikeFilesystemMutationRequest(requestMessage)
-        && looksLikeSuccessfulFilesystemMutationResponse(clean);
-      const shouldFlagVpnDnsCompatibilityIssue = looksLikeWebOperationRequest(requestMessage)
-        && looksLikeSpecialUseIpWebBlock(clean);
-      if (shouldFlagUnverifiedLocalFileOperation) {
-        console.warn('[chat] CLI fallback produced an unverified local filesystem success claim', {
-          sessionId: sid,
-          responsePreview: clean.slice(0, 200),
-        });
-      }
-      if (shouldFlagVpnDnsCompatibilityIssue) {
-        console.warn('[chat] CLI fallback indicates VPN/DNS special-use IP compatibility issue', {
-          sessionId: sid,
-          responsePreview: clean.slice(0, 200),
-        });
-      }
-      finalize({
-        success: true,
-        text: clean || 'No response',
-        sessionId: sid,
-        unverifiedLocalFileOperation: shouldFlagUnverifiedLocalFileOperation || undefined,
-        vpnDnsCompatibilityIssue: shouldFlagVpnDnsCompatibilityIssue || undefined,
-      });
-    });
-    child.on('error', (err) => {
-      const message = String(err);
-      if (/spawn\s+npx(?:\.cmd)?\s+ENOENT/i.test(message)) {
-        finalize({
-          success: false,
-          error: 'OpenClaw could not start the local helper runtime. Please rerun Setup to repair your runtime, then retry.',
-          sessionId: sid,
-          localRuntimeMissing: true,
-        });
-        return;
-      }
-      finalize({ success: false, error: message, sessionId: sid });
-    });
-    timeoutHandle = setTimeout(() => {
-      try { child.kill(); } catch {}
-      finalize({ success: false, error: 'Response timeout', sessionId: sid });
-    }, CHAT_TIMEOUT_MS);
   });
 }

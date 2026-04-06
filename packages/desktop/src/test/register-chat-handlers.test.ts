@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import os from 'os';
 import path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { chatState } from '../../electron/ipc/chat-types';
 
 const { ipcHandleMock } = vi.hoisted(() => ({
   ipcHandleMock: vi.fn(),
@@ -84,6 +85,10 @@ describe('registerChatHandlers', () => {
   beforeEach(() => {
     ipcHandleMock.mockReset();
     spawnMock.mockReset();
+    // Reset shared module state between tests
+    chatState.activeChatChild = null;
+    chatState.awarenessInitCompatibilityMode = false;
+    chatState.lastAwarenessInitCompatibilityError = '';
   });
 
   it('falls back to CLI when gateway preflight fails before websocket connect', async () => {

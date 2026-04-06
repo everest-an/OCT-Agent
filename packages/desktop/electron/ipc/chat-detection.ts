@@ -1,0 +1,74 @@
+// Extracted from register-chat-handlers.ts — text pattern matching and heuristic detection.
+// No logic changes, only moved.
+
+export function getHostOsLabel(platform: NodeJS.Platform): string {
+  if (platform === 'win32') return 'Windows';
+  if (platform === 'darwin') return 'macOS';
+  return 'Linux';
+}
+
+export function looksLikePathReference(text: string): boolean {
+  return /[a-zA-Z]:\\|\\\\|\/[A-Za-z0-9._-]|\.[A-Za-z0-9]{1,8}\b/.test(text);
+}
+
+export function looksLikeFilesystemMutationRequest(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  const hasMutationVerb = /(create|write|save|edit|modify|update|append|rename|move|delete|remove|overwrite|mkdir|touch|生成|写入|保存|创建|新建|编辑|修改|更新|追加|重命名|移动|删除|移除|覆盖)/i.test(trimmed);
+  if (!hasMutationVerb) return false;
+
+  const hasFilesystemContext = /(file|folder|directory|path|txt|md|json|csv|docx?|log|文件|文件夹|目录|路径|文档|文本)/i.test(trimmed);
+  return hasFilesystemContext || looksLikePathReference(trimmed);
+}
+
+export function looksLikeFilesystemToolName(toolName: string | undefined): boolean {
+  const normalized = String(toolName || '').trim().toLowerCase();
+  if (!normalized) return false;
+  return /(^|[_.:-])(exec|bash|powershell|read|write|edit|replace|rename|move|delete|remove|mkdir|touch|cat|ls|stat|file)([_.:-]|$)/.test(normalized);
+}
+
+export function looksLikeSuccessfulFilesystemMutationResponse(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (/(did not|didn't|unable|can't|cannot|could not|failed|not able|was not|were not|没能|无法|不能|失败|未能|未成功)/i.test(trimmed)) {
+    return false;
+  }
+
+  const hasSuccessVerb = /(saved|created|wrote|written|updated|edited|renamed|deleted|removed|moved|overwritten|placed|put|listed|found|contains?|there (?:is|are)|saving|writing|保存|创建|写入|写好|写好了|更新|修改|重命名|删除|移除|移动|放在|放到|列出|读取|看到|找到了|包含|目前有|如下|已保存|已创建|已写入|已更新|已读取|已列出)/i.test(trimmed);
+  if (!hasSuccessVerb) return false;
+
+  const hasFilesystemContext = /(file|folder|directory|path|txt|md|json|csv|docx?|log|文件|文件夹|目录|路径|文档|文本)/i.test(trimmed);
+  return hasFilesystemContext || looksLikePathReference(trimmed);
+}
+
+export function looksLikeWebOperationRequest(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return /(https?:\/\/|\bwww\.|\burl\b|\bwebsite\b|\bweb ?page\b|\bbrowser\b|\bbrowse\b|\bweb\b|\bsearch\b|\bfetch\b|\bdownload\b|网页|网站|浏览|搜索|抓取|下载)/i.test(trimmed);
+}
+
+export function looksLikeSpecialUseIpWebBlock(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return /(private\s*[,/ ]\s*internal\s*[,/ ]\s*(or\s+)?special-use\s+ip|private\/internal\/special-use\s+ip|special-use\s+ip\s+address)/i.test(trimmed);
+}
+
+export function extractFirstHttpUrl(text: string): string | null {
+  const match = text.match(/https?:\/\/[^\s)\]"'>]+/i);
+  return match?.[0] || null;
+}
+
+export function hasMeaningfulAgentText(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (/^no response$/i.test(trimmed)) return false;
+  if (/^blocked$/i.test(trimmed)) return false;
+  return true;
+}
+
+export function looksLikeAwarenessInitCompatibilityError(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return /schema must be object or boolean/i.test(trimmed);
+}
