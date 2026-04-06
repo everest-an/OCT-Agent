@@ -22,6 +22,11 @@ function isAllowedMarkdownFile(fileName: string) {
   return path.basename(fileName) === fileName && /^[A-Za-z0-9._-]+\.md$/i.test(fileName);
 }
 
+function normalizeAgentEmoji(value: unknown) {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  return trimmed.toLowerCase() === 'default' ? '' : trimmed;
+}
+
 function getAgentReadDirectories(home: string, agentId: string) {
   const slug = toAgentSlug(agentId);
   const globalWorkspaceDir = path.join(home, '.openclaw', 'workspace');
@@ -75,7 +80,7 @@ function readAgentsFromConfig(home: string): { success: boolean; agents: any[] }
     const agents = agentList.map((a: any) => ({
       id: a.id || 'main',
       name: a.identity?.name || a.name || a.id,
-      emoji: a.identity?.emoji || '',
+      emoji: normalizeAgentEmoji(a.identity?.emoji),
       model: a.model || null,
       bindings: [],
       isDefault: a.id === 'main',
@@ -119,7 +124,7 @@ export function registerAgentHandlers(deps: {
             const agents = list.map((a: any) => ({
               id: a.id || a.name || 'main',
               name: a.identityName || a.displayName || a.name || a.id,
-              emoji: a.identityEmoji || a.emoji || '',
+              emoji: normalizeAgentEmoji(a.identityEmoji || a.emoji || ''),
               model: a.model || a.defaultModel || null,
               bindings: Array.isArray(a.bindingDetails) ? a.bindingDetails : Array.isArray(a.bindings) ? a.bindings : [],
               isDefault: a.isDefault === true || a.default === true || a.id === 'main',

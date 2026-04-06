@@ -312,7 +312,7 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
                 <div className="p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                        <AgentAvatar emoji={agent.emoji} size={28} className="text-2xl" />
+                        <AgentAvatar name={agent.name || agent.id} emoji={agent.emoji} size={28} fallback="logo" className="text-2xl" />
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium">{agent.name || agent.id}</span>

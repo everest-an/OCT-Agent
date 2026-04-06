@@ -75,4 +75,19 @@ describe('Agents page', () => {
       expect(screen.getByRole('button', { name: 'AGENTS.md' })).toBeInTheDocument();
     });
   });
+
+  it('uses official logo fallback instead of rendering the literal default placeholder', async () => {
+    const api = window.electronAPI as any;
+    api.agentsList = vi.fn().mockResolvedValue({
+      success: true,
+      agents: [{ id: 'oc-1', name: 'Research', emoji: 'default', isDefault: false, bindings: [] }],
+    });
+
+    await act(async () => { render(<Agents />); });
+
+    await waitFor(() => {
+      expect(screen.getByAltText('Research logo')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/^default$/i)).not.toBeInTheDocument();
+  });
 });

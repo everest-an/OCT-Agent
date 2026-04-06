@@ -36,7 +36,8 @@ describe('BootstrapWizard', () => {
       expect(api.agentsWriteFile).toHaveBeenCalledTimes(3);
       expect(api.agentsWriteFile).toHaveBeenNthCalledWith(1, 'main', 'USER.md', expect.stringContaining('Edwin'));
       expect(api.agentsWriteFile).toHaveBeenNthCalledWith(2, 'main', 'SOUL.md', expect.stringContaining('# Claw'));
-      expect(api.agentsWriteFile).toHaveBeenNthCalledWith(3, 'main', 'IDENTITY.md', expect.stringContaining('**name**: Claw'));
+      expect(api.agentsWriteFile).toHaveBeenNthCalledWith(3, 'main', 'IDENTITY.md', expect.stringContaining('**Name:** Claw'));
+      expect(api.agentsWriteFile).toHaveBeenNthCalledWith(3, 'main', 'IDENTITY.md', expect.not.stringContaining('default'));
       expect(onComplete).toHaveBeenCalled();
     });
   });

@@ -18,6 +18,20 @@ interface AgentWizardProps {
 
 const TOTAL_STEPS = 2;
 
+function buildIdentityMarkdown(name: string, emoji?: string): string {
+  const normalizedEmoji = emoji?.trim() || '';
+  return [
+    '# IDENTITY.md - Agent Identity',
+    '',
+    `- **Name:** ${name}`,
+    '- **Creature:**',
+    '- **Vibe:**',
+    normalizedEmoji ? `- **Emoji:** ${normalizedEmoji}` : '- **Emoji:**',
+    '- **Avatar:**',
+    '',
+  ].join('\n');
+}
+
 export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) {
   const { t } = useI18n();
 
@@ -108,16 +122,15 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
       // 2. Set identity
       setSavingStatus(t('agentWizard.status.identity', 'Setting identity...'));
       const slug = result.agentId || finalName.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || `oc-${Date.now()}`;
+      const normalizedEmoji = agentEmoji.trim();
       if (api.agentsSetIdentity) {
-        await api.agentsSetIdentity(slug, finalName, agentEmoji);
+        await api.agentsSetIdentity(slug, finalName, normalizedEmoji);
       }
 
       // 3. Write IDENTITY.md
       setSavingStatus(t('agentWizard.status.workspace', 'Setting up workspace...'));
       if (api.agentsWriteFile) {
-        await api.agentsWriteFile(slug, 'IDENTITY.md',
-          `# Identity\n\n- **name**: ${finalName}\n- **emoji**: ${agentEmoji || 'default'}\n- **role**: AI Assistant\n`
-        );
+        await api.agentsWriteFile(slug, 'IDENTITY.md', buildIdentityMarkdown(finalName, normalizedEmoji));
       }
 
       // 4. Bind selected channels

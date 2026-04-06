@@ -41,6 +41,19 @@ Feel free to explore ideas from multiple angles.
 Match the language of the user's input — if they write in Chinese, respond in Chinese; if in English, respond in English.`,
 };
 
+function buildIdentityMarkdown(name: string): string {
+  return [
+    '# IDENTITY.md - Agent Identity',
+    '',
+    `- **Name:** ${name}`,
+    '- **Creature:**',
+    '- **Vibe:**',
+    '- **Emoji:**',
+    '- **Avatar:**',
+    '',
+  ].join('\n');
+}
+
 export default function BootstrapWizard({ onComplete, onSkip }: BootstrapWizardProps) {
   const { t } = useI18n();
   const [step, setStep] = useState(0);
@@ -82,10 +95,7 @@ export default function BootstrapWizard({ onComplete, onSkip }: BootstrapWizardP
       );
 
       // Write IDENTITY.md
-      const emoji = 'default';
-      await writeBootstrapFile('IDENTITY.md',
-        `# Identity\n\n- **name**: ${finalAgentName}\n- **emoji**: ${emoji}\n- **role**: AI Assistant\n`
-      );
+      await writeBootstrapFile('IDENTITY.md', buildIdentityMarkdown(finalAgentName));
 
       // Delete BOOTSTRAP.md — OpenClaw creates this as a one-time first-run ritual file.
       // Once our wizard completes, we delete it so OpenClaw doesn't re-run its own bootstrap.

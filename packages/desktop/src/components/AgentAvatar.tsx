@@ -1,4 +1,5 @@
 import { Bot } from 'lucide-react';
+import logoUrl from '../assets/logo.svg';
 
 function frameSizeClass(size: number): string {
   if (size <= 12) return 'w-3 h-3';
@@ -27,26 +28,43 @@ function emojiTextSizeClass(size: number): string {
 }
 
 export default function AgentAvatar({
+  name,
   emoji,
   size = 16,
+  fallback = 'bot',
   className = '',
 }: {
+  name?: string;
   emoji?: string;
   size?: number;
+  fallback?: 'bot' | 'logo';
   className?: string;
 }) {
-  const normalizedEmoji = String(emoji || '').trim();
+  const rawEmoji = String(emoji || '').trim();
+  const normalizedEmoji = rawEmoji.toLowerCase() === 'default' ? '' : rawEmoji;
+  const normalizedName = String(name || '').trim();
   const frameClass = frameSizeClass(size);
   if (normalizedEmoji) {
     return (
-      <span className={`inline-flex items-center justify-center ${frameClass} leading-none ${emojiTextSizeClass(size)} ${className}`.trim()}>
+      <span title={normalizedName || undefined} className={`inline-flex items-center justify-center ${frameClass} leading-none ${emojiTextSizeClass(size)} ${className}`.trim()}>
         {normalizedEmoji}
       </span>
     );
   }
 
+  if (fallback === 'logo' || rawEmoji.toLowerCase() === 'default') {
+    return (
+      <img
+        src={logoUrl}
+        alt={`${normalizedName || 'Agent'} logo`}
+        title={normalizedName || undefined}
+        className={`${frameClass} rounded-md object-contain ${className}`.trim()}
+      />
+    );
+  }
+
   return (
-    <span className={`inline-flex items-center justify-center rounded-md bg-slate-800/70 text-slate-300 ${frameClass} ${className}`.trim()}>
+    <span title={normalizedName || undefined} className={`inline-flex items-center justify-center rounded-md bg-slate-800/70 text-slate-300 ${frameClass} ${className}`.trim()}>
       <Bot size={iconSize(size)} />
     </span>
   );

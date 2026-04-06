@@ -48,6 +48,11 @@ describe('AgentWizard', () => {
 
     await waitFor(() => {
       expect(api.agentsAdd).toHaveBeenCalledWith('Researcher', undefined, undefined);
+      expect(api.agentsWriteFile).toHaveBeenCalledWith(
+        'researcher',
+        'IDENTITY.md',
+        expect.not.stringContaining('default'),
+      );
       expect(onComplete).toHaveBeenCalledWith('researcher');
     });
   });
