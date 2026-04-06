@@ -46,6 +46,7 @@ function createDoctorWithMocks(home: string, overrides?: {
 describe('doctor', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    invalidateCtxCache();
     while (tempDirs.length > 0) {
       fs.rmSync(tempDirs.pop()!, { recursive: true, force: true });
     }
@@ -347,6 +348,89 @@ describe('doctor', () => {
     expect(calls).toContain(`cd "${openclawRoot}" && npm install --no-save "grammy" "@grammyjs/runner" 2>&1`);
     expect(bindAttempts).toBe(2);
   });
+
+  it('repairs stale channel plugin config and restores allowlist for active channels', async () => {
+    const home = createTempHome();
+    const configDir = path.join(home, '.openclaw');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'openclaw.json'), JSON.stringify({
+      plugins: {
+        allow: ['browser', 'signal'],
+        entries: {
+          telegram: { enabled: false },
+          signal: { enabled: true },
+        },
+      },
+      channels: {
+        telegram: { enabled: true },
+      },
+    }));
+
+    const { doctor } = createDoctorWithMocks(home);
+    const before = await doctor.runChecks(['channel-compatibility']);
+    expect(before.checks[0]).toMatchObject({ id: 'channel-compatibility', status: 'fail', fixable: 'auto' });
+
+    const result = await doctor.runFix('channel-compatibility');
+    expect(result).toMatchObject({ success: true });
+
+    const repairedConfig = JSON.parse(fs.readFileSync(path.join(configDir, 'openclaw.json'), 'utf8'));
+    expect(repairedConfig.plugins.allow).toEqual(expect.arrayContaining(['browser', 'telegram']));
+    expect(repairedConfig.plugins.allow).not.toContain('signal');
+    expect(repairedConfig.plugins.entries.telegram.enabled).toBe(true);
+    expect(repairedConfig.plugins.entries.signal).toBeUndefined();
+  });
+
+  it('fails channel compatibility on Windows when legacy imessage is enabled', async () => {
+    const home = createTempHome();
+    const configDir = path.join(home, '.openclaw');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'openclaw.json'), JSON.stringify({
+      channels: {
+        imessage: { enabled: true },
+      },
+    }));
+
+    const { doctor } = createDoctorWithMocks(home, { platform: 'win32' });
+    const report = await doctor.runChecks(['channel-compatibility']);
+
+    expect(report.checks[0]).toMatchObject({
+      id: 'channel-compatibility',
+      status: 'fail',
+      fixable: 'manual',
+    });
+    expect(report.checks[0].message).toContain('macOS');
+  });
+
+  it('fails channel compatibility when signal-cli is missing for a local Signal setup', async () => {
+    const home = createTempHome();
+    const configDir = path.join(home, '.openclaw');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'openclaw.json'), JSON.stringify({
+      channels: {
+        signal: { enabled: true },
+      },
+    }));
+
+    const shellExec = vi.fn(async (cmd: string) => {
+      if (cmd.includes('which -a node')) return '/usr/local/bin/node';
+      if (cmd === 'node --version') return 'v23.11.0';
+      if (cmd.includes('which -a openclaw')) return '/usr/local/bin/openclaw';
+      if (cmd === 'openclaw --version') return 'OpenClaw 2026.4.5 (abcd123)';
+      if (cmd === 'npm config get prefix') return '/usr/local';
+      if (cmd === '"signal-cli" --version 2>&1') return 'signal-cli: command not found';
+      return null;
+    });
+
+    const { doctor } = createDoctorWithMocks(home, { shellExec, platform: 'linux' });
+    const report = await doctor.runChecks(['channel-compatibility']);
+
+    expect(report.checks[0]).toMatchObject({
+      id: 'channel-compatibility',
+      status: 'fail',
+      fixable: 'manual',
+    });
+    expect(report.checks[0].message).toContain('signal-cli');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -623,7 +707,14 @@ describe('doctor — infrastructure checks', () => {
       fs.mkdirSync(configDir, { recursive: true });
       const configPath = path.join(configDir, 'openclaw.json');
       fs.writeFileSync(configPath, '{}');
-      fs.chmodSync(configPath, 0o600);
+      const statSyncOrig = fs.statSync.bind(fs);
+      vi.spyOn(fs, 'statSync').mockImplementation((filePath: any) => {
+        const stat = statSyncOrig(filePath) as fs.Stats & { mode: number };
+        if (String(filePath) === configPath) {
+          return { ...stat, mode: 0o100600 } as fs.Stats;
+        }
+        return stat;
+      });
       const { doctor } = createDoctorWithMocks(home);
       const report = await doctor.runChecks(['config-permissions']);
       expect(report.checks[0]).toMatchObject({ id: 'config-permissions', status: 'pass' });
@@ -637,7 +728,14 @@ describe('doctor — infrastructure checks', () => {
       fs.mkdirSync(configDir, { recursive: true });
       const configPath = path.join(configDir, 'openclaw.json');
       fs.writeFileSync(configPath, '{}');
-      fs.chmodSync(configPath, 0o644);
+      const statSyncOrig = fs.statSync.bind(fs);
+      vi.spyOn(fs, 'statSync').mockImplementation((filePath: any) => {
+        const stat = statSyncOrig(filePath) as fs.Stats & { mode: number };
+        if (String(filePath) === configPath) {
+          return { ...stat, mode: 0o100644 } as fs.Stats;
+        }
+        return stat;
+      });
       const { doctor } = createDoctorWithMocks(home);
       const report = await doctor.runChecks(['config-permissions']);
       expect(report.checks[0]).toMatchObject({ id: 'config-permissions', status: 'warn', fixable: 'auto' });
@@ -651,7 +749,23 @@ describe('doctor — infrastructure checks', () => {
       fs.mkdirSync(configDir, { recursive: true });
       const configPath = path.join(configDir, 'openclaw.json');
       fs.writeFileSync(configPath, '{}');
-      fs.chmodSync(configPath, 0o644);
+      const statSyncOrig = fs.statSync.bind(fs);
+      const chmodSyncOrig = fs.chmodSync.bind(fs);
+      let mockedMode = 0o100644;
+      vi.spyOn(fs, 'statSync').mockImplementation((filePath: any) => {
+        const stat = statSyncOrig(filePath) as fs.Stats & { mode: number };
+        if (String(filePath) === configPath) {
+          return { ...stat, mode: mockedMode } as fs.Stats;
+        }
+        return stat;
+      });
+      vi.spyOn(fs, 'chmodSync').mockImplementation((filePath: any, mode: any) => {
+        if (String(filePath) === configPath) {
+          mockedMode = 0o100000 | Number(mode);
+          return;
+        }
+        return chmodSyncOrig(filePath, mode);
+      });
       const { doctor } = createDoctorWithMocks(home);
       const result = await doctor.runFix('config-permissions');
       expect(result).toMatchObject({ success: true });

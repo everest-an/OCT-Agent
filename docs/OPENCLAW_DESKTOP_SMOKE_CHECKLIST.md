@@ -1,6 +1,6 @@
 # AwarenessClaw Desktop 手工冒烟清单
 
-最后更新：2026-04-01
+最后更新：2026-04-07
 适用范围：`AwarenessClaw/packages/desktop/electron/main.ts` 及当前已拆出的主进程模块
 
 ## 1. 目的
@@ -17,6 +17,8 @@
 如果要做真机 WhatsApp 防打扰与配对闭环验证，请使用 [OPENCLAW_WHATSAPP_REAL_SMOKE_2026-04-05.md](OPENCLAW_WHATSAPP_REAL_SMOKE_2026-04-05.md)。这份脚本要求真实设备和真实联系人，重点覆盖“陌生联系人不被打扰、owner 可用、allowlist/pairing 可控、重连不回归”。
 
 如果要验证 Windows 首次安装后“首聊自动恢复”链路（daemon pending + CLI fallback ENOENT 自愈重试），请使用 [OPENCLAW_WINDOWS_FIRST_CHAT_RECOVERY_SMOKE_2026-04-05.md](OPENCLAW_WINDOWS_FIRST_CHAT_RECOVERY_SMOKE_2026-04-05.md)。
+
+如果要做发布前或 OpenClaw 升级后的 tier-1 通道三端验证，请使用 [OPENCLAW_TIER1_CHANNEL_SMOKE_MATRIX_2026-04-07.md](OPENCLAW_TIER1_CHANNEL_SMOKE_MATRIX_2026-04-07.md)。这份矩阵固定覆盖 Telegram、WhatsApp、Discord、微信，并要求在 Windows、macOS、Linux 都走通“连接 / 首条消息 / 重启后再发一条”的最小闭环。
 
 ## 2. 执行前提
 

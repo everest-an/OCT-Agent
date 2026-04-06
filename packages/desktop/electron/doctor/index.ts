@@ -34,6 +34,10 @@ import {
   checkNpmPrefixWritable,
   checkWebDnsCompatibility,
 } from './checks-infra';
+import {
+  checkChannelCompatibility,
+  fixChannelCompatibility,
+} from './checks-channel-compatibility';
 import { checkChannelBindings, fixChannelBindings } from './checks-channels';
 
 // Re-export types for callers
@@ -51,6 +55,7 @@ const CHECK_REGISTRY: Record<string, { check: (ctx: any) => Promise<CheckResult>
   'gateway-running': { check: checkGatewayRunning, fix: fixGatewayStart },
   'web-dns-compat': { check: checkWebDnsCompatibility },
   'plugin-installed': { check: checkPluginInstalled, fix: fixPluginInstall },
+  'channel-compatibility': { check: checkChannelCompatibility, fix: fixChannelCompatibility },
   'daemon-running': { check: checkDaemonRunning, fix: fixDaemonStart },
   'channel-bindings': { check: checkChannelBindings, fix: fixChannelBindings },
   'config-permissions': { check: checkConfigPermissions, fix: fixConfigPermissions },
@@ -61,6 +66,7 @@ const CHECK_ORDER = [
   'node-installed', 'openclaw-installed', 'openclaw-command-health', 'openclaw-version', 'openclaw-conflicts',
   'launchagent-path', 'gateway-running', 'plugin-installed', 'daemon-running',
   'web-dns-compat',
+  'channel-compatibility',
   'channel-bindings', 'config-permissions', 'npm-prefix-writable',
 ];
 

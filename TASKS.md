@@ -39,6 +39,8 @@
 - [ ] 设定兼容性 KPI：频道首连成功率、自动修复成功率、用户可感知等待时长，并在 Dashboard 持续观测
 - [ ] 按 docs/structures.md 红线推进主进程拆分，优先低风险抽离，不在同一 PR 混合行为改动和重构
 - [x] 新增 GitHub Actions 三端桌面测试矩阵（Windows/macOS/Linux），每次 push/PR 自动执行 `packages/desktop` 测试（2026-04-05）
+- [x] 新增 channel compatibility Doctor 审计：升级后自动修复孤儿 channel plugin 配置，并对 Signal/LINE/iMessage 给出跨平台前提告警（2026-04-07）
+- [x] 新增 tier-1 通道三端 smoke matrix（Telegram/WhatsApp/Discord/微信），明确 OpenClaw 升级后的最小发布验证脚本（2026-04-07）
 
 ### 聊天（最高优先级）
 - [x] 聊天气泡 UI（用户蓝色/AI 深色）

@@ -53,6 +53,10 @@ export function registerAppRuntimeHandlers(deps: {
   getBundledNpmBin: (binName: 'npx' | 'npm') => string | null;
   shutdownLocalDaemon: (timeoutMs?: number) => Promise<boolean>;
   clearAwarenessLocalNpxCache: (homedir: string) => void;
+  doctor?: {
+    runChecks: (subset?: string[]) => Promise<any>;
+    runFix: (checkId: string) => Promise<any>;
+  };
   getMainWindow: () => any | null;
 }) {
   // Upgrade progress helper — pushes phase info to renderer + taskbar progress
@@ -311,6 +315,22 @@ export function registerAppRuntimeHandlers(deps: {
           progress('openclaw:doctor-fix', 'done');
         } catch {
           progress('openclaw:doctor-fix', 'skipped', 'doctor fix skipped');
+        }
+
+        if (deps.doctor) {
+          progress('openclaw:channel-audit', 'running');
+          try {
+            const audit = await deps.doctor.runChecks(['channel-compatibility']);
+            const check = Array.isArray(audit?.checks) ? audit.checks[0] : null;
+            if (check?.fixable === 'auto' && (check.status === 'warn' || check.status === 'fail')) {
+              const fix = await deps.doctor.runFix('channel-compatibility');
+              progress('openclaw:channel-audit', fix?.success ? 'done' : 'skipped', fix?.message || check.message);
+            } else {
+              progress('openclaw:channel-audit', check?.status === 'pass' ? 'done' : 'skipped', check?.message || 'channel audit skipped');
+            }
+          } catch {
+            progress('openclaw:channel-audit', 'skipped', 'channel audit skipped');
+          }
         }
 
         // Post-upgrade: restart gateway so new version takes effect

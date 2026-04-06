@@ -1082,6 +1082,7 @@ registerAppRuntimeHandlers({
   getBundledNpmBin,
   shutdownLocalDaemon,
   clearAwarenessLocalNpxCache,
+  doctor,
   getMainWindow: () => mainWindow,
 });
 registerChatHandlers({

@@ -37,6 +37,12 @@ function getRegisteredReadConfigHandler() {
   return match[1] as (event: unknown, channelId: string) => Promise<any>;
 }
 
+function getRegisteredTestHandler() {
+  const match = handleMock.mock.calls.find(([channel]) => channel === 'channel:test');
+  if (!match) throw new Error('channel:test handler not registered');
+  return match[1] as (event: unknown, channelId: string) => Promise<any>;
+}
+
 describe('registerChannelConfigHandlers', () => {
   beforeEach(() => {
     handleMock.mockReset();
@@ -223,6 +229,63 @@ describe('registerChannelConfigHandlers', () => {
     expect(result.bindRetried).toBe(true);
     expect(runAsync).toHaveBeenCalledWith('openclaw pairing approve --channel telegram C4AVKKA9 2>&1', 30000);
     expect(runAsync).toHaveBeenCalledWith('openclaw gateway restart 2>&1', 30000);
+  });
+
+  it('returns a Telegram first-message hint when the channel is healthy but no pairing request exists yet', async () => {
+    vi.spyOn(fs, 'readFileSync').mockImplementation((filePath: any) => {
+      if (String(filePath).includes('openclaw.json')) {
+        return JSON.stringify({
+          channels: {
+            telegram: {
+              enabled: true,
+              botToken: 'redacted-token',
+            },
+          },
+        }) as any;
+      }
+      throw new Error(`unexpected readFileSync(${String(filePath)})`);
+    });
+
+    const readShellOutputAsync = vi
+      .fn()
+      .mockResolvedValueOnce('Runtime: running\nRPC probe: ok')
+      .mockResolvedValueOnce('telegram configured enabled')
+      .mockResolvedValueOnce('No pending telegram pairing requests.');
+
+    registerChannelConfigHandlers({
+      home: 'C:/Users/test',
+      safeShellExecAsync: vi.fn(async () => null),
+      readShellOutputAsync,
+      runAsync: vi.fn(),
+      discoverOpenClawChannels: vi.fn(),
+      parseCliHelp: vi.fn(() => ({ cliChannels: new Set<string>(), channelFields: new Map() })),
+      applyCliHelp: vi.fn(),
+      mergeCatalog: vi.fn(),
+      mergeChannelOptions: vi.fn(),
+      getAllChannels: vi.fn(() => []),
+      serializeRegistry: vi.fn(() => []),
+      getChannel: vi.fn(() => ({
+        id: 'telegram',
+        openclawId: 'telegram',
+        label: 'Telegram',
+        color: '#26A5E4',
+        iconType: 'svg',
+        connectionType: 'token',
+        configFields: [{ key: 'botToken' }],
+        saveStrategy: 'cli',
+        source: 'openclaw-dynamic',
+        order: 1,
+      })) as any,
+      buildCLIFlags: vi.fn(() => ''),
+      toOpenclawId: vi.fn((id: string) => id),
+    });
+
+    const handler = getRegisteredTestHandler();
+    const result = await handler({}, 'telegram');
+
+    expect(result).toMatchObject({ success: true });
+    expect(result.output).toContain('send your bot a first direct message');
+    expect(readShellOutputAsync).toHaveBeenCalledWith('openclaw pairing list telegram 2>&1', 20000);
   });
 
   it('falls back to gateway status when channels status --probe is temporarily unreachable', async () => {

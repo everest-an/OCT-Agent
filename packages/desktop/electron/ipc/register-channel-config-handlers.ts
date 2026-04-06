@@ -283,6 +283,7 @@ function collectPairingCodesFromValue(value: any, out: string[]) {
 
 function extractPendingPairingCodes(output: string | null): string[] {
   if (!output) return [];
+  if (/no pending/i.test(output)) return [];
 
   const unique = new Set<string>();
   const ordered: string[] = [];
@@ -324,6 +325,21 @@ function extractPendingPairingCodes(output: string | null): string[] {
   }
 
   return ordered;
+}
+
+function describeTelegramPairingState(output: string | null): string | null {
+  if (!output) return null;
+
+  if (/no pending/i.test(output)) {
+    return 'Telegram is connected. To generate a pairing code, open Telegram and send your bot a first direct message. OpenClaw only creates the code after that inbound message arrives.';
+  }
+
+  const codes = extractPendingPairingCodes(output);
+  if (codes.length > 0) {
+    return `Telegram is connected. Pairing code: ${codes[0]}. Approve it below to enable replies.`;
+  }
+
+  return null;
 }
 
 function coerceTelegramCliConfig(channelDef: ChannelDef | undefined, config: Record<string, string>) {
@@ -1015,6 +1031,14 @@ export function registerChannelConfigHandlers(deps: {
 
       const listOutput = await deps.readShellOutputAsync('openclaw channels list 2>&1', 20000);
       const isListed = listOutput && listOutput.toLowerCase().includes(channelId);
+
+      if (ocId === 'telegram' && isListed && gwRunning) {
+        const pairingOutput = await deps.readShellOutputAsync('openclaw pairing list telegram 2>&1', 20000);
+        const pairingStatus = describeTelegramPairingState(pairingOutput);
+        if (pairingStatus) {
+          return { success: true, output: pairingStatus };
+        }
+      }
 
       if (isListed && gwRunning) {
         return { success: true, output: `${channelId}: configured and gateway active` };

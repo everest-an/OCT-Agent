@@ -66,10 +66,11 @@ export function registerRuntimeHealthHandlers(deps: {
     ['openclaw-command-health', 10],
     ['openclaw-installed', 20],
     ['plugin-installed', 30],
-    ['daemon-running', 40],
-    ['gateway-running', 50],
-    ['channel-bindings', 60],
-    ['launchagent-path', 70],
+    ['channel-compatibility', 40],
+    ['daemon-running', 50],
+    ['gateway-running', 60],
+    ['channel-bindings', 70],
+    ['launchagent-path', 80],
   ]);
 
   ipcMain.handle('setup:bootstrap', async () => {
@@ -303,6 +304,7 @@ export function registerRuntimeHealthHandlers(deps: {
       'openclaw-command-health',
       'openclaw-installed',
       'plugin-installed',
+      'channel-compatibility',
       'daemon-running',
       // 'gateway-running' intentionally excluded from startup auto-fix:
       // main.ts startGatewayRepairInBackground() already starts the gateway in
@@ -324,7 +326,7 @@ export function registerRuntimeHealthHandlers(deps: {
     // Split checks into fast (no external CLI) and slow (needs OpenClaw CLI) groups
     const fastChecks = [
       'node-installed', 'openclaw-installed', 'openclaw-command-health',
-      'plugin-installed',
+      'plugin-installed', 'channel-compatibility',
       ...(process.platform === 'darwin' ? ['launchagent-path'] : []),
     ];
     const slowChecks = ['daemon-running', 'gateway-running', 'channel-bindings'];

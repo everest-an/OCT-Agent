@@ -77,6 +77,9 @@ export function SettingsHealthPanel({
                 <div className="flex-1 min-w-0">
                   <span className="font-medium">{check.label}</span>
                   <span className="ml-2 text-slate-400">{check.message}</span>
+                  {check.detail && (
+                    <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">{check.detail}</p>
+                  )}
                   {check.fixable === 'manual' && check.fixDescription && (
                     <p className="text-[10px] text-slate-500 mt-0.5 font-mono break-all">{check.fixDescription}</p>
                   )}

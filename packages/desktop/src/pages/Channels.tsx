@@ -133,7 +133,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
       case 'imessage':
         return t('channels.postConnect.imessage', 'Send an iMessage to this Mac (or let someone message you) — your AI agent will reply automatically.');
       case 'telegram':
-        return t('channels.postConnect.telegram', 'Open Telegram and message your bot to start chatting with your AI agent.');
+        return t('channels.postConnect.telegram', 'Open Telegram and send your bot any direct message. If Telegram is still in pairing mode, the bot sends the pairing code only after that first message.');
       case 'discord':
         return t('channels.postConnect.discord', 'Go to your Discord server and send a message in the configured channel — your AI agent will respond.');
       case 'slack':
@@ -375,6 +375,9 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
 
       const testResult = await (window.electronAPI as any).channelTest(activeWizard);
       setTestStatus(testResult.success ? 'success' : 'error');
+      if (testResult.success && testResult.output) {
+        setTestNotice(testResult.output);
+      }
       if (!testResult.success) setTestError(testResult.error || testResult.output || null);
     }
   };
@@ -428,10 +431,17 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
   const renderPairingApprovalPanel = () => {
     if (!supportsPairingApproval) return null;
 
+    const pairingHelpText = activeWizard === 'telegram' && testStatus === 'success'
+      ? t(
+          'channels.pairing.help.telegramSuccess',
+          'After you send the first Telegram DM, any pending pairing code will appear here automatically. You can also paste the full "openclaw pairing approve ..." line.',
+        )
+      : t('channels.pairing.help', 'Received a pairing prompt? Paste the 8-character code or the full "openclaw pairing approve ..." line here.');
+
     return (
       <div className="p-3 bg-slate-800/50 border border-slate-700 rounded-lg space-y-2">
         <p className="text-xs text-slate-300">
-          {t('channels.pairing.help', 'Received a pairing prompt? Paste the 8-character code or the full "openclaw pairing approve ..." line here.')}
+          {pairingHelpText}
         </p>
         <div className="flex gap-2">
           <input
@@ -458,6 +468,18 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
         {pairingError && (
           <p className="text-[11px] text-red-400 bg-red-900/20 rounded px-2 py-1">{pairingError}</p>
         )}
+      </div>
+    );
+  };
+
+  const renderTelegramSuccessChecklist = () => {
+    if (activeWizard !== 'telegram' || testStatus !== 'success') return null;
+
+    return (
+      <div className="px-3 py-3 bg-brand-900/20 border border-brand-700/30 rounded-xl text-xs text-brand-100 text-left leading-relaxed space-y-1.5">
+        <span className="font-semibold block">{t('channels.telegram.nextStepTitle', 'Telegram still needs one more step')}</span>
+        <p>{t('channels.telegram.nextStep.one', '1. Open Telegram and send your bot a first direct message.')}</p>
+        <p>{t('channels.telegram.nextStep.two', '2. If OpenClaw creates a pairing code, approve it below and replies will unlock.')}</p>
       </div>
     );
   };
@@ -825,6 +847,8 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                           {getPostConnectHint()}
                         </div>
                       )}
+                      {renderTelegramSuccessChecklist()}
+                      {supportsPairingApproval && renderPairingApprovalPanel()}
                       <div className="flex justify-end gap-2">
                         <button onClick={closeWizard}
                           className="px-5 py-2 border border-slate-600 hover:border-slate-400 text-slate-300 hover:text-white rounded-xl text-sm font-medium transition-colors">

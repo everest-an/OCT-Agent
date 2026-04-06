@@ -204,6 +204,39 @@ describe('Channels Page', () => {
     });
   });
 
+  it('shows Telegram first-message notice after token setup succeeds', async () => {
+    const api = window.electronAPI as any;
+    api.channelSave = vi.fn().mockResolvedValue({ success: true });
+    api.channelTest = vi.fn().mockResolvedValue({
+      success: true,
+      output: 'Telegram is connected. To generate a pairing code, open Telegram and send your bot a first direct message. OpenClaw only creates the code after that inbound message arrives.',
+    });
+
+    await act(async () => { render(<Channels />); });
+
+    const telegramBtn = screen.getAllByText('Telegram')[0]?.closest('button');
+    expect(telegramBtn).toBeTruthy();
+    await act(async () => { fireEvent.click(telegramBtn as HTMLButtonElement); });
+
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Next/i })); });
+
+    const tokenInput = document.querySelector('input[type="password"]') as HTMLInputElement | null;
+    expect(tokenInput).toBeTruthy();
+    await act(async () => {
+      fireEvent.change(tokenInput as HTMLInputElement, { target: { value: 'fake-token' } });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Connect$/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/send your bot a first direct message/i).length).toBeGreaterThan(0);
+      expect(screen.getByText(/telegram still needs one more step/i)).toBeInTheDocument();
+      expect(screen.getByPlaceholderText(/Paste code or full approve line/i)).toBeInTheDocument();
+    });
+  });
+
   it('shows telegram pairing code input and triggers one-click approve', async () => {
     const api = window.electronAPI as any;
     api.channelPairingApprove = vi.fn().mockResolvedValue({

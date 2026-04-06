@@ -3,6 +3,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { Ctx, DoctorDeps } from './types';
+import { readJsonFileWithBom } from '../json-file';
 
 // --- Context-local helpers (only used by buildContext) ---
 
@@ -45,13 +46,13 @@ export async function buildContext(deps: DoctorDeps): Promise<Ctx> {
     // Always re-read config (cheap, local file) but keep shell results cached
     const configPath = path.join(deps.homedir, '.openclaw', 'openclaw.json');
     let config: any = null;
-    try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+    try { config = readJsonFileWithBom(configPath); } catch {}
     return { ..._ctxCache.ctx, config, deps };
   }
 
   const configPath = path.join(deps.homedir, '.openclaw', 'openclaw.json');
   let config: any = null;
-  try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+  try { config = readJsonFileWithBom(configPath); } catch {}
 
   const findCommand = deps.platform === 'win32' ? 'where' : 'which -a';
 
