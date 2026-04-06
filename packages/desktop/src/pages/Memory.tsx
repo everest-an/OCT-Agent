@@ -180,6 +180,8 @@ export default function Memory() {
   const [daemonHealth, setDaemonHealth] = useState<DaemonHealth | null>(null);
   const [daemonStarting, setDaemonStarting] = useState(false);
   const [daemonConnected, setDaemonConnected] = useState(false);
+  const daemonStartingRef = useRef(false);
+  const autoStartAttemptedRef = useRef(false);
   const selfImprovement = useSelfImprovement(config.selectedAgentId || 'main');
   const { loadLearningStatus, loadPromotionProposals } = selfImprovement;
 
@@ -347,6 +349,61 @@ export default function Memory() {
 
   // loadLearningStatus and loadPromotionProposals are provided by useSelfImprovement hook above
 
+  const reloadMemoryData = useCallback(async () => {
+    const contextLoaded = await loadContext();
+    await Promise.all([
+      contextLoaded ? Promise.resolve() : loadCards(),
+      loadEvents(0),
+      loadPerception(),
+      contextLoaded ? Promise.resolve() : loadDailySummary(),
+      loadLearningStatus(),
+      loadPromotionProposals(),
+      loadTasks(),
+    ]);
+  }, [
+    loadContext,
+    loadCards,
+    loadEvents,
+    loadPerception,
+    loadDailySummary,
+    loadLearningStatus,
+    loadPromotionProposals,
+    loadTasks,
+  ]);
+
+  const startDaemonAndReload = useCallback(async (silentFailure = false) => {
+    if (!api || daemonStartingRef.current) return false;
+    daemonStartingRef.current = true;
+    setDaemonStarting(true);
+    if (!silentFailure) {
+      setError(null);
+    }
+    try {
+      const result = await api.startDaemon();
+      if (!result?.success) {
+        if (!silentFailure) {
+          setError(result?.error || t('memory.daemonStartFailed'));
+        }
+        return false;
+      }
+
+      setDaemonConnected(true);
+      if (window.electronAPI) (window.electronAPI as any).daemonMarkConnected?.();
+      await checkHealth();
+      await reloadMemoryData();
+      setError(null);
+      return true;
+    } catch {
+      if (!silentFailure) {
+        setError(t('memory.daemonStartFailed'));
+      }
+      return false;
+    } finally {
+      daemonStartingRef.current = false;
+      setDaemonStarting(false);
+    }
+  }, [api, t, checkHealth, reloadMemoryData]);
+
 
 
 
@@ -357,25 +414,23 @@ export default function Memory() {
       try {
         const connected = await checkHealth();
         if (connected) {
-          const contextLoaded = await loadContext();
-          await Promise.all([
-            contextLoaded ? Promise.resolve() : loadCards(),
-            loadEvents(),
-            loadPerception(),
-            contextLoaded ? Promise.resolve() : loadDailySummary(),
-            loadLearningStatus(),
-            loadPromotionProposals(),
-            loadTasks(),
-          ]);
+          await reloadMemoryData();
         } else {
-          await Promise.all([loadLearningStatus(), loadPromotionProposals(), loadTasks()]);
+          let autoStarted = false;
+          if (!autoStartAttemptedRef.current) {
+            autoStartAttemptedRef.current = true;
+            autoStarted = await startDaemonAndReload(true);
+          }
+          if (!autoStarted) {
+            await Promise.all([loadLearningStatus(), loadPromotionProposals(), loadTasks()]);
+          }
         }
       } finally {
         setLoading(false);
       }
     };
     init();
-  }, [checkHealth, loadCards, loadContext, loadEvents, loadPerception, loadDailySummary, loadLearningStatus, loadPromotionProposals]);
+  }, [checkHealth, reloadMemoryData, startDaemonAndReload, loadLearningStatus, loadPromotionProposals, loadTasks]);
 
   // Reload events when source view changes
   useEffect(() => {
@@ -422,33 +477,7 @@ export default function Memory() {
   };
 
   const handleStartDaemon = async () => {
-    if (!api) return;
-    setError(null);
-    setDaemonStarting(true);
-    try {
-      const result = await api.startDaemon();
-      if (result?.success) {
-        setDaemonConnected(true);
-        if (window.electronAPI) (window.electronAPI as any).daemonMarkConnected?.();
-        // Reload everything
-        await checkHealth();
-        const contextLoaded = await loadContext();
-        await Promise.all([
-          contextLoaded ? Promise.resolve() : loadCards(),
-          loadEvents(0),
-          loadPerception(),
-          contextLoaded ? Promise.resolve() : loadDailySummary(),
-          loadLearningStatus(),
-          loadPromotionProposals(),
-        ]);
-        setError(null);
-      } else {
-        setError(result?.error || t('memory.daemonStartFailed'));
-      }
-    } catch {
-      setError(t('memory.daemonStartFailed'));
-    }
-    setDaemonStarting(false);
+    await startDaemonAndReload(false);
   };
 
   const handleSearch = async () => {

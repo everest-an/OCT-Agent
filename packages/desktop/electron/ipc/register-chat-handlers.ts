@@ -47,7 +47,7 @@ import {
   getMemoryCapturePolicy,
   buildWebCompatibilityRetryPrompt,
 } from './awareness-memory-utils';
-import { chatSendViaCli, chatSendViaCliWithWebCompatibilityRetry } from './chat-cli-executor';
+import { chatSendViaCli, chatSendViaCliWithWebCompatibilityRetry, prepareCliFallbackWithDaemonRetry } from './chat-cli-executor';
 
 // --- Helper functions extracted to ./chat-message-builders.ts, ./gateway-event-normalizer.ts,
 // --- ./chat-detection.ts, ./awareness-memory-utils.ts, ./chat-cli-executor.ts ---
@@ -281,12 +281,11 @@ ${message}`;
         type: 'gateway',
         message: gatewayReady.error || 'Gateway unavailable. Falling back to direct OpenClaw chat...',
       });
-      try {
-        await deps.prepareCliFallback?.();
-      } catch (prepareErr: any) {
-        const detail = prepareErr?.message || String(prepareErr);
+      const preparedCli = await prepareCliFallbackWithDaemonRetry(deps.prepareCliFallback, send);
+      if (!preparedCli.ok) {
+        const detail = preparedCli.error || 'unknown error';
         console.warn('[chat] CLI fallback preparation failed:', detail);
-        if (/LOCAL_DAEMON_NOT_READY/i.test(detail)) {
+        if (preparedCli.daemonNotReady || /LOCAL_DAEMON_NOT_READY/i.test(detail)) {
           return withWorkspaceFallbackMeta({
             success: false,
             error: 'Local memory service is still starting. Please wait 20-60 seconds, then retry.',
@@ -697,10 +696,9 @@ ${message}`;
           message: 'Detected Awareness memory compatibility mode. Retrying without awareness_init...',
         });
 
-        try {
-          await deps.prepareCliFallback?.();
-        } catch (prepareErr: any) {
-          console.warn('[chat] CLI compatibility retry preparation failed:', prepareErr?.message || prepareErr);
+        const preparedCli = await prepareCliFallbackWithDaemonRetry(deps.prepareCliFallback, send);
+        if (!preparedCli.ok) {
+          console.warn('[chat] CLI compatibility retry preparation failed:', preparedCli.error || 'unknown error');
         }
 
         const retryPrompt = buildAwarenessInitCompatibilityRetryPrompt(
@@ -745,10 +743,9 @@ ${message}`;
             type: 'gateway',
             message: 'Detected VPN/DNS compatibility mode. Retrying with exec-based web access...',
           });
-          try {
-            await deps.prepareCliFallback?.();
-          } catch (prepareErr: any) {
-            console.warn('[chat] CLI compatibility retry preparation failed:', prepareErr?.message || prepareErr);
+          const preparedCli = await prepareCliFallbackWithDaemonRetry(deps.prepareCliFallback, send);
+          if (!preparedCli.ok) {
+            console.warn('[chat] CLI compatibility retry preparation failed:', preparedCli.error || 'unknown error');
           }
 
           const retryPrompt = buildWebCompatibilityRetryPrompt(message, finalText);
@@ -893,10 +890,17 @@ ${message}`;
         if (/pairing required/i.test(errorMsg)) {
           deps.getGatewayWs().catch(() => { /* background repair — don't block fallback */ });
         }
-        try {
-          await deps.prepareCliFallback?.();
-        } catch (prepareErr: any) {
-          console.warn('[chat] CLI fallback preparation failed:', prepareErr?.message || prepareErr);
+        const preparedCli = await prepareCliFallbackWithDaemonRetry(deps.prepareCliFallback, send);
+        if (!preparedCli.ok) {
+          const detail = preparedCli.error || 'unknown error';
+          console.warn('[chat] CLI fallback preparation failed:', detail);
+          if (preparedCli.daemonNotReady || /LOCAL_DAEMON_NOT_READY/i.test(detail)) {
+            return withWorkspaceFallbackMeta({
+              success: false,
+              error: 'Local memory service is still starting. Please wait 20-60 seconds, then retry.',
+              sessionId: sid,
+            });
+          }
         }
         const cliResult = await chatSendViaCliWithWebCompatibilityRetry({
           requestMessage: fullMessage,

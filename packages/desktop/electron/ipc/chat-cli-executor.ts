@@ -14,6 +14,46 @@ import {
 } from './chat-detection';
 import { buildWebCompatibilityRetryPrompt } from './awareness-memory-utils';
 
+const LOCAL_DAEMON_RETRY_DELAY_MS = 8000;
+
+export async function prepareCliFallbackWithDaemonRetry(
+  prepareCliFallback: (() => Promise<void>) | undefined,
+  send: (channel: string, payload: any) => void,
+): Promise<{ ok: boolean; error?: string; daemonNotReady?: boolean }> {
+  if (!prepareCliFallback) {
+    return { ok: true };
+  }
+
+  try {
+    await prepareCliFallback();
+    return { ok: true };
+  } catch (prepareErr: any) {
+    const detail = prepareErr?.message || String(prepareErr || '');
+    if (!/LOCAL_DAEMON_NOT_READY/i.test(detail)) {
+      return { ok: false, error: detail };
+    }
+
+    send('chat:status', {
+      type: 'gateway',
+      message: 'Local memory service is still starting. Waiting a few seconds and retrying automatically...',
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, LOCAL_DAEMON_RETRY_DELAY_MS));
+
+    try {
+      await prepareCliFallback();
+      return { ok: true };
+    } catch (retryErr: any) {
+      const retryDetail = retryErr?.message || String(retryErr || '');
+      return {
+        ok: false,
+        error: retryDetail,
+        daemonNotReady: /LOCAL_DAEMON_NOT_READY/i.test(retryDetail),
+      };
+    }
+  }
+}
+
 export async function chatSendViaCli(
   requestMessage: string,
   sid: string,
@@ -231,11 +271,9 @@ export async function chatSendViaCliWithWebCompatibilityRetry(params: {
       message: 'Local memory service is recovering. Retrying automatically...',
     });
 
-    try {
-      await deps.prepareCliFallback?.();
-    } catch (prepareErr: any) {
-      const detail = prepareErr?.message || String(prepareErr || '');
-      if (/LOCAL_DAEMON_NOT_READY/i.test(detail)) {
+    const prepared = await prepareCliFallbackWithDaemonRetry(deps.prepareCliFallback, send);
+    if (!prepared.ok) {
+      if (prepared.daemonNotReady || /LOCAL_DAEMON_NOT_READY/i.test(prepared.error || '')) {
         return {
           success: false,
           error: 'Local memory service is still starting. Please wait 20-60 seconds, then retry.',

@@ -315,6 +315,11 @@ export default function SetupWizard({ onComplete }: SetupProps) {
         ...PERMISSION_PRESET_VALUES[DEFAULT_ONBOARDING_PERMISSION_PRESET],
       });
     }
+    try {
+      await (window.electronAPI as any)?.setDaemonAutostart?.(true);
+    } catch {
+      // Best-effort only; setup completion should not be blocked by autostart registration failures.
+    }
     onComplete();
   };
 

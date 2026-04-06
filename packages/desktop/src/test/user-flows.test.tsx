@@ -384,7 +384,7 @@ describe('Memory Page — Timeline & Daemon (E2E)', () => {
     vi.restoreAllMocks();
   });
 
-  it('flow: Start Daemon button triggers startDaemon and refreshes page', async () => {
+  it('flow: offline memory page auto-starts daemon and refreshes page', async () => {
     // Initial: daemon offline
     getApi().memoryCheckHealth = vi.fn()
       .mockResolvedValueOnce({ error: 'Not running' })  // initial check
@@ -402,18 +402,12 @@ describe('Memory Page — Timeline & Daemon (E2E)', () => {
     });
 
     await act(async () => { render(<Memory />); });
-    // Should show Start Daemon
-    await waitFor(() => expect(screen.getByText('Start Daemon')).toBeInTheDocument());
-
-    // Click Start Daemon
-    await act(async () => { fireEvent.click(screen.getByText('Start Daemon')); });
-
-    // Should call startDaemon
-    expect(getApi().startDaemon).toHaveBeenCalled();
+    // Memory page now auto-starts daemon when initial health check is offline.
+    await waitFor(() => expect(getApi().startDaemon).toHaveBeenCalled(), { timeout: 3000 });
 
     // After daemon starts, timeline should show events
     await waitFor(() => expect(screen.getAllByText('First event').length).toBeGreaterThan(0), { timeout: 3000 });
-    // Start Daemon button should be gone
+    // Start Daemon button should not remain visible after auto-recovery.
     expect(screen.queryByText('Start Daemon')).not.toBeInTheDocument();
   });
 
