@@ -1211,6 +1211,9 @@ app.on('second-instance', () => {
 app.on('before-quit', () => {
   isQuitting = true;
   daemonWatchdog.stopDaemonWatchdog();
+  // Force-kill any shell children (e.g. hung `openclaw skills list --json`) that
+  // were spawned with detached:true. Without this they survive as orphan processes.
+  shellUtils.killAllTrackedShellChildren();
 });
 
 app.on('window-all-closed', () => {
