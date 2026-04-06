@@ -4,6 +4,8 @@
 
 import { spawn } from 'node:child_process';
 import { get } from 'node:http';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 const DAEMON_PORT = 37800;
 const DAEMON_URL = `http://127.0.0.1:${DAEMON_PORT}`;
@@ -20,11 +22,33 @@ export async function startDaemon() {
 
   console.log('🚀 Starting Awareness local daemon...');
 
-  const child = spawn('npx', ['@awareness-sdk/local', 'start'], {
-    detached: true,
-    stdio: 'ignore',
-    env: { ...process.env, AWARENESS_PORT: String(DAEMON_PORT) },
-  });
+  const daemonArgs = [
+    '-y',
+    '@awareness-sdk/local@latest',
+    'start',
+    '--port',
+    String(DAEMON_PORT),
+    '--project',
+    join(homedir(), '.openclaw'),
+    '--background',
+  ];
+
+  const child = process.platform === 'win32'
+    ? spawn('cmd.exe', ['/d', '/c', 'npx', ...daemonArgs], {
+        detached: true,
+        stdio: 'ignore',
+        env: {
+          ...process.env,
+          AWARENESS_PORT: String(DAEMON_PORT),
+          PATHEXT: process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC',
+          ComSpec: process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe',
+        },
+      })
+    : spawn('npx', daemonArgs, {
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env, AWARENESS_PORT: String(DAEMON_PORT) },
+      });
   child.unref();
 }
 

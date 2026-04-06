@@ -1481,8 +1481,11 @@ ${message}`;
       }
       send('chat:stream-end', {});
       const errorMsg = err?.message || String(err);
-      if (errorMsg.includes('WebSocket') || errorMsg.includes('connect') || errorMsg.includes('timed out')) {
-        console.warn('[chat] WebSocket failed, falling back to CLI:', errorMsg);
+      if (errorMsg.includes('WebSocket') || errorMsg.includes('connect') || errorMsg.includes('timed out') || /pairing required/i.test(errorMsg)) {
+        console.warn('[chat] WebSocket/pairing failed, falling back to CLI:', errorMsg);
+        if (/pairing required/i.test(errorMsg)) {
+          deps.getGatewayWs().catch(() => { /* background repair only */ });
+        }
         try {
           await deps.prepareCliFallback?.();
         } catch (prepareErr: any) {

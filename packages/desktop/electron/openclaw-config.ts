@@ -97,7 +97,9 @@ export function normalizePluginAllow(value: unknown): string[] | undefined {
 
 /**
  * Determine whether `openclaw gateway status` output indicates a running Gateway.
- * Rejects negative signals (stopped, not running, probe failed) before accepting positive ones.
+ * Rejects negative signals (stopped, probe timeout, handshake close) before accepting positive ones.
+ * When the CLI prints explicit probe/connect lines, require those to be healthy instead of trusting
+ * a listener-only signal. This avoids false positives where the port is open but RPC is still dead.
  */
 export function isGatewayRunningOutput(output: string | null): boolean {
   if (!output) return false;
@@ -107,13 +109,26 @@ export function isGatewayRunningOutput(output: string | null): boolean {
     normalized.includes('runtime: stopped') ||
     normalized.includes('not running') ||
     normalized.includes('no listener detected') ||
-    normalized.includes('rpc probe: failed')
+    normalized.includes('rpc probe: failed') ||
+    normalized.includes('rpc probe: timeout') ||
+    normalized.includes('gateway closed') ||
+    normalized.includes('reachable: no') ||
+    normalized.includes('connect: failed') ||
+    normalized.includes('closed before connect')
   ) {
     return false;
   }
 
+   const hasExplicitProbeResult =
+    normalized.includes('rpc probe:') ||
+    normalized.includes('reachable:') ||
+    normalized.includes('connect:');
+
+  if (hasExplicitProbeResult) {
+    return normalized.includes('rpc probe: ok') || normalized.includes('reachable: yes');
+  }
+
   return normalized.includes('runtime: running') ||
-    normalized.includes('rpc probe: ok') ||
     normalized.includes('listening:');
 }
 

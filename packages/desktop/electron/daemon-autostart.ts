@@ -18,6 +18,16 @@ function findNpxPath(): string {
   return process.platform === 'win32' ? 'npx.cmd' : 'npx';
 }
 
+function quoteWindowsTaskArg(value: string): string {
+  return /[\s"]/u.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+function buildWindowsTaskCommand(daemonArgs: string[]): string {
+  const comspec = process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe';
+  const joinedArgs = daemonArgs.map(quoteWindowsTaskArg).join(' ');
+  return `"${comspec}" /d /c "npx ${joinedArgs}"`;
+}
+
 function getDaemonArgs(homedir: string): string[] {
   const projectDir = path.join(homedir, '.openclaw');
   return ['-y', '@awareness-sdk/local@latest', 'start', '--port', '37800', '--project', projectDir, '--background'];
@@ -87,9 +97,8 @@ function isEnabledMac(): boolean {
 // ── Windows Scheduled Task ─────────────────────────────────────────────────
 
 async function enableWindows(): Promise<void> {
-  const npxPath = findNpxPath();
   const daemonArgs = getDaemonArgs(os.homedir());
-  const fullCommand = `${npxPath} ${daemonArgs.join(' ')}`;
+  const fullCommand = buildWindowsTaskCommand(daemonArgs);
 
   await runCommand('schtasks', [
     '/Create', '/F',
@@ -203,7 +212,7 @@ export async function isDaemonAutostartEnabled(): Promise<boolean> {
 
 function runCommand(cmd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let stdout = '';
     let stderr = '';
     child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });

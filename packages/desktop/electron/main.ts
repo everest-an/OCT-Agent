@@ -288,6 +288,39 @@ function isGatewayPermissionError(output: string | null) {
   return /EACCES|Access is denied|permission denied|拒绝访问|schtasks create failed/i.test(output);
 }
 
+type GatewayStatusSnapshot = {
+  service?: {
+    runtime?: {
+      status?: string;
+    };
+  };
+  port?: {
+    status?: string;
+  };
+  rpc?: {
+    ok?: boolean;
+  };
+  health?: {
+    healthy?: boolean;
+  };
+};
+
+async function readGatewayStatusSnapshot(): Promise<GatewayStatusSnapshot | null> {
+  try {
+    const raw = await runSpawnAsync('openclaw', ['gateway', 'status', '--json'], 15000);
+    return JSON.parse(raw) as GatewayStatusSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+function isGatewaySnapshotHealthy(snapshot: GatewayStatusSnapshot | null): boolean {
+  if (!snapshot) return false;
+  const runtimeRunning = snapshot.service?.runtime?.status === 'running';
+  const portBusy = snapshot.port?.status === 'busy';
+  return !!snapshot.rpc?.ok && !!snapshot.health?.healthy && (runtimeRunning || portBusy);
+}
+
 async function ensureLocalDaemonReadyForRuntime(send?: (ch: string, data: any) => void): Promise<boolean> {
   const daemonProjectDir = path.join(HOME, '.openclaw');
 
@@ -458,14 +491,23 @@ async function startGatewayInUserSession(send?: (ch: string, data: any) => void)
 
   for (let i = 0; i < 20; i++) {
     await sleep(1000);
-    const check = await readShellOutputAsync('openclaw gateway status 2>&1', 15000);
-    if (isGatewayRunningOutput(check)) {
+    const snapshot = await readGatewayStatusSnapshot();
+    if (isGatewaySnapshotHealthy(snapshot)) {
+      await sleep(1200);
+      const confirmedSnapshot = await readGatewayStatusSnapshot();
+      if (!isGatewaySnapshotHealthy(confirmedSnapshot)) {
+        continue;
+      }
       if (process.platform === 'win32') {
         writeRuntimePreferences({ ...readRuntimePreferences(), preferUserSessionGateway: true });
       }
       send?.('chat:status', { type: 'gateway', message: 'Gateway started in app session' });
       return { ok: true };
     }
+  }
+
+  if (process.platform === 'win32') {
+    writeRuntimePreferences({ ...readRuntimePreferences(), preferUserSessionGateway: false });
   }
 
   return {
@@ -803,6 +845,25 @@ async function getGatewayWs(options?: { onPairingRepairStart?: () => void; onPai
       await gatewayWsClient.connect();
     }
   }
+
+  if (!gatewayWsClient.hasWriteScopes) {
+    try {
+      await gatewayWsClient.warmUpWriteScopes();
+    } catch (scopeErr: any) {
+      const scopeMessage = scopeErr?.message || '';
+      if (/pairing required/i.test(scopeMessage)) {
+        const approvalOutput = await runAsync('openclaw devices approve --latest 2>&1', 30000).catch(() => '');
+        if (/Approved\s+/i.test(approvalOutput || '')) {
+          try {
+            await gatewayWsClient.warmUpWriteScopes();
+          } catch {
+            // Best-effort pre-warm only; first chat send can still retry.
+          }
+        }
+      }
+    }
+  }
+
   return gatewayWsClient;
 }
 
