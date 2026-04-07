@@ -679,6 +679,31 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
 }
 
 /**
+ * Fast openclaw installation check using file existence before falling back
+ * to shell command. Avoids process-spawn timeouts in packaged Electron apps.
+ */
+async function checkOpenclawInstalled(): Promise<boolean> {
+  // Fast path: check known binary locations (no process spawn needed)
+  const binaryPaths = [
+    path.join(HOME, '.npm-global', 'bin', 'openclaw'),
+    '/usr/local/bin/openclaw',
+    '/opt/homebrew/bin/openclaw',
+    path.join(HOME, '.local', 'bin', 'openclaw'),
+  ];
+  const packageEntryPaths = [
+    path.join(HOME, '.npm-global', 'lib', 'node_modules', 'openclaw', 'openclaw.mjs'),
+    '/usr/local/lib/node_modules/openclaw/openclaw.mjs',
+    '/opt/homebrew/lib/node_modules/openclaw/openclaw.mjs',
+  ];
+  if (binaryPaths.some(p => fs.existsSync(p)) || packageEntryPaths.some(p => fs.existsSync(p))) {
+    return true;
+  }
+  // Fallback: shell command (may be slow in packaged Electron env)
+  const version = await safeShellExecAsync('openclaw --version', 8000);
+  return !!version;
+}
+
+/**
  * Ensure Gateway is running before sending chat messages.
  * Auto-starts if stopped. Returns a user-facing error instead of crashing if
  * OpenClaw is missing or the gateway cannot be started.
@@ -689,8 +714,8 @@ async function ensureGatewayRunning(): Promise<{ ok: boolean; error?: string }> 
   };
 
   try {
-    const openclawVersion = await safeShellExecAsync('openclaw --version', 5000);
-    if (!openclawVersion) {
+    const installed = await checkOpenclawInstalled();
+    if (!installed) {
       send('chat:status', { type: 'error', message: 'OpenClaw is not installed' });
       return {
         ok: false,
@@ -719,8 +744,8 @@ async function prepareGatewayForChat(): Promise<{ ok: boolean; error?: string }>
   };
 
   try {
-    const openclawVersion = await safeShellExecAsync('openclaw --version', 5000);
-    if (!openclawVersion) {
+    const installed = await checkOpenclawInstalled();
+    if (!installed) {
       return {
         ok: false,
         error: 'OpenClaw is not installed yet. Please finish Setup first, or reinstall OpenClaw in Settings before chatting.',
