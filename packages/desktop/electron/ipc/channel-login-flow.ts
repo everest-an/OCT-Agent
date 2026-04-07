@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { registerActiveLogin, unregisterActiveLogin } from '../openclaw-process-guard';
 
 /**
  * Watch the OpenClaw plugin log file for a WeChat QR URL.
@@ -120,6 +121,24 @@ export function createChannelLoginWithQR(deps: {
               PATH: ep,
             },
           });
+
+      // Register this login under its channel id so:
+      //   1. A subsequent login for the same channel can tree-kill us before spawning
+      //      (prevents two bot workers competing for the same WeChat session — root
+      //      cause of "connected but not replying").
+      //   2. `channel:remove` IPC can find and tree-kill our process tree before
+      //      deleting the channel config (otherwise the bot worker stays alive
+      //      with a now-broken config).
+      //   3. `app.on('before-quit')` can clean us up so users don't leave 800 MB
+      //      orphans behind on app close.
+      // Channel id is parsed from the login command argv (always shaped like
+      // `openclaw channels login --channel <id> --verbose`).
+      const channelMatch = loginCmd.match(/--channel\s+(\S+)/);
+      const trackedChannelId = channelMatch ? channelMatch[1] : null;
+      const trackedPid = child.pid || 0;
+      if (trackedChannelId && trackedPid) {
+        registerActiveLogin(trackedChannelId, child);
+      }
 
       let idleTimer: NodeJS.Timeout | null = null;
       const clearIdleTimer = () => {
@@ -241,6 +260,7 @@ export function createChannelLoginWithQR(deps: {
       child.on('exit', (code) => {
         if (lineBuffer) processLine(lineBuffer);
         stopLogWatcher?.();
+        if (trackedChannelId && trackedPid) unregisterActiveLogin(trackedChannelId, trackedPid);
         if (settled) return;
         settled = true;
         clearIdleTimer();
@@ -259,6 +279,7 @@ export function createChannelLoginWithQR(deps: {
 
       child.on('error', (err) => {
         stopLogWatcher?.();
+        if (trackedChannelId && trackedPid) unregisterActiveLogin(trackedChannelId, trackedPid);
         clearIdleTimer();
         if (qrFlushTimer) {
           clearTimeout(qrFlushTimer);

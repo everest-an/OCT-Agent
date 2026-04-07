@@ -52,6 +52,7 @@ import { createShellUtils } from './shell-utils';
 import { isGatewayRunningOutput } from './openclaw-config';
 import { getAgentWorkspaceDir } from './openclaw-config';
 import { hasExplicitExecApprovalConfig, writeDesktopExecApprovalDefaults } from './openclaw-config';
+import { dedupedChannelsList, killAllActiveLogins, killAllStaleChannelOps } from './openclaw-process-guard';
 import { resolveDashboardUrl } from './openclaw-dashboard';
 import {
   applyDesktopAwarenessPluginConfig,
@@ -1414,6 +1415,39 @@ app.whenReady().then(() => {
   setTimeout(() => {
     prefetchSchema().catch(() => {});
   }, 60_000);
+
+  // Startup zombie cleanup — fire-and-forget. Kills any orphan
+  // `openclaw.mjs channels|cron` processes left over from a previous app session
+  // (crashes, force-quits, or upgrades that didn't drain children). Without this,
+  // every dev/test reinstall accumulates 800 MB-each zombies; real measurement
+  // showed 27 orphans / 11 GB after one day.
+  //
+  // CRITICAL: this kill is NOT awaited. The powershell/pkill query takes 3-5 s on
+  // Windows even when there's nothing to kill, so awaiting it would block the
+  // startup status banner and the gateway pre-warm. Match scope is tightened to
+  // ONLY `openclaw.mjs channels|cron`, never the gateway or awareness daemon.
+  killAllStaleChannelOps().catch((err) => {
+    console.warn('[startup] zombie cleanup failed (non-fatal):', err?.message || err);
+  });
+
+  // Background pre-warm of `openclaw channels list`. This serves three purposes:
+  //   1. Loads the 50MB+ OpenClaw JS bundle into the OS file cache so any
+  //      subsequent CLI invocation (like `openclaw channels login`) starts ~5-10 s faster.
+  //   2. Populates the shared channelsListInflight dedup cache in openclaw-process-guard
+  //      so the Channels page renders instantly on first open.
+  //   3. Surfaces any "Gateway not running" / "plugin failed to load" errors early,
+  //      not at the moment the user clicks "Connect WeChat".
+  // Runs at 25 s after app start — late enough to not compete with Gateway startup,
+  // early enough that it usually finishes before the user clicks Channels.
+  // Routed through dedupedChannelsList so any concurrent IPC call to channels list
+  // (e.g. user opens Channels page during the warm-up) shares this same process.
+  setTimeout(() => {
+    dedupedChannelsList(async (cmd, timeoutMs) => {
+      try { return await runAsync(cmd, timeoutMs); } catch { return null; }
+    }, 60_000).catch((err) => {
+      console.warn('[startup] channels list pre-warm failed (non-fatal):', err?.message || err);
+    });
+  }, 25_000);
 });
 
 app.on('second-instance', () => {
@@ -1433,6 +1467,11 @@ app.on('before-quit', () => {
   // Force-kill any shell children (e.g. hung `openclaw skills list --json`) that
   // were spawned with detached:true. Without this they survive as orphan processes.
   shellUtils.killAllTrackedShellChildren();
+  // Tree-kill any tracked channel login workers (cmd.exe wrapper + node openclaw.mjs
+  // grandchild). Without this, every app close leaves an 800 MB bot worker behind,
+  // and over a few app restarts the user accumulates 5-11 GB of zombies that compete
+  // with the new app's CLI calls. Fire-and-forget — Electron won't wait on it.
+  void killAllActiveLogins().catch(() => { /* best-effort */ });
 });
 
 app.on('window-all-closed', () => {

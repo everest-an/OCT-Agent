@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron';
 import { parseJsonShellOutput } from '../openclaw-shell-output';
+import { dedupedCronList } from '../openclaw-process-guard';
 
 type CronAddInput = {
   name?: string;
@@ -146,14 +147,17 @@ export function registerCronHandlers(deps: {
   runSpawnAsync: (cmd: string, args: string[], timeoutMs?: number) => Promise<string>;
 }) {
   ipcMain.handle('cron:list', async () => {
-    const jsonOutput = await deps.readShellOutputAsync('openclaw cron list --json 2>&1', CRON_LIST_TIMEOUT_MS);
+    // Routed through shared dedup so concurrent cron:list IPC calls (e.g. user
+    // navigates to Automation page from two different entry points) reuse one
+    // OpenClaw process instead of spawning two each loading all plugins.
+    const jsonOutput = await dedupedCronList(deps.readShellOutputAsync, 'openclaw cron list --json 2>&1', CRON_LIST_TIMEOUT_MS);
     const parsed = parseJsonShellOutput<{ jobs?: unknown[] } | unknown[]>(jsonOutput);
     if (parsed) {
       const jobs = Array.isArray(parsed) ? parsed : Array.isArray(parsed.jobs) ? parsed.jobs : [];
       return { jobs };
     }
 
-    const plainOutput = await deps.readShellOutputAsync('openclaw cron list 2>&1', CRON_LIST_TIMEOUT_MS);
+    const plainOutput = await dedupedCronList(deps.readShellOutputAsync, 'openclaw cron list 2>&1', CRON_LIST_TIMEOUT_MS);
     if (!plainOutput) {
       return { jobs: [], error: 'OpenClaw not available' };
     }

@@ -13,6 +13,7 @@ import {
   resolveChannelPluginInstallSpec,
 } from './channel-plugin-spec';
 import { clearChannelStatusCache } from './register-channel-list-handlers';
+import { dedupedChannelsAddHelp, dedupedChannelsList, killActiveLoginForChannel } from '../openclaw-process-guard';
 
 let discoveryDone = false;
 
@@ -567,7 +568,7 @@ export function registerChannelConfigHandlers(deps: {
 
     let listed = listedFromFile;
     if (!listedFromFile) {
-      const listOutput = await deps.readShellOutputAsync('openclaw channels list 2>&1', CHANNEL_ADD_IDLE_TIMEOUT_MS);
+      const listOutput = await dedupedChannelsList(deps.readShellOutputAsync, CHANNEL_ADD_IDLE_TIMEOUT_MS);
       listed = !!listOutput && (
         listOutput.toLowerCase().includes(openclawId.toLowerCase())
         || listOutput.toLowerCase().includes(channelId.toLowerCase())
@@ -641,7 +642,7 @@ export function registerChannelConfigHandlers(deps: {
       }
 
       try {
-        const helpOut = await deps.safeShellExecAsync(`openclaw channels add --help ${stderrRedirect}`, 5000);
+        const helpOut = await dedupedChannelsAddHelp(deps.safeShellExecAsync, 5000, stderrRedirect);
         if (helpOut) {
           const { cliChannels, channelFields } = deps.parseCliHelp(helpOut);
           if (cliChannels.size > 0 || channelFields.size > 0) {
@@ -764,7 +765,7 @@ export function registerChannelConfigHandlers(deps: {
             } catch (retryErr: any) {
               const retryMsg = retryErr?.message || String(retryErr);
               if (isTimeoutLike(retryMsg)) {
-                const listOutput = await deps.readShellOutputAsync('openclaw channels list 2>&1', CHANNEL_ADD_IDLE_TIMEOUT_MS);
+                const listOutput = await dedupedChannelsList(deps.readShellOutputAsync, CHANNEL_ADD_IDLE_TIMEOUT_MS);
                 if (!channelAppearsConfigured(listOutput, safeOpenclawId)) {
                   return { success: false, error: formatChannelActionError(safeOpenclawId, 'install', retryMsg) };
                 }
@@ -774,7 +775,7 @@ export function registerChannelConfigHandlers(deps: {
             }
           } else {
             if (isTimeoutLike(msg)) {
-              const listOutput = await deps.readShellOutputAsync('openclaw channels list 2>&1', CHANNEL_ADD_IDLE_TIMEOUT_MS);
+              const listOutput = await dedupedChannelsList(deps.readShellOutputAsync, CHANNEL_ADD_IDLE_TIMEOUT_MS);
               if (!channelAppearsConfigured(listOutput, safeOpenclawId)) {
                 return { success: false, error: formatChannelActionError(safeOpenclawId, 'install', msg) };
               }
@@ -976,6 +977,14 @@ export function registerChannelConfigHandlers(deps: {
       const channelDef = deps.getChannel(channelId);
       const openclawId = channelDef?.openclawId || channelId;
 
+      // 0. Kill any running login worker for this channel BEFORE removing config.
+      // Without this, the bot worker stays alive after the config is deleted, which
+      // produces the half-broken state seen in production: WeChat session still
+      // connected to a now-stale config, leading to "connected but not replying" or
+      // "channel not found" errors. tree-kill (taskkill /T /F on Windows) ensures
+      // both the cmd.exe wrapper AND the node openclaw.mjs grandchild are gone.
+      await killActiveLoginForChannel(openclawId).catch(() => { /* best-effort */ });
+
       // 1. Unbind from all agents (best-effort — ignore errors)
       try {
         const listOutput = await deps.readShellOutputAsync('openclaw agents list --json 2>&1', 15000);
@@ -1049,7 +1058,7 @@ export function registerChannelConfigHandlers(deps: {
       const gwStatus = await deps.readShellOutputAsync('openclaw channels status 2>&1', 20000);
       const gwRunning = gwStatus && (gwStatus.includes('running') || gwStatus.includes('active'));
 
-      const listOutput = await deps.readShellOutputAsync('openclaw channels list 2>&1', 20000);
+      const listOutput = await dedupedChannelsList(deps.readShellOutputAsync, 20000);
       const isListed = listOutput && listOutput.toLowerCase().includes(channelId);
 
       if (ocId === 'telegram' && isListed && gwRunning) {

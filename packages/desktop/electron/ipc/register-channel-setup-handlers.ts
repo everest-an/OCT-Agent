@@ -14,6 +14,7 @@ import {
   sanitizePluginId,
 } from './channel-plugin-spec';
 import { clearChannelStatusCache } from './register-channel-list-handlers';
+import { acquireChannelLoginLock, dedupedChannelsList, killStaleChannelLogins } from '../openclaw-process-guard';
 
 export function registerChannelSetupHandlers(deps: {
   getMainWindow: () => typeof Electron.BrowserWindow.prototype | null;
@@ -48,6 +49,65 @@ export function registerChannelSetupHandlers(deps: {
   };
 
   const isNpxEnoentLike = (message: string) => /spawn\s+npx(?:\.cmd)?\s+enoent/i.test(message || '');
+
+  // Transient OpenClaw failures that almost always succeed on a second attempt:
+  // - timeout: first attempt absorbs the 15-30s plugin load tax, second hits warm cache
+  // - AbortError: upstream regression where plugin init is aborted by handshake timeout
+  // - handshake timeout: gateway-cli DEFAULT_HANDSHAKE_TIMEOUT_MS is hardcoded to 3000ms
+  // Reference: github.com/openclaw/openclaw/issues/46256
+  const isTransientLoginFailure = (message: string) => {
+    if (!message) return false;
+    if (isTimeoutLike(message)) return true;
+    if (/AbortError/i.test(message)) return true;
+    if (/This operation was aborted/i.test(message)) return true;
+    if (/handshake timeout/i.test(message)) return true;
+    return false;
+  };
+
+  // Known-broken WeChat plugin versions that throw AbortError on init.
+  // 2.1.3 is the canonical bad version reported upstream; downgrade to 2.0.1 + allowUnsigned
+  // is the official workaround until @tencent-weixin/openclaw-weixin ships a fix.
+  // Reference: github.com/openclaw/openclaw/issues/52341
+  const KNOWN_BROKEN_WECHAT_VERSIONS = new Set(['2.1.3']);
+  const SAFE_WECHAT_VERSION = '2.0.1';
+
+  const ensureWeChatPluginCompatible = async (sendStatus: (msg: string) => void): Promise<boolean> => {
+    try {
+      const pkgJsonPath = path.join(os.homedir(), '.openclaw', 'extensions', 'openclaw-weixin', 'package.json');
+      if (!fs.existsSync(pkgJsonPath)) return false;
+      const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
+      const version = String(pkg?.version || '');
+      if (!KNOWN_BROKEN_WECHAT_VERSIONS.has(version)) return false;
+
+      sendStatus('channels.status.fixingWechatVersion');
+      try {
+        await deps.runAsync(
+          `openclaw plugins install "@tencent-weixin/openclaw-weixin@${SAFE_WECHAT_VERSION}" --force 2>&1`,
+          CHANNEL_PLUGIN_INSTALL_IDLE_TIMEOUT_MS,
+        );
+      } catch (err: unknown) {
+        const msg = toErrorMessage(err);
+        if (!isIgnorablePluginInstallError(msg)) return false;
+      }
+
+      // Allow unsigned: 2.0.1 predates current signature scheme so OpenClaw rejects it by default.
+      try {
+        const cfgRaw = fs.readFileSync(OPENCLAW_CONFIG_PATH, 'utf8');
+        const cfg = JSON.parse(cfgRaw);
+        if (cfg && typeof cfg === 'object') {
+          if (!isPlainRecord(cfg.plugins)) cfg.plugins = {};
+          if (!isPlainRecord(cfg.plugins.entries)) cfg.plugins.entries = {};
+          if (!isPlainRecord(cfg.plugins.entries['openclaw-weixin'])) cfg.plugins.entries['openclaw-weixin'] = {};
+          cfg.plugins.entries['openclaw-weixin'].allowUnsigned = true;
+          fs.writeFileSync(OPENCLAW_CONFIG_PATH, JSON.stringify(cfg, null, 2));
+        }
+      } catch { /* non-fatal — install itself succeeded */ }
+
+      return true;
+    } catch {
+      return false;
+    }
+  };
 
   const formatSetupError = (openclawId: string, channelLabel: string, rawError: string) => {
     const message = (rawError || '').trim();
@@ -370,7 +430,7 @@ export function registerChannelSetupHandlers(deps: {
 
     for (let index = 0; index < attempts.length; index += 1) {
       sendStatus(`channels.status.confirming::${label}`);
-      const output = await deps.readShellOutputAsync('openclaw channels list 2>&1', attempts[index]);
+      const output = await dedupedChannelsList(deps.readShellOutputAsync, attempts[index]);
       if (isChannelLinked(output, openclawId)) {
         return true;
       }
@@ -506,6 +566,29 @@ export function registerChannelSetupHandlers(deps: {
       }
     }
 
+    // WeChat-specific pre-flight: detect known-broken plugin versions and auto-pin to a safe one.
+    if (openclawId === 'openclaw-weixin') {
+      await ensureWeChatPluginCompatible(sendStatus);
+    }
+
+    // JS-level login mutex. If a previous channel:setup is still inside its login
+    // attempt, this caller waits in queue (no spawn yet, no extra OpenClaw process).
+    // The lock is purely in-process: zero powershell, zero added latency on the
+    // happy path. When the queue is empty, acquire returns immediately.
+    //
+    // We additionally fire-and-forget a kill of any leftover login wrappers from
+    // PRIOR app sessions (orphans). The kill runs in the background and does NOT
+    // block our spawn — by the time our channelLoginWithQR finishes plugin loading
+    // (~15-30 s), the kill has long since completed.
+    const releaseLoginLock = await acquireChannelLoginLock();
+    void killStaleChannelLogins().catch(() => { /* fire-and-forget */ });
+
+    // CRITICAL: every code path below must release the lock — including early
+    // returns and uncaught throws. We use a try/finally wrapper around the entire
+    // handler body to guarantee release. The release is idempotent, so the explicit
+    // release at the end of the login retry chain is also safe.
+    try {
+
     sendStatus(`channels.status.connecting::${channelLabel}`);
     const loginCmd = `openclaw channels login --channel ${openclawId} --verbose`;
     let result = await deps.channelLoginWithQR(loginCmd, CHANNEL_LOGIN_IDLE_TIMEOUT_MS);
@@ -542,6 +625,45 @@ export function registerChannelSetupHandlers(deps: {
         rawFailure = [result.error || '', result.output || ''].join('\n').trim();
       }
     }
+
+    // Auto-retry once on transient failures (timeout / AbortError / handshake timeout).
+    // The first attempt warms OpenClaw's plugin cache; the second usually succeeds without
+    // forcing the user to click "Retry" manually. Only retries if we haven't already retried
+    // via the plugin-repair path above.
+    if (!result.success && isTransientLoginFailure(rawFailure)) {
+      // Last-resort WeChat downgrade: if the first attempt failed with AbortError on a
+      // version we don't have in KNOWN_BROKEN_WECHAT_VERSIONS yet, try the safe version.
+      if (openclawId === 'openclaw-weixin' && /AbortError|This operation was aborted/i.test(rawFailure)) {
+        sendStatus('channels.status.fixingWechatVersion');
+        try {
+          await deps.runAsync(
+            `openclaw plugins install "@tencent-weixin/openclaw-weixin@${SAFE_WECHAT_VERSION}" --force 2>&1`,
+            CHANNEL_PLUGIN_INSTALL_IDLE_TIMEOUT_MS,
+          );
+          try {
+            const cfgRaw = fs.readFileSync(OPENCLAW_CONFIG_PATH, 'utf8');
+            const cfg = JSON.parse(cfgRaw);
+            if (cfg && typeof cfg === 'object') {
+              if (!isPlainRecord(cfg.plugins)) cfg.plugins = {};
+              if (!isPlainRecord(cfg.plugins.entries)) cfg.plugins.entries = {};
+              if (!isPlainRecord(cfg.plugins.entries['openclaw-weixin'])) cfg.plugins.entries['openclaw-weixin'] = {};
+              cfg.plugins.entries['openclaw-weixin'].allowUnsigned = true;
+              fs.writeFileSync(OPENCLAW_CONFIG_PATH, JSON.stringify(cfg, null, 2));
+            }
+          } catch {}
+        } catch { /* fall through to plain retry */ }
+      }
+
+      sendStatus(`channels.status.autoRetrying::${channelLabel}`);
+      await sleep(2000);
+      result = await deps.channelLoginWithQR(loginCmd, CHANNEL_LOGIN_IDLE_TIMEOUT_MS);
+      rawFailure = [result.error || '', result.output || ''].join('\n').trim();
+    }
+
+    // Release the JS-level mutex now that all login attempts (incl. auto-retry) are
+    // done. Subsequent steps (config write, agent bind, confirmation polling) don't
+    // spawn another `channels login`, so they're safe outside the lock.
+    releaseLoginLock();
 
     if (!result.success) {
       return {
@@ -591,5 +713,13 @@ export function registerChannelSetupHandlers(deps: {
       }
     }
     return result;
+
+    } finally {
+      // Failsafe release. The explicit releaseLoginLock() at the end of the login
+      // retry chain has already fired on the happy path; this finally is the safety
+      // net for any throw/early-return that bypassed it. release is idempotent so
+      // double-release is a no-op.
+      releaseLoginLock();
+    }
   });
 }

@@ -638,3 +638,115 @@ OpenClaw 的 chat 质量依赖 `~/.openclaw/workspace/` 下的 MD 文档：
 | 删除 | ✅ 有确认 | 加 `--force --json` 获取删除结果 |
 | 模型选择 | ❌ 缺失 | 创建时应支持选择模型（`--model`） |
 | 绑定展示 | ❌ 解析不准确 | 用 `bindingDetails` 字段显示 |
+
+---
+
+## P2.6 — OpenClaw 子进程并发治理（潜在风险，待规划）
+
+### 背景与根因
+
+OpenClaw CLI 每次启动都会**重新加载所有已安装插件**(feishu/awareness-memory/device-pair/openclaw-weixin/phone-control 等 10+ 个),单次启动:
+- **耗时 15-30 秒**(冷启动)
+- **占用 ~800 MB 内存**(每个进程)
+- **大量磁盘 IO**(读取插件 package.json + 解析 plugin schema)
+
+如果桌面端在短时间内 spawn 多个 OpenClaw 子进程,它们会**互相抢 CPU/磁盘/内存**,每个进程实际比单独跑慢 5-10 倍,导致用户感受到"等很久"甚至 UI 假死。
+
+### 已修复(2026-04-07)
+
+| 命令 | 修复方式 | 文件 |
+|---|---|---|
+| `openclaw channels list` | 全局共享 dedup 锁(`dedupedChannelsList`),所有 IPC handler 复用同一个 in-flight Promise | `electron/openclaw-process-guard.ts` + 4 个 handler |
+| `openclaw channels login` | 全局互斥锁(`acquireChannelLoginLock`),新 login 触发前先 `killStaleChannelLogins` 杀掉前一个 login 进程 | `register-channel-setup-handlers.ts` |
+| 启动期孤儿清理 | App 启动时 `killAllStaleChannelOps` 一次性 kill 所有遗留 OpenClaw channel 进程 | `main.ts` |
+
+### 待修复 — 其他可能触发并发的命令
+
+下列命令**目前没有任何互斥/dedup 保护**,在用户密集操作时仍可能堆积成多个并发的 800 MB OpenClaw 进程,导致整体卡顿。优先级按"用户触发频率 × 单次成本"排序:
+
+#### 🔴 高优先级(用户密集操作时风险最大)
+
+- [ ] **`openclaw plugins install <package>`**
+  - 触发场景:升级流程(OpenClaw → Plugin → Daemon 串行升级)、首次安装通道(WhatsApp/Signal/Telegram 等)、doctor 自动修复
+  - 风险:用户点"升级所有"按钮 → 升级 OpenClaw 主程序 + 升级 plugin + 升级 daemon,3 个进程串行但每个都加载全部插件;如果同时有人点连接微信,4 个并发
+  - 建议方案:全局 plugin 操作互斥锁,同一时刻只允许 1 个 `plugins install/uninstall` 在跑;新请求 enqueue 排队
+  - 影响文件:`register-channel-setup-handlers.ts`(line 444、454)、`register-channel-config-handlers.ts`、`main.ts` `app:upgrade-component`、`doctor/checks-channels.ts`、所有 `register-skill-handlers.ts`
+
+- [ ] **`openclaw channels add --channel <id>`**
+  - 触发场景:通道连接(WhatsApp/Signal/Telegram/iMessage 等所有 cli-strategy 通道)、doctor 修复
+  - 风险:用户在 Channels 页面快速连接多个通道(企业用户常见场景)→ 多个 add 并发
+  - 建议方案:复用 `acquireChannelLoginLock` 同一把锁(channels add 和 channels login 不应并发)
+  - 影响文件:`register-channel-setup-handlers.ts`(line 540、549)、`register-channel-config-handlers.ts`(line 755)
+
+- [ ] **`openclaw agents add/delete/bind/set-identity`**
+  - 触发场景:多 Agent 页面的所有 CRUD 操作(Agents.tsx、AgentWizard.tsx)
+  - 风险:用户在 Agents 页快速添加多个 agent / 连续绑定通道,每次都加载全部插件;企业用户批量配置时尤其明显
+  - 单次耗时:agents add ~30-45s,agents bind/delete ~30s
+  - 建议方案:全局 agents 操作串行队列(同一时刻 1 个),新请求等待前一个完成
+  - 影响文件:`register-agent-handlers.ts`(全部)
+
+#### 🟡 中优先级(单点触发为主)
+
+- [ ] **`openclaw gateway start/stop/restart`**
+  - 触发场景:Gateway 自愈、doctor 修复、用户手动重启
+  - 风险:Gateway 1006 自愈 + doctor 同时跑可能并发 restart → 第二个 restart 卡死
+  - 注意:上游 commit `59d8725` 已用 TCP probe 替代了 `gateway status` 慢路径,这条已大幅缓解
+  - 建议方案:gateway 操作单点互斥锁,新 restart 等待前一个完成或直接 reject
+  - 影响文件:`register-gateway-handlers.ts`、`main.ts`(self-heal 路径)
+
+- [ ] **`openclaw skills install/uninstall`**
+  - 触发场景:Skills 页面安装/卸载技能
+  - 风险:用户连续点多个技能"安装"(批量装一批)→ 多个 spawn 并发
+  - 建议方案:skill 操作串行队列(已有 progress 推送基础设施,加锁即可)
+  - 影响文件:`register-skill-handlers.ts`
+
+#### 🟢 低优先级(短命令或低频)
+
+- [ ] **`openclaw devices approve --latest`**(pairing 自愈,低频)
+- [ ] **`openclaw plugins uninstall`**(用户主动操作,低频)
+- [ ] **doctor 全量 check**(并发跑多个 openclaw 命令,但只在用户主动 run doctor 时触发)
+
+### 真正一劳永逸的方案 — 全局 OpenClaw 命令调度器
+
+把 `openclaw-process-guard.ts` 升级成统一调度器:
+
+```ts
+// 设想中的 API
+import { runOpenClawCommand } from './openclaw-process-guard';
+
+// 所有 spawn openclaw 的地方都过这个调度器
+await runOpenClawCommand('channels login --channel xxx', {
+  category: 'channel-login',  // 用于互斥/dedup 分组
+  dedup: false,                // login 不 dedup
+  mutex: true,                 // 但同一 category 互斥
+  killStale: true,             // 启动前 kill 同 category 的 stale 进程
+  timeout: 180000,
+  onProgress: (line) => sendStatus(line),
+});
+```
+
+设计要点:
+1. **全局并发上限**:同一时刻最多 N 个 OpenClaw 子进程在跑(N = max(2, CPU/2))
+2. **分类互斥**:相同 `category` 的命令互斥(channel-login、agent-write、plugin-install、gateway-control)
+3. **跨类别 dedup**:相同 `cmd` 的并发请求复用 in-flight Promise
+4. **kill stale**:启动前可选 kill 同 category 的孤儿进程
+5. **优先级队列**:用户触发的(channel login)优先于后台触发的(prewarm、doctor)
+6. **超时治理**:超时后强制 kill 进程树(Windows 用 `taskkill /T /F`,Unix 用 `process.kill(-pid)`)
+7. **遥测**:记录每个 category 的平均耗时、并发峰值、超时率,导出到 Settings → Diagnostics
+
+### 工作量估算
+- 调度器实现:2-3 小时
+- 全部 spawn 点改造(20+ 处):2-3 小时
+- 测试 + 跨平台验证:1-2 小时
+- **总计:~6 小时**
+
+### 触发条件(什么时候做)
+- 用户反馈"通道操作很慢" / "升级时整个 app 卡死" / "批量配置 agent 等很久"
+- 或者准备做企业版批量配置时
+- 或者支持 50+ 通道/agent 的大客户时
+
+### 当前缓解措施
+- ✅ Channels list/login 已修(覆盖 80% 用户痛点)
+- ✅ 启动时清理孤儿
+- ⚠️ 其他命令仍然 raw spawn,但单点触发居多,用户密集操作时才会爆炸
+- 💡 短期 workaround:如果用户报告卡顿,先教他们重启 app(会清理孤儿)

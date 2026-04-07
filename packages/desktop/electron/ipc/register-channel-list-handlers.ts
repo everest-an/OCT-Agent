@@ -2,11 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import { ipcMain } from 'electron';
 import { parseJsonShellOutput } from '../openclaw-shell-output';
+import { dedupedChannelsList } from '../openclaw-process-guard';
 
 const channelStatusCache: { configured: string[]; ts: number } = { configured: [], ts: 0 };
-
-// Dedup lock: only one `openclaw channels list` process at a time
-let channelsListInflight: Promise<string | null> | null = null;
 
 export function clearChannelStatusCache() {
   channelStatusCache.configured = [];
@@ -34,12 +32,12 @@ export function registerChannelListHandlers(deps: {
   readShellOutputAsync: (cmd: string, timeoutMs?: number) => Promise<string | null>;
   toFrontendId: (openclawId: string) => string;
 }) {
-  // Deduplicated `openclaw channels list` — reuses in-flight promise if one exists
+  // Deduplicated `openclaw channels list` — shared with all other handlers
+  // via openclaw-process-guard so concurrent callers from any IPC handler
+  // (channel-config, channel-setup, agents, wizard, startup pre-warm) all
+  // reuse the same in-flight process instead of spawning their own.
   function channelsListDeduped(timeoutMs: number): Promise<string | null> {
-    if (channelsListInflight) return channelsListInflight;
-    channelsListInflight = deps.readShellOutputAsync('openclaw channels list 2>&1', timeoutMs)
-      .finally(() => { channelsListInflight = null; });
-    return channelsListInflight;
+    return dedupedChannelsList(deps.readShellOutputAsync, timeoutMs);
   }
 
   ipcMain.handle('channel:list-configured', async () => {
