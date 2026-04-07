@@ -432,8 +432,15 @@ export function registerChannelSetupHandlers(deps: {
     // npm respects npm_config_registry as an env var, which openclaw passes through to npm install.
     const pluginInstallCmdMirror = `npm_config_registry=https://registry.npmmirror.com openclaw plugins install "${pluginPkg}" 2>&1`;
 
+    // Fast path: if the plugin is already installed locally, skip the install command entirely.
+    // openclaw plugins install loads ALL plugins before checking, wasting 15-30s even when already installed.
+    const pluginLocalDir = path.join(os.homedir(), '.openclaw', 'extensions', openclawId, 'package.json');
+    const pluginAlreadyInstalled = fs.existsSync(pluginLocalDir);
+
     sendStatus(`channels.status.configuring::${channelLabel}`);
-    try {
+    if (pluginAlreadyInstalled) {
+      // Plugin is present on disk — skip install and go straight to login.
+    } else try {
       await deps.runAsync(pluginInstallCmd, CHANNEL_PLUGIN_INSTALL_IDLE_TIMEOUT_MS);
     } catch (pluginErr: unknown) {
       const pluginMsg = toErrorMessage(pluginErr);
