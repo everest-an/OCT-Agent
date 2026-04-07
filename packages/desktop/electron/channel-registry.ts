@@ -359,10 +359,10 @@ function refreshDynamicChannels(): void {
             ...channel,
             configFields: _dynamicConfigFields.get(channel.id)?.length
               ? _dynamicConfigFields.get(channel.id)!
-              : [{ ...DEFAULT_TOKEN_FIELD }],
+              : (getFallbackConfigFields(channel.id).length > 0 ? getFallbackConfigFields(channel.id) : [{ ...DEFAULT_TOKEN_FIELD }]),
             connectionType: _dynamicConfigFields.get(channel.id)?.length
               ? (_dynamicConfigFields.get(channel.id)!.length > 1 ? 'multi-field' : 'token')
-              : 'token',
+              : (getFallbackConfigFields(channel.id).length > 1 ? 'multi-field' : 'token'),
             saveStrategy: _cliSupportedChannels.has(channel.id) ? 'cli' : 'json-direct',
           }
     ));
@@ -567,8 +567,36 @@ const KNOWN_OVERRIDES: Record<string, KnownOverride> = {
   msteams:  { label: 'Microsoft Teams' },
 };
 
+const VERIFIED_FALLBACK_CONFIG_FIELDS: Record<string, ConfigField[]> = {
+  feishu: [
+    {
+      key: 'appId',
+      label: 'appId',
+      placeholder: '',
+      type: 'text',
+      required: true,
+      cliFlag: '--app-id',
+      configPath: 'accounts.default',
+    },
+    {
+      key: 'appSecret',
+      label: 'appSecret',
+      placeholder: '',
+      type: 'password',
+      required: true,
+      cliFlag: '--app-secret',
+      configPath: 'accounts.default',
+    },
+  ],
+};
+
 // Default single-token config field (used for most channels)
 const DEFAULT_TOKEN_FIELD: ConfigField = { key: 'token', label: 'Token', placeholder: '', type: 'password', required: true, cliFlag: '--token' };
+
+function getFallbackConfigFields(channelId: string): ConfigField[] {
+  const fields = VERIFIED_FALLBACK_CONFIG_FIELDS[channelId];
+  return Array.isArray(fields) ? fields.map((field) => ({ ...field })) : [];
+}
 
 // ---------------------------------------------------------------------------
 // Index maps
@@ -623,6 +651,7 @@ function buildDynamicChannel(id: string, label: string, opts: {
 
   // Config fields priority: official capabilities > CLI help fallback > default token
   const dynamicFields = _dynamicConfigFields.get(id);
+  const fallbackFields = getFallbackConfigFields(id);
   let configFields: ConfigField[];
   let connectionType: ChannelDef['connectionType'];
 
@@ -632,6 +661,9 @@ function buildDynamicChannel(id: string, label: string, opts: {
   } else if (dynamicFields && dynamicFields.length > 0) {
     configFields = dynamicFields;
     connectionType = dynamicFields.length > 1 ? 'multi-field' : 'token';
+  } else if (fallbackFields.length > 0) {
+    configFields = fallbackFields;
+    connectionType = fallbackFields.length > 1 ? 'multi-field' : 'token';
   } else {
     configFields = [{ ...DEFAULT_TOKEN_FIELD }];
     connectionType = 'token';

@@ -277,6 +277,13 @@ Options:
   });
 
   describe('Dynamic channels — config fields from CLI help', () => {
+    it('feishu keeps official app credential fields even when capabilities are unavailable', () => {
+      const feishu = getChannel('feishu')!;
+      expect(feishu.connectionType).toBe('multi-field');
+      expect(feishu.configFields.map((field) => field.key)).toEqual(['appId', 'appSecret']);
+      expect(feishu.configFields.every((field) => field.configPath === 'accounts.default')).toBe(true);
+    });
+
     it('slack has 2 dynamic fields', () => {
       const sl = getChannel('slack')!;
       expect(sl.connectionType).toBe('multi-field');

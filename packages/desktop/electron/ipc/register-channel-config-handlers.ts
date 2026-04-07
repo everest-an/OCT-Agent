@@ -381,6 +381,23 @@ function sanitizeLegacyChannelConfigInFile(home: string, openclawId?: string): b
   }
 }
 
+function isChannelBoundToMainAgentInConfig(home: string, openclawId: string): boolean {
+  try {
+    const configPath = path.join(home, '.openclaw', 'openclaw.json');
+    const existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    if (!Array.isArray(existing?.bindings)) return false;
+
+    return existing.bindings.some((binding: any) => {
+      if (!isPlainRecord(binding)) return false;
+      if (binding.agentId !== 'main') return false;
+      const match = isPlainRecord(binding.match) ? binding.match : null;
+      return match?.channel === openclawId;
+    });
+  } catch {
+    return false;
+  }
+}
+
 function formatChannelActionError(openclawId: string, action: 'install' | 'bind', rawError: string): string {
   const message = (rawError || '').trim();
 
@@ -512,18 +529,23 @@ export function registerChannelConfigHandlers(deps: {
   };
 
   const bindChannelToMainAgent = async (openclawId: string) => {
+    if (isChannelBoundToMainAgentInConfig(deps.home, openclawId)) {
+      return { success: true as const, retried: false as const, skipped: true as const };
+    }
+
     try {
       await deps.runAsync(`openclaw agents bind --agent main --bind ${openclawId} 2>&1`, CHANNEL_BIND_IDLE_TIMEOUT_MS);
-      return { success: true as const, retried: false as const };
+      return { success: true as const, retried: false as const, skipped: false as const };
     } catch {
       try { await deps.runAsync('openclaw gateway restart 2>&1', GATEWAY_RESTART_IDLE_TIMEOUT_MS); } catch {}
       try {
         await deps.runAsync(`openclaw agents bind --agent main --bind ${openclawId} 2>&1`, CHANNEL_BIND_IDLE_TIMEOUT_MS);
-        return { success: true as const, retried: true as const };
+        return { success: true as const, retried: true as const, skipped: false as const };
       } catch (retryErr: any) {
         return {
           success: false as const,
           retried: true as const,
+          skipped: false as const,
           error: (retryErr?.message || String(retryErr)).slice(0, 240),
         };
       }
@@ -795,11 +817,9 @@ export function registerChannelConfigHandlers(deps: {
 
       try { await deps.runAsync('openclaw gateway restart 2>&1', GATEWAY_RESTART_IDLE_TIMEOUT_MS); } catch {}
 
-      try {
-        await deps.runAsync(`openclaw agents bind --agent main --bind ${safeOpenclawId} 2>&1`, CHANNEL_BIND_IDLE_TIMEOUT_MS);
-      } catch (bindErr: any) {
-        const bindMsg = bindErr?.message || String(bindErr);
-        const combined = pluginInstallError ? `${pluginInstallError}\n${bindMsg}` : bindMsg;
+      const bindResult = await bindChannelToMainAgent(safeOpenclawId);
+      if (!bindResult.success) {
+        const combined = pluginInstallError ? `${pluginInstallError}\n${bindResult.error}` : bindResult.error;
         return { success: false, error: formatChannelActionError(safeOpenclawId, 'bind', combined) };
       }
 

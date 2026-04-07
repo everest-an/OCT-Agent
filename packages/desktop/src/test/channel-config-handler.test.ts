@@ -695,4 +695,88 @@ describe('registerChannelConfigHandlers', () => {
 
     expect(result).toEqual({ success: true, config: { appId: 'cli_abc', appSecret: 'secret_xyz' } });
   });
+
+  it('skips redundant Feishu bind when the main agent route already exists in openclaw.json', async () => {
+    let storedConfigText = JSON.stringify({
+      channels: {
+        feishu: {
+          enabled: true,
+          accounts: {
+            default: {
+              enabled: true,
+              appId: 'cli_existing',
+              appSecret: 'secret_existing',
+            },
+          },
+        },
+      },
+      bindings: [
+        {
+          type: 'route',
+          agentId: 'main',
+          match: {
+            channel: 'feishu',
+          },
+        },
+      ],
+    });
+
+    vi.spyOn(fs, 'writeFileSync').mockImplementation((filePath: any, data: any) => {
+      if (String(filePath).includes('.openclaw') && String(filePath).includes('openclaw.json')) {
+        storedConfigText = String(data);
+      }
+      return undefined;
+    });
+    vi.spyOn(fs, 'readFileSync').mockImplementation((filePath: any) => {
+      if (String(filePath).includes('.openclaw') && String(filePath).includes('openclaw.json')) {
+        return storedConfigText as any;
+      }
+      throw new Error(`unexpected readFileSync(${String(filePath)})`);
+    });
+
+    const runAsync = vi
+      .fn()
+      .mockResolvedValueOnce('plugin installed')
+      .mockResolvedValueOnce('gateway restarted');
+
+    registerChannelConfigHandlers({
+      home: 'C:/Users/test',
+      safeShellExecAsync: vi.fn(async () => null),
+      readShellOutputAsync: vi.fn(async () => null),
+      runAsync,
+      discoverOpenClawChannels: vi.fn(),
+      parseCliHelp: vi.fn(() => ({ cliChannels: new Set<string>(), channelFields: new Map() })),
+      applyCliHelp: vi.fn(),
+      mergeCatalog: vi.fn(),
+      mergeChannelOptions: vi.fn(),
+      getAllChannels: vi.fn(() => []),
+      serializeRegistry: vi.fn(() => []),
+      getChannel: vi.fn(() => ({
+        id: 'feishu',
+        openclawId: 'feishu',
+        label: 'Feishu',
+        color: '#3370FF',
+        iconType: 'svg',
+        connectionType: 'multi-field',
+        saveStrategy: 'json-direct',
+        pluginPackage: '@openclaw/feishu',
+        configFields: [
+          { key: 'appId', label: 'appId', cliFlag: '--app-id', configPath: 'accounts.default' },
+          { key: 'appSecret', label: 'appSecret', cliFlag: '--app-secret', type: 'password', configPath: 'accounts.default' },
+        ],
+        source: 'openclaw-dynamic',
+        order: 8,
+      })) as any,
+      buildCLIFlags: vi.fn(() => ''),
+      toOpenclawId: vi.fn((id: string) => id),
+    });
+
+    const handler = getRegisteredSaveHandler();
+    const result = await handler({}, 'feishu', { appId: 'cli_existing', appSecret: 'secret_existing' });
+
+    expect(result).toMatchObject({ success: true });
+    expect(runAsync).toHaveBeenCalledWith('openclaw plugins install "@openclaw/feishu" 2>&1', 60000);
+    expect(runAsync).toHaveBeenCalledWith('openclaw gateway restart 2>&1', 30000);
+    expect(runAsync).not.toHaveBeenCalledWith('openclaw agents bind --agent main --bind feishu 2>&1', 30000);
+  });
 });
