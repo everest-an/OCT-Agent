@@ -75,6 +75,22 @@ export async function chatSendViaCli(
     let stdoutRemainder = '';
     let stderrRemainder = '';
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    // Defense-in-depth: capture "Unknown agent id" reports from OpenClaw stderr.
+    // These come through as `Gateway agent failed; falling back to embedded:
+    // Error: Unknown agent id "xxx". Use "openclaw agents list" to see configured agents.`
+    // The line is filtered by isNoiseLine (we don't want it streamed verbatim), but we
+    // still need to know it happened so we can surface a friendly error instead of
+    // returning empty text → "No response" with no actionable signal to the user.
+    // See CLAUDE.md "聊天 No response 防回归规则" + openclaw#17330 / openclaw#41686.
+    let detectedUnknownAgentId: string | null = null;
+    // Defense-in-depth (path A4): detect Gateway 1006 abnormal closures emitted by
+    // OpenClaw's `agent` CLI when the Gateway WS handshake completes but the chat.send
+    // RPC is dropped immediately. This usually means Gateway is in a half-broken state
+    // (process up, accepting TCP, but the request pipeline is wedged — see openclaw#46256).
+    // When detected, the chat IPC handler will request a one-shot Gateway restart in
+    // the background so the next message has a fresh server. Detection only — actual
+    // restart is wired in the IPC handler that owns the gateway client.
+    let detectedGateway1006 = false;
     const finalize = (result: any) => {
       if (settled) return;
       settled = true;
@@ -121,8 +137,14 @@ export async function chatSendViaCli(
       if (/^at\s+process\.processTicksAndRejections\b/i.test(trimmed)) return true;
       if (/^at\s+.*\(node:internal\//i.test(trimmed)) return true;
       if (trimmed.startsWith('Config')) return true;
-      if (trimmed.startsWith('Registered')) return true;
-      if (trimmed.includes('plugin')) return true;
+      if (trimmed.startsWith('Registered ')) return true;
+      // Tightened: previously `trimmed.includes('plugin')` matched ANY line containing
+      // the word "plugin", which silently swallows legitimate assistant text such as
+      // "the Telegram plugin requires a bot token...". This produced an empty `clean`
+      // string and the desktop UI fell back to "No response" even though OpenClaw had
+      // generated a real reply. Restrict to OpenClaw's actual plugin-loader prefixes
+      // (always at line start, always followed by a colon or whitespace marker).
+      if (/^(\[plugins\]|plugins?\s*[:>]|Plugin\s+\S+\s+(loaded|registered|disabled|skipped))/.test(trimmed)) return true;
       if (/^gateway connect failed:/i.test(trimmed)) return true;
       if (/^Gateway agent failed; falling back to embedded:/i.test(trimmed)) return true;
       if (/^Gateway target:/i.test(trimmed)) return true;
@@ -150,6 +172,13 @@ export async function chatSendViaCli(
       for (const line of lines) {
         const trimmed = line.trim();
         rememberRawLine(trimmed);
+        if (!detectedUnknownAgentId) {
+          const m = trimmed.match(/Unknown agent id\s+"([^"]+)"/i);
+          if (m) detectedUnknownAgentId = m[1];
+        }
+        if (!detectedGateway1006 && /gateway closed\s*\(\s*1006\b/i.test(trimmed)) {
+          detectedGateway1006 = true;
+        }
         if (!isNoiseLine(trimmed)) {
           collectedLines.push(trimmed);
           send('chat:stream', `${trimmed}\n`);
@@ -203,6 +232,20 @@ export async function chatSendViaCli(
         return;
       }
 
+      // If OpenClaw reported an unknown agent id and the run produced no usable
+      // assistant text, surface a friendly, actionable error instead of "No response".
+      // Empty text + detected ghost agent id == 100% reproducible silent failure
+      // mode caught by openclaw#17330 / openclaw#41686. We must not swallow it.
+      if (detectedUnknownAgentId && !clean) {
+        finalize({
+          success: false,
+          error: `The selected agent "${detectedUnknownAgentId}" no longer exists in OpenClaw. Please pick a different agent (or "main") in the chat header and try again.`,
+          sessionId: sid,
+          unknownAgentId: detectedUnknownAgentId,
+        });
+        return;
+      }
+
       const shouldFlagUnverifiedLocalFileOperation = looksLikeFilesystemMutationRequest(requestMessage)
         && looksLikeSuccessfulFilesystemMutationResponse(clean);
       const shouldFlagVpnDnsCompatibilityIssue = looksLikeWebOperationRequest(requestMessage)
@@ -225,6 +268,7 @@ export async function chatSendViaCli(
         sessionId: sid,
         unverifiedLocalFileOperation: shouldFlagUnverifiedLocalFileOperation || undefined,
         vpnDnsCompatibilityIssue: shouldFlagVpnDnsCompatibilityIssue || undefined,
+        gateway1006: detectedGateway1006 || undefined,
       });
     });
     child.on('error', (err) => {

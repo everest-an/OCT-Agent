@@ -65,6 +65,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onChatEvent: (callback: (event: any) => void) => {
     ipcRenderer.on('chat:event', (_e: any, event: any) => callback(event));
   },
+  // Fired by main when a chat:send arrives with an agentId that no longer exists in
+  // openclaw.json (deleted, failed-creation orphan, or pre-upgrade ghost). Renderer
+  // should clear that id from persisted store so the user is not left in a stuck
+  // state where every send re-triggers the same downgrade warning.
+  onChatAgentInvalidated: (callback: (info: { requestedAgentId: string; resolvedAgentId: string; reason?: string }) => void) => {
+    ipcRenderer.on('chat:agent-invalidated', (_e: any, info: any) => callback(info));
+  },
 
   // Channel management
   channelSave: (channelId: string, config: Record<string, string>) => ipcRenderer.invoke('channel:save', channelId, config),

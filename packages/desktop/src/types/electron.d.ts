@@ -80,6 +80,7 @@ export interface ElectronAPI {
   onChatDebug?: (callback: (msg: string) => void) => void;
   onChatEvent?: (callback: (event: unknown) => void) => void;
   onChatStatus?: (callback: (status: { type: string; tool?: string; toolStatus?: string; toolId?: string; message?: string; detail?: string; approvalRequestId?: string; approvalCommand?: string }) => void) => void;
+  onChatAgentInvalidated?: (callback: (info: { requestedAgentId: string; resolvedAgentId: string; reason?: string }) => void) => void;
   onMemoryWarning?: (callback: (payload: { type: string; message: string }) => void) => void;
   filePreview?: (filePath: string) => Promise<unknown>;
   selectFile?: (options?: { filters?: Array<{ name: string; extensions: string[] }> }) => Promise<{ filePath: string | null }>;

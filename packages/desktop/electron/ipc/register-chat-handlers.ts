@@ -53,6 +53,120 @@ import { chatSendViaCli, chatSendViaCliWithWebCompatibilityRetry, prepareCliFall
 // --- ./chat-detection.ts, ./awareness-memory-utils.ts, ./chat-cli-executor.ts ---
 // --- (pure copy/paste extraction, no logic changes) ---
 
+/**
+ * Validate that an agentId actually exists in openclaw.json before routing chat to it.
+ *
+ * Why this exists:
+ *   The frontend persists `selectedAgentId` in store. If the user deletes/recreates the
+ *   agent, imports a different config, or upgrades across an OpenClaw breaking change
+ *   (e.g. v2026.4.1+ pairing tightening, see openclaw#59428), the persisted id can become
+ *   a "ghost" — present in our store but not in OpenClaw's config.
+ *
+ *   When that ghost id reaches Gateway, OpenClaw silently falls back to the embedded agent
+ *   (`Gateway agent failed; falling back to embedded: Unknown agent id "xxx"`) and the run
+ *   completes with empty assistant text. The desktop app then displays "No response" with
+ *   no actionable error — reproducing the chat-failure pattern documented in CLAUDE.md.
+ *
+ * Strategy:
+ *   - Always allow 'main' (OpenClaw's reserved default — cannot be deleted).
+ *   - Read agents.list[] directly from openclaw.json (≤1ms, no CLI spawn). The CLI spawn
+ *     would re-load all plugins (15-30s, see CLAUDE.md "OpenClaw CLI 超时规则").
+ *   - If the requested id is missing from the config, downgrade to 'main' so the user
+ *     still gets a reply and can re-pick an agent in the UI.
+ *   - Never throw — config-read failures degrade gracefully to allowing the original id
+ *     so we don't introduce a new failure mode if openclaw.json is briefly unreadable.
+ */
+/**
+ * Self-heal for OpenClaw Gateway 1006 abnormal closures.
+ *
+ * When `chat-cli-executor` reports `gateway1006: true`, Gateway accepted the WS
+ * handshake but immediately tore down the chat.send RPC. This is a half-broken
+ * server state — process is up, port is listening, but the request pipeline is
+ * wedged. Subsequent messages will keep hitting the slow CLI fallback path until
+ * Gateway is restarted (see openclaw#46256 + observed behavior on 2026-04-07).
+ *
+ * Strategy:
+ *   - Throttle to one restart per ~60 s via chatState.lastGateway1006RestartAt.
+ *     A loop of failed messages must not become a loop of Gateway restarts.
+ *   - Fire-and-forget. Restart runs in the background; the current chat already
+ *     completed via CLI fallback, so the user sees their reply now and the next
+ *     message benefits from the fresh server.
+ *   - Notify the renderer via chat:status so the user understands what happened.
+ */
+function maybeSelfHealGateway1006(
+  result: any,
+  send: (channel: string, payload: any) => void,
+  runSpawnFn: ((cmd: string, args: string[], opts?: Record<string, unknown>) => any) | undefined,
+  enhancedPath: string,
+) {
+  if (!result?.gateway1006) return;
+  const now = Date.now();
+  if (now - chatState.lastGateway1006RestartAt < 60_000) return;
+  chatState.lastGateway1006RestartAt = now;
+
+  console.warn('[chat] Gateway 1006 detected; scheduling background restart');
+  send('chat:status', {
+    type: 'gateway',
+    message: 'Local Gateway dropped a request unexpectedly. Restarting it in the background...',
+  });
+
+  try {
+    const env = { ...process.env, PATH: enhancedPath };
+    // Cross-platform: prefer the injected runSpawn (which already handles
+    // Win cmd.exe vs *nix bash --norc --noprofile shell wrapping per CLAUDE.md
+    // shell-execution rules). Fall back to a direct spawn if not provided.
+    if (runSpawnFn) {
+      const child = runSpawnFn('openclaw', ['gateway', 'restart'], {
+        env,
+        stdio: 'ignore',
+        windowsHide: true,
+        detached: true,
+      });
+      // Detach so a slow restart does not keep the chat handler alive
+      try { child.unref?.(); } catch { /* ignore */ }
+    } else {
+      const child = spawn('openclaw', ['gateway', 'restart'], {
+        env,
+        stdio: 'ignore',
+        windowsHide: true,
+        detached: true,
+        shell: process.platform === 'win32',
+      });
+      try { child.unref(); } catch { /* ignore */ }
+    }
+  } catch (err: any) {
+    console.warn('[chat] Gateway 1006 self-heal failed to spawn restart:', err?.message || err);
+  }
+}
+
+function validateAgentIdAgainstConfig(home: string, agentId: string): {
+  resolvedAgentId: string;
+  wasStale: boolean;
+} {
+  if (!agentId || agentId === 'main') {
+    return { resolvedAgentId: 'main', wasStale: false };
+  }
+  try {
+    const configPath = path.join(home, '.openclaw', 'openclaw.json');
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    const cfg = JSON.parse(raw);
+    const list: any[] = Array.isArray(cfg?.agents?.list) ? cfg.agents.list : [];
+    // Empty list is treated as "config is fresh / only main exists" — drop the stale id.
+    if (list.length === 0) {
+      return { resolvedAgentId: 'main', wasStale: true };
+    }
+    const knownIds = new Set<string>(list.map((a: any) => String(a?.id || '')).filter(Boolean));
+    if (knownIds.has(agentId)) {
+      return { resolvedAgentId: agentId, wasStale: false };
+    }
+    return { resolvedAgentId: 'main', wasStale: true };
+  } catch {
+    // Config unreadable: do not block the user. Pass the original id through and let
+    // the downstream Gateway/CLI path surface any error.
+    return { resolvedAgentId: agentId, wasStale: false };
+  }
+}
+
 export function registerChatHandlers(deps: {
   sendToRenderer: (channel: string, payload: any) => void;
   ensureGatewayRunning: () => Promise<{ ok: boolean; error?: string }>;
@@ -132,7 +246,30 @@ export function registerChatHandlers(deps: {
     // Agent routing is done via the session key format, not a separate agentId param.
     // Gateway session keys: agent:<agentId>:main (operator), agent:<agentId>:webchat:<id> (desktop).
     // When a non-main agent is selected, prefix the session key so Gateway routes to the right agent.
-    const agentId = requestedOptions.agentId || 'main';
+    //
+    // Pre-validate the requested agentId against openclaw.json. If the frontend sent a stale
+    // id (deleted agent, failed-creation orphan, or pre-upgrade ghost), downgrade to 'main'
+    // before any Gateway/CLI call. This prevents the "Unknown agent id" → silent embedded
+    // fallback → empty assistant text → "No response" failure chain. See helper comment above.
+    const requestedAgentId = requestedOptions.agentId || 'main';
+    const validated = validateAgentIdAgainstConfig(os.homedir(), requestedAgentId);
+    const agentId = validated.resolvedAgentId;
+    if (validated.wasStale) {
+      console.warn('[chat] Stale agentId requested by renderer; downgrading to main', {
+        requestedAgentId,
+        resolvedAgentId: agentId,
+      });
+      requestedOptions.agentId = 'main';
+      deps.sendToRenderer('chat:agent-invalidated', {
+        requestedAgentId,
+        resolvedAgentId: 'main',
+        reason: 'agent-not-in-config',
+      });
+      deps.sendToRenderer('chat:status', {
+        type: 'gateway',
+        message: `Selected agent "${requestedAgentId}" no longer exists. Switched to the default agent for this reply.`,
+      });
+    }
     const rawSid = sessionId || `ac-${Date.now()}`;
     const sid = agentId !== 'main'
       ? `agent:${agentId}:webchat:${rawSid}`
@@ -313,8 +450,10 @@ ${message}`;
           send,
           deps,
         });
+        maybeSelfHealGateway1006(retryResult, send, deps.runSpawn, deps.getEnhancedPath());
         return withWorkspaceFallbackMeta(retryResult);
       }
+      maybeSelfHealGateway1006(cliResult, send, deps.runSpawn, deps.getEnhancedPath());
       return withWorkspaceFallbackMeta(cliResult);
     }
 
@@ -922,8 +1061,10 @@ ${message}`;
             send,
             deps,
           });
+          maybeSelfHealGateway1006(retryResult, send, deps.runSpawn, deps.getEnhancedPath());
           return withWorkspaceFallbackMeta(retryResult);
         }
+        maybeSelfHealGateway1006(cliResult, send, deps.runSpawn, deps.getEnhancedPath());
         return withWorkspaceFallbackMeta(cliResult);
       }
       return withWorkspaceFallbackMeta({ success: false, text: '', error: errorMsg, sessionId: sid });

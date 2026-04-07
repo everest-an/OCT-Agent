@@ -3,6 +3,7 @@ const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, dialog } = 
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import net from 'net';
 import http from 'http';
 import https from 'https';
 import crypto from 'crypto';
@@ -738,6 +739,45 @@ async function ensureGatewayRunning(): Promise<{ ok: boolean; error?: string }> 
   }
 }
 
+/**
+ * Fast TCP probe — does the Gateway port accept connections right now?
+ *
+ * Why this exists: every `openclaw gateway status` invocation reloads OpenClaw's
+ * full plugin runtime (15-30 s on a typical machine — see CLAUDE.md "OpenClaw CLI
+ * 超时规则" and openclaw#28587 / #62051). Using that command as a liveness check
+ * inside chat:send guarantees the user pays the plugin reload tax on every send.
+ *
+ * A loopback TCP connect to port 18789 returns within ~10 ms when the Gateway
+ * process is listening, regardless of plugin load state. That gives chat:send
+ * a way to ask "is Gateway alive?" without spawning OpenClaw at all.
+ *
+ * Scope is intentionally minimal: a successful probe only proves the listener
+ * is up, not that the Gateway WebSocket handshake will succeed. We use it as a
+ * **gate** before the slower WS handshake — never as a replacement for it.
+ */
+async function tcpProbeGatewayPort(timeoutMs = 800): Promise<boolean> {
+  const port = getGatewayPort() || 18789;
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      try { socket.destroy(); } catch { /* ignore */ }
+      resolve(ok);
+    };
+    socket.setTimeout(timeoutMs);
+    socket.once('connect', () => finish(true));
+    socket.once('timeout', () => finish(false));
+    socket.once('error', () => finish(false));
+    try {
+      socket.connect(port, '127.0.0.1');
+    } catch {
+      finish(false);
+    }
+  });
+}
+
 async function prepareGatewayForChat(): Promise<{ ok: boolean; error?: string }> {
   const send = (ch: string, data: any) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(ch, data);
@@ -752,15 +792,45 @@ async function prepareGatewayForChat(): Promise<{ ok: boolean; error?: string }>
       };
     }
 
+    // Fast path: WS already connected from a prior chat or startup pre-warm.
+    // This is the steady-state path after the first successful connection.
     if (gatewayWsClient?.isConnected) {
       return { ok: true };
     }
 
-    const statusOutput = await readShellOutputAsync('openclaw gateway status 2>&1', 4000);
-    if (isGatewayRunningOutput(statusOutput)) {
-      return { ok: true };
+    // Liveness check: TCP probe (<=800ms) instead of `openclaw gateway status`
+    // (4-30s plugin reload). When the listener is up, actively complete the WS
+    // handshake instead of dropping to the CLI fallback. The CLI fallback also
+    // pays the plugin reload tax, so falling back during normal startup means
+    // the user waits for plugin loading TWICE (once for status, once for `agent`).
+    const portOpen = await tcpProbeGatewayPort();
+    if (portOpen) {
+      send('chat:status', {
+        type: 'gateway',
+        message: 'Connecting to local Gateway...',
+      });
+      try {
+        // getGatewayWs internally handles concurrent callers via gatewayWsConnectPromise
+        // mutex, has a 10s connect timeout, and pre-warms write scopes. Once this
+        // succeeds, gatewayWsClient.isConnected stays true for the lifetime of the
+        // process — every subsequent chat hits the fast path above with no delay.
+        await getGatewayWs();
+        if (gatewayWsClient?.isConnected) {
+          return { ok: true };
+        }
+      } catch (err: any) {
+        // WS connect failed despite the port being open. This usually means
+        // Gateway is mid-startup and not yet accepting protocol-level connects
+        // (handshake races plugin loader — see openclaw#46256). Fall through to
+        // CLI fallback so the user still gets an answer, and kick a background
+        // repair so the next message will likely hit the fast path.
+        console.warn('[chat] Gateway WS connect failed despite open port:', err?.message || err);
+      }
     }
 
+    // Gateway is not reachable via TCP, or the WS handshake failed. Trigger a
+    // background repair (idempotent — no-op if one is already running) and tell
+    // the chat path to use CLI fallback for this single message.
     startGatewayRepairInBackground(send);
 
     return {
@@ -1279,10 +1349,59 @@ app.whenReady().then(() => {
   createWindow();
   createTray();
 
-  // Best-effort: start Gateway early so it's ready when user sends first message
-  startGatewayRepairInBackground().catch((err) => {
-    console.warn('[startup] Gateway pre-start failed (will retry on first chat):', err?.message || err);
-  });
+  // Best-effort: start Gateway early so it's ready when user sends first message.
+  // Once that completes, also pre-warm the Gateway WebSocket connection in the
+  // background so the user's first chat:send hits the fast path (no plugin reload,
+  // no CLI fallback). Without this pre-warm, the first message after launch pays
+  // a 30-60s tax even when Gateway is healthy — see CLAUDE.md "OpenClaw CLI 超时
+  // 规则" and openclaw#28587 / #46256. The retry loop tolerates Gateway taking up
+  // to ~60 seconds to finish loading plugins after the process starts.
+  //
+  // Path A3 — early visible signal: emit a chat:status banner immediately so the
+  // user sees "engine warming up" the moment they open Chat, rather than silence
+  // while plugins load. CLAUDE.md "用人话说话": telling the user "首次启动约需 30
+  // 秒" turns a perceived freeze into a visible progress indicator. This message
+  // is replaced by the success / failure log lines below as warmup progresses.
+  const sendStartupGatewayBanner = (msg: string) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('chat:status', { type: 'gateway', message: msg });
+    }
+  };
+  // Delay slightly so the renderer has a chance to mount its onChatStatus listener.
+  setTimeout(() => {
+    if (!gatewayWsClient?.isConnected) {
+      sendStartupGatewayBanner(
+        '正在启动本地 OpenClaw 引擎（首次启动约 30 秒）... / Local OpenClaw engine is starting (about 30s on first run)...',
+      );
+    }
+  }, 1500);
+
+  startGatewayRepairInBackground()
+    .then(async () => {
+      for (let attempt = 0; attempt < 12; attempt++) {
+        try {
+          if (await tcpProbeGatewayPort()) {
+            await getGatewayWs();
+            if (gatewayWsClient?.isConnected) {
+              console.log('[startup] Gateway WS pre-warm connected on attempt', attempt + 1);
+              sendStartupGatewayBanner('本地 OpenClaw 引擎已就绪 / Local OpenClaw engine ready');
+              return;
+            }
+          }
+        } catch (err: any) {
+          // Expected during plugin load window — keep retrying.
+          console.log('[startup] Gateway WS pre-warm attempt', attempt + 1, 'failed:', err?.message || err);
+        }
+        await sleep(5000);
+      }
+      console.warn('[startup] Gateway WS pre-warm gave up after 60s — first chat may take longer');
+      sendStartupGatewayBanner(
+        '本地引擎启动较慢，首条消息可能需要等待 / Local engine is slow to start; first message may take longer',
+      );
+    })
+    .catch((err) => {
+      console.warn('[startup] Gateway pre-start failed (will retry on first chat):', err?.message || err);
+    });
 
   // Start watchdog after a delay (give startup flow time to connect daemon first)
   setTimeout(() => {

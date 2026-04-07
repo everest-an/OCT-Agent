@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -770,6 +771,18 @@ describe('registerChatHandlers', () => {
   });
 
   it('routes non-main agents via session key format agent:<id>:webchat:<sid>', async () => {
+    // chat:send pre-validates agentId against ~/.openclaw/openclaw.json (added to prevent
+    // stale-id ghost agents from triggering Gateway's silent embedded fallback). Stub the
+    // config read so this test's synthetic 'researcher' agent passes validation.
+    const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+    const realReadFileSync = fs.readFileSync;
+    const readSpy = vi.spyOn(fs, 'readFileSync').mockImplementation(((p: any, ...rest: any[]) => {
+      if (typeof p === 'string' && p === configPath) {
+        return JSON.stringify({ agents: { list: [{ id: 'main' }, { id: 'researcher' }] } });
+      }
+      return (realReadFileSync as any)(p, ...rest);
+    }) as any);
+
     const ws = new FakeGatewayClient();
     // The session key for non-main agents is agent:<agentId>:webchat:<rawSid>
     const expectedSid = 'agent:researcher:webchat:test-session';
@@ -812,6 +825,68 @@ describe('registerChatHandlers', () => {
     // Verify agentId is NOT in chat.send params (Gateway rejects additionalProperties)
     const callArgs = (ws.chatSend as any).mock.calls[0][2];
     expect(callArgs).not.toHaveProperty('agentId');
+
+    readSpy.mockRestore();
+  });
+
+  it('downgrades stale agentId to main and emits chat:agent-invalidated when not in openclaw.json', async () => {
+    // Reproduces the "ghost agent id" failure pattern: frontend persists a selectedAgentId
+    // that no longer exists in OpenClaw config (deleted agent, failed-creation orphan, or
+    // pre-upgrade ghost). Without pre-validation, this id reaches Gateway, OpenClaw silently
+    // falls back to embedded, the run completes empty, and the user sees "No response".
+    // After the fix, chat:send must downgrade to 'main' before any Gateway/CLI call.
+    const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+    const realReadFileSync = fs.readFileSync;
+    const readSpy = vi.spyOn(fs, 'readFileSync').mockImplementation(((p: any, ...rest: any[]) => {
+      if (typeof p === 'string' && p === configPath) {
+        return JSON.stringify({ agents: { list: [{ id: 'main' }] } });
+      }
+      return (realReadFileSync as any)(p, ...rest);
+    }) as any);
+
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        // Gateway must be addressed by the resolved (main) session key, not the ghost one.
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: { role: 'assistant', content: 'reply from main' },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    const sendToRenderer = vi.fn();
+    registerChatHandlers({
+      sendToRenderer,
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, 'hello', 'test-session', { agentId: 'oc-1775488657793' });
+
+    // Result must succeed via main, not return "No response"
+    expect(result).toMatchObject({ success: true, text: 'reply from main' });
+    // Session key must NOT be agent:oc-1775488657793:webchat:* — it should be the plain main sid
+    expect(ws.chatSend).toHaveBeenCalledWith('test-session', expect.any(String), expect.any(Object));
+    // Renderer must receive an explicit invalidation event so the store can self-heal
+    const invalidatedCall = sendToRenderer.mock.calls.find((c) => c[0] === 'chat:agent-invalidated');
+    expect(invalidatedCall).toBeTruthy();
+    expect(invalidatedCall![1]).toMatchObject({
+      requestedAgentId: 'oc-1775488657793',
+      resolvedAgentId: 'main',
+      reason: 'agent-not-in-config',
+    });
+
+    readSpy.mockRestore();
   });
 
   it('requests verbose full so gateway tool events include real output details', async () => {

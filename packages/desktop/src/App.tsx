@@ -70,7 +70,7 @@ function isZoomOutKey(event: KeyboardEvent): boolean {
 }
 
 export default function App() {
-  const { config } = useAppConfig();
+  const { config, updateConfig } = useAppConfig();
   const [setupComplete, setSetupComplete] = useState<boolean | null>(null);
   const [runtimeReady, setRuntimeReady] = useState<boolean | null>(null);
   const [currentPage, setCurrentPage] = useState<Page>('chat');
@@ -79,6 +79,81 @@ export default function App() {
 
   // Apply theme switching
   useThemeEffect(config.theme || 'dark');
+
+  // ─── Ghost agent self-heal ─────────────────────────────────────────────
+  // Two complementary mechanisms keep selectedAgentId in sync with OpenClaw:
+  //
+  // 1. Boot-time sweep: on first mount, fetch the real agents list from
+  //    main (fast path, reads openclaw.json directly, ~1ms). If the
+  //    persisted selectedAgentId no longer exists, reset to "main".
+  //    Catches the four ghost-id failure modes documented in CLAUDE.md:
+  //    deleted agent, failed-creation orphan, post-import id drift, and
+  //    cross-version upgrade where OpenClaw rebuilt the agents list.
+  //
+  // 2. Runtime listener: subscribe to chat:agent-invalidated events from
+  //    main (emitted by chat:send pre-validation when a stale id is
+  //    rejected mid-session). Without this, the user would see the same
+  //    "agent xxx no longer exists" warning on every send because the
+  //    store still holds the dead id. With this, the first warning is
+  //    also the last — store self-corrects and subsequent sends go
+  //    straight to "main".
+  //
+  // Both mechanisms are no-ops in the happy path (id is valid). Failure
+  // mode is graceful: if agentsList errors out, we leave selectedAgentId
+  // alone and rely on the main-side guard to handle it.
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api?.agentsList) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await api.agentsList!();
+        if (cancelled || !result?.success || !Array.isArray(result.agents)) return;
+        const validIds = new Set(result.agents.map((a) => a.id));
+        const current = config.selectedAgentId || 'main';
+        if (current !== 'main' && !validIds.has(current)) {
+          console.warn('[app] Boot sweep: stale selectedAgentId cleared', {
+            stale: current,
+            knownIds: Array.from(validIds),
+          });
+          updateConfig({ selectedAgentId: 'main' });
+        }
+      } catch {
+        // Soft-fail: keep current selection, main-side guard will catch it.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Run only once on mount — re-running on every config change would loop
+    // because updateConfig itself triggers a config change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api?.onChatAgentInvalidated) return;
+    api.onChatAgentInvalidated((info) => {
+      // Only react if the dead id is the one we still hold. Avoids fighting
+      // a Settings/Agents page that may have already swapped the selection.
+      // Read from localStorage rather than the closured `config` so we always
+      // see the latest value (this listener is registered once on mount).
+      let current = 'main';
+      try {
+        const raw = localStorage.getItem('awareness-claw-config');
+        if (raw) current = JSON.parse(raw)?.selectedAgentId || 'main';
+      } catch { /* ignore */ }
+      if (current === info.requestedAgentId) {
+        console.warn('[app] Runtime self-heal: clearing invalidated agentId', info);
+        updateConfig({ selectedAgentId: info.resolvedAgentId || 'main' });
+      }
+    });
+    // ipcRenderer.on listeners persist for the lifetime of the renderer
+    // process — there is no off() exposed via preload, and App is
+    // mounted exactly once, so this is fine.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // ───────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     const done = localStorage.getItem('awareness-claw-setup-done');
