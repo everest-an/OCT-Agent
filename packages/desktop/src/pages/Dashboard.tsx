@@ -853,6 +853,15 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     }).catch(() => { setGatewayRunning(false); });
   }, [activeChannelKey]);
 
+  // Listen for gateway status push updates from main process
+  useEffect(() => {
+    const api = window.electronAPI as any;
+    const cleanup = api?.onGatewayStatusUpdate?.((data: { running: boolean }) => {
+      setGatewayRunning(data.running);
+    });
+    return () => cleanup?.();
+  }, []);
+
   // When Channels page triggers "Open Chat" for a specific channel, open sidebar
   // and select the most recent session for that channel (or just show sidebar if none yet).
   useEffect(() => {

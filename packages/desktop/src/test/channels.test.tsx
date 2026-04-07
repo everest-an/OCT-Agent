@@ -69,13 +69,13 @@ describe('Channels Page', () => {
 
     // Confirmation dialog should appear
     expect(screen.getByText('Disconnect Channel')).toBeInTheDocument();
-    expect(screen.getByText(/remove the channel configuration/)).toBeInTheDocument();
+    expect(screen.getByText(/stop the channel bot worker/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
 
-  it('calls channelRemove when confirmed', async () => {
+  it('calls channelDisconnect when confirmed', async () => {
     const api = window.electronAPI as any;
-    api.channelRemove = vi.fn().mockResolvedValue({ success: true });
+    api.channelDisconnect = vi.fn().mockResolvedValue({ success: true });
 
     await act(async () => { render(<Channels />); });
     await waitFor(() => {
@@ -96,8 +96,8 @@ describe('Channels Page', () => {
 
     await act(async () => { fireEvent.click(confirmBtn); });
 
-    // channelRemove should have been called
-    expect(api.channelRemove).toHaveBeenCalled();
+    // channelDisconnect should have been called
+    expect(api.channelDisconnect).toHaveBeenCalled();
   });
 
   it('closes confirmation dialog when cancel is clicked', async () => {

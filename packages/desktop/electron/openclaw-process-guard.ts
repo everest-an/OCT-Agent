@@ -40,6 +40,7 @@
  */
 
 import { spawn, type ChildProcess } from 'child_process';
+import os from 'os';
 
 // ---------- generic dedup primitive ----------
 
@@ -174,21 +175,43 @@ function runKillCommand(cmd: string, args: string[]): Promise<void> {
 }
 
 /**
- * Kill any running `openclaw channels login` processes. Safe to call as
- * fire-and-forget (returns a Promise but caller may ignore it). NEVER matches
- * the gateway process (which runs `openclaw/dist/index.js gateway`), only the
- * `openclaw.mjs channels login` wrapper and its node grandchildren.
+ * Kill ORPHAN `openclaw channels login` processes — those NOT tracked by our
+ * in-process `activeLogins` map. Called before spawning a new login worker to
+ * clean up leftovers from a crashed/previous session, while preserving any
+ * healthy bot workers we're managing in the current session.
+ *
+ * NEVER matches the gateway process (`openclaw/dist/index.js gateway`).
  */
 export function killStaleChannelLogins(): Promise<void> {
+  // Collect PIDs we're actively managing — these MUST survive.
+  const safePids = new Set<number>();
+  for (const record of activeLogins.values()) {
+    if (record.wrapperPid > 0) safePids.add(record.wrapperPid);
+  }
+
   if (process.platform === 'win32') {
+    // Build a PowerShell filter that excludes our tracked PIDs.
+    const excludeClause = safePids.size > 0
+      ? ` -and @(${[...safePids].join(',')}) -notcontains $_.ProcessId`
+      : '';
     return runKillCommand('powershell', [
       '-NoProfile', '-Command',
       "Get-CimInstance Win32_Process -Filter \"name = 'node.exe'\" | " +
-      "Where-Object { $_.CommandLine -like '*openclaw.mjs*channels login*' } | " +
+      `Where-Object { $_.CommandLine -like '*openclaw.mjs*channels login*'${excludeClause} } | ` +
       "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }",
     ]);
   }
-  return runKillCommand('pkill', ['-f', 'openclaw.*channels login']);
+
+  // Unix: list matching PIDs, filter out safe ones, then kill the rest.
+  if (safePids.size === 0) {
+    return runKillCommand('bash', ['-c',
+      "pgrep -f 'openclaw\\.mjs.*channels login' | xargs -r kill -9 2>/dev/null",
+    ]);
+  }
+  const grepExclude = [...safePids].map(p => `-e '^${p}$'`).join(' ');
+  return runKillCommand('bash', ['-c',
+    `pgrep -f 'openclaw\\.mjs.*channels login' | grep -v ${grepExclude} | xargs -r kill -9 2>/dev/null`,
+  ]);
 }
 
 // ---------- precise PID tracking for active channel logins ----------
@@ -301,28 +324,124 @@ export function getActiveLoginCount(): number {
 }
 
 /**
+ * Check whether a specific channel id has a tracked (in-process) login worker.
+ * Returns the wrapper PID if tracked, 0 otherwise.
+ */
+export function getTrackedLoginPid(channelId: string): number {
+  return activeLogins.get(channelId)?.wrapperPid ?? 0;
+}
+
+/**
+ * Kill any untracked `channels login` process for a specific channel id.
+ * Used by auto-reconnect to replace orphan workers from previous sessions
+ * with fresh tracked ones. Does NOT kill workers in our activeLogins map.
+ */
+export function killOrphanWorkerForChannel(openclawId: string): Promise<void> {
+  const trackedPid = activeLogins.get(openclawId)?.wrapperPid ?? 0;
+
+  if (process.platform === 'win32') {
+    const excludeClause = trackedPid > 0 ? ` -and $_.ProcessId -ne ${trackedPid}` : '';
+    return runKillCommand('powershell', [
+      '-NoProfile', '-Command',
+      `Get-CimInstance Win32_Process -Filter "name = 'node.exe'" | ` +
+      `Where-Object { $_.CommandLine -like '*channels login*' -and ` +
+      `$_.CommandLine -like '*--channel ${openclawId}*'${excludeClause} } | ` +
+      `ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`,
+    ]);
+  }
+
+  if (trackedPid > 0) {
+    return runKillCommand('bash', ['-c',
+      `pgrep -f 'channels login.*--channel ${openclawId}' | grep -v '^${trackedPid}$' | xargs -r kill -9 2>/dev/null`,
+    ]);
+  }
+  return runKillCommand('bash', ['-c',
+    `pgrep -f 'channels login.*--channel ${openclawId}' | xargs -r kill -9 2>/dev/null`,
+  ]);
+}
+
+/**
  * Kill ALL stale `openclaw channels {list,login,add}` and `cron list` processes.
  * Called once at app startup to clean up orphans from a previous crashed/quit
  * session. Fire-and-forget — runs in the background while the app starts up
  * normally. NEVER matches the gateway or awareness daemon processes.
  *
  * Match strategy is intentionally narrow:
- *   - `openclaw.mjs channels` (covers list/login/add wrappers)
+ *   - `openclaw.mjs channels {list,add,capabilities}` (short-lived read/write ops)
  *   - `openclaw.mjs cron`     (covers cron list/add)
- *   - The Node grandchild children of those wrappers ALSO match because OpenClaw
- *     spawns them with the same openclaw.mjs argv.
+ *   - DOES NOT match `openclaw.mjs channels login` — those are long-running bot
+ *     workers that must stay alive across app restarts. Killing them silently
+ *     breaks WeChat/WhatsApp/Signal message delivery with no visible error.
  *   - Gateway process (`openclaw/dist/index.js gateway`) does NOT match either
  *     pattern, so cleanup is safe to run at any time.
  */
 export function killAllStaleChannelOps(): Promise<void> {
   if (process.platform === 'win32') {
+    // Match channels list/add/capabilities but NOT channels login.
+    // The -notlike guard ensures bot workers survive app restart.
     return runKillCommand('powershell', [
       '-NoProfile', '-Command',
       "Get-CimInstance Win32_Process -Filter \"name = 'node.exe'\" | " +
-      "Where-Object { $_.CommandLine -like '*openclaw.mjs*channels*' -or " +
+      "Where-Object { ($_.CommandLine -like '*openclaw.mjs*channels*' -and " +
+      "$_.CommandLine -notlike '*channels login*') -or " +
       "$_.CommandLine -like '*openclaw.mjs*cron*' } | " +
       "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }",
     ]);
   }
-  return runKillCommand('pkill', ['-f', 'openclaw\\.mjs (channels|cron)']);
+  // Unix: kill channels list/add/capabilities but not channels login
+  return runKillCommand('bash', ['-c',
+    "pgrep -f 'openclaw\\.mjs.*channels (list|add|capabilities)' | xargs -r kill -9 2>/dev/null; " +
+    "pgrep -f 'openclaw\\.mjs.*cron' | xargs -r kill -9 2>/dev/null",
+  ]);
+}
+
+// ---------- detect existing channel login workers ----------
+//
+// At app startup we need to know which `channels login` bot workers are
+// already running (e.g. left from the previous session or started by a
+// scheduled task). These workers are long-lived and MUST be kept alive —
+// they ARE the channel bot that receives and routes messages.
+
+/**
+ * Returns a Set of openclaw channel ids that have an active `channels login`
+ * process (e.g. `openclaw.mjs channels login --channel openclaw-weixin`).
+ * Cross-platform: uses `Get-CimInstance` on Windows, `ps aux` on Unix.
+ */
+export function detectRunningChannelLoginWorkers(): Promise<Set<string>> {
+  return new Promise((resolve) => {
+    const result = new Set<string>();
+    let stdout = '';
+
+    const parseChannelIds = (output: string) => {
+      // Match `--channel <id>` from command lines
+      const regex = /channels\s+login\s+--channel\s+(\S+)/g;
+      let m: RegExpExecArray | null;
+      while ((m = regex.exec(output)) !== null) {
+        result.add(m[1]);
+      }
+    };
+
+    let child: ChildProcess;
+    if (process.platform === 'win32') {
+      child = spawn('powershell', [
+        '-NoProfile', '-Command',
+        "Get-CimInstance Win32_Process -Filter \"name = 'node.exe'\" | " +
+        "Where-Object { $_.CommandLine -like '*channels login*' } | " +
+        "Select-Object -ExpandProperty CommandLine",
+      ], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+    } else {
+      child = spawn('bash', ['-c',
+        "ps aux | grep 'channels login' | grep -v grep",
+      ], { stdio: ['ignore', 'pipe', 'ignore'] });
+    }
+
+    child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.on('error', () => resolve(result));
+    child.on('exit', () => {
+      parseChannelIds(stdout);
+      resolve(result);
+    });
+    // Safety timeout — never hang waiting for ps/powershell
+    setTimeout(() => { try { child.kill(); } catch { /* */ } resolve(result); }, 8000);
+  });
 }

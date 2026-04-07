@@ -52,7 +52,7 @@ import { createShellUtils } from './shell-utils';
 import { isGatewayRunningOutput } from './openclaw-config';
 import { getAgentWorkspaceDir } from './openclaw-config';
 import { hasExplicitExecApprovalConfig, writeDesktopExecApprovalDefaults } from './openclaw-config';
-import { dedupedChannelsList, killAllActiveLogins, killAllStaleChannelOps } from './openclaw-process-guard';
+import { dedupedChannelsList, killAllActiveLogins, killAllStaleChannelOps, detectRunningChannelLoginWorkers, getTrackedLoginPid, killOrphanWorkerForChannel } from './openclaw-process-guard';
 import { resolveDashboardUrl } from './openclaw-dashboard';
 import {
   applyDesktopAwarenessPluginConfig,
@@ -555,22 +555,25 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
   repairOpenClawConfigFile();
 
   // Fast path: HTTP probe avoids the 15-30s CLI plugin preload when the
-  // gateway is already up. OpenClaw 4.5 loads all plugins on every CLI call.
+  // gateway is already up. OpenClaw loads all plugins on every CLI call.
+  // Retry once after 3s to cover the gateway startup window (plugin loading
+  // takes 15-30s — a single probe during that window always fails, causing
+  // unnecessary CLI fallback that spawns another ~500 MB process).
   const port = getGatewayPort();
-  const httpProbeOk = await new Promise<boolean>((resolve) => {
+  const httpProbe = (): Promise<boolean> => new Promise((resolve) => {
     const req = http.get(`http://127.0.0.1:${port}/healthz`, { timeout: 3000 }, (res) => {
       res.resume();
       resolve(res.statusCode !== undefined && res.statusCode < 500);
     });
     req.on('error', () => resolve(false));
-    req.on('timeout', () => {
-      req.destroy();
-      resolve(false);
-    });
+    req.on('timeout', () => { req.destroy(); resolve(false); });
   });
-  if (httpProbeOk) return { ok: true };
+  if (await httpProbe()) return { ok: true };
+  // Gateway may be booting (plugin load window) — wait 3s and retry once.
+  await sleep(3000);
+  if (await httpProbe()) return { ok: true };
 
-  // Fallback: CLI check still handles non-default ports and older installs.
+  // Slow fallback: CLI check handles non-default ports and older installs.
   const statusOutput = await readShellOutputAsync('openclaw gateway status 2>&1', 15000);
   if (isGatewayRunningOutput(statusOutput)) return { ok: true };
 
@@ -657,12 +660,12 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
     }
   }
 
-  // Poll with backoff: 1s×3, 2s×3 = ~12s max (down from 10×1s + 15s timeout each)
+  // Poll with HTTP probe instead of CLI (each CLI call loads all plugins = ~500 MB).
+  // Backoff: 2s×3, 3s×3 = ~15s max — enough for gateway to finish plugin loading.
   for (let i = 0; i < 6; i++) {
-    const delay = i < 3 ? 1000 : 2000;
+    const delay = i < 3 ? 2000 : 3000;
     await sleep(delay);
-    const check = await readShellOutputAsync('openclaw gateway status 2>&1', 8000);
-    if (isGatewayRunningOutput(check)) {
+    if (await httpProbe()) {
       emit('Gateway started');
       return { ok: true };
     }
@@ -1340,6 +1343,118 @@ registerRuntimeHealthHandlers({
 
 // --- App Lifecycle ---
 
+// ---------------------------------------------------------------------------
+// Auto-reconnect channel login workers
+//
+// Channels with persistent login workers (WeChat, WhatsApp, Signal) need their
+// `openclaw channels login --channel <id> --verbose` process to be running
+// continuously. When the app restarts (or the previous session crashed), these
+// workers are gone but the channel is still configured+enabled in openclaw.json.
+// This function detects which enabled channels are missing a worker and spawns
+// one silently. For channels like WeChat, the session is cached locally so the
+// worker reconnects without re-scanning a QR code.
+//
+// openclawIds that use a persistent `channels login` worker:
+const CHANNELS_NEEDING_LOGIN_WORKER: Set<string> = new Set([
+  'openclaw-weixin',  // WeChat
+  'whatsapp',         // WhatsApp
+  'signal',           // Signal
+]);
+
+async function autoReconnectChannelWorkers(): Promise<void> {
+  try {
+    const configPath = path.join(HOME, '.openclaw', 'openclaw.json');
+    if (!fs.existsSync(configPath)) return;
+
+    const config = readJsonFileWithBom<Record<string, any>>(configPath);
+    const channels = config?.channels;
+    if (!channels || typeof channels !== 'object') return;
+
+    // Find enabled channels that need a login worker.
+    const enabledLoginChannels: string[] = [];
+    for (const [ocId, chConfig] of Object.entries(channels)) {
+      if (
+        CHANNELS_NEEDING_LOGIN_WORKER.has(ocId) &&
+        chConfig && typeof chConfig === 'object' &&
+        (chConfig as any).enabled === true
+      ) {
+        enabledLoginChannels.push(ocId);
+      }
+    }
+
+    if (enabledLoginChannels.length === 0) {
+      console.log('[auto-reconnect] No enabled channels need login workers.');
+      return;
+    }
+
+    // Detect OS-level workers (includes both tracked and untracked orphans).
+    const runningWorkers = await detectRunningChannelLoginWorkers();
+
+    // For each enabled channel, determine what to do:
+    //   - Already tracked by us (in activeLogins) → skip, it's managed
+    //   - OS process exists but untracked (orphan from prior session) →
+    //     MUST replace with a tracked one, otherwise killStaleChannelLogins()
+    //     will kill the orphan later and nobody will reconnect it
+    //   - No worker at all → spawn a new tracked one
+    const needSpawn: string[] = [];
+    for (const ocId of enabledLoginChannels) {
+      const trackedPid = getTrackedLoginPid(ocId);
+      if (trackedPid > 0) {
+        console.log(`[auto-reconnect] ${ocId}: already tracked (PID ${trackedPid}), skipping.`);
+        continue;
+      }
+      if (runningWorkers.has(ocId)) {
+        console.log(`[auto-reconnect] ${ocId}: untracked orphan found, will replace with tracked worker.`);
+      } else {
+        console.log(`[auto-reconnect] ${ocId}: no worker found, will spawn.`);
+      }
+      needSpawn.push(ocId);
+    }
+
+    if (needSpawn.length === 0) {
+      console.log('[auto-reconnect] All channel workers are tracked and running.');
+      return;
+    }
+
+    console.log('[auto-reconnect] Spawning tracked workers for:', needSpawn.join(', '));
+
+    // Spawn workers sequentially (each loads all plugins ~800MB, don't spawn all at once).
+    // For channels with untracked orphans, kill the orphan first so two workers
+    // don't compete for the same messaging session (e.g. WeChat only allows one
+    // active login). channelLoginWithQR → registerActiveLogin handles tracked
+    // replacements, but orphans aren't in the map.
+    for (const ocId of needSpawn) {
+      // Kill any untracked orphan worker for this specific channel before spawning.
+      if (runningWorkers.has(ocId)) {
+        console.log(`[auto-reconnect] ${ocId}: killing untracked orphan before spawn...`);
+        await killOrphanWorkerForChannel(ocId);
+        // Brief pause for process cleanup.
+        await sleep(1000);
+      }
+
+      const loginCmd = `openclaw channels login --channel ${ocId} --verbose`;
+      console.log(`[auto-reconnect] Starting worker: ${loginCmd}`);
+      // Fire-and-forget — channelLoginWithQR handles its own PID registration,
+      // idle timeout, output parsing, and error handling. It resolves when the
+      // worker exits (which for a healthy bot = never, until app quits).
+      // Use a very long idle timeout (24h) since this is a persistent worker.
+      channelLoginWithQR(loginCmd, 24 * 60 * 60 * 1000).then((result) => {
+        if (result.success) {
+          console.log(`[auto-reconnect] Worker for ${ocId} exited successfully.`);
+        } else {
+          console.warn(`[auto-reconnect] Worker for ${ocId} exited with error:`, result.error || result.output);
+        }
+      }).catch((err: any) => {
+        console.warn(`[auto-reconnect] Worker for ${ocId} failed:`, err?.message || err);
+      });
+      // Stagger spawns by 5s so plugin loading doesn't overwhelm the system.
+      await sleep(5000);
+    }
+  } catch (err: any) {
+    console.warn('[auto-reconnect] Failed (non-fatal):', err?.message || err);
+  }
+}
+
 app.whenReady().then(() => {
   // Deploy internal hook for awareness memory backup (idempotent, version-gated)
   ensureInternalHook(HOME);
@@ -1378,7 +1493,11 @@ app.whenReady().then(() => {
   }, 1500);
 
   startGatewayRepairInBackground()
-    .then(async () => {
+    .then(async (result) => {
+      // Push gateway status to frontend so Settings/Dashboard update without reload.
+      if (result && result.ok && mainWindow?.webContents) {
+        mainWindow.webContents.send('gateway:status-update', { running: true });
+      }
       for (let attempt = 0; attempt < 12; attempt++) {
         try {
           if (await tcpProbeGatewayPort()) {
@@ -1386,6 +1505,9 @@ app.whenReady().then(() => {
             if (gatewayWsClient?.isConnected) {
               console.log('[startup] Gateway WS pre-warm connected on attempt', attempt + 1);
               sendStartupGatewayBanner('本地 OpenClaw 引擎已就绪 / Local OpenClaw engine ready');
+              if (mainWindow?.webContents) {
+                mainWindow.webContents.send('gateway:status-update', { running: true });
+              }
               return;
             }
           }
@@ -1429,6 +1551,15 @@ app.whenReady().then(() => {
   killAllStaleChannelOps().catch((err) => {
     console.warn('[startup] zombie cleanup failed (non-fatal):', err?.message || err);
   });
+
+  // Auto-reconnect channel workers for enabled channels (WeChat, WhatsApp, Signal)
+  // that need persistent `channels login` processes. Runs 45s after startup so
+  // the gateway has time to finish loading plugins and the zombie cleanup is done.
+  setTimeout(() => {
+    autoReconnectChannelWorkers().catch((err) => {
+      console.warn('[startup] auto-reconnect failed (non-fatal):', err?.message || err);
+    });
+  }, 45_000);
 
   // Background pre-warm of `openclaw channels list`. This serves three purposes:
   //   1. Loads the 50MB+ OpenClaw JS bundle into the OS file cache so any

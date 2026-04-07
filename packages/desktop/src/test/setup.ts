@@ -126,6 +126,7 @@ Object.defineProperty(window, 'electronAPI', {
     configImport: () => Promise.resolve({ success: true }),
     upgradeComponent: () => Promise.resolve({ success: true }),
     channelRemove: () => Promise.resolve({ success: true }),
+    channelDisconnect: () => Promise.resolve({ success: true }),
     channelListConfigured: () => Promise.resolve({ success: true, configured: ['telegram'] }),
     channelListSupported: () => Promise.resolve({ success: false, channels: [] }),
     channelGetRegistry: () => Promise.resolve({ channels: [

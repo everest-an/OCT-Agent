@@ -81,6 +81,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   channelPairingApprove: (channelId: string, pairingCode: string) => ipcRenderer.invoke('channel:pairing-approve', channelId, pairingCode),
   channelPairingLatestCode: (channelId: string) => ipcRenderer.invoke('channel:pairing-latest-code', channelId),
   channelRemove: (channelId: string) => ipcRenderer.invoke('channel:remove', channelId),
+  channelDisconnect: (channelId: string) => ipcRenderer.invoke('channel:disconnect', channelId),
   channelListConfigured: () => ipcRenderer.invoke('channel:list-configured'),
   channelListSupported: () => ipcRenderer.invoke('channel:list-supported'),
   channelGetRegistry: () => ipcRenderer.invoke('channel:get-registry'),
@@ -109,6 +110,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   gatewayStart: () => ipcRenderer.invoke('gateway:start'),
   gatewayStop: () => ipcRenderer.invoke('gateway:stop'),
   gatewayRestart: () => ipcRenderer.invoke('gateway:restart'),
+  onGatewayStatusUpdate: (cb: (data: { running: boolean }) => void) => {
+    const handler = (_e: any, data: { running: boolean }) => cb(data);
+    ipcRenderer.on('gateway:status-update', handler);
+    return () => ipcRenderer.removeListener('gateway:status-update', handler);
+  },
 
   // Log viewer
   getRecentLogs: () => ipcRenderer.invoke('logs:recent'),

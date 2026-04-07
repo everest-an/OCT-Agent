@@ -312,12 +312,14 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
     setRemovingChannel(channelId);
     setConfirmRemove(null);
     try {
-      const result = await (window.electronAPI as any).channelRemove(channelId);
+      // Disconnect = soft stop (kill worker + disable). Config is preserved so user
+      // can reconnect without re-scanning QR. Use channelDisconnect, NOT channelRemove.
+      const result = await (window.electronAPI as any).channelDisconnect(channelId);
       if (!result.success) {
-        console.error('[Channels] remove failed:', result.error);
+        console.error('[Channels] disconnect failed:', result.error);
       }
     } catch (e) {
-      console.error('[Channels] remove error:', e);
+      console.error('[Channels] disconnect error:', e);
     }
     setRemovingChannel(null);
     loadConfiguredChannels(false);
@@ -659,7 +661,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                 <h3 className="text-base font-semibold">{t('channels.confirmRemoveTitle', 'Disconnect Channel')}</h3>
               </div>
               <p className="text-sm text-slate-400">
-                {t('channels.confirmRemoveMsg', 'This will remove the channel configuration and unbind it from all agents. You can reconnect later.')}
+                {t('channels.confirmDisconnectMsg', 'This will stop the channel bot worker and disable message delivery. Your configuration is kept — you can reconnect anytime without re-scanning the QR code.')}
               </p>
               <div className="flex justify-end gap-3">
                 <button onClick={() => setConfirmRemove(null)}

@@ -972,6 +972,39 @@ export function registerChannelConfigHandlers(deps: {
     }
   });
 
+  // ── Disconnect (soft) — kill worker + disable, keep config for easy reconnect ──
+  ipcMain.handle('channel:disconnect', async (_e, channelId: string) => {
+    try {
+      const channelDef = deps.getChannel(channelId);
+      const openclawId = channelDef?.openclawId || channelId;
+
+      // 1. Kill running login worker (if any).
+      await killActiveLoginForChannel(openclawId).catch(() => {});
+
+      // 2. Set enabled: false in openclaw.json (keep all other config intact).
+      try {
+        const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
+        const existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        const key = existing.channels?.[openclawId] ? openclawId : channelId;
+        if (existing.channels?.[key]) {
+          existing.channels[key].enabled = false;
+          fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
+        }
+      } catch { /* config file may not exist */ }
+
+      // 3. Restart gateway so the channel stops receiving messages.
+      try { await deps.runAsync('openclaw gateway restart 2>&1', GATEWAY_RESTART_IDLE_TIMEOUT_MS); } catch {}
+
+      // 4. Flush cache so UI reflects the new state immediately.
+      clearChannelStatusCache();
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: (err.message || String(err)).slice(0, 300) };
+    }
+  });
+
+  // ── Remove (hard) — full deletion: unbind + purge config + restart ──
   ipcMain.handle('channel:remove', async (_e, channelId: string) => {
     try {
       const channelDef = deps.getChannel(channelId);

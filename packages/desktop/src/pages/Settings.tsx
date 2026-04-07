@@ -418,9 +418,16 @@ export default function Settings() {
     document.addEventListener('visibilitychange', onVisibility);
     if (!document.hidden) startPolling();
 
+    // Listen for push updates from main process (e.g. after startup repair succeeds).
+    const api = window.electronAPI as any;
+    const cleanup = api?.onGatewayStatusUpdate?.((data: { running: boolean }) => {
+      setGatewayStatus(data.running ? 'running' : 'stopped');
+    });
+
     return () => {
       stopPolling();
       document.removeEventListener('visibilitychange', onVisibility);
+      cleanup?.();
     };
   }, []);
 

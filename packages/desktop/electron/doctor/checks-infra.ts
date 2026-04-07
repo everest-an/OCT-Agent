@@ -168,7 +168,7 @@ export async function checkGatewayRunning(ctx: Ctx): Promise<CheckResult> {
 
   // Fast path: probe Gateway HTTP port directly (avoids 15-20s plugin preload from CLI)
   const port = getGatewayPort(ctx.deps.homedir);
-  const probeOk = await new Promise<boolean>((resolve) => {
+  const httpProbe = (): Promise<boolean> => new Promise((resolve) => {
     const req = http.get(`http://127.0.0.1:${port}/healthz`, { timeout: 3000 }, (res) => {
       res.resume();
       resolve(res.statusCode !== undefined && res.statusCode < 500);
@@ -177,7 +177,12 @@ export async function checkGatewayRunning(ctx: Ctx): Promise<CheckResult> {
     req.on('timeout', () => { req.destroy(); resolve(false); });
   });
 
-  if (probeOk) {
+  // Retry once after 2s to cover the gateway startup window (plugin loading).
+  if (await httpProbe()) {
+    return { id: 'gateway-running', label: 'Gateway', status: 'pass', message: 'Running', fixable: 'none' };
+  }
+  await new Promise(r => setTimeout(r, 2000));
+  if (await httpProbe()) {
     return { id: 'gateway-running', label: 'Gateway', status: 'pass', message: 'Running', fixable: 'none' };
   }
 

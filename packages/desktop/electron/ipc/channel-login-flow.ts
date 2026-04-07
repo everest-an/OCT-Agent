@@ -13,16 +13,26 @@ import { registerActiveLogin, unregisterActiveLogin } from '../openclaw-process-
  *
  * Returns a cleanup function to stop watching.
  */
-function watchOpenClawLogForQrUrl(onQrFound: (url: string) => void): () => void {
+function watchOpenClawLogForQrUrl(
+  onQrFound: (url: string) => void,
+  onLoginSuccess?: () => void,
+): () => void {
   const today = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   const dateKey = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-  // resolvePreferredOpenClawTmpDir() returns /tmp/openclaw on macOS/Linux
-  const logDir = process.env.OPENCLAW_PREFERRED_TMP_DIR || '/tmp/openclaw';
+  // OpenClaw writes plugin logs to <tmp>/openclaw/openclaw-YYYY-MM-DD.log on all platforms.
+  // macOS/Linux -> /tmp/openclaw ; Windows -> %TEMP%\openclaw. Node fs APIs do NOT honor
+  // Git Bash's /tmp -> %TEMP% mapping, so on Windows we must resolve via os.tmpdir().
+  const logDir = process.env.OPENCLAW_PREFERRED_TMP_DIR
+    || (process.platform === 'win32' ? path.join(os.tmpdir(), 'openclaw') : '/tmp/openclaw');
   const logPath = path.join(logDir, `openclaw-${dateKey}.log`);
+  try {
+    console.log(`[wechat-watcher] watching ${logPath} exists=${fs.existsSync(logPath)}`);
+  } catch { /* ignore */ }
 
   let offset = 0;
   let stopped = false;
+  let qrFound = false;
 
   // Start from current end-of-file to only read new entries
   try {
@@ -47,10 +57,24 @@ function watchOpenClawLogForQrUrl(onQrFound: (url: string) => void): () => void 
         try {
           const entry = JSON.parse(line);
           const msg = String(entry['1'] || '');
-          const match = msg.match(/二维码链接:\s*(https?:\/\/\S+)/);
-          if (match) {
+          if (!qrFound) {
+            const match = msg.match(/二维码链接:\s*(https?:\/\/\S+)/);
+            if (match) {
+              qrFound = true;
+              onQrFound(match[1]);
+              if (!onLoginSuccess) {
+                stopped = true;
+                return;
+              }
+              continue;
+            }
+          }
+          // After QR is shown, watch for the WeChat login success marker.
+          // openclaw-weixin logs "weixin monitor started (...)" once the bot session
+          // is established post-scan. This is the cleanest single-line success signal.
+          if (qrFound && onLoginSuccess && /weixin monitor started/i.test(msg)) {
             stopped = true;
-            onQrFound(match[1]);
+            onLoginSuccess();
             return;
           }
         } catch { /* non-JSON line, skip */ }
@@ -167,18 +191,42 @@ export function createChannelLoginWithQR(deps: {
       };
       resetIdleTimer();
 
-      // On macOS/Linux, openclaw channels login produces no stdout when piped (Node.js block
-      // buffering). The openclaw-weixin plugin logger writes the QR URL to a log file via
-      // fs.appendFileSync (synchronous, never buffered). Watch that file to detect QR in real time.
-      if (process.platform !== 'win32') {
-        stopLogWatcher = watchOpenClawLogForQrUrl((url) => {
+      // openclaw channels login produces no stdout when piped on all platforms (Node.js block
+      // buffering on a non-TTY pipe). The openclaw-weixin plugin logger writes the QR URL to a
+      // log file via fs.appendFileSync (synchronous, never buffered), so watching that file is
+      // the reliable cross-platform path. Previously this was gated to non-Windows, which broke
+      // WeChat login on Windows after the stdout fallback became unreliable.
+      stopLogWatcher = watchOpenClawLogForQrUrl(
+        (url) => {
           if (qrShown || settled) return;
           qrShown = true;
           resetIdleTimer(); // keep the idle timer alive while user scans
           send('channel:status', 'channels.status.generatingQR');
           shell.openExternal(url);
-        });
-      }
+        },
+        () => {
+          // WeChat login succeeded post-scan. The openclaw CLI process stays alive
+          // forever to maintain the bot session, so we never get child.on('exit').
+          // Resolve the IPC promise here and detach the child so the wizard can close.
+          if (settled) return;
+          settled = true;
+          clearIdleTimer();
+          if (qrFlushTimer) {
+            clearTimeout(qrFlushTimer);
+            qrFlushTimer = null;
+          }
+          stopLogWatcher?.();
+          // IMPORTANT: do NOT kill the child here. `openclaw channels login --channel
+          // openclaw-weixin` is itself the worker that hosts the WeChat bot session
+          // (it logs `[...-im-bot] starting weixin provider` / `weixin monitor started`).
+          // Killing it tears down the bot and the channel goes silent on incoming messages.
+          // We just resolve the IPC promise so the wizard can close; the child keeps running
+          // in the background, owned by the Electron main process. The exit handler is a
+          // no-op once settled.
+          send('channel:status', 'channels.status.connected');
+          resolve({ success: true, output: 'Connected!' });
+        },
+      );
 
       const processLine = (line: string) => {
         resetIdleTimer();
