@@ -71,6 +71,7 @@ export function registerSetupHandlers(deps: {
   getDaemonStartupLastKickoff: () => number;
   setDaemonStartupLastKickoff: (value: number) => void;
   sendSetupStatus: (stepKey: string, key: string, detail?: string) => void;
+  setOpenclawInstalling: (value: boolean) => void;
 }) {
   const sendOpenClawStatus = (key: string, detail?: string) => deps.sendSetupStatus('openclaw', key, detail);
 
@@ -337,6 +338,15 @@ export function registerSetupHandlers(deps: {
       return { success: true, alreadyInstalled: true, version: existing };
     }
 
+    deps.setOpenclawInstalling(true);
+    try {
+      return await _installOpenclawCore();
+    } finally {
+      deps.setOpenclawInstalling(false);
+    }
+  });
+
+  async function _installOpenclawCore(): Promise<{ success: boolean; alreadyInstalled?: boolean; version?: string; method?: string; error?: string; hint?: string }> {
     const npmRoot = await deps.safeShellExecAsync('npm root -g', 5000);
     if (npmRoot) {
       const globalOpenClawPkg = path.join(npmRoot.trim(), 'openclaw', 'package.json');
@@ -451,7 +461,7 @@ export function registerSetupHandlers(deps: {
       }
       return { success: false, error: msg, hint: 'Install OpenClaw manually: npm install -g openclaw' };
     }
-  });
+  }
 
   ipcMain.handle('setup:install-plugin', async () => {
     const hasOpenClaw = await deps.safeShellExecAsync('openclaw --version') !== null;

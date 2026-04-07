@@ -86,6 +86,7 @@ describe('registerSetupHandlers', () => {
         lastKickoff = value;
       }),
       sendSetupStatus: vi.fn(),
+      setOpenclawInstalling: vi.fn(),
     });
 
     const handlers = getRegisteredHandlers();

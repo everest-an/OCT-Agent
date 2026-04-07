@@ -168,6 +168,31 @@ export function createShellUtils(options: { home: string; app: any }) {
   }
 
   function getOpenClawPackageDirSync(): string | null {
+    // Fast path: check well-known filesystem locations before spawning `npm root -g`
+    // (which on Windows frequently times out in the 5s budget, causing runSpawn to
+    // fall back to the bare .cmd shim that lacks --stack-size → AJV stack overflow).
+    const knownRoots: string[] = [];
+    if (process.platform === 'win32') {
+      const appdata = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+      knownRoots.push(
+        path.join(appdata, 'npm', 'node_modules', 'openclaw'),
+        path.join(home, '.npm-global', 'lib', 'node_modules', 'openclaw'),
+      );
+      const programfiles = process.env.ProgramFiles || 'C:\\Program Files';
+      knownRoots.push(path.join(programfiles, 'nodejs', 'node_modules', 'openclaw'));
+    } else {
+      knownRoots.push(
+        path.join(home, '.npm-global', 'lib', 'node_modules', 'openclaw'),
+        '/usr/local/lib/node_modules/openclaw',
+        '/opt/homebrew/lib/node_modules/openclaw',
+        '/usr/lib/node_modules/openclaw',
+      );
+    }
+    for (const dir of knownRoots) {
+      if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
+    }
+
+    // Slow path: ask npm where it installs global packages
     const npmRoot = rawShellExecSync('npm root -g', 5000);
     if (!npmRoot) return null;
     const pkgDir = path.join(npmRoot.trim(), 'openclaw');
@@ -175,6 +200,11 @@ export function createShellUtils(options: { home: string; app: any }) {
   }
 
   async function getOpenClawPackageDirAsync(): Promise<string | null> {
+    // Fast path: same filesystem check as the sync variant
+    const syncResult = getOpenClawPackageDirSync();
+    if (syncResult) return syncResult;
+
+    // Slow path: ask npm where it installs global packages (async version)
     const npmRoot = await rawShellExecAsync('npm root -g', 5000);
     if (!npmRoot) return null;
     const pkgDir = path.join(npmRoot.trim(), 'openclaw');
@@ -192,18 +222,18 @@ export function createShellUtils(options: { home: string; app: any }) {
   // V8 --stack-size (in KB) tells V8 how much JS stack to assume it has.
   //
   // CRITICAL Windows pitfall (nodejs/node#43630): on Windows the main thread's OS
-  // stack is hard-linked to ~1 MiB and CANNOT be enlarged via --stack-size. Setting
-  // --stack-size higher than the real OS stack (e.g. 8192) makes V8 think it has
-  // 8 MB and skip the JS RangeError tripwire — the recursion then runs straight
-  // into the OS guard page, killing the process with STATUS_STACK_OVERFLOW
-  // (exit code 3221225725 / 0xC00000FD) and ZERO JS error output. This is what
-  // bricked WeChat login: the openclaw-weixin AJV schema compilation recurses
-  // deeper than 1 MiB, and our 8 MB override hid the soft-fail.
+  // AJV JSON-schema compilation in OpenClaw plugins (openclaw-weixin, minimax,
+  // talk-voice etc.) is deeply recursive and needs more than the default ~984 KB
+  // V8 stack.  When --stack-size is NOT specified, V8 uses the OS thread stack
+  // and AJV can overflow it (exit 0xC00000FD on Windows).  When --stack-size IS
+  // specified, V8 manages its own stack space.
   //
-  // Fix: on Windows keep V8 below the OS stack so it raises RangeError first
-  // (which OpenClaw can at least surface in logs). On macOS/Linux the OS stack
-  // grows to ~8 MiB so a larger value is safe and lets AJV compile cleanly.
-  const NODE_STACK_SIZE_KB = process.platform === 'win32' ? 900 : 8192;
+  // 8192 KB is safe on all platforms: since nodejs/node#43632 (merged v18.6.0,
+  // July 2022) the Windows PE header StackReserveSize is 8 MiB — same as
+  // macOS/Linux.  V8's --stack-size must not exceed the OS thread stack; 8192 KB
+  // = 8 MiB exactly matches it.  The gateway process proves this on Windows
+  // (PID survives and serves healthz).
+  const NODE_STACK_SIZE_KB = 8192;
 
   function buildOpenClawShellFallbackSync(): string | null {
     const pkgDir = getOpenClawPackageDirSync();
@@ -380,10 +410,13 @@ export function createShellUtils(options: { home: string; app: any }) {
       const pkgDir = getOpenClawPackageDirSync();
       const entryPath = pkgDir ? getOpenClawEntryPath(pkgDir) : null;
       if (entryPath) {
-        return spawn(findNodeExecutable(), [`--stack-size=${NODE_STACK_SIZE_KB}`, entryPath, ...args], {
+        const nodeExe = findNodeExecutable();
+        console.log(`[runSpawn] openclaw win32: node=${nodeExe}, entry=${entryPath}, stack=${NODE_STACK_SIZE_KB}`);
+        return spawn(nodeExe, [`--stack-size=${NODE_STACK_SIZE_KB}`, entryPath, ...args], {
           ...spawnOptions,
         });
       }
+      console.warn('[runSpawn] WARN: openclaw win32 entryPath is null — falling through to bare spawn');
     }
 
     if (cmd === 'openclaw') {

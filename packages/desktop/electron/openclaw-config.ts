@@ -529,3 +529,37 @@ export function hardenWhatsAppDmPolicy(config: Record<string, any>): boolean {
   return changed;
 }
 
+// --- Gateway stack-size patching ---
+
+/**
+ * Patch ~/.openclaw/gateway.cmd to inject --stack-size=8192 into the node
+ * command line.  This is the definitive fix for the AJV stack overflow on
+ * Windows (exit 0xC00000FD): regardless of who starts the gateway (scheduled
+ * task, `openclaw gateway start/restart`, or our runSpawn), the cmd script
+ * will always include the larger stack.
+ *
+ * Since nodejs/node#43632 (v18.6.0) the Windows PE StackReserveSize is 8 MiB,
+ * so --stack-size=8192 is safe.
+ *
+ * Safe to call multiple times — skips if already patched or file missing.
+ */
+export function patchGatewayCmdStackSize(homedir: string): void {
+  try {
+    const cmdPath = path.join(homedir, '.openclaw', 'gateway.cmd');
+    if (!fs.existsSync(cmdPath)) return;
+    let content = fs.readFileSync(cmdPath, 'utf-8');
+    if (content.includes('--stack-size=')) return; // already patched
+    // Inject --stack-size=8192 right after the node.exe path
+    const patched = content.replace(
+      /("?[^"]*node\.exe"?)\s+((?:C:|%)[^\r\n]+)/gm,
+      '$1 --stack-size=8192 $2',
+    );
+    if (patched !== content) {
+      fs.writeFileSync(cmdPath, patched, 'utf-8');
+      console.log('[gateway] Patched gateway.cmd with --stack-size=8192');
+    }
+  } catch (err: any) {
+    console.warn('[gateway] Failed to patch gateway.cmd:', err?.message || err);
+  }
+}
+

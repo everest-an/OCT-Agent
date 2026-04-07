@@ -6,7 +6,7 @@ import http from 'http';
 import dns from 'dns';
 import type { CheckResult, FixResult, Ctx } from './types';
 import { getNullDevice, persistAwarenessPluginConfig, WEB_DNS_CANARY_DOMAINS } from './utils';
-import { isGatewayRunningOutput, getGatewayPort } from '../openclaw-config';
+import { isGatewayRunningOutput, getGatewayPort, patchGatewayCmdStackSize } from '../openclaw-config';
 
 // --- DNS / IP helpers (only used by checkWebDnsCompatibility) ---
 
@@ -201,6 +201,7 @@ export async function fixGatewayStart(ctx: Ctx): Promise<FixResult> {
       if (fs.existsSync(startupCmdPath) && !fs.existsSync(gatewayCmdPath)) {
         try {
           await ctx.deps.shellRun('openclaw gateway install 2>&1', 30000);
+          patchGatewayCmdStackSize(ctx.deps.homedir);
         } catch {
           // Keep existing flow intact; start/install fallback below will still run.
         }
@@ -214,6 +215,7 @@ export async function fixGatewayStart(ctx: Ctx): Promise<FixResult> {
     if (ctx.deps.platform === 'win32' && /schtasks run failed/i.test(message)) {
       try {
         await ctx.deps.shellRun('openclaw gateway install 2>&1', 30000);
+        patchGatewayCmdStackSize(ctx.deps.homedir);
         await ctx.deps.shellRun('openclaw gateway start 2>&1', 20000);
         return { id: 'gateway-running', success: true, message: 'Gateway service installed and started' };
       } catch (installErr: any) {

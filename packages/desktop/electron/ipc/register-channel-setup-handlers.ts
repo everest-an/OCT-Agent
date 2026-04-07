@@ -7,6 +7,7 @@ import {
   enforceDesktopChannelSessionIsolation,
   hardenWhatsAppDmPolicy,
   migrateLegacyChannelConfig,
+  patchGatewayCmdStackSize,
 } from '../openclaw-config';
 import {
   isIgnorablePluginInstallError,
@@ -472,6 +473,7 @@ export function registerChannelSetupHandlers(deps: {
       } catch (firstBindErr: unknown) {
         const firstBindMessage = toErrorMessage(firstBindErr);
         if (!isTimeoutLike(firstBindMessage)) throw firstBindErr;
+        if (process.platform === 'win32') patchGatewayCmdStackSize(os.homedir());
         try { await deps.runAsync('openclaw gateway restart 2>&1', GATEWAY_RESTART_IDLE_TIMEOUT_MS); } catch {}
         sendStatus('channels.status.binding');
         await deps.runAsync(bindCmd, CHANNEL_BIND_IDLE_TIMEOUT_MS);
@@ -576,12 +578,14 @@ export function registerChannelSetupHandlers(deps: {
     // The lock is purely in-process: zero powershell, zero added latency on the
     // happy path. When the queue is empty, acquire returns immediately.
     //
-    // We additionally fire-and-forget a kill of any leftover login wrappers from
-    // PRIOR app sessions (orphans). The kill runs in the background and does NOT
-    // block our spawn — by the time our channelLoginWithQR finishes plugin loading
-    // (~15-30 s), the kill has long since completed.
+    // Kill leftover login wrappers from PRIOR app sessions (orphans) BEFORE
+    // spawning the new child. We MUST await this: killStaleChannelLogins captures
+    // safe PIDs synchronously at call time. If we fire-and-forget, PowerShell runs
+    // concurrently with channelLoginWithQR → the newly spawned child's PID is NOT
+    // in the safe list (it didn't exist yet) → Stop-Process -Force kills it →
+    // TerminateProcess(handle, -1) → exit code 0xFFFFFFFF = 4294967295.
     const releaseLoginLock = await acquireChannelLoginLock();
-    void killStaleChannelLogins().catch(() => { /* fire-and-forget */ });
+    await killStaleChannelLogins().catch(() => { /* best-effort */ });
 
     // CRITICAL: every code path below must release the lock — including early
     // returns and uncaught throws. We use a try/finally wrapper around the entire

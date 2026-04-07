@@ -61,6 +61,7 @@ export function registerRuntimeHealthHandlers(deps: {
   recentDaemonStartup: () => boolean;
   ensureGatewayAccess?: (sendStatus: (message: string, progress: number) => void) => Promise<{ ok: boolean; repaired?: boolean; message?: string; error?: string }>;
   getMainWindow: () => any;
+  setOpenclawInstalling: (value: boolean) => void;
 }) {
   const startupRepairPriority = new Map([
     ['openclaw-command-health', 10],
@@ -374,9 +375,15 @@ export function registerRuntimeHealthHandlers(deps: {
     for (const [index, check] of checksToRepair.entries()) {
       const progress = Math.min(80, 20 + Math.round(((index + 1) / checksToRepair.length) * 55));
       sendStartupStatus(`Repairing ${check.label}...`, progress);
-      const fix = await deps.doctor.runFix(check.id);
-      if (fix.success) fixed.push(fix.message);
-      else warnings.push(fix.message || check.message);
+      const isOpenclawInstall = check.id === 'openclaw-installed';
+      if (isOpenclawInstall) deps.setOpenclawInstalling(true);
+      try {
+        const fix = await deps.doctor.runFix(check.id);
+        if (fix.success) fixed.push(fix.message);
+        else warnings.push(fix.message || check.message);
+      } finally {
+        if (isOpenclawInstall) deps.setOpenclawInstalling(false);
+      }
     }
 
     // Final verification: only re-check items that were repaired (not all checks again)

@@ -1,5 +1,5 @@
 import { shell } from 'electron';
-import { spawn } from 'child_process';
+import type { ChildProcess } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -94,9 +94,7 @@ function isQrLine(line: string, stripAnsi: (value: string) => string): boolean {
 }
 
 export function createChannelLoginWithQR(deps: {
-  getEnhancedPath: () => string;
-  wrapWindowsCommand: (cmd: string) => string;
-  rewriteOpenClawCommand: (cmd: string) => string;
+  runSpawn: (cmd: string, args: string[], opts?: Record<string, unknown>) => ChildProcess;
   stripAnsi: (value: string) => string;
   sendToRenderer: (channel: string, payload: unknown) => void;
 }) {
@@ -105,13 +103,25 @@ export function createChannelLoginWithQR(deps: {
     timeoutMs = 180000,
     extraEnv: Record<string, string> = {},
   ): Promise<{ success: boolean; output?: string; error?: string }> {
-    // Rewrite the openclaw command to use node --stack-size=8192 to avoid
-    // AJV stack overflow during plugin loading (affects ALL channels, not just WeChat)
-    loginCmd = deps.rewriteOpenClawCommand(loginCmd);
-    const ep = deps.getEnhancedPath();
-    const windowsPathext = (typeof process.env.PATHEXT === 'string' && process.env.PATHEXT.trim())
-      ? process.env.PATHEXT
-      : '.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC';
+    // Tokenise the legacy string-form command (`openclaw channels login --channel <id> --verbose`)
+    // and route it through `runSpawn` so we get the same direct-`node.exe` + `--stack-size=8192`
+    // path that the gateway uses on Windows. This bypasses three failure modes that the old
+    // `cmd.exe`-shell + `rewriteOpenClawCommand` combo suffered from:
+    //   1. `rewriteOpenClawCommand` silently no-ops if the sync `npm root -g` (5s timeout) is
+    //      slow on Windows → command stays as bare `openclaw` → the .cmd shim runs node
+    //      WITHOUT `--stack-size` → AJV in `openclaw-weixin` overflows V8's default ~984 KB
+    //      stack → `RangeError` → exit -1 = 4294967295.
+    //   2. Even when rewrite fires, sending the full string through cmd.exe + chcp wrappers
+    //      fragments quoting and is harder to reason about for diagnostics.
+    //   3. String-form command opens a shell-injection surface for any future caller that
+    //      forgets to escape the channel id.
+    // By tokenising once at the boundary and using runSpawn(argv) we get a single,
+    // platform-uniform spawn with no shell, no rewrite, no race.
+    const tokens = loginCmd.trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0 || tokens[0] !== 'openclaw') {
+      return Promise.resolve({ success: false, error: `Unexpected login command: ${loginCmd}` });
+    }
+    const args = tokens.slice(1);
     const send = (channel: string, data: unknown) => {
       deps.sendToRenderer(channel, data);
     };
@@ -127,28 +137,17 @@ export function createChannelLoginWithQR(deps: {
 
       let stopLogWatcher: (() => void) | null = null;
 
-      const child = process.platform === 'win32'
-        ? spawn(deps.wrapWindowsCommand(loginCmd), [], {
-            cwd: os.homedir(),
-            shell: 'cmd.exe',
-            windowsHide: true,
-            env: {
-              ...process.env,
-              ...extraEnv,
-              PATH: ep,
-              PATHEXT: windowsPathext,
-              ComSpec: process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe',
-              NO_COLOR: '1',
-              FORCE_COLOR: '0',
-            },
-          })
-        : spawn('/bin/bash', ['--norc', '--noprofile', '-c', `export PATH="${ep}"; ${loginCmd} 2>&1`], {
-            env: {
-              ...process.env,
-              ...extraEnv,
-              PATH: ep,
-            },
-          });
+      // Disable colour everywhere so our QR / line parsing is not foiled by ANSI escapes.
+      // PATH/PATHEXT/ComSpec are injected by runSpawn → buildShellEnv automatically.
+      const child = deps.runSpawn('openclaw', args, {
+        cwd: os.homedir(),
+        stdio: 'pipe',
+        env: {
+          ...extraEnv,
+          NO_COLOR: '1',
+          FORCE_COLOR: '0',
+        },
+      });
 
       // Register this login under its channel id so:
       //   1. A subsequent login for the same channel can tree-kill us before spawning

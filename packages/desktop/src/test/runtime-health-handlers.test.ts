@@ -74,6 +74,7 @@ describe('registerRuntimeHealthHandlers', () => {
       recentDaemonStartup: () => false,
       ensureGatewayAccess: vi.fn(async () => ({ ok: true })),
       getMainWindow: () => ({ isDestroyed: () => false, webContents: { send } }),
+      setOpenclawInstalling: vi.fn(),
     });
 
     const handlers = getRegisteredHandlers();
@@ -121,6 +122,7 @@ describe('registerRuntimeHealthHandlers', () => {
       recentDaemonStartup: () => false,
       ensureGatewayAccess,
       getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: vi.fn() } }),
+      setOpenclawInstalling: vi.fn(),
     });
 
     const handlers = getRegisteredHandlers();
@@ -174,6 +176,7 @@ describe('registerRuntimeHealthHandlers', () => {
       recentDaemonStartup: () => false,
       ensureGatewayAccess: vi.fn(async () => ({ ok: true })),
       getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: vi.fn() } }),
+      setOpenclawInstalling: vi.fn(),
     });
 
     const handlers = getRegisteredHandlers();

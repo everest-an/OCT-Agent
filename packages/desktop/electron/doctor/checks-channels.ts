@@ -2,6 +2,7 @@
 
 import type { CheckResult, FixResult, Ctx } from './types';
 import { CHANNEL_BINDINGS_CHECK_TIMEOUT_MS } from './utils';
+import { patchGatewayCmdStackSize } from '../openclaw-config';
 
 // Cache for channel-bindings check to avoid slow CLI calls on every startup
 let _lastBindingsCheckPass: number = 0;
@@ -300,6 +301,7 @@ export async function fixChannelBindings(ctx: Ctx): Promise<FixResult> {
         }
 
         try {
+          if (ctx.deps.platform === 'win32') patchGatewayCmdStackSize(ctx.deps.homedir);
           await ctx.deps.shellRun('openclaw gateway restart 2>&1', 30000);
         } catch {
           // Binding can still succeed even when restart command reports already running.

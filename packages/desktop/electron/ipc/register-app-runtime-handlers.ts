@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { app, ipcMain, shell } from 'electron';
 import { enableDaemonAutostart, disableDaemonAutostart, isDaemonAutostartEnabled } from '../daemon-autostart';
+import { patchGatewayCmdStackSize } from '../openclaw-config';
 
 const OPENCLAW_INSTALL_TIMEOUT_MS = 300000;
 
@@ -335,6 +336,7 @@ export function registerAppRuntimeHandlers(deps: {
 
         // Post-upgrade: restart gateway so new version takes effect
         progress('openclaw:gateway-restart', 'running');
+        if (process.platform === 'win32') patchGatewayCmdStackSize(deps.home);
         try {
           await deps.runAsync('openclaw gateway restart 2>&1', 20000);
           progress('openclaw:gateway-restart', 'done');

@@ -49,9 +49,7 @@ import {
   writeRuntimePreferences,
 } from './runtime-preferences';
 import { createShellUtils } from './shell-utils';
-import { isGatewayRunningOutput } from './openclaw-config';
-import { getAgentWorkspaceDir } from './openclaw-config';
-import { hasExplicitExecApprovalConfig, writeDesktopExecApprovalDefaults } from './openclaw-config';
+import { isGatewayRunningOutput, getAgentWorkspaceDir, hasExplicitExecApprovalConfig, writeDesktopExecApprovalDefaults, patchGatewayCmdStackSize } from './openclaw-config';
 import { dedupedChannelsList, killAllActiveLogins, killAllStaleChannelOps, detectRunningChannelLoginWorkers, getTrackedLoginPid, killOrphanWorkerForChannel } from './openclaw-process-guard';
 import { resolveDashboardUrl } from './openclaw-dashboard';
 import {
@@ -78,6 +76,7 @@ let gatewayWsClient: GatewayClient | null = null;
 let gatewayWsConnectPromise: Promise<GatewayClient> | null = null;
 let gatewayRepairPromise: Promise<{ ok: boolean; error?: string }> | null = null;
 let gatewayUserSessionLastLaunchAt = 0;
+let openclawInstallInProgress = false;
 
 const GATEWAY_USER_SESSION_RELAUNCH_COOLDOWN_MS = 15000;
 const DAEMON_FOREGROUND_BOOTSTRAP_TIMEOUT_MS = 240000;
@@ -113,9 +112,7 @@ const {
 } = shellUtils;
 
 const channelLoginWithQR = createChannelLoginWithQR({
-  getEnhancedPath,
-  wrapWindowsCommand,
-  rewriteOpenClawCommand: rewriteOpenClawShellCommand,
+  runSpawn,
   stripAnsi,
   sendToRenderer: (channel, payload) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -128,34 +125,7 @@ function sendSetupDaemonStatus(key: string, detail?: string) {
   mainWindow?.webContents.send('setup:daemon-status', { key, detail });
 }
 
-/**
- * Patch ~/.openclaw/gateway.cmd to inject --stack-size=8192 into the node
- * command line.  This is the definitive fix for the AJV stack overflow on
- * Windows: regardless of who starts the gateway (scheduled task, `openclaw
- * gateway start`, `openclaw gateway restart`, or our runSpawn), the cmd
- * script will always include the larger stack.
- *
- * Safe to call multiple times — skips if already patched or file missing.
- */
-function patchGatewayCmdStackSize(): void {
-  try {
-    const cmdPath = path.join(HOME, '.openclaw', 'gateway.cmd');
-    if (!fs.existsSync(cmdPath)) return;
-    let content = fs.readFileSync(cmdPath, 'utf-8');
-    if (content.includes('--stack-size=')) return; // already patched
-    // Inject --stack-size=8192 right after the node.exe path
-    const patched = content.replace(
-      /("?[^"]*node\.exe"?)\s+((?:C:|%)[^\r\n]+)/gm,
-      '$1 --stack-size=8192 $2',
-    );
-    if (patched !== content) {
-      fs.writeFileSync(cmdPath, patched, 'utf-8');
-      console.log('[gateway] Patched gateway.cmd with --stack-size=8192');
-    }
-  } catch (err: any) {
-    console.warn('[gateway] Failed to patch gateway.cmd:', err?.message || err);
-  }
-}
+// patchGatewayCmdStackSize is now imported from './openclaw-config'
 
 function sendSetupStatus(stepKey: string, key: string, detail?: string) {
   mainWindow?.webContents.send('setup:status', { stepKey, key, detail });
@@ -656,7 +626,7 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
     emit('Installing local Gateway service...');
     try {
       await runAsync('openclaw gateway install 2>&1', 30000);
-      patchGatewayCmdStackSize(); // re-patch after install regenerates gateway.cmd
+      patchGatewayCmdStackSize(HOME); // re-patch after install regenerates gateway.cmd
     } catch (err: any) {
       const message = err?.message || '';
       if (process.platform === 'win32') {
@@ -693,7 +663,7 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
       emit('Repairing local Gateway service...');
       try {
         await runAsync('openclaw gateway install 2>&1', 30000);
-        patchGatewayCmdStackSize(); // re-patch after install regenerates gateway.cmd
+        patchGatewayCmdStackSize(HOME); // re-patch after install regenerates gateway.cmd
         await runAsync('openclaw gateway start 2>&1', 20000);
       } catch (repairErr: any) {
         const repairMessage = repairErr?.message || '';
@@ -786,6 +756,13 @@ async function ensureGatewayRunning(): Promise<{ ok: boolean; error?: string }> 
   try {
     const installed = await checkOpenclawInstalled();
     if (!installed) {
+      if (openclawInstallInProgress) {
+        send('chat:status', { type: 'info', message: 'OpenClaw is being installed' });
+        return {
+          ok: false,
+          error: 'OpenClaw is being installed right now. Please wait a moment and try again.',
+        };
+      }
       send('chat:status', { type: 'error', message: 'OpenClaw is not installed' });
       return {
         ok: false,
@@ -855,6 +832,12 @@ async function prepareGatewayForChat(): Promise<{ ok: boolean; error?: string }>
   try {
     const installed = await checkOpenclawInstalled();
     if (!installed) {
+      if (openclawInstallInProgress) {
+        return {
+          ok: false,
+          error: 'OpenClaw is being installed right now. Please wait a moment and try again.',
+        };
+      }
       return {
         ok: false,
         error: 'OpenClaw is not installed yet. Please finish Setup first, or reinstall OpenClaw in Settings before chatting.',
@@ -1391,6 +1374,7 @@ registerSetupHandlers({
   getDaemonStartupLastKickoff: () => daemonStartupLastKickoff,
   setDaemonStartupLastKickoff: (value) => { daemonStartupLastKickoff = value; },
   sendSetupStatus,
+  setOpenclawInstalling: (v) => { openclawInstallInProgress = v; },
 });
 registerRuntimeHealthHandlers({
   home: HOME,
@@ -1407,6 +1391,7 @@ registerRuntimeHealthHandlers({
   recentDaemonStartup: () => !!daemonStartupPromise || (Date.now() - daemonStartupLastKickoff < 180000),
   ensureGatewayAccess: ensureGatewayAccessForStartup,
   getMainWindow: () => mainWindow,
+  setOpenclawInstalling: (v) => { openclawInstallInProgress = v; },
 });
 
 // --- App Lifecycle ---
@@ -1534,7 +1519,7 @@ app.whenReady().then(() => {
   // mechanism (scheduled task, `openclaw gateway start/restart`, manual) will
   // have the AJV stack overflow fix.  Must run before any gateway start attempt.
   if (process.platform === 'win32') {
-    patchGatewayCmdStackSize();
+    patchGatewayCmdStackSize(HOME);
   }
 
   // Reset the gatewayHasStackSize flag on every app launch.  The Windows

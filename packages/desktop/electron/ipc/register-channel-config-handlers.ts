@@ -7,6 +7,7 @@ import {
   enforceDesktopChannelSessionIsolation,
   hardenWhatsAppDmPolicy,
   migrateLegacyChannelConfig,
+  patchGatewayCmdStackSize,
 } from '../openclaw-config';
 import {
   isIgnorablePluginInstallError,
@@ -538,6 +539,7 @@ export function registerChannelConfigHandlers(deps: {
       await deps.runAsync(`openclaw agents bind --agent main --bind ${openclawId} 2>&1`, CHANNEL_BIND_IDLE_TIMEOUT_MS);
       return { success: true as const, retried: false as const, skipped: false as const };
     } catch {
+      if (process.platform === 'win32') patchGatewayCmdStackSize(deps.home);
       try { await deps.runAsync('openclaw gateway restart 2>&1', GATEWAY_RESTART_IDLE_TIMEOUT_MS); } catch {}
       try {
         await deps.runAsync(`openclaw agents bind --agent main --bind ${openclawId} 2>&1`, CHANNEL_BIND_IDLE_TIMEOUT_MS);
@@ -816,6 +818,7 @@ export function registerChannelConfigHandlers(deps: {
 
       sanitizeLegacyChannelConfigInFile(deps.home, safeOpenclawId);
 
+      if (process.platform === 'win32') patchGatewayCmdStackSize(deps.home);
       try { await deps.runAsync('openclaw gateway restart 2>&1', GATEWAY_RESTART_IDLE_TIMEOUT_MS); } catch {}
 
       const bindResult = await bindChannelToMainAgent(safeOpenclawId);
@@ -993,6 +996,7 @@ export function registerChannelConfigHandlers(deps: {
       } catch { /* config file may not exist */ }
 
       // 3. Restart gateway so the channel stops receiving messages.
+      if (process.platform === 'win32') patchGatewayCmdStackSize(deps.home);
       try { await deps.runAsync('openclaw gateway restart 2>&1', GATEWAY_RESTART_IDLE_TIMEOUT_MS); } catch {}
 
       // 4. Flush cache so UI reflects the new state immediately.
@@ -1057,6 +1061,7 @@ export function registerChannelConfigHandlers(deps: {
       } catch { /* config file may not exist */ }
 
       // 4. Restart gateway so channel stops receiving messages
+      if (process.platform === 'win32') patchGatewayCmdStackSize(deps.home);
       try { await deps.runAsync('openclaw gateway restart 2>&1', 20000); } catch { /* best-effort */ }
 
       // 5. Flush the channel list cache so the removed channel disappears immediately.
