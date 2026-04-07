@@ -23,6 +23,7 @@ export function registerGatewayHandlers(deps: {
   readShellOutputAsync: (cmd: string, timeoutMs?: number) => Promise<string | null>;
   runAsync: (cmd: string, timeoutMs?: number) => Promise<string>;
   startGatewayWithRepair: () => Promise<{ ok: boolean; error?: string }>;
+  startGatewayInUserSession?: () => Promise<{ ok: boolean; error?: string }>;
   isGatewayRunningOutput: (output: string | null | undefined) => boolean;
 }) {
   ipcMain.handle('gateway:status', async () => {
@@ -59,6 +60,17 @@ export function registerGatewayHandlers(deps: {
 
   ipcMain.handle('gateway:restart', async () => {
     try {
+      // On Windows, `openclaw gateway restart` would re-launch via gateway.cmd
+      // which may lack --stack-size=8192 if patchGatewayCmdStackSize hasn't run
+      // since the last `openclaw gateway install`. Use stop + user-session start
+      // as a reliable path that always includes --stack-size.
+      if (process.platform === 'win32' && deps.startGatewayInUserSession) {
+        try { await deps.runAsync('openclaw gateway stop 2>&1', 15000); } catch { /* best-effort */ }
+        const result = await deps.startGatewayInUserSession();
+        return result.ok
+          ? { success: true, output: 'Gateway restarted in app session' }
+          : { success: false, error: result.error || 'Gateway restart failed' };
+      }
       const result = await deps.runAsync('openclaw gateway restart 2>&1', 20000);
       return { success: true, output: result };
     } catch (err: any) {

@@ -98,6 +98,8 @@ function maybeSelfHealGateway1006(
   send: (channel: string, payload: any) => void,
   runSpawnFn: ((cmd: string, args: string[], opts?: Record<string, unknown>) => any) | undefined,
   enhancedPath: string,
+  startGatewayInUserSessionFn?: () => Promise<{ ok: boolean; error?: string }>,
+  runAsyncFn?: (cmd: string, timeoutMs?: number) => Promise<string>,
 ) {
   if (!result?.gateway1006) return;
   const now = Date.now();
@@ -109,6 +111,20 @@ function maybeSelfHealGateway1006(
     type: 'gateway',
     message: 'Local Gateway dropped a request unexpectedly. Restarting it in the background...',
   });
+
+  // On Windows, `openclaw gateway restart` re-launches via gateway.cmd which
+  // may lack --stack-size=8192. Use stop + user-session start instead.
+  if (process.platform === 'win32' && startGatewayInUserSessionFn && runAsyncFn) {
+    (async () => {
+      try {
+        try { await runAsyncFn('openclaw gateway stop 2>&1', 15000); } catch { /* best-effort */ }
+        await startGatewayInUserSessionFn();
+      } catch (err: any) {
+        console.warn('[chat] Gateway 1006 self-heal (user-session) failed:', err?.message || err);
+      }
+    })();
+    return;
+  }
 
   try {
     const env = { ...process.env, PATH: enhancedPath };
@@ -177,6 +193,8 @@ export function registerChatHandlers(deps: {
   callMcpStrict: (toolName: string, args: Record<string, any>, timeoutMs?: number) => Promise<any>;
   getEnhancedPath: () => string;
   runSpawn?: (cmd: string, args: string[], opts?: Record<string, unknown>) => ReturnType<typeof spawn>;
+  runAsync?: (cmd: string, timeoutMs?: number) => Promise<string>;
+  startGatewayInUserSession?: () => Promise<{ ok: boolean; error?: string }>;
   wrapWindowsCommand: (command: string) => string;
   stripAnsi: (output: string) => string;
   spawnChatProcess?: typeof spawn;
@@ -450,10 +468,10 @@ ${message}`;
           send,
           deps,
         });
-        maybeSelfHealGateway1006(retryResult, send, deps.runSpawn, deps.getEnhancedPath());
+        maybeSelfHealGateway1006(retryResult, send, deps.runSpawn, deps.getEnhancedPath(), deps.startGatewayInUserSession, deps.runAsync);
         return withWorkspaceFallbackMeta(retryResult);
       }
-      maybeSelfHealGateway1006(cliResult, send, deps.runSpawn, deps.getEnhancedPath());
+      maybeSelfHealGateway1006(cliResult, send, deps.runSpawn, deps.getEnhancedPath(), deps.startGatewayInUserSession, deps.runAsync);
       return withWorkspaceFallbackMeta(cliResult);
     }
 
@@ -1077,10 +1095,10 @@ ${message}`;
             send,
             deps,
           });
-          maybeSelfHealGateway1006(retryResult, send, deps.runSpawn, deps.getEnhancedPath());
+          maybeSelfHealGateway1006(retryResult, send, deps.runSpawn, deps.getEnhancedPath(), deps.startGatewayInUserSession, deps.runAsync);
           return withWorkspaceFallbackMeta(retryResult);
         }
-        maybeSelfHealGateway1006(cliResult, send, deps.runSpawn, deps.getEnhancedPath());
+        maybeSelfHealGateway1006(cliResult, send, deps.runSpawn, deps.getEnhancedPath(), deps.startGatewayInUserSession, deps.runAsync);
         return withWorkspaceFallbackMeta(cliResult);
       }
       return withWorkspaceFallbackMeta({ success: false, text: '', error: errorMsg, sessionId: sid });

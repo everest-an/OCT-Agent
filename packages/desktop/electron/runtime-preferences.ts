@@ -4,6 +4,7 @@ import path from 'path';
 
 export type RuntimePreferences = {
   preferUserSessionGateway?: boolean;
+  gatewayHasStackSize?: boolean;
   completedMigrations?: string[];
 };
 

@@ -128,6 +128,35 @@ function sendSetupDaemonStatus(key: string, detail?: string) {
   mainWindow?.webContents.send('setup:daemon-status', { key, detail });
 }
 
+/**
+ * Patch ~/.openclaw/gateway.cmd to inject --stack-size=8192 into the node
+ * command line.  This is the definitive fix for the AJV stack overflow on
+ * Windows: regardless of who starts the gateway (scheduled task, `openclaw
+ * gateway start`, `openclaw gateway restart`, or our runSpawn), the cmd
+ * script will always include the larger stack.
+ *
+ * Safe to call multiple times — skips if already patched or file missing.
+ */
+function patchGatewayCmdStackSize(): void {
+  try {
+    const cmdPath = path.join(HOME, '.openclaw', 'gateway.cmd');
+    if (!fs.existsSync(cmdPath)) return;
+    let content = fs.readFileSync(cmdPath, 'utf-8');
+    if (content.includes('--stack-size=')) return; // already patched
+    // Inject --stack-size=8192 right after the node.exe path
+    const patched = content.replace(
+      /("?[^"]*node\.exe"?)\s+((?:C:|%)[^\r\n]+)/gm,
+      '$1 --stack-size=8192 $2',
+    );
+    if (patched !== content) {
+      fs.writeFileSync(cmdPath, patched, 'utf-8');
+      console.log('[gateway] Patched gateway.cmd with --stack-size=8192');
+    }
+  } catch (err: any) {
+    console.warn('[gateway] Failed to patch gateway.cmd:', err?.message || err);
+  }
+}
+
 function sendSetupStatus(stepKey: string, key: string, detail?: string) {
   mainWindow?.webContents.send('setup:status', { stepKey, key, detail });
 }
@@ -542,7 +571,7 @@ async function startGatewayInUserSession(send?: (ch: string, data: any) => void)
         continue;
       }
       if (process.platform === 'win32') {
-        writeRuntimePreferences({ ...readRuntimePreferences(), preferUserSessionGateway: true });
+        writeRuntimePreferences({ ...readRuntimePreferences(), preferUserSessionGateway: true, gatewayHasStackSize: true });
       }
       send?.('chat:status', { type: 'gateway', message: 'Gateway started in app session' });
       return { ok: true };
@@ -576,17 +605,36 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
     req.on('error', () => resolve(false));
     req.on('timeout', () => { req.destroy(); resolve(false); });
   });
-  if (await httpProbe()) return { ok: true };
+
+  // On Windows, the scheduled task starts a gateway without --stack-size,
+  // causing AJV stack overflow on plugin load.  We track whether **we**
+  // launched the current gateway with the fix via a runtime-preference flag.
+  // If the flag is absent (scheduled-task / old version) we must restart.
+  const prefs = readRuntimePreferences();
+  const needsStackSizeRestart = process.platform === 'win32' && !prefs.gatewayHasStackSize;
+
+  if (await httpProbe()) {
+    if (needsStackSizeRestart) {
+      console.warn('[gateway] Running gateway may lack --stack-size, restarting with proper flags...');
+      send?.('chat:status', { type: 'gateway', message: 'Upgrading Gateway with improved stability...' });
+      try { await runAsync('openclaw gateway stop 2>&1', 15000); } catch { /* best-effort */ }
+      await sleep(1500);
+      // Fall through to start a new gateway with --stack-size (handled below)
+    } else {
+      return { ok: true };
+    }
+  }
   // Gateway may be booting (plugin load window) — wait 3s and retry once.
-  await sleep(3000);
-  if (await httpProbe()) return { ok: true };
+  if (!needsStackSizeRestart) {
+    await sleep(3000);
+    if (await httpProbe()) return { ok: true };
+  }
 
   // Slow fallback: CLI check handles non-default ports and older installs.
   const statusOutput = await readShellOutputAsync('openclaw gateway status 2>&1', 15000);
   if (isGatewayRunningOutput(statusOutput)) return { ok: true };
 
   const emit = (message: string) => send?.('chat:status', { type: 'gateway', message });
-  const prefs = readRuntimePreferences();
 
   if (process.platform === 'win32') {
     await ensureLocalDaemonReadyForRuntime(send);
@@ -608,6 +656,7 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
     emit('Installing local Gateway service...');
     try {
       await runAsync('openclaw gateway install 2>&1', 30000);
+      patchGatewayCmdStackSize(); // re-patch after install regenerates gateway.cmd
     } catch (err: any) {
       const message = err?.message || '';
       if (process.platform === 'win32') {
@@ -630,8 +679,11 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
   emit('Starting Gateway...');
   try {
     await runAsync('openclaw gateway start 2>&1', 20000);
-    if (process.platform === 'win32' && prefs.preferUserSessionGateway) {
-      writeRuntimePreferences({ ...prefs, preferUserSessionGateway: false });
+    if (process.platform === 'win32') {
+      const latestPrefs = readRuntimePreferences();
+      if (latestPrefs.preferUserSessionGateway) {
+        writeRuntimePreferences({ ...latestPrefs, preferUserSessionGateway: false });
+      }
     }
   } catch (err: any) {
     const message = err?.message || '';
@@ -641,6 +693,7 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
       emit('Repairing local Gateway service...');
       try {
         await runAsync('openclaw gateway install 2>&1', 30000);
+        patchGatewayCmdStackSize(); // re-patch after install regenerates gateway.cmd
         await runAsync('openclaw gateway start 2>&1', 20000);
       } catch (repairErr: any) {
         const repairMessage = repairErr?.message || '';
@@ -1215,6 +1268,8 @@ registerChatHandlers({
   callMcpStrict,
   getEnhancedPath,
   runSpawn,
+  runAsync,
+  startGatewayInUserSession: () => startGatewayInUserSession(),
   wrapWindowsCommand,
   stripAnsi,
 });
@@ -1279,6 +1334,7 @@ registerGatewayHandlers({
   readShellOutputAsync,
   runAsync,
   startGatewayWithRepair: () => startGatewayWithRepair(),
+  startGatewayInUserSession: () => startGatewayInUserSession(),
   isGatewayRunningOutput: (output) => isGatewayRunningOutput(output ?? null),
 });
 registerMemoryHandlers();
@@ -1473,6 +1529,24 @@ app.whenReady().then(() => {
 
   // Ensure config has required gateway defaults before anything tries to start
   repairOpenClawConfigFile();
+
+  // Patch gateway.cmd to include --stack-size=8192 so that ANY gateway start
+  // mechanism (scheduled task, `openclaw gateway start/restart`, manual) will
+  // have the AJV stack overflow fix.  Must run before any gateway start attempt.
+  if (process.platform === 'win32') {
+    patchGatewayCmdStackSize();
+  }
+
+  // Reset the gatewayHasStackSize flag on every app launch.  The Windows
+  // scheduled task may have started a new gateway (without --stack-size)
+  // since we last ran.  Clearing the flag forces startGatewayWithRepair to
+  // verify once per session and restart the gateway if needed.
+  if (process.platform === 'win32') {
+    const prefs = readRuntimePreferences();
+    if (prefs.gatewayHasStackSize) {
+      writeRuntimePreferences({ ...prefs, gatewayHasStackSize: false });
+    }
+  }
 
   createWindow();
   createTray();

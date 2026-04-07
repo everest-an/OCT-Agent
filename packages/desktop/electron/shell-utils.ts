@@ -189,16 +189,25 @@ export function createShellUtils(options: { home: string; app: any }) {
     return candidates.find((candidate) => fs.existsSync(candidate)) || null;
   }
 
-  // Default stack size for Node.js is ~1 MB. OpenClaw plugins (minimax, talk-voice,
-  // openclaw-weixin) use AJV for schema compilation, which can exceed the default
-  // stack depth on Windows, causing "RangeError: Maximum call stack size exceeded"
-  // and exit code -1 (4294967295 unsigned).  --stack-size is in KB.
-  const NODE_STACK_SIZE_KB = 8192; // 8 MB
+  // V8 --stack-size (in KB) tells V8 how much JS stack to assume it has.
+  //
+  // CRITICAL Windows pitfall (nodejs/node#43630): on Windows the main thread's OS
+  // stack is hard-linked to ~1 MiB and CANNOT be enlarged via --stack-size. Setting
+  // --stack-size higher than the real OS stack (e.g. 8192) makes V8 think it has
+  // 8 MB and skip the JS RangeError tripwire — the recursion then runs straight
+  // into the OS guard page, killing the process with STATUS_STACK_OVERFLOW
+  // (exit code 3221225725 / 0xC00000FD) and ZERO JS error output. This is what
+  // bricked WeChat login: the openclaw-weixin AJV schema compilation recurses
+  // deeper than 1 MiB, and our 8 MB override hid the soft-fail.
+  //
+  // Fix: on Windows keep V8 below the OS stack so it raises RangeError first
+  // (which OpenClaw can at least surface in logs). On macOS/Linux the OS stack
+  // grows to ~8 MiB so a larger value is safe and lets AJV compile cleanly.
+  const NODE_STACK_SIZE_KB = process.platform === 'win32' ? 900 : 8192;
 
   function buildOpenClawShellFallbackSync(): string | null {
     const pkgDir = getOpenClawPackageDirSync();
     if (!pkgDir) {
-      // openclaw might be on PATH but we can't find its package dir — skip stack override
       return null;
     }
     const entryPath = getOpenClawEntryPath(pkgDir);
