@@ -44,7 +44,7 @@ jobs:
           test -f node_modules/app-builder-bin/mac/app-builder_arm64
 
       - name: Build macOS package (arm64)
-        run: npm run package:mac -- --arm64
+        run: npm run package:mac -- --arm64 -c.npmRebuild=false -c.buildDependenciesFromSource=false
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
