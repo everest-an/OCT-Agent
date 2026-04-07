@@ -140,6 +140,22 @@ async function getUnboundChannels(ctx: Ctx): Promise<string[] | null> {
   const enabledChannels = getEnabledChannels(ctx.config);
   if (enabledChannels.length === 0) return [];
 
+  // Fast path: read bindings directly from openclaw.json (already parsed as ctx.config)
+  // This avoids spawning `openclaw agents bindings --json` which loads all plugins (130s+).
+  const configBindings = ctx.config?.agents?.list;
+  if (Array.isArray(configBindings) && configBindings.length > 0) {
+    const boundChannels = new Set<string>();
+    for (const agent of configBindings) {
+      const bindings = agent?.bindings || agent?.routes || [];
+      if (!Array.isArray(bindings)) continue;
+      for (const b of bindings) {
+        const ch = b?.match?.channel || b?.channel;
+        if (ch) boundChannels.add(ch);
+      }
+    }
+    return enabledChannels.filter((channelId) => !boundChannels.has(channelId));
+  }
+
   const nullDev = getNullDevice(ctx.deps.platform);
 
   let output: string | null = null;
