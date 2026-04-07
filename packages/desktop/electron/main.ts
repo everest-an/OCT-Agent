@@ -617,7 +617,24 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
   if (process.platform === 'win32') {
     emit('Starting Gateway in your Windows session...');
     const fallback = await startGatewayInUserSession(send);
-    if (fallback.ok) return fallback;
+    if (fallback.ok) {
+      // Gateway is running — but if the scheduled task is missing, the user
+      // won't have a gateway after reboot (they'd need to open the app every
+      // time).  Fire-and-forget install so next boot auto-starts the gateway.
+      if (isWindowsGatewayServiceMissing(statusOutput)) {
+        (async () => {
+          try {
+            console.log('[gateway] Scheduled task missing — installing in background');
+            await runAsync('openclaw gateway install 2>&1', 45000);
+            patchGatewayCmdStackSize(HOME);
+            console.log('[gateway] Scheduled task installed successfully');
+          } catch (installErr: any) {
+            console.warn('[gateway] Background scheduled task install failed:', installErr?.message || installErr);
+          }
+        })();
+      }
+      return fallback;
+    }
   }
 
   let shouldInstallService = isWindowsGatewayServiceMissing(statusOutput);
