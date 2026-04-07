@@ -5,6 +5,9 @@ import { parseJsonShellOutput } from '../openclaw-shell-output';
 
 const channelStatusCache: { configured: string[]; ts: number } = { configured: [], ts: 0 };
 
+// Dedup lock: only one `openclaw channels list` process at a time
+let channelsListInflight: Promise<string | null> | null = null;
+
 export function clearChannelStatusCache() {
   channelStatusCache.configured = [];
   channelStatusCache.ts = 0;
@@ -31,6 +34,14 @@ export function registerChannelListHandlers(deps: {
   readShellOutputAsync: (cmd: string, timeoutMs?: number) => Promise<string | null>;
   toFrontendId: (openclawId: string) => string;
 }) {
+  // Deduplicated `openclaw channels list` — reuses in-flight promise if one exists
+  function channelsListDeduped(timeoutMs: number): Promise<string | null> {
+    if (channelsListInflight) return channelsListInflight;
+    channelsListInflight = deps.readShellOutputAsync('openclaw channels list 2>&1', timeoutMs)
+      .finally(() => { channelsListInflight = null; });
+    return channelsListInflight;
+  }
+
   ipcMain.handle('channel:list-configured', async () => {
     const fromFile = readConfiguredFromFile(deps.home, deps.toFrontendId);
 
@@ -42,7 +53,9 @@ export function registerChannelListHandlers(deps: {
       ? [...new Set([...fromFile, ...channelStatusCache.configured])]
       : fromFile;
 
-    deps.readShellOutputAsync('openclaw channels list 2>&1', 20000).then((output) => {
+    // Fire-and-forget background refresh — deduplicated so concurrent calls
+    // from Channels/Agents/AgentWizard pages share one CLI process.
+    channelsListDeduped(20000).then((output) => {
       if (!output) return;
       try {
         const jsonParsed = parseJsonShellOutput<any>(output);
@@ -95,7 +108,7 @@ export function registerChannelListHandlers(deps: {
 
   ipcMain.handle('channel:list-supported', async () => {
     try {
-      const output = await deps.readShellOutputAsync('openclaw channels list 2>&1', 15000);
+      const output = await channelsListDeduped(15000);
       if (output) {
         try {
           const parsed = parseJsonShellOutput<any>(output);
