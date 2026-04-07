@@ -1,6 +1,65 @@
 import { shell } from 'electron';
 import { spawn } from 'child_process';
+import fs from 'fs';
 import os from 'os';
+import path from 'path';
+
+/**
+ * Watch the OpenClaw plugin log file for a WeChat QR URL.
+ * openclaw channels login --verbose has no stdout output due to Node.js block buffering
+ * when stdout is a pipe. However, the openclaw-weixin plugin logger writes to a log file
+ * synchronously (fs.appendFileSync), so we can detect the QR URL reliably via file watch.
+ *
+ * Returns a cleanup function to stop watching.
+ */
+function watchOpenClawLogForQrUrl(onQrFound: (url: string) => void): () => void {
+  const today = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const dateKey = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+  // resolvePreferredOpenClawTmpDir() returns /tmp/openclaw on macOS/Linux
+  const logDir = process.env.OPENCLAW_PREFERRED_TMP_DIR || '/tmp/openclaw';
+  const logPath = path.join(logDir, `openclaw-${dateKey}.log`);
+
+  let offset = 0;
+  let stopped = false;
+
+  // Start from current end-of-file to only read new entries
+  try {
+    if (fs.existsSync(logPath)) {
+      offset = fs.statSync(logPath).size;
+    }
+  } catch { /* ignore */ }
+
+  const checkNewLines = () => {
+    if (stopped) return;
+    try {
+      if (!fs.existsSync(logPath)) return;
+      const stat = fs.statSync(logPath);
+      if (stat.size <= offset) return;
+      const buf = Buffer.alloc(stat.size - offset);
+      const fd = fs.openSync(logPath, 'r');
+      fs.readSync(fd, buf, 0, buf.length, offset);
+      fs.closeSync(fd);
+      offset = stat.size;
+      for (const line of buf.toString('utf8').split('\n')) {
+        if (!line.trim() || stopped) continue;
+        try {
+          const entry = JSON.parse(line);
+          const msg = String(entry['1'] || '');
+          const match = msg.match(/二维码链接:\s*(https?:\/\/\S+)/);
+          if (match) {
+            stopped = true;
+            onQrFound(match[1]);
+            return;
+          }
+        } catch { /* non-JSON line, skip */ }
+      }
+    } catch { /* ignore fs errors */ }
+  };
+
+  const interval = setInterval(checkNewLines, 500);
+  return () => { stopped = true; clearInterval(interval); };
+}
 
 function isQrLine(line: string, stripAnsi: (value: string) => string): boolean {
   const clean = stripAnsi(line);
@@ -37,6 +96,8 @@ export function createChannelLoginWithQR(deps: {
       let lineCount = 0;
       let qrFlushTimer: NodeJS.Timeout | null = null;
 
+      let stopLogWatcher: (() => void) | null = null;
+
       const child = process.platform === 'win32'
         ? spawn(deps.wrapWindowsCommand(loginCmd), [], {
             cwd: os.homedir(),
@@ -72,6 +133,7 @@ export function createChannelLoginWithQR(deps: {
         idleTimer = setTimeout(() => {
           if (settled) return;
           settled = true;
+          stopLogWatcher?.();
           try { child.kill(); } catch {}
           if (qrFlushTimer) {
             clearTimeout(qrFlushTimer);
@@ -85,6 +147,19 @@ export function createChannelLoginWithQR(deps: {
         }, timeoutMs);
       };
       resetIdleTimer();
+
+      // On macOS/Linux, openclaw channels login produces no stdout when piped (Node.js block
+      // buffering). The openclaw-weixin plugin logger writes the QR URL to a log file via
+      // fs.appendFileSync (synchronous, never buffered). Watch that file to detect QR in real time.
+      if (process.platform !== 'win32') {
+        stopLogWatcher = watchOpenClawLogForQrUrl((url) => {
+          if (qrShown || settled) return;
+          qrShown = true;
+          resetIdleTimer(); // keep the idle timer alive while user scans
+          send('channel:status', 'channels.status.generatingQR');
+          shell.openExternal(url);
+        });
+      }
 
       const processLine = (line: string) => {
         resetIdleTimer();
@@ -165,6 +240,7 @@ export function createChannelLoginWithQR(deps: {
 
       child.on('exit', (code) => {
         if (lineBuffer) processLine(lineBuffer);
+        stopLogWatcher?.();
         if (settled) return;
         settled = true;
         clearIdleTimer();
@@ -182,6 +258,7 @@ export function createChannelLoginWithQR(deps: {
       });
 
       child.on('error', (err) => {
+        stopLogWatcher?.();
         clearIdleTimer();
         if (qrFlushTimer) {
           clearTimeout(qrFlushTimer);
