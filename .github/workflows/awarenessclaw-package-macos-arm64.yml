@@ -35,14 +35,12 @@ jobs:
         working-directory: packages/desktop
         env:
           npm_config_workspaces: "false"
-          NPM_CONFIG_WORKSPACES: "false"
         run: npm install --no-audit --no-fund
 
       - name: Ensure app-builder arm64 binary
         working-directory: packages/desktop
         env:
           npm_config_workspaces: "false"
-          NPM_CONFIG_WORKSPACES: "false"
         run: |
           if [ ! -f node_modules/app-builder-bin/mac/app-builder_arm64 ]; then
             echo "app-builder_arm64 missing, installing app-builder-bin..."
@@ -55,7 +53,6 @@ jobs:
         working-directory: packages/desktop
         env:
           npm_config_workspaces: "false"
-          NPM_CONFIG_WORKSPACES: "false"
         run: |
           npm run build
           npx electron-builder --mac --arm64 -c.npmRebuild=false -c.buildDependenciesFromSource=false
