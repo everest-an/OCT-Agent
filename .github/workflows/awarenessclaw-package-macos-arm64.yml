@@ -1,0 +1,52 @@
+name: AwarenessClaw Package macOS arm64
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: Git ref to package (branch, tag, or commit SHA)
+        required: false
+        default: main
+
+concurrency:
+  group: awarenessclaw-package-macos-arm64-${{ github.event.inputs.git_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-macos-arm64:
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.git_ref || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build macOS package (arm64)
+        run: npm run package:mac -- --arm64
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: awarenessclaw-macos-arm64-${{ github.run_number }}
+          if-no-files-found: error
+          path: |
+            packages/desktop/release/*.dmg
+            packages/desktop/release/*.zip
+            packages/desktop/release/latest-mac.yml
+            packages/desktop/release/*.blockmap
+            packages/desktop/release/builder-*.yml
