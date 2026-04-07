@@ -34,6 +34,15 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Ensure app-builder arm64 binary
+        run: |
+          if [ ! -f node_modules/app-builder-bin/mac/app-builder_arm64 ]; then
+            echo "app-builder_arm64 missing, installing app-builder-bin..."
+            npm install --no-audit --no-fund --no-save app-builder-bin@5.0.0
+          fi
+          ls -la node_modules/app-builder-bin/mac
+          test -f node_modules/app-builder-bin/mac/app-builder_arm64
+
       - name: Build macOS package (arm64)
         run: npm run package:mac -- --arm64
 
