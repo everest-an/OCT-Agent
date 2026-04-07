@@ -29,7 +29,7 @@ export function registerChannelSetupHandlers(deps: {
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const CHANNEL_LOGIN_IDLE_TIMEOUT_MS = 180000;
-  const CHANNEL_PLUGIN_INSTALL_IDLE_TIMEOUT_MS = 60000;
+  const CHANNEL_PLUGIN_INSTALL_IDLE_TIMEOUT_MS = 120000;
   const CHANNEL_PLUGIN_UNINSTALL_IDLE_TIMEOUT_MS = 30000;
   const CHANNEL_ADD_IDLE_TIMEOUT_MS = 45000;
   const CHANNEL_BIND_IDLE_TIMEOUT_MS = 30000;
@@ -428,6 +428,9 @@ export function registerChannelSetupHandlers(deps: {
       })
     ) || channelDef?.pluginPackage || `@openclaw/${openclawId}`;
     const pluginInstallCmd = `openclaw plugins install "${pluginPkg}" 2>&1`;
+    // Mirror fallback: use npmmirror.com when the default npm registry is unreachable or slow.
+    // npm respects npm_config_registry as an env var, which openclaw passes through to npm install.
+    const pluginInstallCmdMirror = `npm_config_registry=https://registry.npmmirror.com openclaw plugins install "${pluginPkg}" 2>&1`;
 
     sendStatus(`channels.status.configuring::${channelLabel}`);
     try {
@@ -437,8 +440,11 @@ export function registerChannelSetupHandlers(deps: {
       if (isIgnorablePluginInstallError(pluginMsg)) {
         // Already installed / duplicate install metadata — continue setup.
       } else if (isTimeoutLike(pluginMsg)) {
+        // First attempt timed out — retry with Chinese npm mirror (npmmirror.com).
+        // This fixes WeChat plugin install failures caused by slow access to registry.npmjs.org.
+        sendStatus(`channels.status.configuring::${channelLabel}`);
         try {
-          await deps.runAsync(pluginInstallCmd, CHANNEL_PLUGIN_INSTALL_IDLE_TIMEOUT_MS);
+          await deps.runAsync(pluginInstallCmdMirror, CHANNEL_PLUGIN_INSTALL_IDLE_TIMEOUT_MS);
         } catch (retryInstallErr: unknown) {
           const retryMsg = toErrorMessage(retryInstallErr);
           if (!isIgnorablePluginInstallError(retryMsg)) {
