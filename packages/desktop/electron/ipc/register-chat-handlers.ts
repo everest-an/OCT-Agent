@@ -8,7 +8,7 @@ import { getExecApprovalSettings } from '../openclaw-config';
 
 // Extracted modules — pure copy/paste, no logic changes
 import type { ChatSendOptions, MemoryCapturePolicy } from './chat-types';
-import { chatState, CHAT_TIMEOUT_MS } from './chat-types';
+import { chatState, CHAT_TIMEOUT_MS, CHAT_IDLE_TIMEOUT_MS } from './chat-types';
 import {
   normalizeDesktopRole,
   normalizeContentBlocks,
@@ -475,10 +475,22 @@ ${message}`;
         return { promise, resolve: resolver! };
       })();
       let didTimeout = false;
-      const chatTimeout = setTimeout(() => {
+      let chatTimeout: ReturnType<typeof setTimeout> | null = null;
+      // Activity-based idle timeout: resets on every WS event so long
+      // responses (writing large documents, multi-tool chains) don't time out.
+      const resetChatIdleTimeout = () => {
+        if (chatTimeout) clearTimeout(chatTimeout);
+        chatTimeout = setTimeout(() => {
+          didTimeout = true;
+          chatResolve();
+        }, CHAT_IDLE_TIMEOUT_MS);
+      };
+      // Absolute safety cap to prevent infinite hangs
+      const absoluteChatTimeout = setTimeout(() => {
         didTimeout = true;
         chatResolve();
-      }, CHAT_TIMEOUT_MS);
+      }, CHAT_TIMEOUT_MS * 5); // 10 minutes absolute max
+      resetChatIdleTimeout();
 
       const seenToolIds = new Set<string>();
       const completedToolIds = new Set<string>();
@@ -685,6 +697,7 @@ ${message}`;
       };
 
       allEventsHandler = (evt: any) => {
+        resetChatIdleTimeout();
         const eventName = evt?.event || 'unknown';
         const payload = evt?.payload || evt;
         const preview = JSON.stringify(payload).slice(0, 800);
@@ -726,6 +739,7 @@ ${message}`;
 
       chatEventHandler = (payload: any) => {
         if (!payload) return;
+        resetChatIdleTimeout();
         const payloadSession = payload.sessionKey || payload.key || '';
         if (payloadSession && !payloadSession.endsWith(sid) && payloadSession !== sid) return;
 
@@ -770,11 +784,13 @@ ${message}`;
               finalAssistantContentTypes = ['string'];
             }
           }
-          clearTimeout(chatTimeout);
+          if (chatTimeout) clearTimeout(chatTimeout);
+          clearTimeout(absoluteChatTimeout);
           chatResolve();
         } else if (state === 'aborted' || state === 'error') {
           send('chat:status', { type: 'error' });
-          clearTimeout(chatTimeout);
+          if (chatTimeout) clearTimeout(chatTimeout);
+          clearTimeout(absoluteChatTimeout);
           chatResolve();
         }
       };

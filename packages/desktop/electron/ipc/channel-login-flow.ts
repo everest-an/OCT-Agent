@@ -96,6 +96,7 @@ function isQrLine(line: string, stripAnsi: (value: string) => string): boolean {
 export function createChannelLoginWithQR(deps: {
   getEnhancedPath: () => string;
   wrapWindowsCommand: (cmd: string) => string;
+  rewriteOpenClawCommand: (cmd: string) => string;
   stripAnsi: (value: string) => string;
   sendToRenderer: (channel: string, payload: unknown) => void;
 }) {
@@ -104,6 +105,9 @@ export function createChannelLoginWithQR(deps: {
     timeoutMs = 180000,
     extraEnv: Record<string, string> = {},
   ): Promise<{ success: boolean; output?: string; error?: string }> {
+    // Rewrite the openclaw command to use node --stack-size=8192 to avoid
+    // AJV stack overflow during plugin loading (affects ALL channels, not just WeChat)
+    loginCmd = deps.rewriteOpenClawCommand(loginCmd);
     const ep = deps.getEnhancedPath();
     const windowsPathext = (typeof process.env.PATHEXT === 'string' && process.env.PATHEXT.trim())
       ? process.env.PATHEXT

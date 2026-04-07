@@ -592,7 +592,11 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
     await ensureLocalDaemonReadyForRuntime(send);
   }
 
-  if (process.platform === 'win32' && prefs.preferUserSessionGateway) {
+  // On Windows, always prefer user-session gateway. The scheduled task path
+  // spawns a child process we can't control (no --stack-size flag), causing
+  // AJV stack overflow on plugin load. User session mode uses runSpawn which
+  // now includes --stack-size=8192.
+  if (process.platform === 'win32') {
     emit('Starting Gateway in your Windows session...');
     const fallback = await startGatewayInUserSession(send);
     if (fallback.ok) return fallback;

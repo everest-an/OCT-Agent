@@ -189,36 +189,39 @@ export function createShellUtils(options: { home: string; app: any }) {
     return candidates.find((candidate) => fs.existsSync(candidate)) || null;
   }
 
+  // Default stack size for Node.js is ~1 MB. OpenClaw plugins (minimax, talk-voice,
+  // openclaw-weixin) use AJV for schema compilation, which can exceed the default
+  // stack depth on Windows, causing "RangeError: Maximum call stack size exceeded"
+  // and exit code -1 (4294967295 unsigned).  --stack-size is in KB.
+  const NODE_STACK_SIZE_KB = 8192; // 8 MB
+
   function buildOpenClawShellFallbackSync(): string | null {
-    const existing = rawShellExecSync(process.platform === 'win32' ? 'where openclaw' : 'which openclaw', 3000);
-    if (existing) return null;
     const pkgDir = getOpenClawPackageDirSync();
-    if (!pkgDir) return null;
+    if (!pkgDir) {
+      // openclaw might be on PATH but we can't find its package dir — skip stack override
+      return null;
+    }
     const entryPath = getOpenClawEntryPath(pkgDir);
     if (!entryPath) return null;
-    const candidate = `${getNodeInvocationCommand()} "${entryPath}"`;
+    const candidate = `${getNodeInvocationCommand()} --stack-size=${NODE_STACK_SIZE_KB} "${entryPath}"`;
     return rawShellExecSync(`${candidate} --version`, 8000) ? candidate : null;
   }
 
   async function buildOpenClawShellFallbackAsync(): Promise<string | null> {
-    const existing = await rawShellExecAsync(process.platform === 'win32' ? 'where openclaw' : 'which openclaw', 3000);
-    if (existing) return null;
     const pkgDir = await getOpenClawPackageDirAsync();
     if (!pkgDir) return null;
     const entryPath = getOpenClawEntryPath(pkgDir);
     if (!entryPath) return null;
-    const candidate = `${getNodeInvocationCommand()} "${entryPath}"`;
+    const candidate = `${getNodeInvocationCommand()} --stack-size=${NODE_STACK_SIZE_KB} "${entryPath}"`;
     return await rawShellExecAsync(`${candidate} --version`, 8000) ? candidate : null;
   }
 
   function getOpenClawDirectSpawnSync(): { command: string; argsPrefix: string[] } | null {
-    const existing = rawShellExecSync(process.platform === 'win32' ? 'where openclaw' : 'which openclaw', 3000);
-    if (existing) return null;
     const pkgDir = getOpenClawPackageDirSync();
     if (!pkgDir) return null;
     const entryPath = getOpenClawEntryPath(pkgDir);
     if (!entryPath) return null;
-    return { command: findNodeExecutable(), argsPrefix: [entryPath] };
+    return { command: findNodeExecutable(), argsPrefix: [`--stack-size=${NODE_STACK_SIZE_KB}`, entryPath] };
   }
 
   function rewriteOpenClawShellCommand(command: string, fallback: string | null) {
@@ -364,10 +367,11 @@ export function createShellUtils(options: { home: string; app: any }) {
     if (cmd === 'openclaw' && process.platform === 'win32') {
       // On Windows, npm installs openclaw as a .cmd shim; spawn("openclaw") can fail
       // with ENOENT in non-shell mode. Prefer direct Node + entrypoint execution.
+      // Include --stack-size to prevent AJV stack overflow during plugin loading.
       const pkgDir = getOpenClawPackageDirSync();
       const entryPath = pkgDir ? getOpenClawEntryPath(pkgDir) : null;
       if (entryPath) {
-        return spawn(findNodeExecutable(), [entryPath, ...args], {
+        return spawn(findNodeExecutable(), [`--stack-size=${NODE_STACK_SIZE_KB}`, entryPath, ...args], {
           ...spawnOptions,
         });
       }
@@ -572,6 +576,10 @@ export function createShellUtils(options: { home: string; app: any }) {
     killAllTrackedShellChildren,
     readShellOutputAsync,
     resolveBundledCache,
+    rewriteOpenClawShellCommand: (cmd: string) => {
+      const fallback = buildOpenClawShellFallbackSync();
+      return rewriteOpenClawShellCommand(cmd, fallback);
+    },
     run,
     runAsync,
     runAsyncWithProgress,

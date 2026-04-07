@@ -4,7 +4,7 @@
 import { spawn } from 'child_process';
 import os from 'os';
 import type { ChatSendOptions } from './chat-types';
-import { CHAT_TIMEOUT_MS, chatState } from './chat-types';
+import { CHAT_TIMEOUT_MS, CHAT_IDLE_TIMEOUT_MS, chatState } from './chat-types';
 import {
   looksLikeFilesystemMutationRequest,
   looksLikeSuccessfulFilesystemMutationResponse,
@@ -75,6 +75,7 @@ export async function chatSendViaCli(
     let stdoutRemainder = '';
     let stderrRemainder = '';
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    let absoluteTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
     // Defense-in-depth: capture "Unknown agent id" reports from OpenClaw stderr.
     // These come through as `Gateway agent failed; falling back to embedded:
     // Error: Unknown agent id "xxx". Use "openclaw agents list" to see configured agents.`
@@ -97,6 +98,10 @@ export async function chatSendViaCli(
       if (timeoutHandle) {
         clearTimeout(timeoutHandle);
         timeoutHandle = null;
+      }
+      if (absoluteTimeoutHandle) {
+        clearTimeout(absoluteTimeoutHandle);
+        absoluteTimeoutHandle = null;
       }
       resolve(result);
     };
@@ -199,10 +204,29 @@ export async function chatSendViaCli(
     };
 
     chatState.activeChatChild = child;
+
+    // Activity-based (idle) timeout: resets every time stdout/stderr emits data.
+    // This lets long responses (e.g. writing a 5000-word document) complete without
+    // hitting a fixed wall, while still catching truly stalled processes.
+    const resetIdleTimeout = () => {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      timeoutHandle = setTimeout(() => {
+        try { child.kill(); } catch {}
+        finalize({ success: false, error: 'The agent took too long to respond. This usually happens when the system is still loading. Please try sending your message again.', sessionId: sid });
+      }, CHAT_IDLE_TIMEOUT_MS);
+    };
+    // Absolute safety cap: even with activity, don't let a single chat run forever
+    absoluteTimeoutHandle = setTimeout(() => {
+      try { child.kill(); } catch {}
+      finalize({ success: false, error: 'The agent took too long to respond. This usually happens when the system is still loading. Please try sending your message again.', sessionId: sid });
+    }, CHAT_TIMEOUT_MS * 5); // 10 minutes absolute max
+
     child.stdout?.on('data', (data: Buffer) => {
+      resetIdleTimeout();
       flushChunk(data.toString(), false);
     });
     child.stderr?.on('data', (data: Buffer) => {
+      resetIdleTimeout();
       flushChunk(data.toString(), true);
     });
     child.on('exit', (code: number | null) => {
@@ -284,10 +308,8 @@ export async function chatSendViaCli(
       }
       finalize({ success: false, error: message, sessionId: sid });
     });
-    timeoutHandle = setTimeout(() => {
-      try { child.kill(); } catch {}
-      finalize({ success: false, error: 'Response timeout', sessionId: sid });
-    }, CHAT_TIMEOUT_MS);
+    // Start the initial idle timer (will be reset on first data)
+    resetIdleTimeout();
   });
 }
 
