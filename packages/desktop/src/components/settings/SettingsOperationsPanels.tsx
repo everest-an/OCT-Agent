@@ -4,10 +4,76 @@ import { SettingsModalShell, SettingsRow, SettingsSection, SettingsToggle } from
 
 type TFunction = (key: string, fallback?: string) => string;
 
+function CheckRow({
+  check,
+  isActive,
+  fixingId,
+  onFix,
+  t,
+}: {
+  check: any;
+  isActive: boolean;
+  fixingId: string | null;
+  onFix: (id: string) => void;
+  t: TFunction;
+}) {
+  const isPending = isActive && !check.status;
+  const colorClass = isPending
+    ? 'settings-glass-soft text-slate-400'
+    : check.status === 'pass'
+      ? 'settings-glass-soft text-emerald-300'
+      : check.status === 'warn'
+        ? 'settings-glass-soft text-amber-300'
+        : check.status === 'fail'
+          ? 'settings-glass-soft text-red-400'
+          : 'settings-glass-soft text-slate-500';
+
+  return (
+    <div className={`flex items-center gap-3 p-2.5 rounded-xl text-xs ${colorClass}`}>
+      <span className="shrink-0">
+        {isPending
+          ? <Loader2 size={14} className="animate-spin text-slate-500" />
+          : check.status === 'pass'
+            ? <CheckCircle size={14} />
+            : check.status === 'warn'
+              ? <AlertTriangle size={14} />
+              : check.status === 'fail'
+                ? <CircleX size={14} />
+                : <SkipForward size={14} />}
+      </span>
+      <div className="flex-1 min-w-0">
+        <span className="font-medium">{check.label || check.id}</span>
+        {check.message && <span className="ml-2 text-slate-400">{check.message}</span>}
+        {isPending && <span className="ml-2 text-slate-500">{t('settings.health.checking', 'Checking...')}</span>}
+        {check.detail && (
+          <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">{check.detail}</p>
+        )}
+        {check.fixable === 'manual' && check.fixDescription && (
+          <p className="text-[10px] text-slate-500 mt-0.5 font-mono break-all">{check.fixDescription}</p>
+        )}
+      </div>
+      {check.fixable === 'auto' && check.status && (
+        <button
+          onClick={() => onFix(check.id)}
+          disabled={fixingId === check.id}
+          className="settings-btn settings-btn-primary shrink-0 text-[10px] disabled:bg-slate-700"
+        >
+          {fixingId === check.id
+            ? <Loader2 size={10} className="animate-spin" />
+            : (check.id === 'channel-bindings' && String(check.detail || '').toLowerCase().includes('telegram'))
+              ? t('settings.health.fixTelegram', 'Fix Telegram')
+              : t('settings.health.fix', 'Fix')}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function SettingsHealthPanel({
   t,
   doctorLoading,
   doctorReport,
+  doctorActiveCheckId,
   fixingId,
   onRunDoctor,
   onFix,
@@ -15,10 +81,22 @@ export function SettingsHealthPanel({
   t: TFunction;
   doctorLoading: boolean;
   doctorReport: any;
+  doctorActiveCheckId?: string | null;
   fixingId: string | null;
   onRunDoctor: () => void;
   onFix: (checkId: string) => void;
 }) {
+  // Build display list: completed checks + current active check placeholder
+  const completedChecks: any[] = doctorReport?.checks ?? [];
+  const completedIds = new Set(completedChecks.map((c: any) => c.id));
+  const activeCheck = doctorLoading && doctorActiveCheckId && !completedIds.has(doctorActiveCheckId)
+    ? { id: doctorActiveCheckId, label: doctorActiveCheckId }
+    : null;
+  const displayChecks = activeCheck ? [...completedChecks, activeCheck] : completedChecks;
+
+  const allDone = !doctorLoading && completedChecks.length > 0;
+  const allGood = allDone && doctorReport?.summary?.fail === 0 && doctorReport?.summary?.warn === 0;
+
   return (
     <SettingsSection title={(
       <span className="inline-flex items-center gap-2">
@@ -38,69 +116,41 @@ export function SettingsHealthPanel({
             {t('settings.health.recheck', 'Re-check')}
           </button>
         </div>
-        {doctorLoading && !doctorReport && (
-          <div className="flex items-center gap-2 text-xs text-slate-400 py-4 justify-center">
-            <Loader2 size={14} className="animate-spin" />
-            {t('settings.health.checking', 'Running diagnostics...')}
+
+        {/* No data yet and not loading: prompt user to run */}
+        {!doctorLoading && displayChecks.length === 0 && (
+          <div className="flex items-center gap-2 text-xs text-slate-500 py-4 justify-center">
+            {t('settings.health.prompt', 'Click Re-check to run diagnostics')}
           </div>
         )}
-        {doctorReport && (
-          <>
-            {doctorReport.summary.fail === 0 && doctorReport.summary.warn === 0 && (
-              <div className="flex items-center gap-2 text-xs p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
-                <CheckCircle size={14} className="shrink-0" />
-                <p>{t('settings.health.allGood', 'All systems operational')}</p>
-              </div>
-            )}
-            {doctorReport.checks.map((check: any) => (
-              <div
-                key={check.id}
-                className={`flex items-center gap-3 p-2.5 rounded-xl text-xs ${
-                  check.status === 'pass'
-                    ? 'settings-glass-soft text-emerald-300'
-                    : check.status === 'warn'
-                      ? 'settings-glass-soft text-amber-300'
-                      : check.status === 'fail'
-                        ? 'settings-glass-soft text-red-400'
-                        : 'settings-glass-soft text-slate-500'
-                }`}
-              >
-                <span className="shrink-0">
-                  {check.status === 'pass'
-                    ? <CheckCircle size={14} />
-                    : check.status === 'warn'
-                      ? <AlertTriangle size={14} />
-                      : check.status === 'fail'
-                        ? <CircleX size={14} />
-                        : <SkipForward size={14} />}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <span className="font-medium">{check.label}</span>
-                  <span className="ml-2 text-slate-400">{check.message}</span>
-                  {check.detail && (
-                    <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">{check.detail}</p>
-                  )}
-                  {check.fixable === 'manual' && check.fixDescription && (
-                    <p className="text-[10px] text-slate-500 mt-0.5 font-mono break-all">{check.fixDescription}</p>
-                  )}
-                </div>
-                {check.fixable === 'auto' && (
-                  <button
-                    onClick={() => onFix(check.id)}
-                    disabled={fixingId === check.id}
-                    className="settings-btn settings-btn-primary shrink-0 text-[10px] disabled:bg-slate-700"
-                  >
-                    {fixingId === check.id
-                      ? <Loader2 size={10} className="animate-spin" />
-                      : (check.id === 'channel-bindings' && String(check.detail || '').toLowerCase().includes('telegram'))
-                        ? t('settings.health.fixTelegram', 'Fix Telegram')
-                        : t('settings.health.fix', 'Fix')}
-                  </button>
-                )}
-              </div>
-            ))}
-          </>
+
+        {/* Loading but no checks yet: context is being built */}
+        {doctorLoading && displayChecks.length === 0 && (
+          <div className="flex items-center gap-2 text-xs text-slate-400 py-4 justify-center">
+            <Loader2 size={14} className="animate-spin" />
+            {t('settings.health.starting', 'Preparing diagnostics...')}
+          </div>
         )}
+
+        {/* All-good banner — only after all checks done */}
+        {allGood && (
+          <div className="flex items-center gap-2 text-xs p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
+            <CheckCircle size={14} className="shrink-0" />
+            <p>{t('settings.health.allGood', 'All systems operational')}</p>
+          </div>
+        )}
+
+        {/* Check rows — stream in as results arrive */}
+        {displayChecks.map((check: any) => (
+          <CheckRow
+            key={check.id}
+            check={check}
+            isActive={check.id === doctorActiveCheckId && doctorLoading}
+            fixingId={fixingId}
+            onFix={onFix}
+            t={t}
+          />
+        ))}
       </div>
     </SettingsSection>
   );

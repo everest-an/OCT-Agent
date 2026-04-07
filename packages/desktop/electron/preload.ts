@@ -229,6 +229,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // App Doctor (System Health)
   doctorRun: () => ipcRenderer.invoke('doctor:run'),
   doctorFix: (checkId: string) => ipcRenderer.invoke('doctor:fix', checkId),
+  doctorStream: () => ipcRenderer.invoke('doctor:stream'),
+  onDoctorCheckStart: (callback: (data: { checkId: string }) => void) => {
+    const listener = (_e: any, data: { checkId: string }) => callback(data);
+    ipcRenderer.on('doctor:check-start', listener);
+    return () => ipcRenderer.removeListener('doctor:check-start', listener);
+  },
+  onDoctorCheckResult: (callback: (result: any) => void) => {
+    const listener = (_e: any, result: any) => callback(result);
+    ipcRenderer.on('doctor:check-result', listener);
+    return () => ipcRenderer.removeListener('doctor:check-result', listener);
+  },
+  onDoctorStreamDone: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('doctor:stream-done', listener);
+    return () => ipcRenderer.removeListener('doctor:stream-done', listener);
+  },
 
   // Launch at Login
   setLoginItem: (enabled: boolean) => ipcRenderer.invoke('app:set-login-item', enabled),

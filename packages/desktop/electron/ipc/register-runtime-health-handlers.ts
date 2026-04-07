@@ -448,4 +448,22 @@ export function registerRuntimeHealthHandlers(deps: {
 
   ipcMain.handle('doctor:run', async () => deps.doctor.runAllChecks());
   ipcMain.handle('doctor:fix', async (_e: any, checkId: string) => deps.doctor.runFix(checkId));
+
+  // Streaming doctor: pushes 'doctor:check-start' and 'doctor:check-result' events
+  // as each check completes so the UI can update incrementally.
+  ipcMain.handle('doctor:stream', async () => {
+    const mainWindow = deps.getMainWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+
+    const send = (channel: string, payload: unknown) => {
+      if (!mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+    };
+
+    await deps.doctor.runChecksStreaming(
+      (checkId: string) => send('doctor:check-start', { checkId }),
+      (result: any) => send('doctor:check-result', result),
+    );
+
+    send('doctor:stream-done', {});
+  });
 }

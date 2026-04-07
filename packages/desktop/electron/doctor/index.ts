@@ -101,6 +101,39 @@ export function createDoctor(deps: DoctorDeps) {
     return runChecks();
   }
 
+  async function runChecksStreaming(
+    onCheckStart: (checkId: string) => void,
+    onCheckResult: (result: CheckResult) => void,
+    subset?: string[],
+  ): Promise<DoctorReport> {
+    const ctx = await buildContext(deps);
+    const order = subset || CHECK_ORDER;
+    const entries = order
+      .map((id) => ({ id, entry: CHECK_REGISTRY[id] }))
+      .filter((e) => e.entry);
+
+    const checks: CheckResult[] = [];
+    for (const { id, entry } of entries) {
+      onCheckStart(id);
+      try {
+        const result = await entry!.check(ctx);
+        checks.push(result);
+        onCheckResult(result);
+      } catch {
+        const result: CheckResult = {
+          id, label: id, status: 'fail' as CheckStatus,
+          message: 'Check failed unexpectedly', fixable: 'none' as Fixability,
+        };
+        checks.push(result);
+        onCheckResult(result);
+      }
+    }
+
+    const summary = { pass: 0, warn: 0, fail: 0, skipped: 0 };
+    for (const c of checks) summary[c.status]++;
+    return { timestamp: Date.now(), checks, summary };
+  }
+
   async function runFix(checkId: string): Promise<FixResult> {
     const entry = CHECK_REGISTRY[checkId];
     if (!entry?.fix) return { id: checkId, success: false, message: 'No auto-fix available' };
@@ -118,5 +151,5 @@ export function createDoctor(deps: DoctorDeps) {
     }
   }
 
-  return { runAllChecks, runChecks, runFix };
+  return { runAllChecks, runChecks, runChecksStreaming, runFix };
 }

@@ -273,6 +273,120 @@ export function buildDynamicSectionsFromSchema(
     .map(({ order: _order, ...section }) => section);
 }
 
+/**
+ * Static field type map — avoids the 60s `openclaw config schema` CLI call.
+ * Types are derived from field semantics (apiKey → password, enabled → boolean, etc.)
+ */
+const STATIC_FIELD_TYPES: Record<string, DynamicConfigField['type']> = {
+  'tools.web.search.enabled': 'boolean',
+  'tools.web.search.provider': 'select',
+  'tools.web.search.apiKey': 'password',
+  'tools.web.search.maxResults': 'number',
+  'tools.web.search.timeoutSeconds': 'number',
+  'tools.web.search.cacheTtlMinutes': 'number',
+  'tools.web.search.openaiCodex.enabled': 'boolean',
+  'tools.web.search.openaiCodex.mode': 'select',
+  'tools.web.search.openaiCodex.contextSize': 'select',
+  'tools.web.fetch.enabled': 'boolean',
+  'tools.web.fetch.maxChars': 'number',
+  'tools.web.fetch.maxCharsCap': 'number',
+  'tools.web.fetch.maxResponseBytes': 'number',
+  'tools.web.fetch.timeoutSeconds': 'number',
+  'tools.web.fetch.cacheTtlMinutes': 'number',
+  'tools.web.fetch.maxRedirects': 'number',
+  'tools.web.fetch.userAgent': 'text',
+  'tools.web.fetch.readability': 'boolean',
+  'tools.web.fetch.firecrawl.enabled': 'boolean',
+  'tools.web.fetch.firecrawl.apiKey': 'password',
+};
+
+const STATIC_FIELD_OPTIONS: Record<string, DynamicConfigOption[]> = {
+  'tools.web.search.provider': Object.entries(PROVIDER_LABELS).map(([value, label]) => ({ value, label })),
+  'tools.web.search.openaiCodex.mode': [
+    { value: 'auto', label: 'Auto' },
+    { value: 'computer-use-preview', label: 'Computer Use Preview' },
+  ],
+  'tools.web.search.openaiCodex.contextSize': [
+    { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+  ],
+};
+
+/**
+ * Builds Web & Browser config sections entirely from static metadata — no CLI call required.
+ * Returns the same DynamicConfigSection[] shape as buildDynamicSectionsFromSchema,
+ * so the existing DynamicConfigForm component works without any changes.
+ */
+export function buildStaticWebSections(currentValue: Record<string, any> = {}): DynamicConfigSection[] {
+  const searchFields: DynamicConfigField[] = [];
+  const fetchFields: DynamicConfigField[] = [];
+
+  for (const [path, type] of Object.entries(STATIC_FIELD_TYPES)) {
+    if (SKIP_PATHS.has(path)) continue;
+    const meta = FIELD_META[path];
+    if (!meta) continue;
+
+    // Determine which section this field belongs to
+    const isSearchField = path.startsWith('tools.web.search.');
+    const isFetchField = path.startsWith('tools.web.fetch.');
+
+    // Resolve options
+    let options: DynamicConfigOption[] | undefined;
+    if (type === 'select') {
+      const rawOptions = STATIC_FIELD_OPTIONS[path] || meta.options || [];
+      const section = isSearchField ? currentValue?.search : currentValue?.fetch;
+      const leafKey = path.split('.').pop()!;
+      const currentVal = section?.[leafKey];
+      options = appendCurrentOption(rawOptions, currentVal);
+    }
+
+    // Determine group label for nested fields (e.g. openaiCodex.*)
+    const parts = path.split('.');
+    const group = parts.length > 4 ? titleize(parts[3]) : undefined;
+
+    const field: DynamicConfigField = {
+      key: path,
+      path,
+      label: meta.label,
+      description: meta.description,
+      type,
+      options,
+      group,
+      prominence: PRIMARY_FIELDS.has(path) ? 'primary' : 'advanced',
+    };
+
+    if (isSearchField) searchFields.push(field);
+    else if (isFetchField) fetchFields.push(field);
+  }
+
+  const sections: DynamicConfigSection[] = [];
+
+  const searchMeta = SECTION_META.search;
+  if (searchFields.length > 0) {
+    sections.push({
+      key: 'search',
+      title: searchMeta.title,
+      description: searchMeta.description,
+      fields: sortFields(searchFields),
+      defaultExpanded: false,
+    });
+  }
+
+  const fetchMeta = SECTION_META.fetch;
+  if (fetchFields.length > 0) {
+    sections.push({
+      key: 'fetch',
+      title: fetchMeta.title,
+      description: fetchMeta.description,
+      fields: sortFields(fetchFields),
+      defaultExpanded: false,
+    });
+  }
+
+  return sections;
+}
+
 export function getValueAtPath(value: Record<string, any>, dotPath: string): any {
   return dotPath.split('.').reduce((current, part) => current?.[part], value);
 }

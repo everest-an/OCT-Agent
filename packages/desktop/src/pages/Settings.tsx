@@ -10,7 +10,7 @@ import { SettingsPermissionsPanel } from '../components/settings/SettingsPermiss
 import { SettingsUsagePanel, SettingsVersionPanel } from '../components/settings/SettingsStatsPanels';
 import { SettingsAppearancePanel, SettingsTokenPanel } from '../components/settings/SettingsCorePanels';
 import { SettingsExtensionsPanel, SettingsGatewayPanel, SettingsHealthPanel, SettingsLogsModal, SettingsSecurityAuditPanel, SettingsSystemPanel } from '../components/settings/SettingsOperationsPanels';
-import { buildDynamicSectionsFromSchema, getValueAtPath, setValueAtPath, PROVIDER_PLUGIN_ENTRY, type DynamicConfigSection } from '../lib/openclaw-capabilities';
+import { buildStaticWebSections, getValueAtPath, setValueAtPath, PROVIDER_PLUGIN_ENTRY, type DynamicConfigSection } from '../lib/openclaw-capabilities';
 import {
   PERMISSION_PRESET_VALUES,
   type ExecApprovalAsk,
@@ -29,6 +29,8 @@ const KNOWN_ALLOWED_TOOLS = [
   { id: 'awareness_record', labelKey: 'settings.tool.record.label', labelFallback: 'Memory Save', descKey: 'settings.tool.record.desc', descFallback: 'Write new knowledge back to Awareness memory', riskKey: 'settings.risk.normal', riskFallback: 'Normal' },
   { id: 'awareness_lookup', labelKey: 'settings.tool.lookup.label', labelFallback: 'Knowledge Lookup', descKey: 'settings.tool.lookup.desc', descFallback: 'Read structured memory cards', riskKey: 'settings.risk.normal', riskFallback: 'Normal' },
   { id: 'awareness_perception', labelKey: 'settings.tool.perception.label', labelFallback: 'Project Signals', descKey: 'settings.tool.perception.desc', descFallback: 'Read file patterns and activity signals', riskKey: 'settings.risk.elevated', riskFallback: 'Elevated' },
+  { id: 'sessions_spawn', labelKey: 'settings.tool.sessionsSpawn.label', labelFallback: 'Session Spawn', descKey: 'settings.tool.sessionsSpawn.desc', descFallback: 'Launch sub-agent sessions for multi-agent workflows', riskKey: 'settings.risk.elevated', riskFallback: 'Elevated' },
+  { id: 'agents_list', labelKey: 'settings.tool.agentsList.label', labelFallback: 'Agents List', descKey: 'settings.tool.agentsList.desc', descFallback: 'List available agents for multi-agent coordination', riskKey: 'settings.risk.normal', riskFallback: 'Normal' },
 ];
 
 const KNOWN_DENIED_COMMANDS = [
@@ -210,9 +212,10 @@ export default function Settings() {
   // Security audit
   const [securityIssues, setSecurityIssues] = useState<Array<{ level: string; message: string; fix?: string }>>([]);
 
-  // Doctor (System Health)
+  // Doctor (System Health) — streaming mode
   const [doctorReport, setDoctorReport] = useState<any>(null);
   const [doctorLoading, setDoctorLoading] = useState(false);
+  const [doctorActiveCheckId, setDoctorActiveCheckId] = useState<string | null>(null);
   const [fixingId, setFixingId] = useState<string | null>(null);
 
   // Usage stats
@@ -274,50 +277,85 @@ export default function Settings() {
     // plugins (15-30 s), and running all checks in parallel saturates CPU/IO
     // causing the entire machine to freeze. User must click "Run Diagnostics" manually.
 
-    if (!api.openclawConfigSchema || !api.openclawConfigRead) {
+    if (!api.openclawConfigRead) {
+      // Build static sections even without config read — shows UI immediately
+      setWebSections(buildStaticWebSections({}));
       setWebLoading(false);
       return;
     }
 
-    api.openclawConfigSchema().then(async (schemaResult: any) => {
-      if (!schemaResult?.success || !schemaResult.schema) {
-        setWebError(schemaResult?.error || t('settings.web.loadSchemaFailed', 'Failed to load OpenClaw config schema.'));
-        setWebLoading(false);
-        return;
-      }
+    (async () => {
+      try {
+        const valueResult = await api.openclawConfigRead?.('tools.web');
+        const nextValues = (valueResult?.success ? valueResult.value : {}) || {};
 
-      const valueResult = await api.openclawConfigRead?.('tools.web');
-      const nextValues = (valueResult?.success ? valueResult.value : {}) || {};
-
-      // Back-fill apiKey from plugins.entries.<provider>.config.webSearch.apiKey
-      // because OpenClaw reads per-provider keys, not the unified tools.web.search.apiKey
-      const provider = nextValues?.search?.provider;
-      if (provider && !nextValues?.search?.apiKey) {
-        const pluginEntry = PROVIDER_PLUGIN_ENTRY[provider];
-        if (pluginEntry) {
-          const pluginResult = await api.openclawConfigRead?.(`plugins.entries.${pluginEntry}.config.webSearch.apiKey`);
-          if (pluginResult?.success && pluginResult.value) {
-            nextValues.search = { ...nextValues.search, apiKey: pluginResult.value };
+        // Back-fill apiKey from plugins.entries.<provider>.config.webSearch.apiKey
+        // because OpenClaw reads per-provider keys, not the unified tools.web.search.apiKey
+        const provider = nextValues?.search?.provider;
+        if (provider && !nextValues?.search?.apiKey) {
+          const pluginEntry = PROVIDER_PLUGIN_ENTRY[provider];
+          if (pluginEntry) {
+            const pluginResult = await api.openclawConfigRead?.(`plugins.entries.${pluginEntry}.config.webSearch.apiKey`);
+            if (pluginResult?.success && pluginResult.value) {
+              nextValues.search = { ...nextValues.search, apiKey: pluginResult.value };
+            }
           }
         }
-      }
 
-      setWebValues(nextValues);
-      setWebSections(buildDynamicSectionsFromSchema(schemaResult.schema, 'tools.web', nextValues));
-      setWebLoading(false);
-    }).catch(() => {
-      setWebError(t('settings.web.loadSchemaFailed', 'Failed to load OpenClaw config schema.'));
-      setWebLoading(false);
-    });
+        setWebValues(nextValues);
+        setWebSections(buildStaticWebSections(nextValues));
+      } catch {
+        // On error still show UI with empty values
+        setWebSections(buildStaticWebSections({}));
+      } finally {
+        setWebLoading(false);
+      }
+    })();
   }, [t]);
 
   const runDoctor = async () => {
+    const api = window.electronAPI as any;
     setDoctorLoading(true);
-    try {
-      const report = await (window.electronAPI as any).doctorRun?.();
-      if (report) setDoctorReport(report);
-    } catch {}
-    setDoctorLoading(false);
+    setDoctorActiveCheckId(null);
+    // Reset to empty so stale results don't linger during a fresh run
+    setDoctorReport({ timestamp: Date.now(), checks: [], summary: { pass: 0, warn: 0, fail: 0, skipped: 0 } });
+
+    // Use streaming API if available, fall back to batch
+    if (api?.doctorStream && api?.onDoctorCheckStart && api?.onDoctorCheckResult) {
+      const unsubStart = api.onDoctorCheckStart((data: { checkId: string }) => {
+        setDoctorActiveCheckId(data.checkId);
+      });
+      const unsubResult = api.onDoctorCheckResult((result: any) => {
+        setDoctorReport((prev: any) => {
+          const existing = prev?.checks ?? [];
+          const idx = existing.findIndex((c: any) => c.id === result.id);
+          const nextChecks = idx >= 0
+            ? existing.map((c: any, i: number) => (i === idx ? result : c))
+            : [...existing, result];
+          const summary = { pass: 0, warn: 0, fail: 0, skipped: 0 };
+          for (const c of nextChecks) summary[c.status as keyof typeof summary]++;
+          return { timestamp: prev?.timestamp ?? Date.now(), checks: nextChecks, summary };
+        });
+      });
+
+      try {
+        // Await the invoke itself as the completion signal — no need for a separate stream-done event
+        await api.doctorStream();
+      } catch {}
+
+      // Always clean up after invoke resolves (success or error)
+      unsubStart?.();
+      unsubResult?.();
+      setDoctorLoading(false);
+      setDoctorActiveCheckId(null);
+    } else {
+      // Fallback: batch mode
+      try {
+        const report = await api?.doctorRun?.();
+        if (report) setDoctorReport(report);
+      } catch {}
+      setDoctorLoading(false);
+    }
   };
 
   const handleFix = async (checkId: string) => {
@@ -332,16 +370,21 @@ export default function Settings() {
 
   const savePermissions = async (changes: Partial<PermissionState>) => {
     if (!window.electronAPI || !permissions) return;
-    const updated: PermissionState = {
-      ...permissions,
-      ...changes,
-      execSecurity: changes.execSecurity || permissions.execSecurity || DEFAULT_EXEC_SECURITY,
-      execAsk: changes.execAsk || permissions.execAsk || DEFAULT_EXEC_ASK,
-      execAskFallback: changes.execAskFallback || permissions.execAskFallback || DEFAULT_EXEC_ASK_FALLBACK,
-      execAutoAllowSkills: changes.execAutoAllowSkills ?? permissions.execAutoAllowSkills,
-      execAllowlist: changes.execAllowlist || permissions.execAllowlist || [],
-    };
-    setPermissions(updated);
+    // Use functional setState to avoid stale-closure overwrites when multiple
+    // savePermissions calls are batched in the same event handler (e.g. the
+    // Shell exec buttons call onSaveExecSecurity + onSaveExecAsk together).
+    setPermissions((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        ...changes,
+        execSecurity: changes.execSecurity ?? prev.execSecurity ?? DEFAULT_EXEC_SECURITY,
+        execAsk: changes.execAsk ?? prev.execAsk ?? DEFAULT_EXEC_ASK,
+        execAskFallback: changes.execAskFallback ?? prev.execAskFallback ?? DEFAULT_EXEC_ASK_FALLBACK,
+        execAutoAllowSkills: changes.execAutoAllowSkills ?? prev.execAutoAllowSkills,
+        execAllowlist: changes.execAllowlist ?? prev.execAllowlist ?? [],
+      };
+    });
     await (window.electronAPI as any).permissionsUpdate(changes);
   };
 
@@ -553,7 +596,7 @@ export default function Settings() {
         )}>
           <div className="p-5 space-y-5">
             <div className="text-xs text-slate-500 leading-5">
-              {t('settings.web.desc', 'Configure OpenClaw web search, page fetch, and browser automation settings directly from Desktop. This form is generated from the OpenClaw config schema, so supported fields track the installed OpenClaw version.')}
+              {t('settings.web.desc', 'Configure OpenClaw web search and page fetch settings. Changes are saved directly to openclaw.json and take effect immediately.')}
             </div>
 
             <div className="settings-glass-soft p-4 space-y-4">
@@ -610,7 +653,7 @@ export default function Settings() {
             {webLoading ? (
               <div className="flex items-center gap-2 text-xs text-slate-500">
                 <Loader2 size={12} className="animate-spin" />
-                {t('settings.web.loading', 'Loading OpenClaw capability schema...')}
+                {t('settings.web.loading', 'Loading settings...')}
               </div>
             ) : webSections.length > 0 ? (
               <>
@@ -709,6 +752,7 @@ export default function Settings() {
           t={t}
           doctorLoading={doctorLoading}
           doctorReport={doctorReport}
+          doctorActiveCheckId={doctorActiveCheckId}
           fixingId={fixingId}
           onRunDoctor={runDoctor}
           onFix={handleFix}

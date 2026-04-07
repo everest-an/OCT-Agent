@@ -982,6 +982,11 @@ function getDoctor() {
 const doctor = {
   runAllChecks: () => getDoctor().runAllChecks(),
   runChecks: (subset?: string[]) => getDoctor().runChecks(subset),
+  runChecksStreaming: (
+    onCheckStart: (checkId: string) => void,
+    onCheckResult: (result: any) => void,
+    subset?: string[],
+  ) => getDoctor().runChecksStreaming(onCheckStart, onCheckResult, subset),
   runFix: (checkId: string) => getDoctor().runFix(checkId),
 };
 
@@ -1167,9 +1172,10 @@ registerGatewayHandlers({
 });
 registerMemoryHandlers();
 registerFileDialogHandlers();
-registerOpenClawConfigHandlers({
+const { prefetchSchema } = registerOpenClawConfigHandlers({
   home: HOME,
   safeShellExecAsync,
+  readShellOutputAsync,
   mergeOpenClawConfig,
 });
 registerSkillHandlers({
@@ -1257,6 +1263,13 @@ app.whenReady().then(() => {
   setTimeout(() => {
     if (!daemonWatchdog.isRunning()) daemonWatchdog.startDaemonWatchdog();
   }, 30_000);
+
+  // Warm up the OpenClaw config schema cache in the background.
+  // Runs after a 60 s delay so it doesn't compete with gateway / daemon startup.
+  // By the time the user opens Settings → Web & Browser, the schema is usually ready.
+  setTimeout(() => {
+    prefetchSchema().catch(() => {});
+  }, 60_000);
 });
 
 app.on('second-instance', () => {

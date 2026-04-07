@@ -806,7 +806,20 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
       attachSubagentListener(deps);
 
       try {
-        const ws = await deps.getGatewayWs();
+        // Gateway WS may not be ready on first call after app start — retry up to 3x
+        let ws: Awaited<ReturnType<typeof deps.getGatewayWs>> | null = null;
+        let lastErr: any = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            ws = await deps.getGatewayWs();
+            break;
+          } catch (err) {
+            lastErr = err;
+            console.warn(`[mission:start] gateway connect attempt ${attempt + 1}/3 failed:`, (err as any)?.message);
+            await new Promise(r => setTimeout(r, 1500));
+          }
+        }
+        if (!ws) throw lastErr || new Error('Gateway connection timed out');
 
         // Register mission
         activeMissions.set(params.missionId, {
@@ -1123,6 +1136,32 @@ Start by planning which sub-agents to use, then spawn them.`;
 
           const found = findMissionStep(key, runId);
           if (!found) return;
+
+          // Sub-agents spawned via sessions_spawn tool complete via lifecycle=end,
+          // NOT chat:final (because their result returns to the parent as a tool
+          // call result, not a separate chat message). Handle completion here.
+          if (stream === 'lifecycle' && (phase === 'end' || phase === 'error')) {
+            const isError = phase === 'error' || payload?.data?.status === 'failed' || payload?.data?.status === 'timeout';
+            const resultText: string =
+              payload?.data?.result ||
+              payload?.result ||
+              payload?.data?.output ||
+              payload?.data?.error ||
+              '';
+            sendMissionProgress(params.missionId, {
+              stepUpdate: {
+                sessionKey: found.matchedKey,
+                agentId: found.agentInfo.agentId,
+                status: isError ? 'failed' : 'done',
+                result: typeof resultText === 'string' ? resultText.slice(0, 2000) : '',
+                ...(isError ? { error: 'Sub-agent failed' } : {}),
+                completedAt: new Date().toISOString(),
+              },
+            });
+            completedSubagentKeys.add(found.matchedKey);
+            checkMissionComplete();
+            return;
+          }
 
           let instruction: string | null = null;
           if (stream === 'tool' && toolName) {

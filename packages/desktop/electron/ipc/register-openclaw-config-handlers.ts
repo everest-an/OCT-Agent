@@ -10,6 +10,12 @@ import {
 } from '../openclaw-config';
 import { parseJsonShellOutput } from '../openclaw-shell-output';
 
+// In-process schema cache — keyed by openclaw version string so an upgrade auto-invalidates.
+// Loading the schema via CLI takes 30-120 s (plugin init), so we cache aggressively.
+let _schemaCacheVersion: string | null = null;
+let _schemaCache: Record<string, any> | null = null;
+let _schemaInflightPromise: Promise<Record<string, any> | null> | null = null;
+
 function getConfigPath(home: string) {
   return path.join(home, '.openclaw', 'openclaw.json');
 }
@@ -41,6 +47,7 @@ function buildNestedPatch(dotPath: string, value: any) {
 export function registerOpenClawConfigHandlers(deps: {
   home: string;
   safeShellExecAsync?: (cmd: string, timeoutMs?: number) => Promise<string | null>;
+  readShellOutputAsync?: (cmd: string, timeoutMs?: number) => Promise<string | null>;
   mergeOpenClawConfig?: (existing: Record<string, any>, incoming: Record<string, any>) => Record<string, any>;
 }) {
   ipcMain.handle('plugins:list', async () => {
@@ -192,10 +199,44 @@ export function registerOpenClawConfigHandlers(deps: {
     }
   });
 
+  // Shared fetch logic: runs CLI, parses output, updates cache.
+  async function fetchSchemaFromCli(openclawVersion: string): Promise<Record<string, any> | null> {
+    // Deduplicate concurrent fetches — only one CLI process at a time.
+    if (_schemaInflightPromise) return _schemaInflightPromise;
+
+    _schemaInflightPromise = (async () => {
+      try {
+        // Use readShellOutputAsync (collects stdout+stderr, ignores exit code) so that
+        // config warnings printed to stderr don't cause the JSON to be discarded.
+        // openclaw config schema loads all plugins → can take 60-120 s on slow machines.
+        const shellFn = deps.readShellOutputAsync ?? deps.safeShellExecAsync;
+        const output = await shellFn?.('openclaw config schema 2>&1', 120000);
+        const schema = parseJsonShellOutput<Record<string, any>>(output || null);
+        if (schema) {
+          _schemaCacheVersion = openclawVersion;
+          _schemaCache = schema;
+        }
+        return schema;
+      } finally {
+        _schemaInflightPromise = null;
+      }
+    })();
+
+    return _schemaInflightPromise;
+  }
+
   ipcMain.handle('openclaw-config:schema', async () => {
     try {
-      const output = await deps.safeShellExecAsync?.('openclaw config schema 2>&1', 60000);
-      const schema = parseJsonShellOutput<Record<string, any>>(output || null);
+      // Detect current openclaw version for cache invalidation.
+      const versionRaw = await deps.safeShellExecAsync?.('openclaw --version 2>&1', 8000);
+      const version = (versionRaw || '').match(/(\d+\.\d+\.\d+)/)?.[1] ?? versionRaw ?? 'unknown';
+
+      // Return cached schema if the version hasn't changed.
+      if (_schemaCache && _schemaCacheVersion === version) {
+        return { success: true, schema: _schemaCache, cached: true };
+      }
+
+      const schema = await fetchSchemaFromCli(version);
       if (!schema) {
         return { success: false, error: 'Failed to parse OpenClaw config schema.' };
       }
@@ -204,4 +245,17 @@ export function registerOpenClawConfigHandlers(deps: {
       return { success: false, error: err.message };
     }
   });
+
+  // Background prefetch: call this after app startup so the schema is warm
+  // before the user opens Settings → Web & Browser.
+  async function prefetchSchema() {
+    try {
+      const versionRaw = await deps.safeShellExecAsync?.('openclaw --version 2>&1', 8000);
+      const version = (versionRaw || '').match(/(\d+\.\d+\.\d+)/)?.[1] ?? versionRaw ?? 'unknown';
+      if (_schemaCache && _schemaCacheVersion === version) return;
+      await fetchSchemaFromCli(version);
+    } catch {}
+  }
+
+  return { prefetchSchema };
 }
