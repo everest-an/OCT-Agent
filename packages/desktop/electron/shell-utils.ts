@@ -89,6 +89,10 @@ export function createShellUtils(options: { home: string; app: any }) {
         const fnmDefault = path.join(home, '.fnm', 'aliases', 'default', 'bin');
         if (fs.existsSync(fnmDefault)) extras.push(fnmDefault);
       } catch {}
+      // Volta
+      const voltaHomeMac = process.env.VOLTA_HOME || path.join(home, '.volta');
+      const voltaBinMac = path.join(voltaHomeMac, 'bin');
+      if (fs.existsSync(voltaBinMac)) extras.push(voltaBinMac);
       if (process.platform === 'linux') {
         extras.push('/snap/bin');
       }
@@ -103,6 +107,17 @@ export function createShellUtils(options: { home: string; app: any }) {
         `${process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'}\\nodejs`,
         `${localappdata}\\fnm_multishells`,
       );
+      // nvm-for-windows: NVM_SYMLINK points to the active Node version
+      const nvmSymlink = process.env.NVM_SYMLINK;
+      if (nvmSymlink) extras.push(nvmSymlink);
+      // Volta
+      const voltaHome = process.env.VOLTA_HOME || path.join(localappdata, 'Volta');
+      const voltaBin = path.join(voltaHome, 'bin');
+      if (fs.existsSync(voltaBin)) extras.push(voltaBin);
+      // Scoop
+      const scoopDir = process.env.SCOOP || path.join(home, 'scoop');
+      const scoopNode = path.join(scoopDir, 'apps', 'nodejs', 'current');
+      if (fs.existsSync(scoopNode)) extras.push(scoopNode);
     }
 
     return [...extras, base].join(path.delimiter);
@@ -174,12 +189,52 @@ export function createShellUtils(options: { home: string; app: any }) {
     const knownRoots: string[] = [];
     if (process.platform === 'win32') {
       const appdata = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+      const localappdata = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+      const programfiles = process.env.ProgramFiles || 'C:\\Program Files';
       knownRoots.push(
         path.join(appdata, 'npm', 'node_modules', 'openclaw'),
         path.join(home, '.npm-global', 'lib', 'node_modules', 'openclaw'),
+        path.join(programfiles, 'nodejs', 'node_modules', 'openclaw'),
       );
-      const programfiles = process.env.ProgramFiles || 'C:\\Program Files';
-      knownRoots.push(path.join(programfiles, 'nodejs', 'node_modules', 'openclaw'));
+      // nvm-for-windows: NVM_SYMLINK points to the active Node version directory
+      const nvmSymlink = process.env.NVM_SYMLINK;
+      if (nvmSymlink) {
+        knownRoots.push(path.join(nvmSymlink, 'node_modules', 'openclaw'));
+      }
+      // nvm-for-windows: NVM_HOME contains version directories
+      const nvmHome = process.env.NVM_HOME;
+      if (nvmHome) {
+        try {
+          const versions = fs.readdirSync(nvmHome).filter(v => v.startsWith('v')).sort().reverse();
+          for (const v of versions.slice(0, 3)) {
+            knownRoots.push(path.join(nvmHome, v, 'node_modules', 'openclaw'));
+          }
+        } catch {}
+      }
+      // Volta: global packages under VOLTA_HOME or LOCALAPPDATA\Volta
+      const voltaHome = process.env.VOLTA_HOME || path.join(localappdata, 'Volta');
+      knownRoots.push(
+        path.join(voltaHome, 'tools', 'image', 'packages', 'openclaw', 'lib', 'node_modules', 'openclaw'),
+      );
+      // fnm: FNM_MULTISHELL_PATH or LOCALAPPDATA\fnm
+      const fnmDir = process.env.FNM_DIR || path.join(localappdata, 'fnm');
+      try {
+        const fnmVersions = path.join(fnmDir, 'node-versions');
+        if (fs.existsSync(fnmVersions)) {
+          const versions = fs.readdirSync(fnmVersions).filter(v => v.startsWith('v')).sort().reverse();
+          for (const v of versions.slice(0, 3)) {
+            knownRoots.push(path.join(fnmVersions, v, 'installation', 'node_modules', 'openclaw'));
+          }
+        }
+      } catch {}
+      // Scoop
+      const scoopDir = process.env.SCOOP || path.join(home, 'scoop');
+      knownRoots.push(path.join(scoopDir, 'apps', 'nodejs', 'current', 'node_modules', 'openclaw'));
+      // Chocolatey
+      const chocoDir = process.env.ChocolateyInstall || 'C:\\ProgramData\\chocolatey';
+      knownRoots.push(path.join(chocoDir, 'lib', 'nodejs', 'tools', 'node_modules', 'openclaw'));
+      // pnpm global
+      knownRoots.push(path.join(localappdata, 'pnpm', 'global', 'node_modules', 'openclaw'));
     } else {
       knownRoots.push(
         path.join(home, '.npm-global', 'lib', 'node_modules', 'openclaw'),
@@ -187,36 +242,106 @@ export function createShellUtils(options: { home: string; app: any }) {
         '/opt/homebrew/lib/node_modules/openclaw',
         '/usr/lib/node_modules/openclaw',
       );
+      // nvm: check recent versions' global packages
+      try {
+        const nvmDir = path.join(home, '.nvm', 'versions', 'node');
+        if (fs.existsSync(nvmDir)) {
+          const versions = fs.readdirSync(nvmDir).filter(v => v.startsWith('v')).sort().reverse();
+          for (const v of versions.slice(0, 3)) {
+            knownRoots.push(path.join(nvmDir, v, 'lib', 'node_modules', 'openclaw'));
+          }
+        }
+      } catch {}
+      // fnm
+      try {
+        const fnmDir = process.env.FNM_DIR || path.join(home, '.fnm');
+        const fnmDefault = path.join(fnmDir, 'aliases', 'default');
+        if (fs.existsSync(fnmDefault)) {
+          knownRoots.push(path.join(fnmDefault, 'lib', 'node_modules', 'openclaw'));
+        }
+      } catch {}
+      // Volta
+      const voltaHome = process.env.VOLTA_HOME || path.join(home, '.volta');
+      knownRoots.push(
+        path.join(voltaHome, 'tools', 'image', 'packages', 'openclaw', 'lib', 'node_modules', 'openclaw'),
+      );
+      // pnpm global
+      knownRoots.push(path.join(home, '.local', 'share', 'pnpm', 'global', 'node_modules', 'openclaw'));
     }
     for (const dir of knownRoots) {
       if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
     }
 
-    // Slow path: ask npm where it installs global packages
-    const npmRoot = rawShellExecSync('npm root -g', 5000);
+    // Medium path: resolve from `where/which openclaw` to derive the package dir.
+    // Works regardless of installation method as long as openclaw is on PATH.
+    try {
+      const whichCmd = process.platform === 'win32' ? 'where.exe openclaw' : 'which openclaw';
+      const whichResult = rawShellExecSync(whichCmd, 5000);
+      if (whichResult) {
+        const lines = whichResult.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        for (const line of lines) {
+          if (process.platform === 'win32' && line.toLowerCase().endsWith('.cmd')) {
+            // Windows .cmd shim: <prefix>\openclaw.cmd → package at <prefix>\node_modules\openclaw
+            const prefixDir = path.dirname(line);
+            const pkgDir = path.join(prefixDir, 'node_modules', 'openclaw');
+            if (fs.existsSync(path.join(pkgDir, 'package.json'))) return pkgDir;
+          } else if (process.platform !== 'win32') {
+            // Unix: resolve symlink to find the actual entry file, then derive package dir.
+            // e.g. /usr/local/bin/openclaw → /usr/local/lib/node_modules/openclaw/openclaw.mjs
+            try {
+              const realPath = fs.realpathSync(line);
+              let pkgDir = path.dirname(realPath);
+              if (fs.existsSync(path.join(pkgDir, 'package.json'))) return pkgDir;
+              // Entry might be in a subdirectory (bin/, dist/)
+              const parentDir = path.dirname(pkgDir);
+              if (fs.existsSync(path.join(parentDir, 'package.json'))) return parentDir;
+            } catch {}
+          }
+        }
+      }
+    } catch {}
+
+    // Slow path: ask npm where it installs global packages (timeout 15s for slow Windows envs)
+    const npmRoot = rawShellExecSync('npm root -g', 15000);
     if (!npmRoot) return null;
     const pkgDir = path.join(npmRoot.trim(), 'openclaw');
     return fs.existsSync(path.join(pkgDir, 'package.json')) ? pkgDir : null;
   }
 
   async function getOpenClawPackageDirAsync(): Promise<string | null> {
-    // Fast path: same filesystem check as the sync variant
+    // Fast path: same filesystem check as the sync variant (includes where/which fallback)
     const syncResult = getOpenClawPackageDirSync();
     if (syncResult) return syncResult;
 
-    // Slow path: ask npm where it installs global packages (async version)
-    const npmRoot = await rawShellExecAsync('npm root -g', 5000);
+    // Slow path: ask npm where it installs global packages (async, 15s timeout)
+    const npmRoot = await rawShellExecAsync('npm root -g', 15000);
     if (!npmRoot) return null;
     const pkgDir = path.join(npmRoot.trim(), 'openclaw');
     return fs.existsSync(path.join(pkgDir, 'package.json')) ? pkgDir : null;
   }
 
   function getOpenClawEntryPath(pkgDir: string): string | null {
+    // Well-known entry files
     const candidates = [
       path.join(pkgDir, 'openclaw.mjs'),
       path.join(pkgDir, 'dist', 'index.js'),
     ];
-    return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+    const found = candidates.find((candidate) => fs.existsSync(candidate));
+    if (found) return found;
+
+    // Fallback: read package.json bin/main fields to handle future entry name changes
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8'));
+      const binEntry = typeof pkg.bin === 'string'
+        ? pkg.bin
+        : (pkg.bin?.openclaw || pkg.main);
+      if (binEntry) {
+        const resolved = path.resolve(pkgDir, binEntry);
+        if (fs.existsSync(resolved)) return resolved;
+      }
+    } catch {}
+
+    return null;
   }
 
   // V8 --stack-size (in KB) tells V8 how much JS stack to assume it has.
@@ -416,7 +541,7 @@ export function createShellUtils(options: { home: string; app: any }) {
           ...spawnOptions,
         });
       }
-      console.warn('[runSpawn] WARN: openclaw win32 entryPath is null — falling through to bare spawn');
+      console.warn(`[runSpawn] WARN: openclaw win32 entryPath is null (pkgDir=${pkgDir}) — falling through to bare spawn. This will likely cause AJV stack overflow (exit 0xC00000FD). Check getOpenClawPackageDirSync knownRoots and where.exe openclaw.`);
     }
 
     if (cmd === 'openclaw') {
