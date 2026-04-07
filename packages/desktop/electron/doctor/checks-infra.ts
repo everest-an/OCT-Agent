@@ -56,6 +56,36 @@ function isSpecialUseIpAddress(ip: string): boolean {
   return isSpecialUseIpv4(ip) || isSpecialUseIpv6(ip);
 }
 
+function getNpxCacheDirs(homedir: string): string[] {
+  const dirs = [path.join(homedir, '.npm', '_npx')];
+
+  const npmConfigCache = process.env.npm_config_cache || process.env.NPM_CONFIG_CACHE;
+  if (npmConfigCache) dirs.push(path.join(npmConfigCache, '_npx'));
+
+  if (process.platform === 'win32') {
+    const localAppData = process.env.LOCALAPPDATA || path.join(homedir, 'AppData', 'Local');
+    dirs.push(path.join(localAppData, 'npm-cache', '_npx'));
+  }
+
+  return Array.from(new Set(dirs.map((dir) => path.normalize(dir))));
+}
+
+function getWindowsGatewayStartupPaths(homedir: string) {
+  const startupCmdPath = path.join(
+    homedir,
+    'AppData',
+    'Roaming',
+    'Microsoft',
+    'Windows',
+    'Start Menu',
+    'Programs',
+    'Startup',
+    'OpenClaw Gateway.cmd',
+  );
+  const gatewayCmdPath = path.join(homedir, '.openclaw', 'gateway.cmd');
+  return { startupCmdPath, gatewayCmdPath };
+}
+
 async function resolveDomainAddresses(domain: string): Promise<string[]> {
   try {
     const records = await dns.promises.lookup(domain, { all: true, verbatim: true });
@@ -121,6 +151,21 @@ export async function fixLaunchAgentPath(ctx: Ctx): Promise<FixResult> {
 export async function checkGatewayRunning(ctx: Ctx): Promise<CheckResult> {
   if (!ctx.openclawPath) return { id: 'gateway-running', label: 'Gateway', status: 'skipped', message: 'Skipped (OpenClaw not installed)', fixable: 'none' };
 
+  if (ctx.deps.platform === 'win32') {
+    const { startupCmdPath, gatewayCmdPath } = getWindowsGatewayStartupPaths(ctx.deps.homedir);
+    if (fs.existsSync(startupCmdPath) && !fs.existsSync(gatewayCmdPath)) {
+      return {
+        id: 'gateway-running',
+        label: 'Gateway',
+        status: 'fail',
+        message: 'Gateway startup entry is broken (missing launcher file)',
+        fixable: 'auto',
+        fixDescription: 'Reinstall Gateway startup launcher',
+        detail: `Missing launcher: ${gatewayCmdPath}`,
+      };
+    }
+  }
+
   // Fast path: probe Gateway HTTP port directly (avoids 15-20s plugin preload from CLI)
   const port = getGatewayPort(ctx.deps.homedir);
   const probeOk = await new Promise<boolean>((resolve) => {
@@ -146,6 +191,17 @@ export async function checkGatewayRunning(ctx: Ctx): Promise<CheckResult> {
 
 export async function fixGatewayStart(ctx: Ctx): Promise<FixResult> {
   try {
+    if (ctx.deps.platform === 'win32') {
+      const { startupCmdPath, gatewayCmdPath } = getWindowsGatewayStartupPaths(ctx.deps.homedir);
+      if (fs.existsSync(startupCmdPath) && !fs.existsSync(gatewayCmdPath)) {
+        try {
+          await ctx.deps.shellRun('openclaw gateway install 2>&1', 30000);
+        } catch {
+          // Keep existing flow intact; start/install fallback below will still run.
+        }
+      }
+    }
+
     await ctx.deps.shellRun('openclaw gateway start 2>&1', 20000);
     return { id: 'gateway-running', success: true, message: 'Gateway started' };
   } catch (err: any) {
@@ -251,8 +307,9 @@ export async function checkDaemonRunning(_ctx: Ctx): Promise<CheckResult> {
 export async function fixDaemonStart(ctx: Ctx): Promise<FixResult> {
   try {
     // Clean corrupted npx cache first (common cause of ENOTEMPTY errors)
-    const npxCacheDir = path.join(ctx.deps.homedir, '.npm', '_npx');
-    if (fs.existsSync(npxCacheDir)) {
+    for (const npxCacheDir of getNpxCacheDirs(ctx.deps.homedir)) {
+      if (!fs.existsSync(npxCacheDir)) continue;
+
       try {
         const entries = fs.readdirSync(npxCacheDir);
         for (const entry of entries) {

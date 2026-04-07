@@ -659,6 +659,62 @@ describe('doctor — infrastructure checks', () => {
     } finally { fs.rmSync(home, { recursive: true, force: true }); }
   });
 
+  it('flags broken Windows gateway startup entry when launcher file is missing', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-'));
+    try {
+      const startupDir = path.join(home, 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup');
+      fs.mkdirSync(startupDir, { recursive: true });
+      fs.writeFileSync(path.join(startupDir, 'OpenClaw Gateway.cmd'), '@echo off');
+
+      const { doctor } = createDoctorWithMocks(home, {
+        platform: 'win32',
+        shellExec: async (cmd: string) => {
+          if (cmd === 'where node') return 'C:\\Program Files\\nodejs\\node.exe';
+          if (cmd === 'node --version') return 'v24.12.0';
+          if (cmd === 'where openclaw') return 'C:\\Users\\admin\\AppData\\Roaming\\npm\\openclaw.cmd';
+          if (cmd === 'openclaw --version') return 'OpenClaw 2026.4.5 (abc)';
+          if (cmd === 'npm config get prefix') return path.join(home, 'AppData', 'Roaming', 'npm');
+          return null;
+        },
+      });
+
+      const report = await doctor.runChecks(['gateway-running']);
+      expect(report.checks[0]).toMatchObject({ id: 'gateway-running', status: 'fail', fixable: 'auto' });
+      expect(report.checks[0].message).toContain('startup entry is broken');
+      expect(report.checks[0].detail).toContain(path.join(home, '.openclaw', 'gateway.cmd'));
+    } finally { fs.rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('reinstalls gateway launcher before start in broken Windows startup scenario', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-'));
+    try {
+      const startupDir = path.join(home, 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup');
+      fs.mkdirSync(startupDir, { recursive: true });
+      fs.writeFileSync(path.join(startupDir, 'OpenClaw Gateway.cmd'), '@echo off');
+
+      const shellRun = vi.fn(async () => 'ok');
+      const { doctor } = createDoctorWithMocks(home, {
+        platform: 'win32',
+        shellRun,
+        shellExec: async (cmd: string) => {
+          if (cmd === 'where node') return 'C:\\Program Files\\nodejs\\node.exe';
+          if (cmd === 'node --version') return 'v24.12.0';
+          if (cmd === 'where openclaw') return 'C:\\Users\\admin\\AppData\\Roaming\\npm\\openclaw.cmd';
+          if (cmd === 'openclaw --version') return 'OpenClaw 2026.4.5 (abc)';
+          if (cmd === 'npm config get prefix') return path.join(home, 'AppData', 'Roaming', 'npm');
+          return null;
+        },
+      });
+
+      const result = await doctor.runFix('gateway-running');
+      expect(result).toMatchObject({ id: 'gateway-running', success: true });
+
+      const commands = shellRun.mock.calls.map((call: any[]) => call[0]);
+      expect(commands[0]).toBe('openclaw gateway install 2>&1');
+      expect(commands).toContain('openclaw gateway start 2>&1');
+    } finally { fs.rmSync(home, { recursive: true, force: true }); }
+  });
+
   it('passes plugin check when plugin directory exists', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-'));
     try {

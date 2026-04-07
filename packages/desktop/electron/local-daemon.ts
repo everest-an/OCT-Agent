@@ -6,18 +6,33 @@ function normalizeHomeDir(value: string) {
   return String(value || '').trim().replace(/^['"]+|['"]+$/g, '');
 }
 
+function getNpxCacheDirs(homedir: string) {
+  const dirs = [path.join(homedir, '.npm', '_npx')];
+
+  const npmConfigCache = process.env.npm_config_cache || process.env.NPM_CONFIG_CACHE;
+  if (npmConfigCache) dirs.push(path.join(npmConfigCache, '_npx'));
+
+  if (process.platform === 'win32') {
+    const localAppData = process.env.LOCALAPPDATA || path.join(homedir, 'AppData', 'Local');
+    dirs.push(path.join(localAppData, 'npm-cache', '_npx'));
+  }
+
+  return Array.from(new Set(dirs.map((dir) => path.normalize(dir))));
+}
+
 export function clearAwarenessLocalNpxCache(homedir: string) {
   try {
-    const npxCacheDir = path.join(homedir, '.npm', '_npx');
-    if (!fs.existsSync(npxCacheDir)) return;
+    for (const npxCacheDir of getNpxCacheDirs(homedir)) {
+      if (!fs.existsSync(npxCacheDir)) continue;
 
-    const entries = fs.readdirSync(npxCacheDir);
-    for (const entry of entries) {
-      const entryDir = path.join(npxCacheDir, entry);
-      const sdkDir = path.join(entryDir, 'node_modules', '@awareness-sdk');
-      const localPkg = path.join(sdkDir, 'local', 'package.json');
-      if (fs.existsSync(sdkDir) || fs.existsSync(localPkg)) {
-        fs.rmSync(entryDir, { recursive: true, force: true });
+      const entries = fs.readdirSync(npxCacheDir);
+      for (const entry of entries) {
+        const entryDir = path.join(npxCacheDir, entry);
+        const sdkDir = path.join(entryDir, 'node_modules', '@awareness-sdk');
+        const localPkg = path.join(sdkDir, 'local', 'package.json');
+        if (fs.existsSync(sdkDir) || fs.existsSync(localPkg)) {
+          fs.rmSync(entryDir, { recursive: true, force: true });
+        }
       }
     }
   } catch {
