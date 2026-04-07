@@ -58,7 +58,8 @@
       "dist/**/*",
       "dist-electron/**/*",
       "node_modules/npm/**/*",
-      "cache/**/*"
+      "cache/**/*",
+      "resources/icon.*"
     ],
     "asarUnpack": [
       "node_modules/npm/**/*"

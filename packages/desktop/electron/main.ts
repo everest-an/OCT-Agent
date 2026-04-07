@@ -108,12 +108,14 @@ const {
   safeShellExec,
   safeShellExecAsync,
   stripAnsi,
+  rewriteOpenClawShellCommand,
   wrapWindowsCommand,
 } = shellUtils;
 
 const channelLoginWithQR = createChannelLoginWithQR({
   getEnhancedPath,
   wrapWindowsCommand,
+  rewriteOpenClawCommand: rewriteOpenClawShellCommand,
   stripAnsi,
   sendToRenderer: (channel, payload) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -141,6 +143,12 @@ function createWindow() {
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },
     backgroundColor: '#0f172a',
+    icon: path.join(
+      __dirname,
+      '..',
+      'resources',
+      process.platform === 'win32' ? 'icon.ico' : process.platform === 'darwin' ? 'icon.icns' : 'icon.png'
+    ),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
