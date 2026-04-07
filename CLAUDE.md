@@ -479,6 +479,24 @@ AwarenessClaw/
 - **影响**：测试脚本用 `2>/dev/null` 会吃掉 JSON 输出；桌面端 `runAsync`/`readShellOutputAsync` 合并 stdout+stderr 所以不受影响
 - **规则**：测试 OpenClaw CLI 输出时必须用 `2>&1` 或不重定向，不能用 `2>/dev/null`
 
+### `openclaw channels login` 是常驻 bot worker，不是短命令（极严重踩坑，2026-04-07）
+- **错误模型**：把 `openclaw channels login --channel <id>` 当成"登录完就该退出的 setup 命令"，加 mutex/kill/idle-timeout 想"清理僵尸"
+- **真实情况**：这个进程**本身就是 bot worker**，登录完成后**永远不退出**。它持续运行才能维持 WeChat/WhatsApp/Signal session、接收消息、路由回调。日志里出现 `weixin monitor started` 就代表 bot 已就绪
+- **child.on('exit') 永远不触发**，所以任何"等 exit 释放 mutex"的设计都会死锁
+- **致命后果**：
+  - 启动期 `killAllStaleChannelOps` 无差别杀 `*openclaw.mjs*channels*` → **杀掉所有正常工作的 bot worker**，所有 channel 静默掉线
+  - spawn 前 fire-and-forget `killStaleChannelLogins` → race window 内**误杀刚被 register 的合法 bot**
+  - mutex `await child.on('exit')` 永远不解锁 → 下一次 connect 永远等不到锁
+  - "Disconnect" 按钮调 `channel:remove` → 删 config + 杀 bot → 用户重连必须重扫 QR
+- **正确架构**（commit `c19d999`）：
+  - **绝不杀 `channels login` worker**：`killAllStaleChannelOps` 必须 `-notlike '*channels login*'`，只杀 list/add/cron 这种短命令
+  - **PID safe list**：`killStaleChannelLogins` 改成"用 `activeLogins` Map 里的 PID 做 safe list，powershell `-notcontains` 排除"，绝不杀 tracked 的 bot
+  - **三态判断**：`tracked → 跳过`、`untracked orphan → kill+replace`、`no worker → spawn`。用 `getTrackedLoginPid(channelId)` + `killOrphanWorkerForChannel(channelId)` 实现
+  - **登录成功用日志回调判定**：`watchOpenClawLogForQrUrl` 监听 `weixin monitor started` 触发 `onLoginSuccess`,在回调里 resolve IPC promise but **NOT kill the child**
+  - **App 启动 45s 后自动重连**:`autoReconnectChannelWorkers()` 读 `openclaw.json` 找 enabled channel,三态判断决定是否 spawn(配置在但 worker 不在 → 自动重连),5s 错开避免抢资源
+  - **软断开**:新增 `channel:disconnect` IPC,只 kill worker + `enabled: false` + restart gateway,**config 保留**;Reconnect 时不用重扫 QR
+- **规则**:任何 spawn `openclaw channels login` 的代码 + 任何 kill openclaw 子进程的代码,**必须**先想清楚"我会不会杀到正在维持 session 的 bot worker"。设计 mutex/dedup 时,**必须**区分"短命令"和"常驻 worker",绝不能用同一套清理逻辑
+
 ### Electron dev 模式踩坑（monorepo）
 - **问题**：`./node_modules/.bin/electron .` 在 monorepo 中找不到 electron 二进制（被 hoist 到根 node_modules）
 - **`require('electron')` 返回字符串**：在非 Electron 进程中 `require('electron')` 返回的是 electron 可执行文件的路径字符串，不是 API 对象
