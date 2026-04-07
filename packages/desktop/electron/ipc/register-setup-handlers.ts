@@ -6,6 +6,8 @@ import { writeDesktopExecApprovalDefaults } from '../openclaw-config';
 
 const OPENCLAW_INSTALL_TIMEOUT_MS = 300000;
 const OPENCLAW_STATUS_PULSE_MS = 15000;
+const SETUP_DAEMON_WAIT_PRIMARY_MS = 45000;
+const SETUP_DAEMON_WAIT_AFTER_DIRECT_TRIGGER_MS = 30000;
 const SETUP_DAEMON_WAIT_PREPARING_MS = 120000;
 const SETUP_DAEMON_WAIT_RETRYING_MS = 180000;
 const SETUP_DAEMON_WAIT_AFTER_BOOTSTRAP_MS = 90000;
@@ -582,8 +584,20 @@ export function registerSetupHandlers(deps: {
       }
 
       deps.sendSetupDaemonStatus('setup.install.daemonStatus.preparing');
-      if (await deps.waitForLocalDaemonReady(SETUP_DAEMON_WAIT_PREPARING_MS, 'setup.install.daemonStatus.preparing', { sendStatus: deps.sendSetupDaemonStatus, sleep: deps.sleep })) {
+      if (await deps.waitForLocalDaemonReady(SETUP_DAEMON_WAIT_PRIMARY_MS, 'setup.install.daemonStatus.preparing', { sendStatus: deps.sendSetupDaemonStatus, sleep: deps.sleep })) {
         return { success: true };
+      }
+
+      // Detached spawn can report success while the daemon process exits immediately.
+      // Trigger one direct foreground bootstrap earlier to avoid long setup hangs.
+      const directTriggered = await bootstrapDaemonInForeground('setup.install.daemonStatus.activating');
+      if (directTriggered) {
+        if (await deps.waitForLocalDaemonReady(SETUP_DAEMON_WAIT_AFTER_DIRECT_TRIGGER_MS, 'setup.install.daemonStatus.waiting', {
+          sendStatus: deps.sendSetupDaemonStatus,
+          sleep: deps.sleep,
+        })) {
+          return { success: true };
+        }
       }
 
       try {
