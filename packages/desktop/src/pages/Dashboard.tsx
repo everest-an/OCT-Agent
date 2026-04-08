@@ -1153,7 +1153,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
 
   const sendingRef = useRef(false);
   const [isSending, setIsSending] = useState(false);
-  const messageQueueRef = useRef<Array<{ text: string; userText?: string; files?: AttachedFile[] }>>([]);
+  const messageQueueRef = useRef<Array<{ text: string; userText?: string; files?: AttachedFile[]; targetAgentId?: string }>>([]);
   const [queuedCount, setQueuedCount] = useState(0);
   const lastSentTextRef = useRef<string>('');
   const lastSentTimeRef = useRef<number>(0);
@@ -1188,7 +1188,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
   // Execute a single chat request (the actual send-and-wait logic)
   const executeChatRequest = useCallback(async (
     text: string,
-    options?: { userText?: string; files?: AttachedFile[] }
+    options?: { userText?: string; files?: AttachedFile[]; targetAgentId?: string }
   ) => {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -1226,7 +1226,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         reasoningDisplay: config.reasoningDisplay || 'on',
         files: filePaths,
         workspacePath: projectRoot || undefined,
-        agentId: config.selectedAgentId || 'main',
+        agentId: options?.targetAgentId || config.selectedAgentId || 'main',
       });
       if (result?.workspacePathInvalid && projectRoot) {
         setProjectRoot('');
@@ -1312,7 +1312,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     if (messageQueueRef.current.length === 0) return;
     const next = messageQueueRef.current.shift()!;
     setQueuedCount(messageQueueRef.current.length);
-    await executeChatRequest(next.text, { userText: next.userText, files: next.files });
+    await executeChatRequest(next.text, { userText: next.userText, files: next.files, targetAgentId: next.targetAgentId });
     // Recursively process remaining queued messages
     await processNextQueued();
   }, [executeChatRequest]);
@@ -1320,7 +1320,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
   // Main entry point for sending a message — queues if agent is busy
   const runChatRequest = useCallback(async (
     text: string,
-    options?: { userText?: string; files?: AttachedFile[]; clearComposer?: boolean }
+    options?: { userText?: string; files?: AttachedFile[]; clearComposer?: boolean; targetAgentId?: string }
   ) => {
     const trimmed = text.trim();
     if (!canSendMessage(trimmed)) return;
@@ -1347,7 +1347,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     // If agent is busy, queue the message for later processing
     const isAgentBusy = sendingRef.current || activeRunRef.current;
     if (isAgentBusy) {
-      messageQueueRef.current.push({ text: trimmed, userText, files: pendingFiles });
+      messageQueueRef.current.push({ text: trimmed, userText, files: pendingFiles, targetAgentId: options?.targetAgentId });
       setQueuedCount(messageQueueRef.current.length);
       return;
     }
@@ -1356,7 +1356,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     sendingRef.current = true;
 
     // Agent is idle — execute immediately
-    await executeChatRequest(trimmed, { userText, files: pendingFiles });
+    await executeChatRequest(trimmed, { userText, files: pendingFiles, targetAgentId: options?.targetAgentId });
     // After this run completes, drain any messages that were queued during execution
     await processNextQueued();
   }, [addUserMessageToSession, attachedFiles, canSendMessage, executeChatRequest, processNextQueued]);
@@ -1381,17 +1381,18 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
   const handleSend = async () => {
     if (!canSendCurrentMessage) return;
 
-    // Detect @agent mention → translate to /subagents spawn
+    // Detect @agent mention → route the message directly to that agent's session.
+    // Match by display name first (what the picker now inserts), fall back to id for legacy input.
     const trimmedInput = input.trim();
     const mentionMatch = trimmedInput.match(/^@(\S+)\s+([\s\S]+)$/);
     if (mentionMatch) {
-      const candidateId = mentionMatch[1].toLowerCase();
-      const matchedAgent = agents.find((a) => a.id.toLowerCase() === candidateId);
+      const candidate = mentionMatch[1].toLowerCase();
+      const matchedAgent = agents.find(
+        (a) => a.name.toLowerCase() === candidate || a.id.toLowerCase() === candidate
+      );
       if (matchedAgent && matchedAgent.id !== 'main') {
         const taskDesc = mentionMatch[2].trim();
-        const escaped = taskDesc.replace(/"/g, '\\"');
-        const spawnCmd = `/subagents spawn ${matchedAgent.id} "${escaped}"`;
-        await runChatRequest(spawnCmd, { userText: trimmedInput });
+        await runChatRequest(taskDesc, { userText: trimmedInput, targetAgentId: matchedAgent.id });
         return;
       }
     }

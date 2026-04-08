@@ -1,5 +1,24 @@
 # AwarenessClaw 项目规则
 
+## 📦 macOS DMG 打包规则（避免每次重复探索）
+
+在 `packages/desktop/` 目录下打 DMG：
+
+```bash
+PYTHON_PATH=/usr/bin/python3 CSC_IDENTITY_AUTO_DISCOVERY=false npm run package:mac
+```
+
+**关键参数说明**：
+- `PYTHON_PATH=/usr/bin/python3` — **必须**用系统自带 Python，不要让 `dmg-builder` 默认 `which python3` 拿到 Homebrew Python 3.13。Brew Python 3.13 下 `dmgbuild/core.py` 依赖的 `biplist`/`pyobjc` 导入失败，spawn 会抛 `ENOENT` 误导错误（实际上 python 二进制存在）。
+- `CSC_IDENTITY_AUTO_DISCOVERY=false` — 跳过 macOS code signing（试用包不需要签名/公证）。
+- 仅打 DMG 可用 `npx electron-builder --mac dmg`（跳过 zip 步骤，更快）。
+
+**输出**：`packages/desktop/release/AwarenessClaw-<version>-arm64.dmg`（约 100 MB）
+
+**踩坑记录**：
+- 错误信息 `Exit code: ENOENT. spawn /opt/homebrew/Cellar/python@3.13/.../python3: ENOENT` 的真实原因不是路径不存在，而是 dmgbuild 的 Python 依赖在 Brew Python 3.13 下加载失败。`/usr/bin/python3` 自带 pyobjc，不会有这个问题。
+- 不要试图在 Brew Python 3.13 里 `pip install biplist pyobjc`——`biplist` 已弃用，且 PEP 668 会拦截。直接走系统 Python 最省事。
+
 ## ⚠️ Web Search 验证规则（必须遵守）
 
 在做技术决策、调试问题、实现功能前，**尽可能多用 Web Search 获取最新信息**。特别是：

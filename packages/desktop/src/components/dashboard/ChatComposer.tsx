@@ -176,7 +176,7 @@ export function ChatComposer({
                         // Replace the @partial with @agentId + space
                         const newInput = input.replace(/(?:^|\s)@\S*$/, (match) => {
                           const prefix = match.startsWith(' ') ? ' ' : '';
-                          return `${prefix}@${agent.id} `;
+                          return `${prefix}@${agent.name} `;
                         });
                         onInputChange(newInput);
                         textareaRef.current?.focus();
@@ -186,7 +186,7 @@ export function ChatComposer({
                       <AgentAvatar name={agent.name} emoji={agent.emoji} size={16} className="flex-shrink-0" />
                       <div>
                         <span className="text-xs text-slate-200 font-medium">{agent.name}</span>
-                        <span className="text-[10px] text-slate-500 ml-1.5">@{agent.id}</span>
+                        <span className="text-[10px] text-slate-500 ml-1.5">@{agent.name}</span>
                       </div>
                     </button>
                   ))}
