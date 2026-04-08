@@ -13,6 +13,7 @@ import {
   isIgnorablePluginInstallError,
   resolveChannelPluginInstallSpec,
   ensureTelegramRuntimeDeps,
+  ensureChannelRuntimeDeps,
 } from './channel-plugin-spec';
 import { clearChannelStatusCache } from './register-channel-list-handlers';
 import { dedupedChannelsAddHelp, dedupedChannelsList, killActiveLoginForChannel } from '../openclaw-process-guard';
@@ -751,13 +752,18 @@ export function registerChannelConfigHandlers(deps: {
           readShellOutputAsync: deps.readShellOutputAsync,
         })
       ) || channelDef?.pluginPackage || `@openclaw/${openclawId}`;
-      const saveStrategy = channelDef?.saveStrategy || 'cli';
+      // Force json-direct when channel has account-scoped credential fields
+      // (e.g. Slack appToken/botToken under accounts.default) — CLI flags can't
+      // express nested config paths.
+      const hasAccountScopedFields = channelDef?.configFields?.some(isAccountScopedField) || false;
+      const saveStrategy = hasAccountScopedFields ? 'json-direct' : (channelDef?.saveStrategy || 'cli');
       const configForCli = safeOpenclawId === 'telegram' ? coerceTelegramCliConfig(channelDef, config) : config;
       let pluginInstallError: string | null = null;
 
-      // Telegram runtime-deps fix: ensure grammy is accessible before any CLI
-      // command that loads the telegram plugin (see channel-plugin-spec.ts).
-      if (safeOpenclawId === 'telegram') ensureTelegramRuntimeDeps();
+      // Channel runtime-deps fix: ensure external deps (grammy, @buape/carbon,
+      // @slack/bolt, silk-wasm, etc.) are accessible before any CLI command that
+      // loads the channel plugin (see channel-plugin-spec.ts).
+      ensureChannelRuntimeDeps(safeOpenclawId);
 
       try {
         await deps.runAsync(`openclaw plugins install "${pluginPkg}" 2>&1`, 60000);

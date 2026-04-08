@@ -588,6 +588,50 @@ const VERIFIED_FALLBACK_CONFIG_FIELDS: Record<string, ConfigField[]> = {
       configPath: 'accounts.default',
     },
   ],
+  // Slack Socket Mode requires two tokens: appToken (xapp-...) and botToken (xoxb-...)
+  // See https://docs.openclaw.ai/channels/slack
+  slack: [
+    {
+      key: 'appToken',
+      label: 'App Token (xapp-...)',
+      placeholder: 'xapp-1-...',
+      type: 'password',
+      required: true,
+      cliFlag: '--app-token',
+      configPath: 'accounts.default',
+    },
+    {
+      key: 'botToken',
+      label: 'Bot Token (xoxb-...)',
+      placeholder: 'xoxb-...',
+      type: 'password',
+      required: true,
+      cliFlag: '--bot-token',
+      configPath: 'accounts.default',
+    },
+  ],
+  // LINE Messaging API requires channelAccessToken + channelSecret
+  // See https://docs.openclaw.ai/channels/line
+  line: [
+    {
+      key: 'channelAccessToken',
+      label: 'Channel Access Token',
+      placeholder: '',
+      type: 'password',
+      required: true,
+      cliFlag: '--token',
+      configPath: '',
+    },
+    {
+      key: 'channelSecret',
+      label: 'Channel Secret',
+      placeholder: '',
+      type: 'password',
+      required: true,
+      cliFlag: '--channel-secret',
+      configPath: '',
+    },
+  ],
 };
 
 // Default single-token config field (used for most channels)
