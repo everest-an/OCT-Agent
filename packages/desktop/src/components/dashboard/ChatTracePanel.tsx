@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { memo, useState, useCallback } from 'react';
 import { AlertTriangle, BookOpen, Brain, CheckCircle2, ChevronDown, ChevronRight, Copy, Check, Loader2, Save, Search, Terminal, Wrench, Zap } from 'lucide-react';
 
 export interface ChatTraceEvent {
@@ -98,7 +98,7 @@ function CollapsiblePre({ content, maxLines = 6 }: { content: string; maxLines?:
   );
 }
 
-function TraceEventCard({ event }: { event: ChatTraceEvent }) {
+const TraceEventCard = memo(function TraceEventCard({ event }: { event: ChatTraceEvent }) {
   const detailText = event.detail || '';
   const rawText = event.raw != null ? formatValue(event.raw) : '';
   const hasExpandableContent = detailText.length > 120 || rawText.length > 120 || detailText.includes('\n') || rawText.includes('\n');
@@ -142,10 +142,10 @@ function TraceEventCard({ event }: { event: ChatTraceEvent }) {
       )}
     </div>
   );
-}
+});
 
 /** Single tool call card with collapsible args/output sections. */
-function ToolCallCard({
+const ToolCallCard = memo(function ToolCallCard({
   tc,
   t,
   onApprove,
@@ -271,8 +271,55 @@ function ToolCallCard({
       )}
     </div>
   );
-}
+});
 
+/** Collapsible "Thought for Ns" block, Claude/ChatGPT style — italic gray reasoning text.
+ * When `thinking` is empty but `live` is true, renders a pulsing "Thinking…" placeholder
+ * so users have visible feedback even before reasoning content streams in. */
+const ThoughtBlock = memo(function ThoughtBlock({
+  thinking,
+  live,
+  t,
+}: {
+  thinking: string;
+  live?: boolean;
+  t: (key: string, fallback?: string) => string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const hasContent = Boolean(thinking);
+  const label = !hasContent && live
+    ? t('chat.trace.thinking', 'Thinking…')
+    : live
+      ? t('chat.trace.thinking', 'Thinking…')
+      : t('chat.trace.thoughtFor', 'Thought process');
+  const canExpand = hasContent;
+  return (
+    <div className="mb-1.5">
+      <button
+        onClick={() => canExpand && setExpanded((v) => !v)}
+        className={`flex items-center gap-1.5 text-[11px] text-slate-500 ${canExpand ? 'hover:text-slate-300 cursor-pointer' : 'cursor-default'} transition-colors`}
+      >
+        {canExpand ? (
+          <ChevronRight size={12} className={`transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`} />
+        ) : (
+          <span className="inline-block w-3" />
+        )}
+        <Brain size={11} className={live ? 'text-purple-300 animate-pulse' : 'text-purple-300/70'} />
+        <span>{label}</span>
+      </button>
+      {expanded && hasContent && (
+        <div className="mt-1 ml-4 border-l-2 border-purple-500/20 pl-3">
+          <div className="whitespace-pre-wrap break-words text-[11px] leading-relaxed text-slate-400 italic">
+            {thinking}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+/** Flat, Claude-style trace panel: "Thought for Ns" block + tool cards inline + hidden debug events.
+ * No outer accordion wrapper — tool cards are first-class citizens. */
 export function ChatTracePanel({
   t,
   thinking,
@@ -281,6 +328,7 @@ export function ChatTracePanel({
   onApprove,
   onCopyApproval,
   onStopRequest,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   defaultExpanded = false,
   live = false,
 }: {
@@ -294,70 +342,60 @@ export function ChatTracePanel({
   defaultExpanded?: boolean;
   live?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
-  const hasThinking = Boolean(thinking);
+  const [eventsExpanded, setEventsExpanded] = useState(false);
+  // In live mode, always show the ThoughtBlock as a pulsing "Thinking…" placeholder
+  // even before any reasoning content has streamed in — this gives users feedback
+  // that the agent is alive.
+  const hasThinking = Boolean(thinking) || Boolean(live);
   const hasTools = Boolean(toolCalls && toolCalls.length > 0);
-  const hasTrace = Boolean(traceEvents && traceEvents.length > 0);
-  if (!hasThinking && !hasTools && !hasTrace) return null;
-
-  const sectionCount = [hasThinking, hasTools, hasTrace].filter(Boolean).length;
+  // Filter out only per-chunk stream events and thinking events (both have dedicated UI).
+  // Keep lifecycle / status / request / tool-related events so users always see activity
+  // even when the model didn't actually call any tools.
+  const meaningfulEvents = (traceEvents || []).filter((event) => {
+    if (event.kind === 'stream') return false;
+    if (event.kind === 'thinking') return false;
+    return true;
+  });
+  const hasMeaningfulEvents = meaningfulEvents.length > 0;
+  if (!hasThinking && !hasTools && !hasMeaningfulEvents) return null;
 
   return (
-    <div className="mb-2">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className={`flex items-center gap-1.5 text-[11px] transition-colors ${live ? 'text-sky-300/80 hover:text-sky-200' : 'text-slate-500 hover:text-slate-300'}`}
-      >
-        <ChevronRight size={12} className={`transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`} />
-        <Terminal size={11} />
-        <span>{t('chat.trace.title', 'Run trace')}</span>
-        <span className="text-[10px] opacity-70">{sectionCount}</span>
-      </button>
+    <div className="mb-2 space-y-1.5">
+      {hasThinking && <ThoughtBlock thinking={thinking || ''} live={live} t={t} />}
 
-      <div className="overflow-hidden transition-all duration-200" style={{ maxHeight: expanded ? '720px' : '0px' }}>
-        <div className="mt-1.5 ml-4 space-y-3 border-l border-slate-700/50 pl-3 max-h-[700px] overflow-y-auto">
-          {hasThinking && (
-            <div>
-              <div className="flex items-center gap-1.5 text-[11px] text-purple-300/90">
-                <Brain size={11} />
-                <span>{t('thinking.label', 'Thinking process')}</span>
-              </div>
-              <CollapsiblePre content={thinking || ''} maxLines={10} />
-            </div>
-          )}
+      {hasTools && (
+        <div className="space-y-1">
+          {toolCalls?.map((tc) => (
+            <ToolCallCard
+              key={tc.id}
+              tc={tc}
+              t={t}
+              onApprove={onApprove}
+              onCopyApproval={onCopyApproval}
+              onStopRequest={onStopRequest}
+            />
+          ))}
+        </div>
+      )}
 
-          {hasTools && (
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                <Wrench size={11} />
-                <span>{t('tool.used', '{0} tool(s) used').replace('{0}', String(toolCalls?.length || 0))}</span>
-              </div>
-              {toolCalls?.map((tc) => (
-                <ToolCallCard
-                  key={tc.id}
-                  tc={tc}
-                  t={t}
-                  onApprove={onApprove}
-                  onCopyApproval={onCopyApproval}
-                  onStopRequest={onStopRequest}
-                />
-              ))}
-            </div>
-          )}
-
-          {hasTrace && (
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                <Terminal size={11} />
-                <span>{t('chat.trace.timeline', 'Timeline')}</span>
-              </div>
-              {traceEvents?.map((event) => (
+      {hasMeaningfulEvents && (
+        <div>
+          <button
+            onClick={() => setEventsExpanded((v) => !v)}
+            className="flex items-center gap-1.5 text-[10px] text-slate-600 hover:text-slate-400 transition-colors"
+          >
+            <ChevronRight size={10} className={`transition-transform duration-200 ${eventsExpanded ? 'rotate-90' : ''}`} />
+            <span>{t('chat.trace.details', '{0} detail(s)').replace('{0}', String(meaningfulEvents.length))}</span>
+          </button>
+          {eventsExpanded && (
+            <div className="mt-1 ml-4 space-y-1">
+              {meaningfulEvents.map((event) => (
                 <TraceEventCard key={event.id} event={event} />
               ))}
             </div>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 }

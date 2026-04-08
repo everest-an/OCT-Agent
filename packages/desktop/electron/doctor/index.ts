@@ -39,6 +39,7 @@ import {
   fixChannelCompatibility,
 } from './checks-channel-compatibility';
 import { checkChannelBindings, fixChannelBindings } from './checks-channels';
+import { checkStalePluginOverrides, fixRemoveStalePluginOverrides } from './checks-stale-plugins';
 
 // Re-export types for callers
 export type { CheckStatus, Fixability, CheckResult, DoctorReport, FixResult, DoctorDeps };
@@ -60,6 +61,7 @@ const CHECK_REGISTRY: Record<string, { check: (ctx: any) => Promise<CheckResult>
   'channel-bindings': { check: checkChannelBindings, fix: fixChannelBindings },
   'config-permissions': { check: checkConfigPermissions, fix: fixConfigPermissions },
   'npm-prefix-writable': { check: checkNpmPrefixWritable },
+  'stale-plugin-overrides': { check: checkStalePluginOverrides, fix: fixRemoveStalePluginOverrides },
 };
 
 const CHECK_ORDER = [
@@ -68,6 +70,7 @@ const CHECK_ORDER = [
   'web-dns-compat',
   'channel-compatibility',
   'channel-bindings', 'config-permissions', 'npm-prefix-writable',
+  'stale-plugin-overrides',
 ];
 
 // --- Public API ---

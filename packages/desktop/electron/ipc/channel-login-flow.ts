@@ -6,6 +6,87 @@ import path from 'path';
 import { registerActiveLogin, unregisterActiveLogin } from '../openclaw-process-guard';
 
 /**
+ * URL hosts/paths that look like QR URLs to a naive regex but are NOT user-facing
+ * scan pages. Hitting these causes the wizard to open a 404 page instead of the
+ * real QR landing page.
+ *
+ * - ilinkai.weixin.qq.com: Tencent's iLink Bot HTTP/JSON API base. Root path is
+ *   404 by design. openclaw-weixin >= 2.1.x logs `Fetching QR code from: <api>`
+ *   BEFORE it logs the real liteapp.weixin.qq.com QR landing page, so the naive
+ *   "first https URL after a qr-hint line wins" strategy opened the wrong one.
+ * - localhost / 127.0.0.1: local daemon URLs (Awareness memory dashboard etc.)
+ * - docs.openclaw / github.com: documentation links that often appear in plugin
+ *   startup logs.
+ * - weixin.qq.com/cgi-bin/: legacy WeChat API paths, never user-facing.
+ */
+const NON_QR_URL_PATTERNS: ReadonlyArray<string | RegExp> = [
+  'ilinkai.weixin.qq.com',
+  'localhost',
+  '127.0.0.1',
+  'docs.openclaw',
+  'github.com',
+  /weixin\.qq\.com\/cgi-bin\//i,
+];
+
+/**
+ * Hostnames/paths that ARE the real QR scan landing page for a known channel.
+ * When multiple URLs appear in close succession we prefer one of these over the
+ * generic "first url wins" fallback.
+ *
+ * - liteapp.weixin.qq.com/q/: openclaw-weixin >= 2.1.x. Logged as
+ *   `二维码链接: https://liteapp.weixin.qq.com/q/<code>?qrcode=...&bot_type=3`.
+ * - login.weixin.qq.com / open.weixin.qq.com/connect: defensive coverage for
+ *   older plugin versions in case Tencent rotates back.
+ */
+const QR_LANDING_HOSTS: ReadonlyArray<string> = [
+  'liteapp.weixin.qq.com/q/',
+  'login.weixin.qq.com',
+  'open.weixin.qq.com/connect',
+];
+
+/** Lines like "Fetching QR code from: <api>" — we MUST NOT treat as a QR URL. */
+const QR_FETCH_NOISE = /fetching\s+qr|requesting\s+qr|qr\s+code\s+received/i;
+
+/** Lines that explicitly mean "here is the QR url, open it in a browser". */
+const QR_DISPLAY_HINT = /(二维码链接|请用浏览器打开|scan\s+(this|the)[^\n]{0,40}qr|open[^\n]{0,40}qr[^\n]{0,40}browser)/i;
+
+/** Loose fallback hint, kept for non-WeChat channels whose logs we have not catalogued. */
+const QR_LOOSE_HINT = /二维码|qrcode|qr\s*code|scan/i;
+
+export function isNonQrUrl(url: string): boolean {
+  return NON_QR_URL_PATTERNS.some((p) => (typeof p === 'string' ? url.includes(p) : p.test(url)));
+}
+
+export function isQrLandingUrl(url: string): boolean {
+  return QR_LANDING_HOSTS.some((host) => url.includes(host));
+}
+
+/**
+ * Pick the best QR URL out of a sequence of (line, urls) candidates seen so far.
+ * Returns null if nothing acceptable yet. Used by both the log watcher and stdout
+ * paths so the WeChat fix and the WhatsApp/Signal/etc. fallback share one rule.
+ *
+ * Rules:
+ *  1. Drop any URL that matches NON_QR_URL_PATTERNS.
+ *  2. If any candidate matches QR_LANDING_HOSTS, return that (Tencent's real
+ *     liteapp.weixin.qq.com page).
+ *  3. Otherwise return the first surviving candidate from a line that matches
+ *     QR_DISPLAY_HINT (a strong signal it is the URL the user is meant to open).
+ *  4. Otherwise return null and let the caller wait or fall back to QR_LOOSE_HINT.
+ */
+export function pickQrUrl(
+  candidates: ReadonlyArray<{ line: string; url: string }>,
+): string | null {
+  const surviving = candidates.filter((c) => !isNonQrUrl(c.url));
+  if (surviving.length === 0) return null;
+  const landing = surviving.find((c) => isQrLandingUrl(c.url));
+  if (landing) return landing.url;
+  const fromDisplay = surviving.find((c) => QR_DISPLAY_HINT.test(c.line));
+  if (fromDisplay) return fromDisplay.url;
+  return null;
+}
+
+/**
  * Watch the OpenClaw plugin log file for a WeChat QR URL.
  * openclaw channels login --verbose has no stdout output due to Node.js block buffering
  * when stdout is a pipe. However, the openclaw-weixin plugin logger writes to a log file
@@ -17,6 +98,7 @@ function watchOpenClawLogForQrUrl(
   onQrFound: (url: string) => void,
   onLoginSuccess?: () => void,
   onFatalError?: (message: string) => void,
+  onQrArt?: (asciiArt: string) => void,
 ): () => void {
   const today = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -34,6 +116,66 @@ function watchOpenClawLogForQrUrl(
   let offset = 0;
   let stopped = false;
   let qrFound = false;
+  // ASCII QR collector — openclaw-weixin (and WhatsApp / Signal) print a multi-row block-character
+  // QR via the OpenClaw logger, which writes JSON entries with embedded \n to the log file. After
+  // our buf.split('\n') splits them, each visual QR row arrives as its own "line" that JSON.parse
+  // fails on, so we treat the raw msg as the QR row directly. Collect contiguous QR rows and flush
+  // via onQrArt as soon as the streak ends (or after a 400 ms quiet window).
+  let qrArtRows: string[] = [];
+  let qrArtFlushTimer: NodeJS.Timeout | null = null;
+  let qrArtSent = false;
+  const QR_ART_QUIET_MS = 400;
+  const QR_ART_MIN_ROWS = 8;
+  const flushQrArt = () => {
+    if (qrArtFlushTimer) {
+      clearTimeout(qrArtFlushTimer);
+      qrArtFlushTimer = null;
+    }
+    if (qrArtSent || qrArtRows.length < QR_ART_MIN_ROWS) {
+      qrArtRows = [];
+      return;
+    }
+    qrArtSent = true;
+    const art = qrArtRows.join('\n');
+    qrArtRows = [];
+    try { console.log(`[wechat-watcher] flushing QR art (${art.split('\n').length} rows, ${art.length} chars)`); } catch { /* ignore */ }
+    if (onQrArt) onQrArt(art);
+  };
+  const isAsciiQrRow = (s: string): boolean => {
+    if (!s || s.length < 8) return false;
+    let block = 0;
+    for (const ch of s) if ('▄▀█░▒▓ '.includes(ch)) block++;
+    return block / s.length > 0.55;
+  };
+  // Buffer URL candidates briefly so a strong "liteapp.weixin.qq.com" match can win
+  // over an early "ilinkai.weixin.qq.com" API URL that appears on the same flush.
+  const qrCandidates: Array<{ line: string; url: string }> = [];
+  let settleTimer: NodeJS.Timeout | null = null;
+  const SETTLE_MS = 600;
+  const flushBestQrCandidate = () => {
+    if (qrFound || stopped) return;
+    if (settleTimer) {
+      clearTimeout(settleTimer);
+      settleTimer = null;
+    }
+    const best = pickQrUrl(qrCandidates);
+    if (best) {
+      qrFound = true;
+      try { console.log('[wechat-watcher] selected QR url:', best); } catch { /* ignore */ }
+      onQrFound(best);
+      if (!onLoginSuccess) stopped = true;
+      return;
+    }
+    // No strong match yet — fall back to the first non-blacklisted URL we have seen
+    // so non-WeChat channels (and any future plugin formats) still produce *some* URL.
+    const fallback = qrCandidates.find((c) => !isNonQrUrl(c.url));
+    if (fallback) {
+      qrFound = true;
+      try { console.log('[wechat-watcher] fallback QR url:', fallback.url); } catch { /* ignore */ }
+      onQrFound(fallback.url);
+      if (!onLoginSuccess) stopped = true;
+    }
+  };
 
   // Start from current end-of-file to only read new entries
   try {
@@ -63,6 +205,25 @@ function watchOpenClawLogForQrUrl(
           msg = line;
         }
 
+        // ASCII QR collection: every contiguous block-character row goes into qrArtRows;
+        // when a non-QR row arrives we wait QR_ART_QUIET_MS then flush. Done once per session.
+        if (!qrArtSent) {
+          if (isAsciiQrRow(msg)) {
+            qrArtRows.push(msg);
+            if (qrArtFlushTimer) clearTimeout(qrArtFlushTimer);
+            qrArtFlushTimer = setTimeout(flushQrArt, QR_ART_QUIET_MS);
+          } else if (qrArtRows.length >= QR_ART_MIN_ROWS) {
+            flushQrArt();
+          } else if (qrArtRows.length > 0) {
+            // Stray block-char line was noise — discard.
+            qrArtRows = [];
+            if (qrArtFlushTimer) {
+              clearTimeout(qrArtFlushTimer);
+              qrArtFlushTimer = null;
+            }
+          }
+        }
+
         if (onFatalError) {
           const isWeChatPluginStackOverflow = /openclaw-weixin failed to load/i.test(msg)
             && /(maximum call stack size exceeded|rangeerror)/i.test(msg);
@@ -74,16 +235,28 @@ function watchOpenClawLogForQrUrl(
         }
 
         if (!qrFound) {
-          const hasQrHint = /二维码|qrcode|qr\s*code|scan/i.test(msg);
-          const match = hasQrHint ? msg.match(/https?:\/\/\S+/i) : null;
-          if (match) {
-            qrFound = true;
-            onQrFound(match[0]);
-            if (!onLoginSuccess) {
-              stopped = true;
-              return;
+          // Skip "Fetching QR code from: <api>" style noise — that URL is the iLink
+          // backend (ilinkai.weixin.qq.com), not the user-facing scan page.
+          if (!QR_FETCH_NOISE.test(msg)) {
+            const hasHint = QR_DISPLAY_HINT.test(msg) || QR_LOOSE_HINT.test(msg);
+            if (hasHint) {
+              const urls = msg.match(/https?:\/\/[^\s"',}\]]+/gi) || [];
+              for (const rawUrl of urls) {
+                if (isNonQrUrl(rawUrl)) continue;
+                qrCandidates.push({ line: msg, url: rawUrl });
+              }
+              // Strong hit: a known landing host arrived → flush immediately, no need to wait.
+              if (qrCandidates.some((c) => isQrLandingUrl(c.url))) {
+                flushBestQrCandidate();
+              } else if (qrCandidates.length > 0 && !settleTimer) {
+                // Weak hit: wait briefly in case a stronger candidate (liteapp QR landing) is on its way.
+                settleTimer = setTimeout(flushBestQrCandidate, SETTLE_MS);
+              }
             }
-            continue;
+            if (qrFound) {
+              if (!onLoginSuccess) return;
+              continue;
+            }
           }
         }
 
@@ -100,7 +273,18 @@ function watchOpenClawLogForQrUrl(
   };
 
   const interval = setInterval(checkNewLines, 500);
-  return () => { stopped = true; clearInterval(interval); };
+  return () => {
+    stopped = true;
+    clearInterval(interval);
+    if (settleTimer) {
+      clearTimeout(settleTimer);
+      settleTimer = null;
+    }
+    if (qrArtFlushTimer) {
+      clearTimeout(qrArtFlushTimer);
+      qrArtFlushTimer = null;
+    }
+  };
 }
 
 function isQrLine(line: string, stripAnsi: (value: string) => string): boolean {
@@ -219,10 +403,17 @@ export function createChannelLoginWithQR(deps: {
       stopLogWatcher = watchOpenClawLogForQrUrl(
         (url) => {
           if (qrShown || settled) return;
+          // For WeChat (liteapp.weixin.qq.com), the URL is a mobile WeChat webview shell that
+          // does NOT render a scannable QR in a desktop browser — opening it just shows a blank
+          // weui page. The ASCII QR (delivered separately via onQrArt) is the real scan target.
+          // We still mark qrShown=true so the idle timer treats this as "QR ready" and we still
+          // notify the renderer of the URL for an optional copy-link button, but we DO NOT call
+          // shell.openExternal anymore.
           qrShown = true;
           resetIdleTimer(); // keep the idle timer alive while user scans
           send('channel:status', 'channels.status.generatingQR');
-          shell.openExternal(url);
+          send('channel:qr-url', url);
+          try { console.log('[wechat-watcher] QR url ready (not opened in browser):', url); } catch { /* ignore */ }
         },
         () => {
           // WeChat login succeeded post-scan. The openclaw CLI process stays alive
@@ -258,6 +449,19 @@ export function createChannelLoginWithQR(deps: {
           try { child.kill(); } catch {}
           resolve({ success: false, error: message });
         },
+        (asciiArt) => {
+          // Real WeChat QR delivered as ASCII block-character art via the OpenClaw logger.
+          // Push it to the wizard, which already has a renderer for `channel:qr-art` (used by
+          // WhatsApp). This is the ONLY scannable artifact for desktop users — the mobile
+          // webview liteapp URL is not scannable in a desktop browser.
+          if (settled) return;
+          if (!qrShown) {
+            qrShown = true;
+            resetIdleTimer();
+            send('channel:status', 'channels.status.generatingQR');
+          }
+          send('channel:qr-art', asciiArt);
+        },
       );
 
       const processLine = (line: string) => {
@@ -279,10 +483,11 @@ export function createChannelLoginWithQR(deps: {
         }
 
         if (!qrShown) {
-          const httpsUrls = line.match(/https?:\/\/\S+/g) || [];
+          const httpsUrls = line.match(/https?:\/\/[^\s"',}\]]+/g) || [];
           for (const url of httpsUrls) {
-            if (url.includes('localhost') || url.includes('127.0.0.1') || url.includes('docs.openclaw') || url.includes('github.com')) continue;
+            if (isNonQrUrl(url)) continue;
             qrShown = true;
+            try { console.log('[channel-login-flow] stdout opened url:', url); } catch { /* ignore */ }
             shell.openExternal(url);
             return;
           }

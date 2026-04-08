@@ -62,6 +62,8 @@ interface Message {
   thinking?: string;
   traceEvents?: ChatTraceEvent[];
   contentBlocks?: Array<Record<string, unknown>>;
+  agentName?: string;
+  agentEmoji?: string;
 }
 
 function formatStructuredValue(value: unknown): string | undefined {
@@ -1252,6 +1254,8 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         ? t('chat.localFileChangeUnverified', 'AwarenessClaw did not verify this local file change. The agent answered as if it finished, but no completed tool result was recorded for the request, so the file was not confirmed on disk.')
         : (appendedWarnings.length > 0 ? `${baseResponseText}\n\n${appendedWarnings.join('\n\n')}` : baseResponseText);
 
+      const activeAgentId = options?.targetAgentId || config.selectedAgentId || 'main';
+      const activeAgent = agents.find((a) => a.id === activeAgentId);
       const assistantMsg: Message = {
         id: `msg-${Date.now()}`,
         role: 'assistant',
@@ -1261,6 +1265,8 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         toolCalls: finalizedToolCalls,
         thinking: thinkingRef.current || undefined,
         traceEvents: traceEventsRef.current.length > 0 ? [...traceEventsRef.current] : undefined,
+        agentName: activeAgent?.name || (activeAgentId === 'main' ? undefined : activeAgentId),
+        agentEmoji: activeAgent?.emoji,
       };
 
       setNewestMsgId(assistantMsg.id);
@@ -1305,7 +1311,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         setIsSending(false);
       }
     }
-  }, [activeSessionId, config.language, config.modelId, config.providerKey, config.selectedAgentId, config.thinkingLevel, projectRoot, t, updateSession]);
+  }, [activeSessionId, agents, config.language, config.modelId, config.providerKey, config.selectedAgentId, config.thinkingLevel, projectRoot, t, updateSession]);
 
   // Process the next queued message (called after a run completes)
   const processNextQueued = useCallback(async () => {
@@ -1653,6 +1659,11 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
           projectRoot={projectRoot}
           messagesEndRef={messagesEndRef}
           liveThinkingExpanded={liveThinkingExpanded}
+          currentAgent={(() => {
+            const activeId = config.selectedAgentId || 'main';
+            const found = agents.find((a) => a.id === activeId);
+            return found ? { id: found.id, name: found.name, emoji: found.emoji } : { id: activeId, name: activeId === 'main' ? t('app.name', 'AwarenessClaw') : activeId };
+          })()}
           onToggleLiveThinking={() => setLiveThinkingExpanded((value) => !value)}
           onSelectProjectRoot={handleSelectProjectRoot}
           onSelectModel={() => setShowModelSelector(true)}

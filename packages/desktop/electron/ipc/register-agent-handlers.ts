@@ -348,20 +348,35 @@ export function registerAgentHandlers(deps: {
   });
 
   ipcMain.handle('agents:bind', async (_e: any, agentId: string, binding: string) => {
+    // OpenClaw CLI loads ALL plugins (feishu/awareness-memory/openclaw-weixin/etc.) on every
+    // command, which can take 30-60s on machines with many plugins. The previous 30s idle
+    // timeout was too tight: weixin plugin's "compat check" / "setWeixinRuntime" stages routinely
+    // exceed 30s of stdout silence, causing "Command timed out" with no actual error.
+    //
+    // Idle timeout (not total): 90s gives weixin/feishu plugin loading enough headroom.
+    // 'agents bind' itself (after plugins are loaded) is near-instant.
     try {
-      await deps.runSpawnAsync('openclaw', ['agents', 'bind', '--agent', agentId, '--bind', binding], 30000);
+      await deps.runSpawnAsync('openclaw', ['agents', 'bind', '--agent', agentId, '--bind', binding], 90000);
       return { success: true };
     } catch (err: any) {
-      return { success: false, error: err.message?.slice(0, 200) };
+      const raw = err.message || String(err);
+      const friendly = /timed out|timeout/i.test(raw)
+        ? 'OpenClaw is still loading plugins (this can take 60-90s on first run). Please retry — if it keeps failing, try restarting OpenClaw with `openclaw gateway restart`.'
+        : raw.slice(0, 240);
+      return { success: false, error: friendly };
     }
   });
 
   ipcMain.handle('agents:unbind', async (_e: any, agentId: string, binding: string) => {
     try {
-      await deps.runSpawnAsync('openclaw', ['agents', 'unbind', '--agent', agentId, '--bind', binding], 30000);
+      await deps.runSpawnAsync('openclaw', ['agents', 'unbind', '--agent', agentId, '--bind', binding], 90000);
       return { success: true };
     } catch (err: any) {
-      return { success: false, error: err.message?.slice(0, 200) };
+      const raw = err.message || String(err);
+      const friendly = /timed out|timeout/i.test(raw)
+        ? 'OpenClaw is still loading plugins (this can take 60-90s on first run). Please retry — if it keeps failing, try restarting OpenClaw with `openclaw gateway restart`.'
+        : raw.slice(0, 240);
+      return { success: false, error: friendly };
     }
   });
 

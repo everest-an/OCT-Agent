@@ -542,9 +542,15 @@ ${message}`;
 
       const processAssistantContentBlocks = (blocks: any[]) => {
         for (const block of blocks) {
-          if (block.type === 'tool_use') {
+          // Accept all tool-call block type variants OpenClaw / Anthropic / OpenAI-compat providers emit.
+          // OpenClaw native built-in tools (exec/read/write/edit) use `tool_call`; Anthropic uses `tool_use`.
+          // See OpenClaw control-ui extractors P_ / F_.
+          const blockType = String(block.type || '').toLowerCase();
+          const isToolUseBlock = blockType === 'tool_use' || blockType === 'tool_call' || blockType === 'tooluse' || blockType === 'toolcall';
+          const isToolResultBlock = blockType === 'tool_result' || blockType === 'toolresult' || blockType === 'tool_result_block';
+          if (isToolUseBlock) {
             sawToolBlocks = true;
-            const toolId = block.id || `tc-${Date.now()}`;
+            const toolId = block.id || block.toolCallId || block.tool_call_id || `tc-${Date.now()}`;
             toolNamesById.set(toolId, block.name || 'tool');
             send('chat:event', {
               stream: 'tool',
@@ -567,10 +573,10 @@ ${message}`;
             continue;
           }
 
-          if (block.type === 'tool_result') {
+          if (isToolResultBlock) {
             sawToolBlocks = true;
             sawCompletedToolResult = true;
-            const toolId = block.tool_use_id || '';
+            const toolId = block.tool_use_id || block.tool_call_id || block.toolCallId || block.id || '';
             const toolName = toolNamesById.get(toolId) || block.name || 'tool';
             if (looksLikeFilesystemToolName(toolName)) {
               sawCompletedFilesystemToolResult = true;

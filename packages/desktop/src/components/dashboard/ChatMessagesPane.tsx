@@ -30,7 +30,100 @@ type Message = {
   thinking?: string;
   traceEvents?: ChatTraceEvent[];
   contentBlocks?: Array<Record<string, unknown>>;
+  agentName?: string;
+  agentEmoji?: string;
 };
+
+type CurrentAgent = { id: string; name: string; emoji?: string };
+
+/** Parse inline thinking / tool markers that providers like qwen/deepseek embed directly
+ * in the text stream (Anthropic / Gateway won't always surface these as structured blocks).
+ * Returns the cleaned text plus any extracted thinking and tool calls. */
+function parseInlineMarkers(text: string): {
+  clean: string;
+  thinking: string;
+  toolCalls: ToolCallInfo[];
+} {
+  if (!text) return { clean: text || '', thinking: '', toolCalls: [] };
+
+  const thinkingParts: string[] = [];
+  const toolCalls: ToolCallInfo[] = [];
+  let idx = 0;
+
+  // Extract <thinking>/<reasoning>/<think> blocks.
+  let withoutThinking = text.replace(
+    /<(thinking|reasoning|think)\b[^>]*>([\s\S]*?)<\/\1>/gi,
+    (_m, _tag, inner) => {
+      const t = String(inner || '').trim();
+      if (t) thinkingParts.push(t);
+      return '';
+    },
+  );
+
+  // Extract leading "Reasoning: ..." blob (some providers prefix with this).
+  withoutThinking = withoutThinking.replace(
+    /^\s*Reasoning:([\s\S]*?)(?:\n\n|$)/i,
+    (_m, inner) => {
+      const t = String(inner || '').trim();
+      if (t) thinkingParts.push(t);
+      return '';
+    },
+  );
+
+  // Extract <tool_call>...</tool_call> blocks (qwen / deepseek / glm format, JSON inside).
+  let withoutTools = withoutThinking.replace(
+    /<tool_call\b[^>]*>([\s\S]*?)<\/tool_call>/gi,
+    (_m, inner) => {
+      const raw = String(inner || '').trim();
+      if (!raw) return '';
+      let name = 'tool';
+      let args: unknown = raw;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          name = String((parsed as any).name || (parsed as any).tool || 'tool');
+          args = (parsed as any).arguments ?? (parsed as any).args ?? parsed;
+        }
+      } catch {
+        // Not JSON, keep raw as detail.
+      }
+      toolCalls.push({
+        id: `inline-tc-${idx++}`,
+        name,
+        status: 'completed',
+        timestamp: Date.now(),
+        args,
+        detail: typeof args === 'string' ? args : undefined,
+      });
+      return '';
+    },
+  );
+
+  // Extract ```tool_code ... ``` fenced blocks (gemini-style).
+  withoutTools = withoutTools.replace(
+    /```(?:tool_code|tool|tool_call)\n([\s\S]*?)```/gi,
+    (_m, inner) => {
+      const code = String(inner || '').trim();
+      if (code) {
+        toolCalls.push({
+          id: `inline-tc-${idx++}`,
+          name: 'code',
+          status: 'completed',
+          timestamp: Date.now(),
+          args: code,
+          detail: code,
+        });
+      }
+      return '';
+    },
+  );
+
+  return {
+    clean: withoutTools.trim(),
+    thinking: thinkingParts.join('\n\n'),
+    toolCalls,
+  };
+}
 
 export function ChatMessagesPane({
   t,
@@ -47,6 +140,7 @@ export function ChatMessagesPane({
   projectRoot,
   messagesEndRef,
   liveThinkingExpanded,
+  currentAgent,
   onToggleLiveThinking,
   onSelectProjectRoot,
   onSelectModel,
@@ -75,6 +169,7 @@ export function ChatMessagesPane({
   projectRoot: string;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
   liveThinkingExpanded: boolean;
+  currentAgent?: CurrentAgent;
   onToggleLiveThinking: () => void;
   onSelectProjectRoot: () => void;
   onSelectModel: () => void;
@@ -167,29 +262,39 @@ export function ChatMessagesPane({
           ) : (
             <div key={message.id} className="group -mx-4 px-4 py-3 rounded-xl hover:bg-slate-800/30 transition-colors">
               <div className="flex gap-3">
-                <img src={logoUrl} alt="" className="w-6 h-6 rounded-md mt-0.5 flex-shrink-0" />
+                {message.agentEmoji ? (
+                  <span className="w-6 h-6 rounded-md mt-0.5 flex-shrink-0 flex items-center justify-center bg-slate-800/60 text-sm">{message.agentEmoji}</span>
+                ) : (
+                  <img src={logoUrl} alt="" className="w-6 h-6 rounded-md mt-0.5 flex-shrink-0" />
+                )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[11px] text-slate-500 font-medium">AwarenessClaw</span>
+                    <span className="text-[11px] text-slate-300 font-medium">{message.agentName || currentAgent?.name || t('app.name', 'AwarenessClaw')}</span>
                     {message.model && <span className="text-[10px] text-slate-600">{message.model.split('/').pop()}</span>}
                     <span className="text-[10px] text-slate-600">{new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
 
-                  {message.thinking && !message.traceEvents?.length && <ThinkingBlock thinking={message.thinking} />}
-
-                  <ChatTracePanel
-                    t={t}
-                    thinking={message.thinking}
-                    toolCalls={message.toolCalls}
-                    traceEvents={message.traceEvents}
-                    onApprove={onApproveTool}
-                    onCopyApproval={onCopyApproval}
-                    onStopRequest={onStopRequest}
-                  />
-
-                  <div className="text-sm text-slate-200 leading-relaxed">
-                    <TypewriterMessage content={message.content} isNew={message.id === newestMsgId} />
-                  </div>
+                  {(() => {
+                    const parsed = parseInlineMarkers(message.content);
+                    const mergedThinking = [message.thinking, parsed.thinking].filter(Boolean).join('\n\n') || undefined;
+                    const mergedTools = [...(message.toolCalls || []), ...parsed.toolCalls];
+                    return (
+                      <>
+                        <ChatTracePanel
+                          t={t}
+                          thinking={mergedThinking}
+                          toolCalls={mergedTools.length > 0 ? mergedTools : undefined}
+                          traceEvents={message.traceEvents}
+                          onApprove={onApproveTool}
+                          onCopyApproval={onCopyApproval}
+                          onStopRequest={onStopRequest}
+                        />
+                        <div className="text-sm text-slate-200 leading-relaxed">
+                          <TypewriterMessage content={parsed.clean} isNew={message.id === newestMsgId} />
+                        </div>
+                      </>
+                    );
+                  })()}
 
                   <div className="mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-3">
                     <button onClick={() => onCopyMessage(message)} className="text-slate-600 hover:text-slate-300 text-[10px] flex items-center gap-1 transition-colors">
@@ -205,42 +310,52 @@ export function ChatMessagesPane({
         {agentStatus !== 'idle' && (
           <div className="group -mx-4 px-4 py-3 bg-slate-800/20 rounded-xl">
             <div className="flex gap-3">
-              <img src={logoUrl} alt="" className={`w-6 h-6 rounded-md mt-0.5 flex-shrink-0 ${agentStatus !== 'error' ? 'animate-pulse' : ''}`} />
+              {currentAgent?.emoji ? (
+                <span className={`w-6 h-6 rounded-md mt-0.5 flex-shrink-0 flex items-center justify-center bg-slate-800/60 text-sm ${agentStatus !== 'error' ? 'animate-pulse' : ''}`}>{currentAgent.emoji}</span>
+              ) : (
+                <img src={logoUrl} alt="" className={`w-6 h-6 rounded-md mt-0.5 flex-shrink-0 ${agentStatus !== 'error' ? 'animate-pulse' : ''}`} />
+              )}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[11px] text-slate-500 font-medium">{t('app.name', 'AwarenessClaw')}</span>
+                  <span className="text-[11px] text-slate-300 font-medium">{currentAgent?.name || t('app.name', 'AwarenessClaw')}</span>
                   {config.modelId && <span className="text-[10px] text-slate-600">{config.modelId.split('/').pop()}</span>}
                 </div>
 
-                {agentStatus !== 'error' && thinkingContent && !traceEvents.length && (
-                  <LiveThinkingBlock thinking={thinkingContent} expanded={liveThinkingExpanded} onToggle={onToggleLiveThinking} />
-                )}
+                {(() => {
+                  const parsedLive = parseInlineMarkers(streamingContent);
+                  const mergedLiveThinking = [thinkingContent, parsedLive.thinking].filter(Boolean).join('\n\n');
+                  const mergedLiveTools = [...activeToolCalls, ...parsedLive.toolCalls];
+                  return (
+                    <>
+                      <ChatTracePanel
+                        t={t}
+                        thinking={mergedLiveThinking || undefined}
+                        toolCalls={mergedLiveTools.length > 0 ? mergedLiveTools : undefined}
+                        traceEvents={traceEvents}
+                        onApprove={onApproveTool}
+                        onCopyApproval={onCopyApproval}
+                        onStopRequest={onStopRequest}
+                        defaultExpanded={true}
+                        live={true}
+                      />
 
-                <ChatTracePanel
-                  t={t}
-                  thinking={thinkingContent}
-                  toolCalls={activeToolCalls}
-                  traceEvents={traceEvents}
-                  onApprove={onApproveTool}
-                  onCopyApproval={onCopyApproval}
-                  onStopRequest={onStopRequest}
-                  defaultExpanded={true}
-                  live={true}
-                />
+                      {agentStatus === 'error' && (
+                        <div className="flex items-center gap-2 text-sm text-red-400">
+                          <AlertTriangle size={14} />
+                          <span>{t('chat.status.error', 'Response timed out or failed')}</span>
+                          <button onClick={onDismissError} className="ml-2 px-2 py-0.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors">
+                            {t('chat.dismiss', 'Dismiss')}
+                          </button>
+                        </div>
+                      )}
 
-                {agentStatus === 'error' && (
-                  <div className="flex items-center gap-2 text-sm text-red-400">
-                    <AlertTriangle size={14} />
-                    <span>{t('chat.status.error', 'Response timed out or failed')}</span>
-                    <button onClick={onDismissError} className="ml-2 px-2 py-0.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors">
-                      {t('chat.dismiss', 'Dismiss')}
-                    </button>
-                  </div>
-                )}
-
-                {agentStatus !== 'error' && streamingContent ? (
-                  <div className="text-sm text-slate-200 leading-relaxed">{renderStreamingContent(streamingContent)}</div>
-                ) : agentStatus !== 'error' ? (
+                      {agentStatus !== 'error' && parsedLive.clean ? (
+                        <div className="text-sm text-slate-200 leading-relaxed">{renderStreamingContent(parsedLive.clean)}</div>
+                      ) : null}
+                    </>
+                  );
+                })()}
+                {agentStatus !== 'error' && !streamingContent ? (
                   <div className="flex items-center gap-2 text-sm text-slate-400">
                     <Loader2 size={14} className="animate-spin text-brand-400" />
                     <span>{statusLabel}</span>

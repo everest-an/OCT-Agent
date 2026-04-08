@@ -11,6 +11,20 @@ export function normalizeContentBlocks(message: any): any[] {
     : [];
 }
 
+/** Strip inline thinking/reasoning markers from text so they don't leak into the main bubble. */
+function stripInlineThinking(text: string): string {
+  if (!text) return text;
+  const withoutBlocks = text
+    .replace(/<thinking\b[^>]*>[\s\S]*?<\/thinking>/gi, '')
+    .replace(/<reasoning\b[^>]*>[\s\S]*?<\/reasoning>/gi, '')
+    .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '');
+  // Drop a leading "Reasoning: ..." block when the whole message begins with it.
+  if (/^\s*Reasoning:/i.test(withoutBlocks)) {
+    return '';
+  }
+  return withoutBlocks;
+}
+
 export function extractAssistantText(message: any): string {
   if (!message) return '';
   if (Array.isArray(message.content)) {
@@ -19,7 +33,7 @@ export function extractAssistantText(message: any): string {
       .join('');
   }
   if (typeof message.content === 'string') {
-    return message.content;
+    return stripInlineThinking(message.content);
   }
   return '';
 }

@@ -21,6 +21,7 @@ import {
   waitForLocalDaemonReady,
 } from './local-daemon';
 import { GatewayClient } from './gateway-ws';
+import { healMainAgentIfNeeded } from './heal-main-agent';
 import { createChannelLoginWithQR } from './ipc/channel-login-flow';
 import { registerAgentHandlers } from './ipc/register-agent-handlers';
 import { registerAppUtilityHandlers } from './ipc/register-app-utility-handlers';
@@ -1590,6 +1591,21 @@ async function autoReconnectChannelWorkers(): Promise<void> {
 app.whenReady().then(() => {
   // Deploy internal hook for awareness memory backup (idempotent, version-gated)
   ensureInternalHook(HOME);
+
+  // Self-heal the OpenClaw `main` agent if it has degraded into a skeleton entry
+  // (no workspace / agentDir). This is the default agent that every channel binding
+  // routes to. If main is broken, channels accept messages but never produce replies
+  // because the routing target has no workspace and gets dropped from `agents list`.
+  try {
+    const heal = healMainAgentIfNeeded(HOME);
+    if (heal.status === 'healed') {
+      console.log(`[main-heal] healed main agent: added ${heal.changes?.join(', ')}`);
+    } else if (heal.status === 'error') {
+      console.warn('[main-heal] error:', heal.error);
+    }
+  } catch (err) {
+    console.warn('[main-heal] unexpected error:', err);
+  }
 
   // Ensure config has required gateway defaults before anything tries to start
   repairOpenClawConfigFile();

@@ -463,7 +463,7 @@ describe('Dashboard (Chat)', () => {
     });
 
     expect(screen.getAllByText(/step 1\s*step 2/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Run trace|运行链路/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Thinking & tools|思考与工具/).length).toBeGreaterThan(0);
 
     await act(async () => {
       resolveChat?.({ success: true, text: 'done', sessionId: 'test-session' });
@@ -550,7 +550,7 @@ describe('Dashboard (Chat)', () => {
 
     await act(async () => { render(<Dashboard />); });
 
-    expect(screen.getByText(/Run trace|运行链路/)).toBeInTheDocument();
+    expect(screen.getByText(/Thinking & tools|思考与工具/)).toBeInTheDocument();
   });
 
   it('hides raw gateway debug noise and finalizes active tool calls on successful completion', async () => {
@@ -585,7 +585,7 @@ describe('Dashboard (Chat)', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getAllByText(/Run trace|运行链路/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Thinking & tools|思考与工具/).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/Gateway started in app session/).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/open https:\/\/google.com/).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/先检查是否可以调用浏览器工具/).length).toBeGreaterThan(0);
@@ -598,7 +598,7 @@ describe('Dashboard (Chat)', () => {
 
     await waitFor(() => {
       expect(screen.getByText('done')).toBeInTheDocument();
-      expect(screen.getAllByText(/Run trace|运行链路/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Thinking & tools|思考与工具/).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/Gateway started in app session/).length).toBeGreaterThan(0);
     });
 
@@ -705,7 +705,7 @@ describe('Dashboard (Chat)', () => {
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByText(/Run trace|运行链路/));
+      fireEvent.click(screen.getByText(/Thinking & tools|思考与工具/));
     });
 
     await waitFor(() => {
@@ -753,7 +753,7 @@ describe('Dashboard (Chat)', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getAllByText(/Run trace|运行链路/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Thinking & tools|思考与工具/).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/pwd/).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/\/tmp\/project/).length).toBeGreaterThan(0);
     });
@@ -868,7 +868,7 @@ describe('Dashboard (Chat)', () => {
     });
 
     await act(async () => {
-      fireEvent.click(screen.getAllByText(/Run trace|运行链路/)[0]);
+      fireEvent.click(screen.getAllByText(/Thinking & tools|思考与工具/)[0]);
     });
 
     expect(screen.getAllByText(/Agent status|代理状态/).length).toBe(1);

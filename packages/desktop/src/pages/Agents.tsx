@@ -48,6 +48,8 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
   // Binding
   const [bindingAgentId, setBindingAgentId] = useState<string | null>(null);
   const [bindChannel, setBindChannel] = useState('');
+  const [bindingInProgress, setBindingInProgress] = useState(false);
+  const [bindStatus, setBindStatus] = useState<string | null>(null);
   const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; label: string }>>([]);
 
   // Workspace file editing
@@ -140,13 +142,41 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
 
   const handleBind = async (agentId: string) => {
     if (!window.electronAPI || !bindChannel.trim()) return;
-    const result = await (window.electronAPI as any).agentsBind(agentId, bindChannel.trim());
-    if (result.success) {
-      setBindingAgentId(null);
-      setBindChannel('');
-      loadAgents();
-    } else {
-      setError(result.error || t('agents.bindFailed', 'Bind failed'));
+    const channel = bindChannel.trim();
+
+    // Detect first-match-wins collision: if any OTHER agent already has a binding for the
+    // same channel (without a more specific peer/accountId distinction), warn the user that
+    // OpenClaw routes by ordered first-match — only one agent will actually receive messages.
+    // See https://docs.openclaw.ai/concepts/multi-agent
+    const collidingAgent = agents.find((a) =>
+      a.id !== agentId && (a.bindings || []).some((b) => b === channel || b.startsWith(`${channel}:`)),
+    );
+    if (collidingAgent) {
+      const warn = t(
+        'agents.bindCollideWarn',
+        'Channel "{channel}" is already bound to "{other}". OpenClaw routes by FIRST match wins, so this new binding will NOT receive messages until you unbind it from "{other}" or use a peer-specific binding (e.g. "{channel}:wxid_xxx"). Continue anyway?',
+      )
+        .replace(/\{channel\}/g, channel)
+        .replace(/\{other\}/g, collidingAgent.name || collidingAgent.id);
+      if (!confirm(warn)) return;
+    }
+
+    setBindingInProgress(true);
+    setError(null);
+    setBindStatus(t('agents.bindLoading', 'Loading OpenClaw plugins (this can take 60-90s on first run)…'));
+    try {
+      const result = await (window.electronAPI as any).agentsBind(agentId, channel);
+      if (result.success) {
+        setBindingAgentId(null);
+        setBindChannel('');
+        setBindStatus(null);
+        loadAgents();
+      } else {
+        setError(result.error || t('agents.bindFailed', 'Bind failed'));
+        setBindStatus(null);
+      }
+    } finally {
+      setBindingInProgress(false);
     }
   };
 
@@ -382,20 +412,40 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
 
                   {/* Inline bind input */}
                   {bindingAgentId === agent.id && (
-                    <div className="flex items-center gap-2 pl-11 pt-1 border-t border-slate-700/30">
-                      <select value={bindChannel} onChange={(e) => setBindChannel(e.target.value)} aria-label={t('agents.selectChannel', 'Select channel')}
-                        className="flex-1 px-2 py-1.5 bg-slate-900 border border-slate-600 rounded text-sm text-slate-300">
-                        <option value="">{t('agents.selectChannel', 'Select a channel...')}</option>
-                        {availableChannels
-                          .filter(ch => !agent.bindings?.includes(ch.id))
-                          .map(ch => <option key={ch.id} value={ch.id}>{ch.label}</option>)
-                        }
-                      </select>
-                      <button onClick={() => handleBind(agent.id)} disabled={!bindChannel}
-                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white rounded text-xs">
-                        {t('agents.bind', 'Bind')}
-                      </button>
-                      <button onClick={() => setBindingAgentId(null)} title={t('common.cancel', 'Cancel')} aria-label={t('common.cancel', 'Cancel')} className="p-1 text-slate-500 hover:text-slate-300"><X size={14} /></button>
+                    <div className="flex flex-col gap-2 pl-11 pt-1 border-t border-slate-700/30">
+                      <div className="flex items-center gap-2">
+                        <select value={bindChannel} onChange={(e) => setBindChannel(e.target.value)} aria-label={t('agents.selectChannel', 'Select channel')}
+                          disabled={bindingInProgress}
+                          className="flex-1 px-2 py-1.5 bg-slate-900 border border-slate-600 rounded text-sm text-slate-300 disabled:opacity-50">
+                          <option value="">{t('agents.selectChannel', 'Select a channel...')}</option>
+                          {availableChannels
+                            .filter(ch => !agent.bindings?.includes(ch.id))
+                            .map(ch => <option key={ch.id} value={ch.id}>{ch.label}</option>)
+                          }
+                        </select>
+                        <button onClick={() => handleBind(agent.id)} disabled={!bindChannel || bindingInProgress}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white rounded text-xs flex items-center gap-1.5">
+                          {bindingInProgress && (
+                            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden="true" />
+                          )}
+                          {bindingInProgress
+                            ? t('agents.binding', 'Binding…')
+                            : t('agents.bind', 'Bind')}
+                        </button>
+                        <button onClick={() => { if (!bindingInProgress) { setBindingAgentId(null); setBindStatus(null); } }} disabled={bindingInProgress} title={t('common.cancel', 'Cancel')} aria-label={t('common.cancel', 'Cancel')} className="p-1 text-slate-500 hover:text-slate-300 disabled:opacity-30"><X size={14} /></button>
+                      </div>
+                      {bindStatus && (
+                        <div className="text-[11px] text-slate-400 italic">{bindStatus}</div>
+                      )}
+                      {bindChannel && (() => {
+                        const collide = agents.find((a) => a.id !== agent.id && (a.bindings || []).some((b) => b === bindChannel || b.startsWith(`${bindChannel}:`)));
+                        if (!collide) return null;
+                        return (
+                          <div className="text-[11px] rounded border border-amber-700/40 bg-amber-950/30 px-2 py-1.5 text-amber-300">
+                            ⚠️ {t('agents.bindCollideHint', 'Already bound to').replace(/\{a\}/g, '')} <span className="font-semibold">{collide.name || collide.id}</span>. {t('agents.bindCollideHint2', 'OpenClaw routes by FIRST match, so this binding will not receive messages until you unbind it from the other agent (or use a peer-specific binding like channel:wxid_xxx).')}
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
