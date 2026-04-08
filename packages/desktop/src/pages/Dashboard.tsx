@@ -1116,7 +1116,8 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     const currentAgent = config.selectedAgentId || 'main';
     if (prevAgentRef.current !== currentAgent) {
       prevAgentRef.current = currentAgent;
-      handleNewSession();
+      // No new session — agent switch within current conversation is the intended UX.
+      // chat:send uses the latest agentId to construct the correct session key.
       // Mark for auto-bootstrap greeting (non-main agents only)
       if (currentAgent !== 'main') {
         autoBootstrapAgentRef.current = currentAgent;
@@ -1769,14 +1770,11 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
           onRemoveFile={(index) => setAttachedFiles((prev) => prev.filter((_, currentIndex) => currentIndex !== index))}
           onToggleAgentMenu={() => setShowAgentMenu(!showAgentMenu)}
           onSelectAgent={(agentId) => {
-            const prevAgentId = config.selectedAgentId || 'main';
             updateConfig({ selectedAgentId: agentId });
             setShowAgentMenu(false);
-            // Switching agents requires a new session — Gateway associates sessions with agents,
-            // so reusing the same session would keep routing to the previous agent.
-            if (agentId !== prevAgentId) {
-              handleNewSession();
-            }
+            // No new session needed — chat:send constructs a fresh session key
+            // (agent:<agentId>:webchat:<sid>) on every request based on the current agentId,
+            // so the next message will automatically route to the new agent.
           }}
           onTogglePermissionMenu={() => setShowPermissionMenu(!showPermissionMenu)}
           onSelectPermission={applyChatPermissionPreset}
