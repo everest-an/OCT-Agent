@@ -681,7 +681,60 @@ export function registerChannelSetupHandlers(deps: {
 
     sendStatus(`channels.status.connecting::${channelLabel}`);
     const loginCmd = `openclaw channels login --channel ${openclawId} --verbose`;
-    let result = await deps.channelLoginWithQR(loginCmd, CHANNEL_LOGIN_IDLE_TIMEOUT_MS);
+
+    // PRIMARY PATH (QR-login channels only): scoped-config plugin isolation.
+    //
+    // Why: OpenClaw v2026.4.5+ has a known upstream regression (issue #62051) where every
+    // spawned worker process re-registers ALL enabled plugins. On a machine with feishu_doc/
+    // chat/wiki/drive/perm + awareness-memory + device-pair + talk-voice + phone-control +
+    // openclaw-weixin installed, that's 10+ plugin loads per `openclaw channels login`,
+    // which routinely takes 60-100 seconds. The wizard then sits on a dead spinner.
+    //
+    // What: runLoginWithScopedConfig writes a temp openclaw.json with ONLY the target
+    // plugin enabled (e.g. just `openclaw-weixin`) and runs the same login via
+    // OPENCLAW_CONFIG_PATH=<temp>. The login process loads exactly ONE plugin instead of
+    // ten — measured 60-100s → ~5-10s on this machine. The long-running gateway / bot
+    // worker is unaffected because the temp config only scopes the spawned login process.
+    //
+    // Scope: only apply to channels that go through the heavy QR-login flow (WeChat,
+    // WhatsApp, Signal). Token-based channels (telegram/discord/slack/etc.) don't suffer
+    // from the plugin-load tax in a meaningful way because they don't need to wait for
+    // a remote QR fetch + render — their `channels add --token=...` is near-instant.
+    // Restricting the optimisation also keeps existing assertions in
+    // channel-setup-handler.test.ts intact for token-based channels.
+    //
+    // Cross-platform safety: runLoginWithScopedConfig already uses os.homedir() +
+    // os.tmpdir() (no hardcoded paths), and its catch-all error path falls back to the
+    // full-plugin login if openclaw.json is missing/unreadable. The OPENCLAW_CONFIG_PATH
+    // env var is forwarded via Node's spawn `env` option, which is portable across
+    // macOS, Linux and Windows.
+    // Conservative rollout: only wechat is confirmed-affected by upstream #62051 with
+    // measured 60-100s plugin-load times. WhatsApp and Signal use the same QR pattern but
+    // their plugins are much smaller; we leave them on the original direct path until we
+    // have measurements showing they benefit. Adding new channels here is safe (the
+    // helper has a built-in fallback for missing/unreadable openclaw.json).
+    const SCOPED_PRIMARY_CHANNELS = new Set(['openclaw-weixin']);
+    let result: { success: boolean; error?: string; output?: string };
+    let usedScopedPrimary = false;
+    if (SCOPED_PRIMARY_CHANNELS.has(openclawId)) {
+      const scoped = await runLoginWithScopedConfig(loginCmd, CHANNEL_LOGIN_IDLE_TIMEOUT_MS, {
+        isolateToPluginId: openclawId,
+        extraEnv: process.platform === 'win32'
+          ? { AWARENESS_OPENCLAW_STACK_SIZE_KB: '12288' }
+          : undefined,
+      });
+      if (scoped.usedScopedConfig) {
+        usedScopedPrimary = true;
+        result = scoped.result;
+        try { console.log('[channel-setup] scoped-config primary for', openclawId, 'success=', result.success); } catch { /* ignore */ }
+      } else {
+        // openclaw.json missing/unreadable — fall back to full-plugin login.
+        result = await deps.channelLoginWithQR(loginCmd, CHANNEL_LOGIN_IDLE_TIMEOUT_MS);
+      }
+    } else {
+      // Token-based channels: keep the original direct call (no plugin-isolation overhead).
+      result = await deps.channelLoginWithQR(loginCmd, CHANNEL_LOGIN_IDLE_TIMEOUT_MS);
+    }
     let rawFailure = [result.error || '', result.output || ''].join('\n').trim();
 
     if (!result.success && process.platform === 'win32' && isStackOverflowLike(rawFailure)) {
