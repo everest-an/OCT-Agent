@@ -11,18 +11,27 @@ export function clearChannelStatusCache() {
   channelStatusCache.ts = 0;
 }
 
-function readConfiguredFromFile(home: string, toFrontendId: (openclawId: string) => string): string[] {
+function readConfiguredFromFile(home: string, toFrontendId: (openclawId: string) => string): { configured: string[]; disconnected: string[] } {
   try {
     const configPath = path.join(home, '.openclaw', 'openclaw.json');
     const existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     const channels = existing?.channels || {};
     const configured: string[] = [];
+    const disconnected: string[] = [];
     for (const [id, cfg] of Object.entries(channels)) {
-      if ((cfg as any)?.enabled) configured.push(toFrontendId(id));
+      const frontendId = toFrontendId(id);
+      if ((cfg as any)?.enabled === true) {
+        configured.push(frontendId);
+      } else if ((cfg as any)?.enabled === false) {
+        disconnected.push(frontendId);
+      }
     }
-    return configured;
+    return {
+      configured: Array.from(new Set(configured)),
+      disconnected: Array.from(new Set(disconnected)).filter((id) => !configured.includes(id)),
+    };
   } catch {
-    return [];
+    return { configured: [], disconnected: [] };
   }
 }
 
@@ -47,9 +56,10 @@ export function registerChannelListHandlers(deps: {
     // so channels detected by CLI (but not yet written to file) also appear.
     // This ensures a just-completed WeChat/one-click setup is immediately visible.
     const cacheIsRecent = Date.now() - channelStatusCache.ts < 60000;
-    const immediate: string[] = cacheIsRecent && channelStatusCache.configured.length > 0
-      ? [...new Set([...fromFile, ...channelStatusCache.configured])]
-      : fromFile;
+    const immediateConfigured: string[] = cacheIsRecent && channelStatusCache.configured.length > 0
+      ? [...new Set([...fromFile.configured, ...channelStatusCache.configured])]
+      : fromFile.configured;
+    const immediateDisconnected: string[] = fromFile.disconnected.filter((id) => !immediateConfigured.includes(id));
 
     // Fire-and-forget background refresh — deduplicated so concurrent calls
     // from Channels/Agents/AgentWizard pages share one CLI process.
@@ -101,7 +111,7 @@ export function registerChannelListHandlers(deps: {
       }
     }).catch(() => {});
 
-    return { success: true, configured: immediate };
+    return { success: true, configured: immediateConfigured, disconnected: immediateDisconnected };
   });
 
   ipcMain.handle('channel:list-supported', async () => {

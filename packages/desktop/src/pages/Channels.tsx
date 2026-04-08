@@ -168,6 +168,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
   const [asciiQR, setAsciiQR] = useState<string | null>(null);
   const [channelProgress, setChannelProgress] = useState<string | null>(null);
   const [configuredChannels, setConfiguredChannels] = useState<Set<string>>(new Set());
+  const [disconnectedChannels, setDisconnectedChannels] = useState<Set<string>>(new Set());
   const [channels, setChannels] = useState<ChannelDef[]>(getAllChannels());
   const [loadingChannels, setLoadingChannels] = useState(true);
   const [removingChannel, setRemovingChannel] = useState<string | null>(null);
@@ -185,10 +186,14 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
     try {
       const result = await (window.electronAPI as any).channelListConfigured();
       const configured = new Set<string>(result.configured || []);
+      const disconnected = new Set<string>((result.disconnected || []).filter((id: string) => !configured.has(id)));
       configured.add('local');
+      disconnected.delete('local');
       setConfiguredChannels(configured);
+      setDisconnectedChannels(disconnected);
     } catch {
       setConfiguredChannels(new Set(['local']));
+      setDisconnectedChannels(new Set());
     }
     // Load dynamic channel registry from backend (OpenClaw catalog discovery)
     try {
@@ -281,7 +286,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
     setTestStatus('idle'); setTestError(null); setTestNotice(null); setLastError(null);
 
     // Pre-fill from existing config
-    if (window.electronAPI && configuredChannels.has(channelId)) {
+    if (window.electronAPI && (configuredChannels.has(channelId) || disconnectedChannels.has(channelId))) {
       try {
         const res = await (window.electronAPI as any).channelReadConfig(channelId);
         if (res?.success && res.config) {
@@ -629,11 +634,40 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
           </div>
         </div>
 
+        {/* Disconnected */}
+        <div className="mb-6">
+          <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">{t('channels.disconnected', 'Disconnected')}</h3>
+          <div className="grid grid-cols-2 gap-3">
+            {channels.filter((c) => c.id !== 'local' && disconnectedChannels.has(c.id) && !configuredChannels.has(c.id)).map((ch) => (
+              <div key={ch.id} className="p-4 bg-orange-600/10 border border-orange-600/30 rounded-xl text-left hover:border-orange-500/50 transition-colors">
+                <div className="flex items-center gap-3">
+                  <button onClick={() => openWizard(ch.id)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
+                    <ChannelIcon channelId={ch.id} size={28} />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm">{getChannelLabel(ch)}</div>
+                      <div className="text-xs text-orange-300 inline-flex items-center gap-1.5">
+                        <Unplug size={12} />
+                        {t('channels.disconnected', 'Disconnected')}
+                      </div>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => openWizard(ch.id)}
+                    className="px-2 py-1 text-xs bg-orange-500/20 border border-orange-500/30 rounded text-orange-200 hover:bg-orange-500/30 transition-colors"
+                  >
+                    {t('channels.reconnect', 'Reconnect')}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Available */}
         <div>
           <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">{t('channels.available')}</h3>
           <div className="grid grid-cols-2 gap-3">
-            {channels.filter((c) => c.id !== 'local' && !configuredChannels.has(c.id)).map((ch) => (
+            {channels.filter((c) => c.id !== 'local' && !configuredChannels.has(c.id) && !disconnectedChannels.has(c.id)).map((ch) => (
               <button key={ch.id} onClick={() => openWizard(ch.id)}
                 className="p-4 bg-slate-800/50 border border-slate-700 rounded-xl hover:border-slate-600 transition-colors text-left group">
                 <div className="flex items-center gap-3">
@@ -694,6 +728,11 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                     </span>
                   </span>
                 )}
+                {!configuredChannels.has(activeWizard) && disconnectedChannels.has(activeWizard) && (
+                  <span className="text-xs font-normal px-2 py-0.5 bg-orange-600/20 border border-orange-600/30 text-orange-300 rounded-full">
+                    {t('channels.disconnected', 'Disconnected')}
+                  </span>
+                )}
               </h2>
               <button
                 onClick={closeWizard}
@@ -716,7 +755,13 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                     </div>
                   )}
 
-                  {supportsPairingApproval && configuredChannels.has(activeWizard) && renderPairingApprovalPanel()}
+                  {!configuredChannels.has(activeWizard) && disconnectedChannels.has(activeWizard) && (
+                    <div className="p-3 bg-orange-600/10 border border-orange-600/20 rounded-lg text-xs text-orange-300">
+                      {t('channels.savedButDisconnected', 'This channel is saved but currently disconnected. Click Connect to resume it.')}
+                    </div>
+                  )}
+
+                  {supportsPairingApproval && (configuredChannels.has(activeWizard) || disconnectedChannels.has(activeWizard)) && renderPairingApprovalPanel()}
 
                   <div className="flex justify-end">
                     <button

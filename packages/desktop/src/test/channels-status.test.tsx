@@ -39,4 +39,21 @@ describe('Channels status from openclaw.json', () => {
 
     (window as any).electronAPI = origApi;
   });
+
+  it('shows disabled channels in disconnected section', async () => {
+    const origApi = (window as any).electronAPI;
+    (window as any).electronAPI = {
+      ...origApi,
+      channelListConfigured: () => Promise.resolve({ success: true, configured: [], disconnected: ['wechat'] }),
+    };
+
+    await act(async () => { render(<Channels />); });
+    await waitFor(() => {
+      expect(screen.getAllByText('Disconnected').length).toBeGreaterThan(0);
+      expect(screen.getByText('WeChat')).toBeInTheDocument();
+      expect(screen.getByText('Reconnect')).toBeInTheDocument();
+    });
+
+    (window as any).electronAPI = origApi;
+  });
 });

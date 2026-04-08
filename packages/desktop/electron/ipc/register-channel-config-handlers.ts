@@ -23,6 +23,13 @@ const CHANNEL_REMOVE_IDLE_TIMEOUT_MS = 30000;
 const GATEWAY_RESTART_IDLE_TIMEOUT_MS = 30000;
 const CHANNEL_BIND_IDLE_TIMEOUT_MS = 30000;
 const CHANNEL_PAIRING_IDLE_TIMEOUT_MS = 30000;
+const CHANNEL_LOGOUT_IDLE_TIMEOUT_MS = 30000;
+
+const CHANNELS_WITH_PERSISTED_LOGIN_SESSION = new Set([
+  'openclaw-weixin',
+  'whatsapp',
+  'signal',
+]);
 
 const RESERVED_PAIRING_WORDS = new Set([
   'TELEGRAM',
@@ -1021,6 +1028,16 @@ export function registerChannelConfigHandlers(deps: {
       // "channel not found" errors. tree-kill (taskkill /T /F on Windows) ensures
       // both the cmd.exe wrapper AND the node openclaw.mjs grandchild are gone.
       await killActiveLoginForChannel(openclawId).catch(() => { /* best-effort */ });
+
+      // 0.5 Clear cached channel auth on hard remove so switching to a new account
+      // doesn't silently reuse the old session credentials.
+      if (CHANNELS_WITH_PERSISTED_LOGIN_SESSION.has(openclawId)) {
+        try {
+          await deps.runAsync(`openclaw channels logout --channel ${openclawId} 2>&1`, CHANNEL_LOGOUT_IDLE_TIMEOUT_MS);
+        } catch {
+          // Best-effort cleanup only. Some channels may return non-zero when no session exists.
+        }
+      }
 
       // 1. Unbind from all agents (best-effort — ignore errors)
       try {

@@ -209,7 +209,15 @@ export async function fixGatewayStart(ctx: Ctx): Promise<FixResult> {
     }
 
     await ctx.deps.shellRun('openclaw gateway start 2>&1', 20000);
-    return { id: 'gateway-running', success: true, message: 'Gateway started' };
+    const verify = await checkGatewayRunning(ctx);
+    if (verify.status === 'pass') {
+      return { id: 'gateway-running', success: true, message: 'Gateway started' };
+    }
+    return {
+      id: 'gateway-running',
+      success: false,
+      message: 'Gateway command completed but the service is still not reachable. Please retry once.',
+    };
   } catch (err: any) {
     const message = err?.message || '';
     if (ctx.deps.platform === 'win32' && /schtasks run failed/i.test(message)) {
@@ -217,7 +225,15 @@ export async function fixGatewayStart(ctx: Ctx): Promise<FixResult> {
         await ctx.deps.shellRun('openclaw gateway install 2>&1', 30000);
         patchGatewayCmdStackSize(ctx.deps.homedir);
         await ctx.deps.shellRun('openclaw gateway start 2>&1', 20000);
-        return { id: 'gateway-running', success: true, message: 'Gateway service installed and started' };
+        const verify = await checkGatewayRunning(ctx);
+        if (verify.status === 'pass') {
+          return { id: 'gateway-running', success: true, message: 'Gateway service installed and started' };
+        }
+        return {
+          id: 'gateway-running',
+          success: false,
+          message: 'Gateway service was repaired, but runtime is still not reachable. Please retry once.',
+        };
       } catch (installErr: any) {
         const installMessage = installErr?.message || '';
         if (/EACCES|Access is denied|permission denied|拒绝访问|schtasks create failed/i.test(installMessage)) {

@@ -692,7 +692,14 @@ describe('doctor — infrastructure checks', () => {
       fs.mkdirSync(startupDir, { recursive: true });
       fs.writeFileSync(path.join(startupDir, 'OpenClaw Gateway.cmd'), '@echo off');
 
-      const shellRun = vi.fn(async () => 'ok');
+      const shellRun = vi.fn(async (cmd: string) => {
+        if (cmd === 'openclaw gateway install 2>&1') {
+          const gatewayCmdPath = path.join(home, '.openclaw', 'gateway.cmd');
+          fs.mkdirSync(path.dirname(gatewayCmdPath), { recursive: true });
+          fs.writeFileSync(gatewayCmdPath, '@echo off\r\n');
+        }
+        return 'ok';
+      });
       const { doctor } = createDoctorWithMocks(home, {
         platform: 'win32',
         shellRun,
@@ -705,6 +712,8 @@ describe('doctor — infrastructure checks', () => {
           return null;
         },
       });
+
+      mockHttpGet(200);
 
       const result = await doctor.runFix('gateway-running');
       expect(result).toMatchObject({ id: 'gateway-running', success: true });

@@ -360,7 +360,9 @@ function isGatewaySnapshotHealthy(snapshot: GatewayStatusSnapshot | null): boole
   if (!snapshot) return false;
   const runtimeRunning = snapshot.service?.runtime?.status === 'running';
   const portBusy = snapshot.port?.status === 'busy';
-  return !!snapshot.rpc?.ok && !!snapshot.health?.healthy && (runtimeRunning || portBusy);
+  // `health.healthy` can be false-positive in stale-PID edge cases even when
+  // RPC is reachable. Treat RPC reachability as the source of truth.
+  return !!snapshot.rpc?.ok && (runtimeRunning || portBusy);
 }
 
 async function ensureLocalDaemonReadyForRuntime(send?: (ch: string, data: any) => void): Promise<boolean> {
@@ -605,6 +607,25 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
   if (isGatewayRunningOutput(statusOutput)) return { ok: true };
 
   const emit = (message: string) => send?.('chat:status', { type: 'gateway', message });
+
+  // Windows stale-listener recovery: port may stay occupied by a dead/half-ready
+  // gateway process (busy port + runtime stopped + rpc timeout). Clear it before
+  // normal start/install attempts so auto-start does not enter a retry loop.
+  if (process.platform === 'win32') {
+    const snapshot = await readGatewayStatusSnapshot();
+    const looksStaleBusy = snapshot?.service?.runtime?.status !== 'running'
+      && snapshot?.port?.status === 'busy'
+      && !snapshot?.rpc?.ok;
+    if (looksStaleBusy) {
+      emit('Clearing stale Gateway listener...');
+      try {
+        await runAsync('openclaw gateway stop 2>&1', 15000);
+      } catch {
+        // Best-effort only; start/install logic below still runs.
+      }
+      await sleep(1200);
+    }
+  }
 
   if (process.platform === 'win32') {
     await ensureLocalDaemonReadyForRuntime(send);
