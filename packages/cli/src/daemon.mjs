@@ -37,6 +37,7 @@ export async function startDaemon() {
     ? spawn('cmd.exe', ['/d', '/c', 'npx', ...daemonArgs], {
         detached: true,
         stdio: 'ignore',
+        windowsHide: true,
         env: {
           ...process.env,
           AWARENESS_PORT: String(DAEMON_PORT),
