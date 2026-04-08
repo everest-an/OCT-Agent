@@ -850,8 +850,9 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
         }
         const nonMainAgents = resolvedAgents.filter(a => a.id !== 'main');
 
-        // Session key for this mission's main orchestrator.
-        // Plain key (no agent: prefix) = routes to main agent (same as regular chat).
+        // Session key for this mission's main orchestrator (plain, without agent prefix).
+        // Gateway internally prepends "agent:main:" to all webchat session keys,
+        // so chat.send receives plain "orch-xxx" but WS events come back as "agent:main:orch-xxx".
         const mainSessionKey = `orch-${params.missionId.slice(-8)}`;
 
         // Build orchestration prompt — main agent decides which sub-agents to spawn
@@ -978,10 +979,15 @@ Start by planning which sub-agents to use, then spawn them.`;
           return { matchedKey: mk, agentInfo: mission.spawnedAgents.get(mk)! };
         };
 
-        // Helper: check if event is from the main orchestrator session
+        // Helper: check if event is from the main orchestrator session.
+        // Gateway prepends "agent:main:" to plain session keys in WS events,
+        // so we use endsWith() to match "agent:main:orch-xxx" against "orch-xxx".
         const isMainSession = (key: string, runId: string): boolean => {
-          if (key === mainSessionKey) return true;
-          if (runId && missionRef.runIdToKey.get(runId) === mainSessionKey) return true;
+          if (key === mainSessionKey || key.endsWith(`:${mainSessionKey}`)) return true;
+          if (runId) {
+            const mapped = missionRef.runIdToKey.get(runId);
+            if (mapped === mainSessionKey || mapped?.endsWith(`:${mainSessionKey}`)) return true;
+          }
           return false;
         };
 
