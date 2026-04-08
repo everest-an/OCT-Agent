@@ -474,6 +474,11 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
   // Memory warning toast
   const [memoryWarning, setMemoryWarning] = useState<string | null>(null);
   const memoryWarningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Workspace-change toast — shown when user picks/clears the project folder, confirms the
+  // same working directory is applied to channels (WeChat/Telegram/...) via the before_prompt_build
+  // hook, not just to desktop chat.
+  const [workspaceToast, setWorkspaceToast] = useState<string | null>(null);
+  const workspaceToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const resetChatActivityTimeout = useCallback(() => {
     if (!activeRunRef.current) return;
@@ -1045,9 +1050,34 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     // that makes "channels respect the project folder picked in chat" actually work.
     const api = window.electronAPI as any;
     if (api?.workspaceSetActive) {
-      void api.workspaceSetActive(projectRoot || null).catch(() => { /* non-fatal */ });
+      void api.workspaceSetActive(projectRoot || null)
+        .then((result: { success: boolean; error?: string } | undefined) => {
+          // Surface a confirmation toast so the user knows the change is also applied to
+          // channel inbound messages — not just the desktop chat. Without this feedback
+          // users had no idea their WeChat bot would pick up the new workspace.
+          if (result && result.success === false) {
+            setWorkspaceToast(
+              t('chat.workspaceSyncFailed', 'Workspace change saved locally but failed to sync to channels: {error}')
+                .replace(/\{error\}/g, (result.error || 'unknown error').slice(0, 100)),
+            );
+          } else if (projectRoot) {
+            setWorkspaceToast(
+              t(
+                'chat.workspaceSynced',
+                'Active project: {name}. Desktop chat and all channels (WeChat, Telegram…) will use this directory.',
+              ).replace(/\{name\}/g, projectRoot),
+            );
+          } else {
+            setWorkspaceToast(
+              t('chat.workspaceCleared', 'Active project cleared. Channels will fall back to the agent default workspace.'),
+            );
+          }
+          if (workspaceToastTimerRef.current) clearTimeout(workspaceToastTimerRef.current);
+          workspaceToastTimerRef.current = setTimeout(() => setWorkspaceToast(null), 5000);
+        })
+        .catch(() => { /* non-fatal */ });
     }
-  }, [projectRoot]);
+  }, [projectRoot, t]);
 
   // Auto-scroll
   useEffect(() => {
@@ -1544,6 +1574,21 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
       onDragLeave={e => { if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node)) setIsDragOver(false); }}
       onDrop={e => { handleFileDrop(e); setIsDragOver(false); }}
     >
+      {/* Workspace change toast — floats top-center for 5s when user picks/clears the
+          project folder. Confirms the change applies to BOTH desktop chat AND all channels
+          (WeChat/Telegram/Signal) via the before_prompt_build hook. */}
+      {workspaceToast && (
+        <div
+          className="pointer-events-none fixed top-4 left-1/2 -translate-x-1/2 z-[210] max-w-lg rounded-xl border border-emerald-600/40 bg-emerald-950/90 px-4 py-2.5 text-[13px] text-emerald-100 shadow-lg shadow-emerald-950/40 backdrop-blur"
+          role="status"
+          aria-live="polite"
+        >
+          <span className="inline-flex items-start gap-2">
+            <span className="mt-[2px] h-2 w-2 flex-shrink-0 rounded-full bg-emerald-400" aria-hidden="true" />
+            <span className="leading-snug">{workspaceToast}</span>
+          </span>
+        </div>
+      )}
       {/* Custom confirm dialog */}
       {confirmDialog && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200] p-8">
