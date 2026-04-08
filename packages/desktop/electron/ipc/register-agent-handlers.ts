@@ -266,6 +266,27 @@ export function registerAgentHandlers(deps: {
       if (safeModel) { spawnArgs.push('--model', safeModel); }
       // OpenClaw loads all plugins on every CLI invocation (15-20s), so 45s timeout is needed
       await deps.runSpawnAsync('openclaw', spawnArgs, 45000);
+      // Strip the auto-generated `workspace` field that `openclaw agents add`
+      // wrote into openclaw.json. When that field is set, OpenClaw's write/exec
+      // tools refuse to operate outside ~/.openclaw/workspace-<slug>, so users
+      // get "I can't save the file" hallucinations when asking the sub-agent
+      // to write into ~/Documents/anywhere. main agent has no such field and
+      // works fine — we make sub-agents match.
+      // We still need --workspace on the CLI invocation above so OpenClaw seeds
+      // SOUL.md / AGENTS.md / BOOTSTRAP.md etc. into the slug dir; we just don't
+      // want the field to persist in the config afterwards.
+      try {
+        const cfgPath = path.join(deps.home, '.openclaw', 'openclaw.json');
+        const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+        const list: any[] = Array.isArray(cfg?.agents?.list) ? cfg.agents.list : [];
+        const entry = list.find((a) => a?.id === slug);
+        if (entry && entry.workspace === wsDir) {
+          delete entry.workspace;
+          fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+        }
+      } catch {
+        // Non-fatal: sanitize on next app start will catch it.
+      }
       if (systemPrompt) {
         const agentDir = path.join(deps.home, '.openclaw', 'agents', slug, 'agent');
         fs.mkdirSync(wsDir, { recursive: true });

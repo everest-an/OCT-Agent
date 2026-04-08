@@ -209,6 +209,38 @@ export function sanitizeDesktopAwarenessPluginConfig(config: Record<string, any>
     delete config.plugins.entries['memory-awareness'];
   }
 
+  // Workaround for OpenClaw upstream bug: `memory-lancedb` schema requires
+  // `config.embedding` even when the entry is `enabled: false`, so an empty
+  // or stub entry crashes `openclaw doctor` and blocks the runtime. We don't
+  // ship lancedb (we use awareness-memory), so it's safe to remove the entry
+  // whenever it's empty/disabled/missing the required `embedding` field.
+  // If a power user has deliberately filled in a complete lancedb config we
+  // leave it alone.
+  const lancedbEntry = config.plugins.entries?.['memory-lancedb'];
+  if (lancedbEntry && !lancedbEntry?.config?.embedding) {
+    delete config.plugins.entries['memory-lancedb'];
+  }
+
+  // Strip auto-generated `agents.list[].workspace` fields that hard-sandbox
+  // sub-agents into ~/.openclaw/workspace-<slug>/. When this field is set,
+  // OpenClaw's write/exec/fs_read tools refuse to operate outside that dir,
+  // so users see "I can't save the file" / "tool not ready" hallucinations
+  // when asking a sub-agent to write into ~/Documents/anywhere. The `main`
+  // agent has no such field by default and can write anywhere — sub-agents
+  // should match. We only remove the field when it points at the auto path
+  // pattern `~/.openclaw/workspace-<slug>`; if a power user has manually set
+  // a real path (e.g. their actual project folder) we leave it alone.
+  // Compatible with all OpenClaw versions because `workspace` is an optional
+  // field — main agent has been running without it forever.
+  const agentList: any[] = Array.isArray(config.agents?.list) ? config.agents.list : [];
+  const autoWorkspacePrefix = path.join(homedir, '.openclaw', 'workspace-');
+  for (const a of agentList) {
+    const ws = a?.workspace;
+    if (typeof ws === 'string' && ws.startsWith(autoWorkspacePrefix)) {
+      delete a.workspace;
+    }
+  }
+
   const awarenessConfig = config.plugins.entries?.['openclaw-memory']?.config;
   if (awarenessConfig?.localUrl === 'http://localhost:37800') {
     awarenessConfig.localUrl = 'http://127.0.0.1:37800';
