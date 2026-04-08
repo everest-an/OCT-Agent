@@ -1,6 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import { app, ipcMain, shell } from 'electron';
+import {
+  AWARENESS_DOWNLOAD_URL,
+  compareSemver,
+  fetchLatestDesktopVersion,
+} from '../app-update-check';
 import { enableDaemonAutostart, disableDaemonAutostart, isDaemonAutostartEnabled } from '../daemon-autostart';
 import { patchGatewayCmdStackSize } from '../openclaw-config';
 
@@ -164,6 +169,22 @@ export function registerAppRuntimeHandlers(deps: {
   ipcMain.handle('app:check-updates', async () => {
     const updates: any[] = [];
 
+    // Desktop app (AwarenessClaw itself) update check — polls backend for latest version.
+    try {
+      const currentDesktop = app.getVersion();
+      const latest = await fetchLatestDesktopVersion();
+      if (latest && currentDesktop && compareSemver(latest.latestVersion, currentDesktop) > 0) {
+        updates.push({
+          component: 'desktop',
+          label: 'AwarenessClaw Desktop',
+          currentVersion: currentDesktop,
+          latestVersion: latest.latestVersion,
+          changelog: latest.releaseNotes || undefined,
+          downloadUrl: latest.downloadUrl || AWARENESS_DOWNLOAD_URL,
+        });
+      }
+    } catch { /* best-effort */ }
+
     const currentOC = await deps.safeShellExecAsync('openclaw --version');
     if (currentOC) {
       const versionMatch = currentOC.match(/(\d+\.\d+\.\d+)/);
@@ -269,7 +290,26 @@ export function registerAppRuntimeHandlers(deps: {
     });
 
     try {
-      if (component === 'openclaw') {
+      if (component === 'desktop') {
+        // Desktop app upgrade is manual for now: open the download/landing page in the
+        // user's default browser. When we ship electron-updater, replace this with the
+        // native download + install flow.
+        progress('desktop:open-download', 'running');
+        let downloadUrl = AWARENESS_DOWNLOAD_URL;
+        try {
+          const latest = await fetchLatestDesktopVersion();
+          if (latest?.downloadUrl) downloadUrl = latest.downloadUrl;
+        } catch {}
+        try {
+          await shell.openExternal(downloadUrl);
+          progress('desktop:open-download', 'done', downloadUrl);
+          progress('complete', 'done');
+          return { success: true, version: 'manual', downloadUrl };
+        } catch (err: any) {
+          progress('desktop:open-download', 'error', err?.message);
+          return { success: false, error: `Failed to open download page: ${err?.message || 'unknown error'}` };
+        }
+      } else if (component === 'openclaw') {
         progress('openclaw:check-version', 'running');
         const preVer = await deps.safeShellExecAsync('openclaw --version', 5000);
         const preMatch = preVer?.match(/(\d+\.\d+\.\d+)/);

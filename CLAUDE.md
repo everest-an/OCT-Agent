@@ -1,5 +1,30 @@
 # AwarenessClaw 项目规则
 
+## 🚀 发布流程（bump 版本 → 打包 → 推送升级提示）
+
+AwarenessClaw 目前走**手动下载升级**模式（没接 electron-updater），升级提示由后端 `/api/v1/app/latest-version` 下发，桌面客户端轮询后显示 `UpdateBanner` 并通过 `shell.openExternal` 打开 `downloadUrl`。**每次发布新版本必须按以下顺序执行，缺一不可**：
+
+1. **bump `packages/desktop/package.json` 的 `version`**（semver，客户端用 `app.getVersion()` 与后端下发版本比较）。
+2. **更新 `packages/desktop/CHANGELOG.md`**（若无则创建）：`## [x.y.z] - YYYY-MM-DD` + Added/Changed/Fixed，作为后端 `AWARENESSCLAW_RELEASE_NOTES` 的内容来源。
+3. **打 DMG**：`cd packages/desktop && PYTHON_PATH=/usr/bin/python3 CSC_IDENTITY_AUTO_DISCOVERY=false npm run package:mac`。产物在 `release/AwarenessClaw-<version>-arm64.dmg`。
+4. **上传 DMG / 安装包到分发位置**（暂时为 `https://awareness.market/` 落地页，后续换 OSS/S3/GitHub Release）。
+5. **后端推送新版本号**：在生产服务器 `.env.prod` 更新（或临时 `export`）：
+   - `AWARENESSCLAW_LATEST_VERSION=x.y.z`
+   - `AWARENESSCLAW_DOWNLOAD_URL=https://awareness.market/`（或真实 dmg/exe 直链）
+   - `AWARENESSCLAW_RELEASE_NOTES="<changelog 摘要>"`
+   - `AWARENESSCLAW_MANDATORY=false`（只有破坏性 breaking change 才设 true）
+   然后重启 backend：`docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.prod up -d backend mcp worker beat`（**禁止带 postgres**）。
+6. **验证**：`curl https://awareness.market/api/v1/app/latest-version?app=awarenessclaw` 确认 JSON 中 `latestVersion` 是新版本；在旧版客户端启动，确认 `UpdateBanner` 弹出，点击 "Upgrade Now" 打开官网。
+7. **提交代码**：commit message 必须包含版本号、改动摘要、DMG 路径。同时更新 `Awareness/docs/prd/deployment-log.md`。
+8. **三端发布**：macOS DMG 完成后必须评估 Windows exe 和 Linux AppImage/deb 是否同步；未发布的平台在 CHANGELOG 中显式标注 "macOS only"。
+9. **绝不直接改后端硬编码默认值**：`backend/awareness/api/routes/app_version.py` 里的 `0.1.0` 只是保底，真实版本必须走环境变量。
+
+**强制规则**：每次 bump desktop `version` 必须同步至少以下三个动作——打包 DMG、在服务器设置环境变量、本地启动一次验证升级提示——三者都完成才算发布成功。缺任何一步都视为未发布，禁止合并到 main。
+
+**跨平台兼容**：客户端 `app-update-check.ts` 是纯 JS，不依赖 macOS/Linux/Windows 专有 API。后端端点对 `app` query 参数做 fallback（未知 app 返回 `awarenessclaw` 默认值），保证旧客户端不会因后端扩展而崩。
+
+**防回归**：`src/test/app-update-check.test.ts`（vitest）覆盖 semver 比较、`shouldShowDesktopUpdate`、`fetchLatestDesktopVersion` mock 路径；后端 `backend/tests/test_app_version_endpoint.py`（pytest）覆盖环境变量 override、mandatory 布尔解析、未知 app fallback。修改发布/升级相关代码前后必须跑这两个测试。
+
 ## 📦 macOS DMG 打包规则（避免每次重复探索）
 
 在 `packages/desktop/` 目录下打 DMG：
