@@ -12,6 +12,7 @@ import {
 import {
   isIgnorablePluginInstallError,
   resolveChannelPluginInstallSpec,
+  ensureTelegramRuntimeDeps,
 } from './channel-plugin-spec';
 import { clearChannelStatusCache } from './register-channel-list-handlers';
 import { dedupedChannelsAddHelp, dedupedChannelsList, killActiveLoginForChannel } from '../openclaw-process-guard';
@@ -178,6 +179,16 @@ function flattenStoredChannelConfig(channelDef: ChannelDef | undefined, storedCo
     }
   }
 
+  // Fallback: if field-based extraction found nothing, include any non-meta
+  // string values from the stored config. This handles key mismatches between
+  // dynamic configFields and OpenClaw's internal storage (e.g. token vs botToken).
+  if (Object.keys(flattened).length === 0) {
+    for (const [key, value] of Object.entries(storedConfig)) {
+      if (key === 'enabled') continue;
+      if (typeof value === 'string' && value) flattened[key] = value;
+    }
+  }
+
   return flattened;
 }
 
@@ -186,13 +197,22 @@ function hasRequiredChannelCredentials(channelDef: ChannelDef | undefined, store
     return Object.keys(storedConfig).some((key) => key !== 'enabled' && !!storedConfig[key]);
   }
 
-  return channelDef.configFields.every((field) => {
+  const fieldCheck = channelDef.configFields.every((field) => {
     if (field.required === false) return true;
     const value = isAccountScopedField(field)
       ? getNestedValue(storedConfig, `${field.configPath}.${field.key}`)
       : storedConfig[field.key];
     return typeof value === 'string' ? value.trim().length > 0 : !!value;
   });
+
+  if (fieldCheck) return true;
+
+  // Fallback: OpenClaw may store credentials under a different key than what
+  // dynamic configFields declare (e.g. CLI --token → stored as botToken for
+  // Telegram). Accept the config if any non-meta string value exists.
+  return Object.keys(storedConfig).some((key) =>
+    key !== 'enabled' && typeof storedConfig[key] === 'string' && storedConfig[key].trim().length > 0,
+  );
 }
 
 function channelAppearsConfigured(listOutput: string | null, openclawId: string): boolean {
@@ -734,6 +754,10 @@ export function registerChannelConfigHandlers(deps: {
       const saveStrategy = channelDef?.saveStrategy || 'cli';
       const configForCli = safeOpenclawId === 'telegram' ? coerceTelegramCliConfig(channelDef, config) : config;
       let pluginInstallError: string | null = null;
+
+      // Telegram runtime-deps fix: ensure grammy is accessible before any CLI
+      // command that loads the telegram plugin (see channel-plugin-spec.ts).
+      if (safeOpenclawId === 'telegram') ensureTelegramRuntimeDeps();
 
       try {
         await deps.runAsync(`openclaw plugins install "${pluginPkg}" 2>&1`, 60000);

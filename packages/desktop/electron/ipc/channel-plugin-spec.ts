@@ -1,6 +1,112 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { parseJsonShellOutput } from '../openclaw-shell-output';
 
 const INSPECT_TIMEOUT_MS = 12000;
+
+// ---------------------------------------------------------------------------
+// Telegram runtime-deps fix (OpenClaw packaging bug workaround)
+// ---------------------------------------------------------------------------
+// OpenClaw bundles telegram's runtime deps (grammy, @grammyjs, …) inside
+//   dist/extensions/telegram/node_modules/
+// But the dist-level chunk files (sticker-cache-*.js, monitor-*.js, …) do
+//   import "grammy" — Node resolution from dist/ goes UP to the package's
+//   own node_modules/ and never looks SIDEWAYS into extensions/telegram/.
+//
+// Fix: copy the missing deps into <openclaw>/node_modules/ once so the
+// standard resolution chain finds them.  Idempotent (no-op when already done).
+// ---------------------------------------------------------------------------
+function findOpenClawPackageDirQuick(): string | null {
+  const home = os.homedir();
+  const candidates: string[] = [];
+
+  // Managed runtime (AwarenessClaw bundled install)
+  candidates.push(
+    path.join(home, '.awareness-claw', 'openclaw-runtime', 'node_modules', 'openclaw'),
+    path.join(home, '.awareness-claw', 'openclaw-runtime', 'lib', 'node_modules', 'openclaw'),
+  );
+
+  if (process.platform === 'win32') {
+    const appdata = process.env.APPDATA || '';
+    const localappdata = process.env.LOCALAPPDATA || '';
+    if (appdata) candidates.push(path.join(appdata, 'npm', 'node_modules', 'openclaw'));
+    if (localappdata) {
+      candidates.push(path.join(localappdata, 'pnpm', 'global', 'node_modules', 'openclaw'));
+    }
+  } else {
+    candidates.push(
+      path.join(home, '.npm-global', 'lib', 'node_modules', 'openclaw'),
+      '/usr/local/lib/node_modules/openclaw',
+      '/opt/homebrew/lib/node_modules/openclaw',
+      '/usr/lib/node_modules/openclaw',
+    );
+  }
+
+  for (const dir of candidates) {
+    try { if (fs.existsSync(path.join(dir, 'package.json'))) return dir; } catch {}
+  }
+  return null;
+}
+
+export function ensureTelegramRuntimeDeps(): boolean {
+  try {
+    const openclawDir = findOpenClawPackageDirQuick();
+    if (!openclawDir) {
+      console.warn('[telegram-deps] cannot locate openclaw package dir');
+      return false;
+    }
+
+    const telegramDepsDir = path.join(openclawDir, 'dist', 'extensions', 'telegram', 'node_modules');
+    const targetDir = path.join(openclawDir, 'node_modules');
+
+    // Already fixed?
+    if (fs.existsSync(path.join(targetDir, 'grammy', 'package.json'))) return true;
+    // Source deps available?
+    if (!fs.existsSync(path.join(telegramDepsDir, 'grammy'))) {
+      console.warn('[telegram-deps] grammy not found in bundled telegram deps');
+      return false;
+    }
+    // Ensure target dir exists
+    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+    // Copy all telegram runtime deps to openclaw/node_modules/
+    // Scoped packages (e.g. @grammyjs) are scope directories containing
+    // sub-package folders — we must iterate into them and copy each sub-package
+    // individually, otherwise a pre-existing empty scope dir blocks the copy.
+    const entries = fs.readdirSync(telegramDepsDir).filter(e => !e.startsWith('.'));
+    let copied = 0;
+    for (const entry of entries) {
+      const src = path.join(telegramDepsDir, entry);
+      const dst = path.join(targetDir, entry);
+      try {
+        if (!fs.statSync(src).isDirectory()) continue;
+        if (entry.startsWith('@')) {
+          // Scoped package: ensure scope dir exists, then copy each sub-package
+          if (!fs.existsSync(dst)) fs.mkdirSync(dst, { recursive: true });
+          for (const sub of fs.readdirSync(src)) {
+            const subSrc = path.join(src, sub);
+            const subDst = path.join(dst, sub);
+            if (!fs.existsSync(subDst) && fs.statSync(subSrc).isDirectory()) {
+              fs.cpSync(subSrc, subDst, { recursive: true });
+              copied++;
+            }
+          }
+        } else if (!fs.existsSync(dst)) {
+          fs.cpSync(src, dst, { recursive: true });
+          copied++;
+        }
+      } catch (cpErr) {
+        console.warn(`[telegram-deps] failed to copy ${entry}:`, cpErr);
+      }
+    }
+    if (copied > 0) console.log(`[telegram-deps] Copied ${copied} telegram runtime deps to ${targetDir}`);
+    return fs.existsSync(path.join(targetDir, 'grammy', 'package.json'));
+  } catch (err) {
+    console.warn('[telegram-deps] ensureTelegramRuntimeDeps failed:', err);
+    return false;
+  }
+}
 
 export function sanitizePluginId(value: string): string {
   return String(value || '').replace(/[^a-z0-9@/_-]/gi, '').toLowerCase();

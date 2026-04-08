@@ -13,6 +13,7 @@ import {
   isIgnorablePluginInstallError,
   resolveChannelPluginInstallSpec,
   sanitizePluginId,
+  ensureTelegramRuntimeDeps,
 } from './channel-plugin-spec';
 import { clearChannelStatusCache } from './register-channel-list-handlers';
 import { acquireChannelLoginLock, dedupedChannelsList, killStaleChannelLogins } from '../openclaw-process-guard';
@@ -599,6 +600,14 @@ export function registerChannelSetupHandlers(deps: {
     // openclaw plugins install loads ALL plugins before checking, wasting 15-30s even when already installed.
     const pluginLocalDir = path.join(os.homedir(), '.openclaw', 'extensions', openclawId, 'package.json');
     const pluginAlreadyInstalled = fs.existsSync(pluginLocalDir);
+
+    // Telegram runtime-deps fix: the bundled telegram plugin ships grammy in
+    // dist/extensions/telegram/node_modules/ but the dist-level chunk files
+    // can't find it via standard Node resolution. Copy it once to openclaw's
+    // own node_modules/ before any CLI command that would try to load the plugin.
+    if (openclawId === 'telegram') {
+      ensureTelegramRuntimeDeps();
+    }
 
     sendStatus(`channels.status.configuring::${channelLabel}`);
     if (pluginAlreadyInstalled) {
