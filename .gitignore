@@ -17,5 +17,6 @@ packages/desktop/.awareness/
 packages/desktop/.clawhub/
 packages/desktop/skills/
 packages/desktop/main.js
+packages/desktop/channel-login-flow.js
 packages/desktop/.tmp-source-map-index.json
 .mcp.json

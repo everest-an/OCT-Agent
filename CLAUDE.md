@@ -1,5 +1,25 @@
 # AwarenessClaw 项目规则
 
+## 📦 npm 包发布规则（`@awareness-sdk/claw` CLI 安装器）
+
+AwarenessClaw 目前向 npm 发布一个包：`@awareness-sdk/claw`（源码在 `packages/cli/`），用作 `npx @awareness-sdk/claw` 一键安装器。发布必须遵守以下规则：
+
+1. **强制走官方 registry**：本机 npm 默认 registry 可能被改成 `https://registry.npmmirror.com`（镜像不接受 publish，报 `ENEEDAUTH need auth`）。**每次 publish 必须显式带** `--registry=https://registry.npmjs.org/`，不要依赖默认 registry。完整命令：
+   ```bash
+   cd packages/cli && npm publish --access public \
+     --registry=https://registry.npmjs.org/ \
+     --//registry.npmjs.org/:_authToken=<NPM_TOKEN>
+   ```
+2. **必须加 `--access public`**：`@awareness-sdk` 是 scoped 包，npm 默认把 scoped 包当 private 包，没有 `--access public` 会报 402 Payment Required。
+3. **Token 在主仓 `Awareness/CLAUDE.md` 的 "SDK 发布凭证" 里**，不要在代码里 hardcode，也不要提交到 git。
+4. **首次发布前必须有 README.md**：npm 包列表页会显示 README，没有 README 会让包看起来不专业。`packages/cli/README.md` 是最小必需内容，发布前确认它存在且覆盖 Quick Start + Requirements + License。
+5. **`package.json` 必须有 `files` 白名单**：只发 `bin/` 和 `src/`，避免把 `node_modules/`、`test/`、`.DS_Store` 等打进 tarball。当前 `files: ["bin/", "src/"]` 是正确的，改动时必须同步维护。
+6. **版本号必须和 CHANGELOG 对齐**：每次 bump `packages/cli/package.json` 的 `version` 必须同步更新 `packages/cli/CHANGELOG.md`（没有则新建）。
+7. **发布后必须验证**：`npm view @awareness-sdk/claw version` 应返回新版本号；`npx @awareness-sdk/claw@latest --help` 应能正常拉取并打印帮助（验证 bin 入口和 files 白名单正确）。
+8. **禁止用 `npm publish --tag latest` 发测试版**：测试版用 `--tag next` 或 `--tag beta`，避免 `npx @awareness-sdk/claw` 意外拉到未验证版本。
+
+**Claw CLI ↔ Desktop 版本关系**：CLI `@awareness-sdk/claw` 和 Desktop `AwarenessClaw.dmg` 是**两套独立发布渠道**，版本号互不绑定。CLI 面向命令行用户，走 `npx`；Desktop 面向 GUI 用户，走 dmg/exe 下载 + 后端 `latest-version` 端点。两边都要维护 CHANGELOG，都要在主仓 `docs/prd/deployment-log.md` 留痕。
+
 ## 🚀 发布流程（bump 版本 → 打包 → 推送升级提示）
 
 AwarenessClaw 目前走**手动下载升级**模式（没接 electron-updater），升级提示由后端 `/api/v1/app/latest-version` 下发，桌面客户端轮询后显示 `UpdateBanner` 并通过 `shell.openExternal` 打开 `downloadUrl`。**每次发布新版本必须按以下顺序执行，缺一不可**：
