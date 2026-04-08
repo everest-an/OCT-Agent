@@ -595,6 +595,119 @@ describe('registerChannelSetupHandlers', () => {
     expect(send).toHaveBeenCalledWith('channel:status', 'channels.status.repairingPlugin::telegram');
   });
 
+  it('isolates login to target channel plugin when unrelated plugin load failure blocks setup', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+
+    const channelLoginWithQR = vi
+      .fn()
+      .mockResolvedValueOnce({
+        success: false,
+        error: "[openclaw] Failed to start CLI: PluginLoadFailureError: plugin load failed: feishu: Error: Cannot find module '@larksuiteoapi/node-sdk'",
+      })
+      .mockResolvedValueOnce({ success: true });
+
+    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => undefined);
+    const rmSpy = vi.spyOn(fs, 'rmSync').mockImplementation(() => undefined as any);
+    vi.spyOn(fs, 'readFileSync').mockImplementation((filePath: any) => {
+      if (String(filePath).includes('openclaw.json')) {
+        return JSON.stringify({
+          plugins: {
+            allow: ['feishu', 'openclaw-weixin'],
+            entries: {
+              feishu: { enabled: true },
+              'openclaw-weixin': { enabled: true },
+            },
+          },
+          channels: {
+            'openclaw-weixin': { enabled: true },
+          },
+        }) as any;
+      }
+      throw new Error(`unexpected readFileSync(${String(filePath)})`);
+    });
+
+    registerChannelSetupHandlers({
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any),
+      getChannel: () => ({ label: 'WeChat', openclawId: 'openclaw-weixin', pluginPackage: '@tencent-weixin/openclaw-weixin', setupFlow: 'qr-login', saveStrategy: 'json-direct' }),
+      runAsync: vi.fn(async () => 'ok'),
+      safeShellExecAsync: vi.fn(async () => 'ok'),
+      readShellOutputAsync: vi.fn(async () => '[{"id":"openclaw-weixin","status":"linked"}]'),
+      channelLoginWithQR,
+      ensureLocalDaemonReadyForRuntime: vi.fn(async () => true),
+    });
+
+    const handler = getRegisteredSetupHandler();
+    const result = await handler({}, 'wechat');
+
+    expect(result).toMatchObject({ success: true });
+    expect(channelLoginWithQR).toHaveBeenCalledTimes(2);
+    const scopedEnv = channelLoginWithQR.mock.calls[1]?.[2] as Record<string, string> | undefined;
+    expect(scopedEnv?.OPENCLAW_CONFIG_PATH).toBeTruthy();
+    expect(scopedEnv?.AWARENESS_OPENCLAW_STACK_SIZE_KB).toBe('12288');
+
+    const isolatedWrite = writeSpy.mock.calls.find(([target]) => String(target).includes('awarenessclaw-channel-login'));
+    expect(isolatedWrite).toBeTruthy();
+    const isolatedConfig = JSON.parse(String(isolatedWrite?.[1] || '{}'));
+    expect(isolatedConfig.plugins?.allow).toEqual(['openclaw-weixin']);
+    expect(isolatedConfig.plugins?.entries?.feishu?.enabled).toBe(false);
+    expect(isolatedConfig.plugins?.entries?.['openclaw-weixin']?.enabled).toBe(true);
+    expect(rmSpy).toHaveBeenCalledWith(expect.stringContaining('awarenessclaw-channel-login'), expect.objectContaining({ force: true }));
+  });
+
+  it('uses full login output payload to detect unrelated plugin failures even when error text is truncated', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+
+    const channelLoginWithQR = vi
+      .fn()
+      .mockResolvedValueOnce({
+        success: false,
+        error: 'dules/openclaw/dist/program-4nvJHrAo.js:136:5) at async Command.parseAsync (...) at async runCli (...)',
+        output: "[openclaw] Failed to start CLI: PluginLoadFailureError: plugin load failed: feishu: Error: Cannot find module '@larksuiteoapi/node-sdk'",
+      })
+      .mockResolvedValueOnce({ success: true });
+
+    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => undefined);
+    vi.spyOn(fs, 'rmSync').mockImplementation(() => undefined as any);
+    vi.spyOn(fs, 'readFileSync').mockImplementation((filePath: any) => {
+      if (String(filePath).includes('openclaw.json')) {
+        return JSON.stringify({
+          plugins: {
+            allow: ['feishu', 'openclaw-weixin'],
+            entries: {
+              feishu: { enabled: true },
+              'openclaw-weixin': { enabled: true },
+            },
+          },
+          channels: {
+            'openclaw-weixin': { enabled: true },
+          },
+        }) as any;
+      }
+      throw new Error(`unexpected readFileSync(${String(filePath)})`);
+    });
+
+    registerChannelSetupHandlers({
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any),
+      getChannel: () => ({ label: 'WeChat', openclawId: 'openclaw-weixin', pluginPackage: '@tencent-weixin/openclaw-weixin', setupFlow: 'qr-login', saveStrategy: 'json-direct' }),
+      runAsync: vi.fn(async () => 'ok'),
+      safeShellExecAsync: vi.fn(async () => 'ok'),
+      readShellOutputAsync: vi.fn(async () => '[{"id":"openclaw-weixin","status":"linked"}]'),
+      channelLoginWithQR,
+      ensureLocalDaemonReadyForRuntime: vi.fn(async () => true),
+    });
+
+    const handler = getRegisteredSetupHandler();
+    const result = await handler({}, 'wechat');
+
+    expect(result).toMatchObject({ success: true });
+    expect(channelLoginWithQR).toHaveBeenCalledTimes(2);
+    const scopedEnv = channelLoginWithQR.mock.calls[1]?.[2] as Record<string, string> | undefined;
+    expect(scopedEnv?.OPENCLAW_CONFIG_PATH).toBeTruthy();
+
+    const isolatedWrite = writeSpy.mock.calls.find(([target]) => String(target).includes('awarenessclaw-channel-login'));
+    expect(isolatedWrite).toBeTruthy();
+  });
+
   it('prepares official CLI channels via channels add before login', async () => {
     const runAsync = vi.fn(async () => 'ok');
     const channelLoginWithQR = vi.fn(async () => ({ success: true }));

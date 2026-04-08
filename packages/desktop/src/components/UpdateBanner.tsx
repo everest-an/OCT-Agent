@@ -287,6 +287,12 @@ export default function UpdateBanner() {
                 </div>
               ))}
 
+              {upgrading && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-300">
+                  {t('update.doNotLeave', 'Upgrade in progress. Keep this window open until all components finish. Closing or leaving now can interrupt the upgrade.')}
+                </div>
+              )}
+
               {/* Success message */}
               {allUpgraded && (
                 <div className="p-3 bg-emerald-600/10 border border-emerald-600/20 rounded-xl text-xs text-emerald-400 text-center">

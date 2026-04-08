@@ -59,7 +59,27 @@ export function registerAppRuntimeHandlers(deps: {
     runFix: (checkId: string) => Promise<any>;
   };
   getMainWindow: () => any | null;
+  onUpgradeRunningChange?: (running: boolean) => void;
 }) {
+  const UPGRADE_STATE_PATH = path.join(deps.home, '.openclaw', '.desktop-upgrade-state.json');
+
+  const writeUpgradeState = (state: Record<string, unknown>) => {
+    try {
+      fs.mkdirSync(path.dirname(UPGRADE_STATE_PATH), { recursive: true });
+      fs.writeFileSync(UPGRADE_STATE_PATH, JSON.stringify(state, null, 2), 'utf8');
+    } catch {
+      // Non-fatal: upgrade can proceed even if state marker fails.
+    }
+  };
+
+  const clearUpgradeState = () => {
+    try {
+      fs.rmSync(UPGRADE_STATE_PATH, { force: true });
+    } catch {
+      // Non-fatal cleanup.
+    }
+  };
+
   // Upgrade progress helper — pushes phase info to renderer + taskbar progress
   let lastDetailTs = 0;
   function sendUpgradeProgress(data: {
@@ -90,6 +110,21 @@ export function registerAppRuntimeHandlers(deps: {
       }
     }
   }
+
+  let activeUpgradeJobs = 0;
+  const setUpgradeRunning = (running: boolean) => {
+    if (running) {
+      activeUpgradeJobs += 1;
+    } else {
+      activeUpgradeJobs = Math.max(0, activeUpgradeJobs - 1);
+    }
+    const isRunning = activeUpgradeJobs > 0;
+    deps.onUpgradeRunningChange?.(isRunning);
+    const win = deps.getMainWindow();
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('app:upgrade-lock', { running: isRunning });
+    }
+  };
   ipcMain.handle('app:get-platform', () => process.platform);
 
   ipcMain.handle('app:open-external', (_e: any, url: string) => {
@@ -224,6 +259,14 @@ export function registerAppRuntimeHandlers(deps: {
     const progress = (phase: string, status: 'running' | 'done' | 'error' | 'skipped', detail?: string, progressFraction?: number) => {
       sendUpgradeProgress({ component, phase, status, detail, progressFraction });
     };
+
+    setUpgradeRunning(true);
+    writeUpgradeState({
+      running: true,
+      component,
+      startedAt: new Date().toISOString(),
+      pid: process.pid,
+    });
 
     try {
       if (component === 'openclaw') {
@@ -493,6 +536,9 @@ export function registerAppRuntimeHandlers(deps: {
         };
       }
       return { success: false, error: msg.slice(0, 300) };
+    } finally {
+      setUpgradeRunning(false);
+      clearUpgradeState();
     }
   });
 }

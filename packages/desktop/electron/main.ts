@@ -77,6 +77,7 @@ let gatewayWsConnectPromise: Promise<GatewayClient> | null = null;
 let gatewayRepairPromise: Promise<{ ok: boolean; error?: string }> | null = null;
 let gatewayUserSessionLastLaunchAt = 0;
 let openclawInstallInProgress = false;
+let upgradeInProgress = false;
 
 const GATEWAY_USER_SESSION_RELAUNCH_COOLDOWN_MS = 15000;
 const DAEMON_FOREGROUND_BOOTSTRAP_TIMEOUT_MS = 240000;
@@ -174,7 +175,25 @@ function createWindow() {
     mainWindow.loadFile(builtIndexPath);
   }
 
+  const showUpgradeLeaveBlockedDialog = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    void dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      title: 'Upgrade In Progress',
+      message: 'AwarenessClaw is upgrading components right now.',
+      detail: 'Please keep this window open until the upgrade finishes. Leaving now can interrupt the upgrade and corrupt runtime files.',
+      buttons: ['OK'],
+      defaultId: 0,
+      noLink: true,
+    });
+  };
+
   mainWindow.on('close', (e: Event) => {
+    if (upgradeInProgress) {
+      e.preventDefault();
+      showUpgradeLeaveBlockedDialog();
+      return;
+    }
     if (!isQuitting && tray) {
       e.preventDefault();
       mainWindow?.hide();
@@ -1225,6 +1244,20 @@ function createTray() {
       label: 'Quit',
       accelerator: 'CmdOrCtrl+Q',
       click: () => {
+        if (upgradeInProgress) {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            void dialog.showMessageBox(mainWindow, {
+              type: 'warning',
+              title: 'Upgrade In Progress',
+              message: 'AwarenessClaw is upgrading components right now.',
+              detail: 'Please wait for the upgrade to complete before quitting.',
+              buttons: ['OK'],
+              defaultId: 0,
+              noLink: true,
+            });
+          }
+          return;
+        }
         isQuitting = true;
         app.quit();
       },
@@ -1274,6 +1307,14 @@ registerAppRuntimeHandlers({
   clearAwarenessLocalNpxCache,
   doctor,
   getMainWindow: () => mainWindow,
+  onUpgradeRunningChange: (running: boolean) => {
+    upgradeInProgress = running;
+    if (running && mainWindow && !mainWindow.isDestroyed()) {
+      if (!mainWindow.isVisible()) mainWindow.show();
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  },
 });
 registerChatHandlers({
   sendToRenderer: (channel, payload) => {
@@ -1701,7 +1742,26 @@ app.on('second-instance', () => {
   createWindow();
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', (e: Event) => {
+  if (upgradeInProgress) {
+    e.preventDefault();
+    isQuitting = false;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      void dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        title: 'Upgrade In Progress',
+        message: 'AwarenessClaw is upgrading components right now.',
+        detail: 'Please wait for upgrade completion before closing the app.',
+        buttons: ['OK'],
+        defaultId: 0,
+        noLink: true,
+      });
+      if (!mainWindow.isVisible()) mainWindow.show();
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+    return;
+  }
   isQuitting = true;
   daemonWatchdog.stopDaemonWatchdog();
   // Force-kill any shell children (e.g. hung `openclaw skills list --json`) that

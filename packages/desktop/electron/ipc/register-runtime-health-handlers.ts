@@ -293,6 +293,7 @@ export function registerRuntimeHealthHandlers(deps: {
   });
 
   ipcMain.handle('app:startup-ensure-runtime', async () => {
+    const upgradeStatePath = path.join(deps.home, '.openclaw', '.desktop-upgrade-state.json');
     const fixed: string[] = [];
     const warnings: string[] = [];
     const sendStartupStatus = (message: string, progress: number) => {
@@ -301,6 +302,51 @@ export function registerRuntimeHealthHandlers(deps: {
         mainWindow.webContents.send('app:startup-status', { message, progress });
       }
     };
+
+    const clearUpgradeRecoveryMarker = () => {
+      try {
+        fs.rmSync(upgradeStatePath, { force: true });
+      } catch {
+        // Non-fatal cleanup.
+      }
+    };
+
+    let interruptedUpgradeState: { running?: boolean; component?: string; startedAt?: string } | null = null;
+    try {
+      if (fs.existsSync(upgradeStatePath)) {
+        interruptedUpgradeState = JSON.parse(fs.readFileSync(upgradeStatePath, 'utf8'));
+      }
+    } catch {
+      interruptedUpgradeState = null;
+    }
+
+    if (interruptedUpgradeState?.running) {
+      const staleComponent = String(interruptedUpgradeState.component || 'runtime');
+      sendStartupStatus('Detected an interrupted upgrade. Recovering runtime integrity...', 5);
+      warnings.push(`Detected interrupted ${staleComponent} upgrade from previous app session. Running automatic recovery.`);
+
+      const recoveryChecks = ['openclaw-command-health', 'openclaw-installed', 'plugin-installed'];
+      try {
+        const recoveryReport = await deps.doctor.runChecks(recoveryChecks);
+        for (const check of recoveryReport.checks || []) {
+          if (check?.fixable !== 'auto') continue;
+          if (check?.status !== 'fail' && check?.status !== 'warn') continue;
+
+          if (check.id === 'openclaw-installed') deps.setOpenclawInstalling(true);
+          try {
+            const fix = await deps.doctor.runFix(check.id);
+            if (fix?.success) fixed.push(fix.message || `${check.label} recovered`);
+            else warnings.push(fix?.message || `${check.label} recovery failed`);
+          } finally {
+            if (check.id === 'openclaw-installed') deps.setOpenclawInstalling(false);
+          }
+        }
+      } catch (err: any) {
+        warnings.push(`Upgrade recovery check failed: ${err?.message || String(err)}`);
+      } finally {
+        clearUpgradeRecoveryMarker();
+      }
+    }
     const autoFixChecks = new Set([
       'openclaw-command-health',
       'openclaw-installed',

@@ -5,7 +5,8 @@
       "Bash(powershell -NoProfile -Command 'Get-CimInstance Win32_Process | Where-Object { $_.Name -eq '\\\\''AwarenessClaw.exe'\\\\'' -or \\($_.CommandLine -match '\\\\''openclaw'\\\\'' -and $_.CommandLine -notmatch '\\\\''EBWebView|yuanbao|claude.plugins'\\\\''\\) } | Select-Object ProcessId,ParentProcessId,Name,@{n='\\\\''MemMB'\\\\'';e={[math]::Round\\($_.WorkingSetSize/1MB,1\\)}},CommandLine | Format-Table -AutoSize -Wrap')",
       "Bash(git stash:*)",
       "Bash(git pull:*)",
-      "Bash(du -b packages/desktop/resources/*)"
+      "Bash(du -b packages/desktop/resources/*)",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('channels:', list\\(\\(d.get\\('channels'\\) or {}\\).keys\\(\\)\\)\\); print\\('feishu:', json.dumps\\(d.get\\('channels',{}\\).get\\('feishu'\\), indent=2, ensure_ascii=False\\)\\); print\\('plugins.entries keys:', list\\(\\(d.get\\('plugins',{}\\).get\\('entries'\\) or {}\\).keys\\(\\)\\)\\)\")"
     ]
   }
 }

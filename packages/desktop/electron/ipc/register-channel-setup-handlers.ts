@@ -150,6 +150,11 @@ export function registerChannelSetupHandlers(deps: {
         'Please try connecting again — it usually succeeds on the second attempt. ' +
         `If it keeps failing, run: openclaw plugins install @tencent-weixin/openclaw-weixin --force`;
     }
+    if (/PluginLoadFailureError|plugin load failed|Cannot find module/i.test(message)) {
+      return `${channelLabel} setup was blocked because another enabled plugin failed to load. ` +
+        'AwarenessClaw will retry with isolated channel loading automatically. ' +
+        'If it still fails, disable unrelated channels/plugins in Settings and retry.';
+    }
     return message.slice(0, 300) || `Channel setup failed for "${openclawId}".`;
   };
 
@@ -160,6 +165,7 @@ export function registerChannelSetupHandlers(deps: {
     const patterns = [
       /\[plugins\]\s+([a-z0-9@/_-]+)\s+failed to load/gi,
       /PluginLoadFailureError:\s*([a-z0-9@/_-]+)\s+failed to load/gi,
+      /PluginLoadFailureError:\s*plugin load failed:\s*([a-z0-9@/_-]+)/gi,
     ];
 
     for (const pattern of patterns) {
@@ -171,6 +177,13 @@ export function registerChannelSetupHandlers(deps: {
     }
 
     return [...pluginIds];
+  };
+
+  const hasNonTargetPluginLoadFailure = (rawFailure: string, targetPluginId: string) => {
+    if (!rawFailure) return false;
+    const target = (targetPluginId || '').toLowerCase();
+    return extractPluginLoadFailures(rawFailure)
+      .some((pluginId) => pluginId && pluginId !== target);
   };
 
   const repairBlockingPlugins = async (rawFailure: string, sendStatus: (msg: string) => void) => {
@@ -747,6 +760,24 @@ export function registerChannelSetupHandlers(deps: {
       if (repaired) {
         sendStatus(`channels.status.connecting::${channelLabel}`);
         result = await deps.channelLoginWithQR(loginCmd, CHANNEL_LOGIN_IDLE_TIMEOUT_MS);
+        rawFailure = [result.error || '', result.output || ''].join('\n').trim();
+      }
+    }
+
+    if (!result.success && hasNonTargetPluginLoadFailure(rawFailure, openclawId)) {
+      // Product-level guard: OpenClaw CLI currently preloads all enabled plugins.
+      // If an unrelated plugin (e.g. feishu) is broken, it can block the target
+      // channel setup (e.g. wechat). Retry once with a command-scoped config that
+      // isolates to the target plugin so customers can still connect channels.
+      sendStatus(`channels.status.autoRetrying::${channelLabel}`);
+      const scoped = await runLoginWithScopedConfig(loginCmd, CHANNEL_LOGIN_IDLE_TIMEOUT_MS, {
+        isolateToPluginId: openclawId,
+        extraEnv: process.platform === 'win32'
+          ? { AWARENESS_OPENCLAW_STACK_SIZE_KB: '12288' }
+          : undefined,
+      });
+      if (scoped.usedScopedConfig) {
+        result = scoped.result;
         rawFailure = [result.error || '', result.output || ''].join('\n').trim();
       }
     }

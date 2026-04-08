@@ -261,7 +261,7 @@ describe('registerChatHandlers', () => {
     }
   });
 
-  it('logs an upstream empty-response warning when Gateway finishes with no assistant payload', async () => {
+  it('falls back to CLI when Gateway finishes with no assistant payload', async () => {
     const ws = new FakeGatewayClient();
     ws.chatSend = vi.fn(async () => {
       setTimeout(() => {
@@ -273,7 +273,67 @@ describe('registerChatHandlers', () => {
       return { status: 'started' };
     });
 
+    const cliFallbackChild = createCliFallbackChild('CLI recovered reply');
+    spawnMock.mockReturnValue(cliFallbackChild as any);
+
+    const sendToRenderer = vi.fn();
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    registerChatHandlers({
+      sendToRenderer,
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const pending = handlers['chat:send']({}, 'hello', 'test-session', {});
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
+    cliFallbackChild.emitOutput();
+    const result = await pending;
+
+    expect(result).toMatchObject({ success: true, text: 'CLI recovered reply', sessionId: 'test-session' });
+    expect(sendToRenderer).toHaveBeenCalledWith(
+      'chat:status',
+      expect.objectContaining({
+        type: 'gateway',
+        message: 'Gateway returned an empty reply. Retrying through local CLI fallback...',
+      }),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('OpenClaw/Gateway completed the run with an empty assistant response'),
+      expect.objectContaining({
+        sessionId: 'test-session',
+        sawFinalState: true,
+        sawAssistantDelta: false,
+      }),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('returns CLI fallback error when Gateway finishes empty and CLI recovery fails', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: {
+            role: 'assistant',
+          },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    const cliFallbackChild = createCliFallbackErrorChild(['CLI fallback failed after empty gateway reply'], 1);
+    spawnMock.mockReturnValue(cliFallbackChild as any);
 
     registerChatHandlers({
       sendToRenderer: vi.fn(),
@@ -288,19 +348,16 @@ describe('registerChatHandlers', () => {
     });
 
     const handlers = getRegisteredHandlers();
-    const result = await handlers['chat:send']({}, 'hello', 'test-session', {});
+    const pending = handlers['chat:send']({}, 'hello', 'test-session', {});
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
+    cliFallbackChild.emitOutput();
+    const result = await pending;
 
-    expect(result).toMatchObject({ success: true, text: 'No response', sessionId: 'test-session' });
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('OpenClaw/Gateway completed the run with an empty assistant response'),
-      expect.objectContaining({
-        sessionId: 'test-session',
-        sawFinalState: true,
-        sawAssistantDelta: false,
-      }),
-    );
-
-    warnSpy.mockRestore();
+    expect(result).toMatchObject({
+      success: false,
+      sessionId: 'test-session',
+    });
+    expect(String(result.error || '')).toContain('CLI fallback failed after empty gateway reply');
   });
 
   it('uses assistant text from the final event when no delta text was streamed', async () => {

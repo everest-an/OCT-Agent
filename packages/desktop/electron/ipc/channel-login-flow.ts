@@ -349,14 +349,27 @@ export function createChannelLoginWithQR(deps: {
           qrFlushTimer = null;
         }
         const unsignedCode = typeof code === 'number' && code < 0 ? (0x100000000 + code) : code;
+        const fullOutput = stdout.trim();
         if (code === 0) {
           resolve({ success: true, output: 'Connected!' });
         } else if (code === -1073741571 || unsignedCode === 3221225725) {
-          resolve({ success: false, error: 'OpenClaw crashed while loading plugins. Please retry once.' });
+          resolve({
+            success: false,
+            error: 'OpenClaw crashed while loading plugins. Please retry once.',
+            output: fullOutput ? fullOutput.slice(-12000) : undefined,
+          });
         } else if (qrShown) {
-          resolve({ success: false, error: 'QR code expired. Click "Try again" to get a new QR code.' });
+          resolve({
+            success: false,
+            error: 'QR code expired. Click "Try again" to get a new QR code.',
+            output: fullOutput ? fullOutput.slice(-12000) : undefined,
+          });
         } else {
-          resolve({ success: false, error: stdout.slice(-300) || `Exit code ${code}` });
+          resolve({
+            success: false,
+            error: fullOutput.slice(-300) || `Exit code ${code}`,
+            output: fullOutput ? fullOutput.slice(-12000) : undefined,
+          });
         }
       });
 

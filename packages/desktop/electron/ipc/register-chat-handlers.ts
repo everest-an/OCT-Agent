@@ -975,6 +975,51 @@ ${message}`;
         } else {
           console.warn('[chat] Empty response could not be classified cleanly', diagnostic);
         }
+
+        send('chat:status', {
+          type: 'gateway',
+          message: 'Gateway returned an empty reply. Retrying through local CLI fallback...',
+        });
+
+        const preparedCli = await prepareCliFallbackWithDaemonRetry(deps.prepareCliFallback, send);
+        if (!preparedCli.ok) {
+          const detail = preparedCli.error || 'unknown error';
+          console.warn('[chat] CLI fallback preparation failed after empty Gateway reply:', detail);
+          if (preparedCli.daemonNotReady || /LOCAL_DAEMON_NOT_READY/i.test(detail)) {
+            return withWorkspaceFallbackMeta({
+              success: false,
+              error: 'Local memory service is still starting. Please wait 20-60 seconds, then retry.',
+              sessionId: sid,
+            });
+          }
+        }
+
+        const cliRecoveryResult = await chatSendViaCliWithWebCompatibilityRetry({
+          requestMessage: fullMessage,
+          originalUserMessage: message,
+          sid,
+          options: requestedOptions,
+          send,
+          deps,
+        });
+        const cliNeedsRawRetry = cliRecoveryResult?.success
+          && (!cliRecoveryResult.text || /^(No response|No reply from agent\.?)+$/i.test(String(cliRecoveryResult.text).trim()));
+        if (cliNeedsRawRetry && fullMessage !== message) {
+          console.warn('[chat] CLI recovery after empty Gateway reply returned empty text with metadata prompt; retrying with raw user message');
+          const cliRawRetryResult = await chatSendViaCliWithWebCompatibilityRetry({
+            requestMessage: message,
+            originalUserMessage: message,
+            sid,
+            options: requestedOptions,
+            send,
+            deps,
+          });
+          maybeSelfHealGateway1006(cliRawRetryResult, send, deps.runSpawn, deps.getEnhancedPath(), deps.startGatewayInUserSession, deps.runAsync);
+          return withWorkspaceFallbackMeta(cliRawRetryResult);
+        }
+
+        maybeSelfHealGateway1006(cliRecoveryResult, send, deps.runSpawn, deps.getEnhancedPath(), deps.startGatewayInUserSession, deps.runAsync);
+        return withWorkspaceFallbackMeta(cliRecoveryResult);
       }
 
       const memoryCapturePolicy = deps.readMemoryCapturePolicy?.() || getMemoryCapturePolicy(os.homedir());
