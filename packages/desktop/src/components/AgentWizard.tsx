@@ -15,6 +15,7 @@ import { useState } from 'react';
 import {
   Sparkles, Bot, Loader2, X, MessageSquare,
 } from 'lucide-react';
+import AgentAvatar from './AgentAvatar';
 import { useI18n } from '../lib/i18n';
 
 interface AgentWizardProps {
@@ -23,6 +24,12 @@ interface AgentWizardProps {
 }
 
 const TOTAL_STEPS = 1;
+
+const AGENT_EMOJIS = [
+  '🤖', '🧠', '🔬', '🎯', '📊', '💡', '🛡️', '🚀',
+  '📝', '🔧', '🎨', '📚', '🐾', '💼', '⚡', '🌙',
+  '🔥', '🐚', '🏠', '🦞', '👨‍💻', '🧪', '📡', '🎭',
+];
 
 function buildIdentityMarkdown(name: string, emoji?: string): string {
   const normalizedEmoji = emoji?.trim() || '';
@@ -43,7 +50,7 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
 
   const [step] = useState(0);
   const [agentName, setAgentName] = useState('');
-  const [agentEmoji] = useState('');
+  const [agentEmoji, setAgentEmoji] = useState('');
   const [saving, setSaving] = useState(false);
   const [savingStatus, setSavingStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -152,12 +159,12 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
             <div className="flex-1 flex flex-col gap-4">
               <div className="text-center">
                 <h2 className="text-lg font-semibold text-white mb-1">{t('agentWizard.step1.title', 'Name your agent')}</h2>
-                <p className="text-xs text-slate-500">{t('agentWizard.step1.hint', 'Give it a unique name')}</p>
+                <p className="text-xs text-slate-500">{t('agentWizard.step1.hint', 'Give it a unique name and emoji')}</p>
               </div>
 
               <div className="flex items-center gap-3 mx-auto w-full max-w-xs">
                 <div className="w-12 h-12 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
-                  <Bot size={22} className="text-sky-300" />
+                  <AgentAvatar name={agentName} emoji={agentEmoji} size={20} className="scale-125" />
                 </div>
                 <input
                   type="text"
@@ -168,6 +175,28 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
                   autoFocus
                   onKeyDown={e => e.key === 'Enter' && canProceed && !saving && handleCreate()}
                 />
+              </div>
+
+              <div>
+                <p className="text-[11px] text-slate-500 mb-2">{t('agentWizard.step1.pickEmoji', 'Pick an icon:')}</p>
+                <div className="grid grid-cols-8 gap-1.5">
+                  {AGENT_EMOJIS.map(emoji => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => setAgentEmoji(emoji)}
+                      className={`w-9 h-9 rounded-lg text-lg flex items-center justify-center transition-all ${
+                        agentEmoji === emoji
+                          ? 'bg-brand-500/20 ring-2 ring-brand-500 scale-110'
+                          : 'bg-slate-800/50 hover:bg-slate-700/70'
+                      }`}
+                      aria-label={emoji}
+                      title={emoji}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* Bootstrap hint */}

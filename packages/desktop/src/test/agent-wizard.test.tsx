@@ -13,6 +13,8 @@ describe('AgentWizard', () => {
     await act(async () => { render(<AgentWizard onComplete={vi.fn()} onCancel={vi.fn()} />); });
     expect(screen.getByText('Name your agent')).toBeTruthy();
     expect(screen.getByPlaceholderText(/Research/i)).toBeTruthy();
+    expect(screen.getByText(/pick an icon/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: '🧠' })).toBeTruthy();
   });
 
   it('has no channel binding step (removed 2026-04-08 — routing managed on Channels page)', async () => {
@@ -31,7 +33,7 @@ describe('AgentWizard', () => {
     expect(onCancel).toHaveBeenCalled();
   });
 
-  it('creates agent and returns agentId for chat navigation (single-step)', async () => {
+  it('creates agent with selected emoji and returns agentId for chat navigation (single-step)', async () => {
     const api = window.electronAPI as any;
     api.agentsAdd = vi.fn().mockResolvedValue({ success: true, agentId: 'researcher' });
     api.agentsSetIdentity = vi.fn().mockResolvedValue({ success: true });
@@ -42,14 +44,16 @@ describe('AgentWizard', () => {
 
     // Single step: fill name then click Create directly.
     await act(async () => { fireEvent.change(screen.getByPlaceholderText(/Research/i), { target: { value: 'Researcher' } }); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '🧠' })); });
     await act(async () => { fireEvent.click(screen.getByTestId('agent-create-btn')); });
 
     await waitFor(() => {
       expect(api.agentsAdd).toHaveBeenCalledWith('Researcher', undefined, undefined);
+      expect(api.agentsSetIdentity).toHaveBeenCalledWith('researcher', 'Researcher', '🧠');
       expect(api.agentsWriteFile).toHaveBeenCalledWith(
         'researcher',
         'IDENTITY.md',
-        expect.not.stringContaining('default'),
+        expect.stringContaining('- **Emoji:** 🧠'),
       );
       expect(onComplete).toHaveBeenCalledWith('researcher');
     });
