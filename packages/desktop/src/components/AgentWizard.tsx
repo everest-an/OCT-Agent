@@ -1,13 +1,19 @@
 /**
- * Agent Creation Wizard — 2-step flow:
- *   Step 0: Name
- *   Step 1: Channel binding (optional, from dynamic OpenClaw registry)
- *   → Create agent (preserving BOOTSTRAP.md)
- *   → Auto-navigate to chat for Bootstrap Q&A ritual
+ * Agent Creation Wizard — single-step flow (2026-04-08 simplification):
+ *   Step 0: Name → Create agent (preserving BOOTSTRAP.md) → Auto-navigate to chat
+ *
+ * Channel binding was removed. New agents do NOT touch openclaw.json bindings[]
+ * on creation — they are simply "eligible" for all channels, and users route a
+ * channel to a specific agent from the Channels page via the per-channel
+ * "Replied by" dropdown. This keeps the creation flow trivial for first-time
+ * users, avoids the OpenClaw first-match-wins footgun (where binding the same
+ * channel to multiple agents silently breaks all but the first one), and
+ * matches OpenClaw's own model of "one agent per channel default, optional
+ * peer-level overrides for power users".
  */
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
-  ChevronRight, ChevronLeft, Sparkles, Bot, Loader2, X, Link, Check, MessageSquare,
+  Sparkles, Bot, Loader2, X, MessageSquare,
 } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 
@@ -16,7 +22,7 @@ interface AgentWizardProps {
   onCancel: () => void;
 }
 
-const TOTAL_STEPS = 2;
+const TOTAL_STEPS = 1;
 
 function buildIdentityMarkdown(name: string, emoji?: string): string {
   const normalizedEmoji = emoji?.trim() || '';
@@ -35,62 +41,17 @@ function buildIdentityMarkdown(name: string, emoji?: string): string {
 export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) {
   const { t } = useI18n();
 
-  const [step, setStep] = useState(0);
+  const [step] = useState(0);
   const [agentName, setAgentName] = useState('');
   const [agentEmoji] = useState('');
   const [saving, setSaving] = useState(false);
   const [savingStatus, setSavingStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  // Channel binding (step 1)
-  const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; label: string }>>([]);
-  const [channelsLoading, setChannelsLoading] = useState(true);
-  const [selectedBindings, setSelectedBindings] = useState<string[]>([]);
-
-  // Load channels from dynamic registry on mount
-  useEffect(() => {
-    const load = async () => {
-      if (!window.electronAPI) { setChannelsLoading(false); return; }
-      try {
-        const api = window.electronAPI as any;
-        const regResult = await api.channelGetRegistry?.();
-        const configured = await api.channelListConfigured?.();
-        const configuredSet = new Set<string>(configured?.configured || []);
-
-        if (regResult?.channels?.length > 0) {
-          const channels = (regResult.channels as Array<{ id: string; openclawId?: string; label: string }>)
-            .filter(ch => ch.id !== 'local')
-            .map(ch => ({
-              id: ch.openclawId || ch.id,
-              label: ch.label || ch.id,
-              configured: configuredSet.has(ch.id) || configuredSet.has(ch.openclawId || ''),
-            }))
-            .sort((a, b) => {
-              if (a.configured !== b.configured) return a.configured ? -1 : 1;
-              return a.label.localeCompare(b.label);
-            });
-          setAvailableChannels(channels);
-        } else {
-          const ids = Array.from(configuredSet).filter(id => id !== 'local');
-          setAvailableChannels(ids.map(id => ({ id, label: id })).sort((a, b) => a.label.localeCompare(b.label)));
-        }
-      } catch { /* ignore */ }
-      setChannelsLoading(false);
-    };
-    load();
-  }, []);
-
-  const toggleBinding = (channelId: string) => {
-    setSelectedBindings(prev =>
-      prev.includes(channelId) ? prev.filter(c => c !== channelId) : [...prev, channelId]
-    );
-  };
-
   const handleCreate = async () => {
     const finalName = agentName.trim();
     if (!finalName) {
       setError(t('agentWizard.error.nameRequired', 'Please enter a name for the agent'));
-      setStep(0);
       return;
     }
 
@@ -133,14 +94,10 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
         await api.agentsWriteFile(slug, 'IDENTITY.md', buildIdentityMarkdown(finalName, normalizedEmoji));
       }
 
-      // 4. Bind selected channels
-      if (api.agentsBind && selectedBindings.length > 0) {
-        setSavingStatus(t('agentWizard.status.binding', 'Binding channels...'));
-        for (const channel of selectedBindings) {
-          try { await api.agentsBind(slug, channel); } catch { /* ignore */ }
-        }
-      }
-
+      // Channel binding removed 2026-04-08. New agents no longer touch
+      // openclaw.json bindings[] on creation. Routing is set from the
+      // Channels page by switching a channel's "Replied by" dropdown to
+      // this new agent (optional).
       onComplete(slug);
     } catch (err: any) {
       setError(err?.message || t('agentWizard.error.unexpected', 'Unexpected error.'));
@@ -150,12 +107,7 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
     }
   };
 
-  const handleNext = () => {
-    if (step < TOTAL_STEPS - 1) { setError(null); setStep(step + 1); }
-    else handleCreate();
-  };
-
-  const canProceed = step === 0 ? agentName.trim().length > 0 : true;
+  const canProceed = agentName.trim().length > 0;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/95 flex items-center justify-center p-6">
@@ -214,7 +166,7 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
                   placeholder={t('agentWizard.step1.placeholder', 'e.g. Research, Coding, Writer...')}
                   className="flex-1 px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-brand-500"
                   autoFocus
-                  onKeyDown={e => e.key === 'Enter' && canProceed && handleNext()}
+                  onKeyDown={e => e.key === 'Enter' && canProceed && !saving && handleCreate()}
                 />
               </div>
 
@@ -232,56 +184,7 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
             </div>
           )}
 
-          {/* Step 1: Channel Binding */}
-          {step === 1 && (
-            <div className="flex-1 flex flex-col gap-4">
-              <div className="text-center mb-1">
-                <h2 className="text-lg font-semibold text-white">{t('agentWizard.step4.title', 'Bind channels')}</h2>
-                <p className="text-xs text-slate-500">{t('agentWizard.step4.hint', 'Optionally bind messaging channels to this agent')}</p>
-              </div>
-
-              {channelsLoading ? (
-                <div className="flex-1 flex flex-col items-center justify-center gap-3">
-                  <Loader2 size={24} className="text-slate-500 animate-spin" />
-                  <p className="text-sm text-slate-500">{t('agentWizard.step4.loading', 'Loading channels...')}</p>
-                </div>
-              ) : availableChannels.length === 0 ? (
-                <div className="flex-1 flex flex-col items-center justify-center gap-3">
-                  <Link size={24} className="text-slate-600" />
-                  <p className="text-sm text-slate-500 text-center">
-                    {t('agentWizard.step4.noChannels', 'No channels connected yet. You can bind channels later from the Agents page.')}
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
-                  <p className="text-[11px] text-slate-500">
-                    {t('agentWizard.step4.selectChannels', 'Select channels to route to this agent:')}
-                  </p>
-                  {availableChannels.map(ch => (
-                    <button
-                      key={ch.id}
-                      onClick={() => toggleBinding(ch.id)}
-                      className={`w-full p-3 rounded-xl border text-left transition-all flex items-center gap-3 ${
-                        selectedBindings.includes(ch.id)
-                          ? 'border-emerald-500 bg-emerald-500/10'
-                          : 'border-slate-700 bg-slate-800/50 hover:border-slate-600'
-                      }`}
-                    >
-                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
-                        selectedBindings.includes(ch.id) ? 'border-emerald-500 bg-emerald-500' : 'border-slate-600'
-                      }`}>
-                        {selectedBindings.includes(ch.id) && <Check size={12} className="text-white" />}
-                      </div>
-                      <Link size={14} className={selectedBindings.includes(ch.id) ? 'text-emerald-400' : 'text-slate-500'} />
-                      <span className={`text-sm ${selectedBindings.includes(ch.id) ? 'text-emerald-300' : 'text-slate-300'}`}>
-                        {ch.label}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          {/* Channel binding step removed 2026-04-08 (see file header). */}
         </div>
 
         {/* Status message during creation */}
@@ -292,19 +195,11 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
           </div>
         )}
 
-        {/* Navigation buttons */}
+        {/* Navigation buttons — single-step wizard, just Cancel + Create. */}
         <div className="flex items-center justify-between mt-4">
           <div>
             {saving ? (
               <span />
-            ) : step > 0 ? (
-              <button
-                onClick={() => { setStep(step - 1); setError(null); }}
-                className="flex items-center gap-1 text-sm text-slate-400 hover:text-white transition-colors"
-              >
-                <ChevronLeft size={16} />
-                {t('bootstrap.back', 'Back')}
-              </button>
             ) : (
               <button onClick={onCancel} className="text-sm text-slate-500 hover:text-slate-300 transition-colors">
                 {t('common.cancel', 'Cancel')}
@@ -312,29 +207,18 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
             )}
           </div>
           <div>
-            {step < TOTAL_STEPS - 1 ? (
-              <button
-                onClick={handleNext}
-                disabled={!canProceed}
-                className="flex items-center gap-1 px-5 py-2 bg-brand-600 hover:bg-brand-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-xl transition-colors"
-              >
-                {t('bootstrap.next', 'Next')}
-                <ChevronRight size={16} />
-              </button>
-            ) : (
-              <button
-                onClick={handleCreate}
-                disabled={saving || !canProceed}
-                data-testid="agent-create-btn"
-                className="flex items-center gap-2 px-5 py-2 bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white text-sm font-medium rounded-xl transition-colors"
-              >
-                {saving ? (
-                  <><Loader2 size={14} className="animate-spin" /> {t('agentWizard.creating', 'Creating...')}</>
-                ) : (
-                  <><Sparkles size={14} /> {t('agentWizard.finish', 'Create & Start Chat')}</>
-                )}
-              </button>
-            )}
+            <button
+              onClick={handleCreate}
+              disabled={saving || !canProceed}
+              data-testid="agent-create-btn"
+              className="flex items-center gap-2 px-5 py-2 bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white text-sm font-medium rounded-xl transition-colors"
+            >
+              {saving ? (
+                <><Loader2 size={14} className="animate-spin" /> {t('agentWizard.creating', 'Creating...')}</>
+              ) : (
+                <><Sparkles size={14} /> {t('agentWizard.finish', 'Create & Start Chat')}</>
+              )}
+            </button>
           </div>
         </div>
       </div>

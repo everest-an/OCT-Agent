@@ -2,6 +2,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+import { redirectOrphanBindings } from './bindings-manager';
+
 /**
  * Self-heal the OpenClaw `main` agent if it has degraded into a "skeleton" entry
  * (no `workspace` and no `agentDir`). This is the default agent for fresh OpenClaw
@@ -77,4 +79,32 @@ export function healMainAgentIfNeeded(home: string = os.homedir()): HealMainAgen
   try { fs.mkdirSync(main.agentDir, { recursive: true }); } catch { /* ignore */ }
 
   return { status: 'healed', changes };
+}
+
+/**
+ * Scan bindings[] for entries whose agentId no longer exists (e.g. user deleted
+ * an agent that was previously the "Replied by" target for WeChat), and redirect
+ * them to `main` so inbound messages don't drop silently. Safe migration helper
+ * for the 2026-04-08 refactor that moved binding management from the Agents page
+ * to the Channels page per-channel dropdown.
+ *
+ * Runs immediately after healMainAgentIfNeeded at app startup so subsequent code
+ * (gateway start, channel worker autoReconnect) sees a valid binding graph.
+ *
+ * Returns the list of redirected bindings for logging, or an empty array if no
+ * change was needed.
+ */
+export function healOrphanBindings(home: string = os.homedir()): ReturnType<typeof redirectOrphanBindings> {
+  const configPath = path.join(home, '.openclaw', 'openclaw.json');
+  let config: any;
+  try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); }
+  catch { return []; }
+  const list: any[] = config?.agents?.list;
+  if (!Array.isArray(list)) return [];
+  const knownAgentIds = new Set<string>(
+    list.map((a) => (a && typeof a.id === 'string' ? a.id : null)).filter((x): x is string => !!x),
+  );
+  // Always include 'main' as a known agent (heal runs just before this and guarantees main exists).
+  knownAgentIds.add('main');
+  return redirectOrphanBindings(knownAgentIds, 'main', home);
 }

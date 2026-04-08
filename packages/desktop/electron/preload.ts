@@ -177,6 +177,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Active project workspace shared between desktop chat and channel inbound hook.
   workspaceGetActive: () => ipcRenderer.invoke('workspace:get-active'),
   workspaceSetActive: (path: string | null) => ipcRenderer.invoke('workspace:set-active', path),
+  // Channel-level inbound agent routing ("which agent answers WeChat / Telegram / ...").
+  channelGetInboundAgent: (channelId: string) => ipcRenderer.invoke('channel:get-inbound-agent', channelId),
+  channelSetInboundAgent: (channelId: string, agentId: string) => ipcRenderer.invoke('channel:set-inbound-agent', channelId, agentId),
 
   // Agents management
   agentsList: () => ipcRenderer.invoke('agents:list'),

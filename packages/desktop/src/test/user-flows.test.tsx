@@ -65,12 +65,10 @@ describe('Multi-Agent Management (user flows)', () => {
     expect(createBtn).toBeTruthy();
     await act(async () => { fireEvent.click(createBtn!); });
 
-    // Step 0: name + emoji
+    // Single-step flow (2026-04-08 refactor): fill name → click Create directly,
+    // no Next button, no channel binding step.
     const nameInput = screen.getByPlaceholderText(/Research/i);
     await act(async () => { fireEvent.change(nameInput, { target: { value: 'SalesBot' } }); });
-    // Next → Step 1 (channels)
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /next/i })); });
-    // Click create button on step 1
     const finishBtn = screen.getByTestId('agent-create-btn');
     await act(async () => { fireEvent.click(finishBtn); });
 
@@ -118,17 +116,14 @@ describe('Multi-Agent Management (user flows)', () => {
     await waitFor(() => expect(deleteMock).toHaveBeenCalledWith('bot2'));
   });
 
-  it('flow: bind dropdown appears when clicking Add binding', async () => {
+  it('flow: Agents page no longer exposes channel binding UI (managed on Channels page)', async () => {
+    // 2026-04-08 refactor: bind/unbind controls moved to the Channels page per-channel
+    // "Replied by" dropdown. The Agents page is now identity/workspace/prompts only.
     await act(async () => { render(<Agents />); });
     await waitFor(() => expect(screen.getByText('Claw')).toBeInTheDocument());
 
-    // Open binding form
-    const bindBtn = screen.getAllByRole('button').find(b => b.getAttribute('title') === 'Add binding');
-    if (bindBtn) {
-      await act(async () => { fireEvent.click(bindBtn); });
-      // Channel selector dropdown should appear (updated UI uses <select> instead of text input)
-      await waitFor(() => expect(screen.getByRole('combobox')).toBeInTheDocument());
-    }
+    const bindBtn = screen.getAllByRole('button').find((b) => b.getAttribute('title') === 'Add binding');
+    expect(bindBtn).toBeUndefined();
   });
 });
 

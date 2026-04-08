@@ -21,7 +21,11 @@ import {
   waitForLocalDaemonReady,
 } from './local-daemon';
 import { GatewayClient } from './gateway-ws';
-import { healMainAgentIfNeeded } from './heal-main-agent';
+import {
+  getChannelInboundAgent,
+  setChannelInboundAgent,
+} from './bindings-manager';
+import { healMainAgentIfNeeded, healOrphanBindings } from './heal-main-agent';
 import { installWorkspaceInjectHook, readActiveWorkspace, writeActiveWorkspace } from './install-workspace-hook';
 import { createChannelLoginWithQR } from './ipc/channel-login-flow';
 import { registerAgentHandlers } from './ipc/register-agent-handlers';
@@ -1310,6 +1314,27 @@ ipcMain.handle('workspace:set-active', (_e: unknown, workspacePath: string | nul
   }
 });
 
+// Channel-level inbound agent routing (simple default "which agent answers this
+// channel" dropdown on the Channels page). Backed by bindings-manager which
+// writes channel-only entries into openclaw.json bindings[], leaving peer/
+// account-level rules untouched for power users.
+ipcMain.handle('channel:get-inbound-agent', (_e: unknown, channelId: string) => {
+  try {
+    return { success: true, agentId: getChannelInboundAgent(channelId, HOME) };
+  } catch (err: any) {
+    return { success: false, error: err?.message?.slice(0, 200) };
+  }
+});
+
+ipcMain.handle('channel:set-inbound-agent', (_e: unknown, channelId: string, agentId: string) => {
+  try {
+    const ok = setChannelInboundAgent(channelId, agentId, HOME);
+    return ok ? { success: true } : { success: false, error: 'Failed to write openclaw.json' };
+  } catch (err: any) {
+    return { success: false, error: err?.message?.slice(0, 200) };
+  }
+});
+
 registerAppUtilityHandlers({
   safeShellExecAsync,
   readShellOutputAsync,
@@ -1624,6 +1649,19 @@ app.whenReady().then(() => {
     }
   } catch (err) {
     console.warn('[main-heal] unexpected error:', err);
+  }
+
+  // Redirect orphan bindings (user deleted an agent that was previously the inbound
+  // target for a channel) to `main` so inbound messages do not drop silently. Runs
+  // after healMainAgentIfNeeded so main is guaranteed to be a valid fallback target.
+  try {
+    const orphans = healOrphanBindings(HOME);
+    if (orphans.length > 0) {
+      console.log(`[bindings-heal] redirected ${orphans.length} orphan binding(s) to main:`,
+        orphans.map((o) => `${o.channelId}(${o.qualifier}) was ${o.oldAgent}`).join(', '));
+    }
+  } catch (err) {
+    console.warn('[bindings-heal] unexpected error:', err);
   }
 
   // Install the workspace-injection hook so channel inbound messages get the same

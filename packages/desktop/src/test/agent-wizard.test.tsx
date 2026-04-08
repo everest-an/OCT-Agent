@@ -15,12 +15,13 @@ describe('AgentWizard', () => {
     expect(screen.getByPlaceholderText(/Research/i)).toBeTruthy();
   });
 
-  it('navigates to channel binding step', async () => {
+  it('has no channel binding step (removed 2026-04-08 — routing managed on Channels page)', async () => {
     await act(async () => { render(<AgentWizard onComplete={vi.fn()} onCancel={vi.fn()} />); });
-    const nameInput = screen.getByPlaceholderText(/Research/i);
-    await act(async () => { fireEvent.change(nameInput, { target: { value: 'Test' } }); });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /next/i })); });
-    expect(screen.getByText('Bind channels')).toBeTruthy();
+    // The wizard is now single-step: no Next button, no "Bind channels" step.
+    expect(screen.queryByText(/Bind channels/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: /next/i })).toBeNull();
+    // The Create button is always visible on step 0.
+    expect(screen.getByTestId('agent-create-btn')).toBeTruthy();
   });
 
   it('calls onCancel when Cancel is clicked', async () => {
@@ -30,7 +31,7 @@ describe('AgentWizard', () => {
     expect(onCancel).toHaveBeenCalled();
   });
 
-  it('creates agent and returns agentId for chat navigation', async () => {
+  it('creates agent and returns agentId for chat navigation (single-step)', async () => {
     const api = window.electronAPI as any;
     api.agentsAdd = vi.fn().mockResolvedValue({ success: true, agentId: 'researcher' });
     api.agentsSetIdentity = vi.fn().mockResolvedValue({ success: true });
@@ -39,11 +40,8 @@ describe('AgentWizard', () => {
     const onComplete = vi.fn();
     await act(async () => { render(<AgentWizard onComplete={onComplete} onCancel={vi.fn()} />); });
 
-    // Step 0: name
+    // Single step: fill name then click Create directly.
     await act(async () => { fireEvent.change(screen.getByPlaceholderText(/Research/i), { target: { value: 'Researcher' } }); });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /next/i })); });
-
-    // Step 1: skip channels, create
     await act(async () => { fireEvent.click(screen.getByTestId('agent-create-btn')); });
 
     await waitFor(() => {
@@ -55,21 +53,25 @@ describe('AgentWizard', () => {
       );
       expect(onComplete).toHaveBeenCalledWith('researcher');
     });
+    // agentsBind must NOT be called — new agents don't touch bindings anymore.
+    // (setup.ts mock defines api.agentsBind as a vi.fn that resolves { success: true })
+    if (typeof api.agentsBind?.mock?.calls !== 'undefined') {
+      expect(api.agentsBind.mock.calls.length).toBe(0);
+    }
   });
 
-  it('shows error when creation fails', async () => {
+  it('shows error when creation fails (single-step)', async () => {
     const api = window.electronAPI as any;
     api.agentsAdd = vi.fn().mockResolvedValue({ success: false, error: 'Permission denied' });
 
     await act(async () => { render(<AgentWizard onComplete={vi.fn()} onCancel={vi.fn()} />); });
     await act(async () => { fireEvent.change(screen.getByPlaceholderText(/Research/i), { target: { value: 'test' } }); });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /next/i })); });
     await act(async () => { fireEvent.click(screen.getByTestId('agent-create-btn')); });
 
     await waitFor(() => { expect(screen.getByText(/permission denied/i)).toBeTruthy(); });
   });
 
-  it('continues when agent already exists', async () => {
+  it('continues when agent already exists (single-step)', async () => {
     const onComplete = vi.fn();
     const api = window.electronAPI as any;
     api.agentsAdd = vi.fn().mockResolvedValue({ success: false, error: 'already exists' });
@@ -78,7 +80,6 @@ describe('AgentWizard', () => {
 
     await act(async () => { render(<AgentWizard onComplete={onComplete} onCancel={vi.fn()} />); });
     await act(async () => { fireEvent.change(screen.getByPlaceholderText(/Research/i), { target: { value: 'test' } }); });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /next/i })); });
     await act(async () => { fireEvent.click(screen.getByTestId('agent-create-btn')); });
 
     await waitFor(() => { expect(onComplete).toHaveBeenCalled(); });

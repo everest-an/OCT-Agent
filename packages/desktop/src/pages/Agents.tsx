@@ -46,11 +46,9 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
   const [editTheme, setEditTheme] = useState('');
 
   // Binding
-  const [bindingAgentId, setBindingAgentId] = useState<string | null>(null);
-  const [bindChannel, setBindChannel] = useState('');
-  const [bindingInProgress, setBindingInProgress] = useState(false);
-  const [bindStatus, setBindStatus] = useState<string | null>(null);
-  const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; label: string }>>([]);
+  // Channel routing is no longer managed here — it lives in the Channels page via
+  // a per-channel "Replied by" dropdown. An agent card just shows WHICH channels
+  // currently route to it (read-only), see agent.bindings display below.
 
   // Workspace file editing
   const [fileEditAgentId, setFileEditAgentId] = useState<string | null>(null);
@@ -82,37 +80,7 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
     setLoading(false);
   };
 
-  // Load available channels for binding dropdown (from dynamic OpenClaw registry)
-  const loadChannels = async () => {
-    if (!window.electronAPI) return;
-    try {
-      const api = window.electronAPI as any;
-      const regResult = await api.channelGetRegistry?.();
-      const configured = await api.channelListConfigured?.();
-      const configuredSet = new Set<string>(configured?.configured || []);
-
-      if (regResult?.channels?.length > 0) {
-        const channels = (regResult.channels as Array<{ id: string; openclawId?: string; label: string }>)
-          .filter(ch => ch.id !== 'local')
-          .map(ch => ({
-            id: ch.openclawId || ch.id,
-            label: ch.label || ch.id,
-            configured: configuredSet.has(ch.id) || configuredSet.has(ch.openclawId || ''),
-          }))
-          .sort((a, b) => {
-            if (a.configured !== b.configured) return a.configured ? -1 : 1;
-            return a.label.localeCompare(b.label);
-          });
-        setAvailableChannels(channels);
-      } else {
-        // Fallback: use configured list as-is
-        const ids = Array.from(configuredSet).filter(id => id !== 'local');
-        setAvailableChannels(ids.map(id => ({ id, label: id })).sort((a, b) => a.label.localeCompare(b.label)));
-      }
-    } catch { /* fallback to empty */ }
-  };
-
-  useEffect(() => { loadAgents(); loadChannels(); }, []);
+  useEffect(() => { loadAgents(); }, []);
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const handleDelete = async (agentId: string) => {
@@ -140,52 +108,11 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
     }
   };
 
-  const handleBind = async (agentId: string) => {
-    if (!window.electronAPI || !bindChannel.trim()) return;
-    const channel = bindChannel.trim();
-
-    // Detect first-match-wins collision: if any OTHER agent already has a binding for the
-    // same channel (without a more specific peer/accountId distinction), warn the user that
-    // OpenClaw routes by ordered first-match — only one agent will actually receive messages.
-    // See https://docs.openclaw.ai/concepts/multi-agent
-    const collidingAgent = agents.find((a) =>
-      a.id !== agentId && (a.bindings || []).some((b) => b === channel || b.startsWith(`${channel}:`)),
-    );
-    if (collidingAgent) {
-      const warn = t(
-        'agents.bindCollideWarn',
-        'Channel "{channel}" is already bound to "{other}". OpenClaw routes by FIRST match wins, so this new binding will NOT receive messages until you unbind it from "{other}" or use a peer-specific binding (e.g. "{channel}:wxid_xxx"). Continue anyway?',
-      )
-        .replace(/\{channel\}/g, channel)
-        .replace(/\{other\}/g, collidingAgent.name || collidingAgent.id);
-      if (!confirm(warn)) return;
-    }
-
-    setBindingInProgress(true);
-    setError(null);
-    setBindStatus(t('agents.bindLoading', 'Loading OpenClaw plugins (this can take 60-90s on first run)…'));
-    try {
-      const result = await (window.electronAPI as any).agentsBind(agentId, channel);
-      if (result.success) {
-        setBindingAgentId(null);
-        setBindChannel('');
-        setBindStatus(null);
-        loadAgents();
-      } else {
-        setError(result.error || t('agents.bindFailed', 'Bind failed'));
-        setBindStatus(null);
-      }
-    } finally {
-      setBindingInProgress(false);
-    }
-  };
-
-  const handleUnbind = async (agentId: string, binding: string) => {
-    if (!window.electronAPI) return;
-    const result = await (window.electronAPI as any).agentsUnbind(agentId, binding);
-    if (result.success) loadAgents();
-    else setError(result.error || t('agents.unbindFailed', 'Unbind failed'));
-  };
+  // handleBind / handleUnbind removed 2026-04-08 — channel-to-agent routing is now
+  // managed exclusively on the Channels page via the per-channel "Replied by" dropdown.
+  // This keeps the Agents page focused on identity/workspace/prompts editing only.
+  // Any display of current routing on an agent card is read-only and derived from the
+  // same agents:list bindings[] that the Channels page dropdown writes to.
 
   // Workspace file editing
   const loadFile = useCallback(async (agentId: string, fileName: string) => {
@@ -358,8 +285,8 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
                       </button>
                       <button onClick={() => { setEditingId(agent.id); setEditName(agent.name || ''); setEditEmoji(agent.emoji || ''); setEditAvatar(''); setEditTheme(''); }}
                         className="p-1.5 text-slate-500 hover:text-slate-300 rounded" title={t('agents.editIdentity', 'Edit identity')}><Edit3 size={14} /></button>
-                      <button onClick={() => { setBindingAgentId(agent.id); setBindChannel(''); }}
-                        className="p-1.5 text-slate-500 hover:text-emerald-400 rounded" title={t('agents.addBinding', 'Add binding')}><Link size={14} /></button>
+                      {/* "Add binding" button removed 2026-04-08 — channel routing is now
+                          managed on the Channels page via per-channel "Replied by" dropdown. */}
                       {!agent.isDefault && (
                         <button
                           onClick={() => handleDelete(agent.id)}
@@ -373,13 +300,17 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
                     </div>
                   </div>
 
-                  {/* Bindings */}
+                  {/* Bindings (read-only): which channels currently route to this agent.
+                      Managed exclusively on the Channels page; this is just a status pill. */}
                   {agent.bindings && agent.bindings.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 pl-11">
                       {agent.bindings.map((b, i) => (
-                        <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] bg-emerald-600/15 text-emerald-400 rounded-full">
+                        <span
+                          key={i}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] bg-emerald-600/15 text-emerald-400 rounded-full"
+                          title={t('agents.bindingReadOnlyHint', 'Manage channel routing on the Channels page')}
+                        >
                           <Link size={9} />{b}
-                          <button onClick={() => handleUnbind(agent.id, b)} title={t('common.delete', 'Delete')} aria-label={t('common.delete', 'Delete')} className="hover:text-red-400 ml-0.5"><X size={9} /></button>
                         </span>
                       ))}
                     </div>
@@ -410,44 +341,7 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
                     </div>
                   )}
 
-                  {/* Inline bind input */}
-                  {bindingAgentId === agent.id && (
-                    <div className="flex flex-col gap-2 pl-11 pt-1 border-t border-slate-700/30">
-                      <div className="flex items-center gap-2">
-                        <select value={bindChannel} onChange={(e) => setBindChannel(e.target.value)} aria-label={t('agents.selectChannel', 'Select channel')}
-                          disabled={bindingInProgress}
-                          className="flex-1 px-2 py-1.5 bg-slate-900 border border-slate-600 rounded text-sm text-slate-300 disabled:opacity-50">
-                          <option value="">{t('agents.selectChannel', 'Select a channel...')}</option>
-                          {availableChannels
-                            .filter(ch => !agent.bindings?.includes(ch.id))
-                            .map(ch => <option key={ch.id} value={ch.id}>{ch.label}</option>)
-                          }
-                        </select>
-                        <button onClick={() => handleBind(agent.id)} disabled={!bindChannel || bindingInProgress}
-                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white rounded text-xs flex items-center gap-1.5">
-                          {bindingInProgress && (
-                            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden="true" />
-                          )}
-                          {bindingInProgress
-                            ? t('agents.binding', 'Binding…')
-                            : t('agents.bind', 'Bind')}
-                        </button>
-                        <button onClick={() => { if (!bindingInProgress) { setBindingAgentId(null); setBindStatus(null); } }} disabled={bindingInProgress} title={t('common.cancel', 'Cancel')} aria-label={t('common.cancel', 'Cancel')} className="p-1 text-slate-500 hover:text-slate-300 disabled:opacity-30"><X size={14} /></button>
-                      </div>
-                      {bindStatus && (
-                        <div className="text-[11px] text-slate-400 italic">{bindStatus}</div>
-                      )}
-                      {bindChannel && (() => {
-                        const collide = agents.find((a) => a.id !== agent.id && (a.bindings || []).some((b) => b === bindChannel || b.startsWith(`${bindChannel}:`)));
-                        if (!collide) return null;
-                        return (
-                          <div className="text-[11px] rounded border border-amber-700/40 bg-amber-950/30 px-2 py-1.5 text-amber-300">
-                            ⚠️ {t('agents.bindCollideHint', 'Already bound to').replace(/\{a\}/g, '')} <span className="font-semibold">{collide.name || collide.id}</span>. {t('agents.bindCollideHint2', 'OpenClaw routes by FIRST match, so this binding will not receive messages until you unbind it from the other agent (or use a peer-specific binding like channel:wxid_xxx).')}
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  )}
+                  {/* Inline bind UI removed 2026-04-08 — see handleBind comment above. */}
                 </div>
 
                 {/* Workspace file editor (expanded) */}

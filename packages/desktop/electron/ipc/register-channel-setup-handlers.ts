@@ -16,6 +16,7 @@ import {
 } from './channel-plugin-spec';
 import { clearChannelStatusCache } from './register-channel-list-handlers';
 import { acquireChannelLoginLock, dedupedChannelsList, killStaleChannelLogins } from '../openclaw-process-guard';
+import { ensureDefaultChannelBinding } from '../bindings-manager';
 
 export function registerChannelSetupHandlers(deps: {
   getMainWindow: () => typeof Electron.BrowserWindow.prototype | null;
@@ -551,18 +552,32 @@ export function registerChannelSetupHandlers(deps: {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('channel:status', msg);
     };
 
+    // Bind a freshly-connected channel to the default "main" agent so incoming
+    // messages route somewhere sane out of the box. Previously this shelled out
+    // to `openclaw agents bind --agent main --bind <id>`, which triggers the
+    // OpenClaw CLI's full plugin-reload (60-100s on machines with many plugins,
+    // upstream regression #62051). Binding is purely a JSON write into
+    // openclaw.json `bindings[]` — the CLI does not do anything magical beyond
+    // that — so we write the entry directly via bindings-manager. OpenClaw
+    // gateway picks it up on next config reload (watcher) or restart. This cuts
+    // post-login binding time from ~60s to <10ms.
+    //
+    // ensureDefaultChannelBinding is idempotent:
+    //   - inserts a default `{agentId: "main", match: {channel}}` if no channel
+    //     level binding exists
+    //   - preserves an existing channel-level binding (user may have previously
+    //     routed this channel to a different agent via the Channels page
+    //     dropdown — we do NOT overwrite that choice)
+    //   - leaves peer/accountId-level rules alone (power users)
     const bindToMainAgent = async (bindId: string) => {
-      const bindCmd = `openclaw agents bind --agent main --bind ${bindId} 2>&1`;
       sendStatus('channels.status.binding');
       try {
-        await deps.runAsync(bindCmd, CHANNEL_BIND_IDLE_TIMEOUT_MS);
-      } catch (firstBindErr: unknown) {
-        const firstBindMessage = toErrorMessage(firstBindErr);
-        if (!isTimeoutLike(firstBindMessage)) throw firstBindErr;
-        if (process.platform === 'win32') patchGatewayCmdStackSize(os.homedir());
-        try { await deps.runAsync('openclaw gateway restart 2>&1', GATEWAY_RESTART_IDLE_TIMEOUT_MS); } catch {}
-        sendStatus('channels.status.binding');
-        await deps.runAsync(bindCmd, CHANNEL_BIND_IDLE_TIMEOUT_MS);
+        const result = ensureDefaultChannelBinding(bindId, 'main', os.homedir());
+        try { console.log(`[channel-setup] ensureDefaultChannelBinding(${bindId}) → ${result}`); } catch { /* ignore */ }
+      } catch (err) {
+        try { console.warn(`[channel-setup] ensureDefaultChannelBinding(${bindId}) threw`, err); } catch { /* ignore */ }
+        // Non-fatal: the channel is still usable even if we could not insert the
+        // default binding (user can set it via Channels page dropdown).
       }
     };
 

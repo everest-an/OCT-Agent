@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Check, CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, Loader2, MessageSquare, Pencil, Radio, Unplug, X } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { useExternalNavigator } from '../lib/useExternalNavigator';
@@ -174,6 +174,89 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
   const [removingChannel, setRemovingChannel] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const hasLoadedOnce = useRef(false);
+  // Inbound-agent routing state — which agent handles each configured channel.
+  // Loaded lazily once agents + configured channels are known. Map key is the
+  // user-facing channel id (e.g. "wechat"), value is the agentId currently routing
+  // that channel's messages (e.g. "main" / "oc-1775286601076" / etc.).
+  type InboundAgentInfo = { id: string; name?: string; emoji?: string; hasWorkspace: boolean; isDefault?: boolean };
+  const [availableAgents, setAvailableAgents] = useState<InboundAgentInfo[]>([]);
+  const [channelInboundAgent, setChannelInboundAgent] = useState<Record<string, string | null>>({});
+  const [inboundAgentSaving, setInboundAgentSaving] = useState<Record<string, boolean>>({});
+
+  // Load the flat list of agents so the per-channel dropdown can show {id→label}.
+  // Uses the existing agents:list IPC which already returns {id, name, emoji, isDefault, workspace}.
+  const loadAvailableAgents = useCallback(async () => {
+    const api = window.electronAPI as any;
+    if (!api?.agentsList) return;
+    try {
+      const res = await api.agentsList();
+      if (res?.success && Array.isArray(res.agents)) {
+        const infos: InboundAgentInfo[] = res.agents
+          .map((a: any) => ({
+            id: String(a.id || ''),
+            name: typeof a.name === 'string' ? a.name : undefined,
+            emoji: typeof a.emoji === 'string' ? a.emoji : undefined,
+            hasWorkspace: Boolean(a.workspace) || a.isDefault === true || a.id === 'main',
+            isDefault: Boolean(a.isDefault),
+          }))
+          .filter((a: InboundAgentInfo) => a.id);
+        setAvailableAgents(infos);
+      }
+    } catch { /* non-fatal */ }
+  }, []);
+
+  // For each configured non-local channel, ask the main process which agent
+  // currently owns its channel-level binding. Runs whenever configuredChannels
+  // changes so the dropdown always reflects the authoritative openclaw.json state.
+  const loadInboundAgentsForChannels = useCallback(async () => {
+    const api = window.electronAPI as any;
+    if (!api?.channelGetInboundAgent) return;
+    const targets = Array.from(configuredChannels).filter((id) => id !== 'local');
+    if (targets.length === 0) { setChannelInboundAgent({}); return; }
+    const next: Record<string, string | null> = {};
+    await Promise.all(targets.map(async (channelId) => {
+      // Map user-facing channel id (e.g. "wechat") to OpenClaw plugin id (e.g. "openclaw-weixin"),
+      // which is the shape used inside openclaw.json bindings[].match.channel.
+      const def = getChannel(channelId);
+      const openclawId = def?.openclawId || channelId;
+      try {
+        const res = await api.channelGetInboundAgent(openclawId);
+        next[channelId] = res?.success ? (res.agentId ?? null) : null;
+      } catch {
+        next[channelId] = null;
+      }
+    }));
+    setChannelInboundAgent(next);
+  }, [configuredChannels]);
+
+  useEffect(() => { void loadAvailableAgents(); }, [loadAvailableAgents]);
+  useEffect(() => { void loadInboundAgentsForChannels(); }, [loadInboundAgentsForChannels]);
+
+  // Handle a dropdown change — write the new agent binding and refresh state.
+  // Fire-and-forget UI: optimistic local state update + async persist.
+  const handleInboundAgentChange = async (channelId: string, newAgentId: string) => {
+    const api = window.electronAPI as any;
+    if (!api?.channelSetInboundAgent) return;
+    const def = getChannel(channelId);
+    const openclawId = def?.openclawId || channelId;
+    setInboundAgentSaving((prev) => ({ ...prev, [channelId]: true }));
+    setChannelInboundAgent((prev) => ({ ...prev, [channelId]: newAgentId }));
+    try {
+      const res = await api.channelSetInboundAgent(openclawId, newAgentId);
+      if (!res?.success) {
+        // Revert optimistic update on failure.
+        void loadInboundAgentsForChannels();
+      }
+    } catch {
+      void loadInboundAgentsForChannels();
+    } finally {
+      setInboundAgentSaving((prev) => {
+        const next = { ...prev };
+        delete next[channelId];
+        return next;
+      });
+    }
+  };
 
   // Get the active channel definition from registry
   const activeChannel = activeWizard ? getChannel(activeWizard) : undefined;
@@ -629,6 +712,48 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                     </div>
                   )}
                 </div>
+                {/* Inbound agent dropdown — "who answers this channel?" */}
+                {ch.id !== 'local' && availableAgents.length > 0 && (() => {
+                  const def = getChannel(ch.id);
+                  const openclawId = def?.openclawId || ch.id;
+                  const currentAgent = channelInboundAgent[ch.id] ?? null;
+                  // Fall back to 'main' display value if binding not yet loaded or empty —
+                  // new channels auto-bind to main via ensureDefaultChannelBinding on setup.
+                  const selectValue = currentAgent || 'main';
+                  const saving = Boolean(inboundAgentSaving[ch.id]);
+                  return (
+                    <div className="mt-3 pt-3 border-t border-emerald-700/20 flex items-center gap-2 text-xs">
+                      <span className="text-slate-400 shrink-0">
+                        {t('channels.repliedBy', 'Replied by')}
+                      </span>
+                      <select
+                        value={selectValue}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          void handleInboundAgentChange(ch.id, e.target.value);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        disabled={saving}
+                        className="flex-1 min-w-0 px-2 py-1 bg-slate-900/60 border border-slate-700 rounded text-slate-200 text-xs disabled:opacity-50"
+                        aria-label={t('channels.repliedBy', 'Replied by')}
+                      >
+                        {/* If the current binding targets an agent we don't know about (e.g. manually
+                            edited openclaw.json), show it as a read-only option so the dropdown
+                            reflects reality instead of silently flipping it to main. */}
+                        {currentAgent && !availableAgents.some((a) => a.id === currentAgent) && (
+                          <option value={currentAgent}>{`⚠️ ${currentAgent}`}</option>
+                        )}
+                        {availableAgents.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.emoji ? `${a.emoji} ` : ''}{a.name || a.id}{a.isDefault ? ' (default)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      {saving && <Loader2 size={12} className="animate-spin text-slate-500 shrink-0" />}
+                      <span className="sr-only">{openclawId}</span>
+                    </div>
+                  );
+                })()}
               </div>
             ))}
           </div>

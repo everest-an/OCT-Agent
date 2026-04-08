@@ -284,6 +284,9 @@ export interface ElectronAPI {
   // Active project workspace (shared between desktop chat and channel inbound hook)
   workspaceGetActive?: () => Promise<{ success: boolean; path?: string | null; error?: string }>;
   workspaceSetActive?: (path: string | null) => Promise<{ success: boolean; error?: string }>;
+  // Channel-level inbound agent routing (simple default "which agent answers this channel")
+  channelGetInboundAgent?: (channelId: string) => Promise<{ success: boolean; agentId?: string | null; error?: string }>;
+  channelSetInboundAgent?: (channelId: string, agentId: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 export interface EnvironmentInfo {
