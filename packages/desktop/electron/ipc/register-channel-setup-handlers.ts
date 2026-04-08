@@ -35,6 +35,7 @@ export function registerChannelSetupHandlers(deps: {
   const CHANNEL_PLUGIN_UNINSTALL_IDLE_TIMEOUT_MS = 30000;
   const CHANNEL_ADD_IDLE_TIMEOUT_MS = 45000;
   const CHANNEL_BIND_IDLE_TIMEOUT_MS = 30000;
+  const CHANNEL_LOGOUT_IDLE_TIMEOUT_MS = 30000;
   const GATEWAY_RESTART_IDLE_TIMEOUT_MS = 30000;
 
   const OFFICIAL_ADD_BEFORE_LOGIN_CHANNELS = new Set(['whatsapp', 'signal', 'imessage']);
@@ -47,6 +48,16 @@ export function registerChannelSetupHandlers(deps: {
   const isTimeoutLike = (message: string) => {
     const lower = (message || '').toLowerCase();
     return lower.includes('timed out') || lower.includes('timeout');
+  };
+
+  const isStackOverflowLike = (message: string) => {
+    const lower = (message || '').toLowerCase();
+    return lower.includes('maximum call stack size exceeded')
+      || lower.includes('rangeerror')
+      || lower.includes('stack overflow')
+      || lower.includes('0xc00000fd')
+      || lower.includes('3221225725')
+      || lower.includes('crashed while loading plugins');
   };
 
   const isNpxEnoentLike = (message: string) => /spawn\s+npx(?:\.cmd)?\s+enoent/i.test(message || '');
@@ -120,6 +131,9 @@ export function registerChannelSetupHandlers(deps: {
     }
     if (isNpxEnoentLike(message)) {
       return 'OpenClaw could not launch required helper tools (npx not found in runtime PATH). Please rerun Setup to repair runtime tools, then retry.';
+    }
+    if (isStackOverflowLike(message)) {
+      return `${channelLabel} plugin hit a stack overflow while loading. This is not a credential issue. Please retry once.`;
     }
     if (/Unknown channel/i.test(message)) {
       return `OpenClaw does not recognize channel "${openclawId}" yet. Please reinstall the channel plugin and retry.`;
@@ -257,7 +271,61 @@ export function registerChannelSetupHandlers(deps: {
     return changed;
   };
 
-  const runLoginWithScopedConfig = async (loginCmd: string, timeoutMs: number) => {
+  const isolateLoginToChannelPlugin = (config: Record<string, any>, pluginId: string) => {
+    if (!pluginId) return false;
+    if (!isPlainRecord(config.plugins)) config.plugins = {};
+    const plugins = config.plugins as Record<string, any>;
+
+    let changed = false;
+    if (!Array.isArray(plugins.allow) || plugins.allow.length !== 1 || plugins.allow[0] !== pluginId) {
+      plugins.allow = [pluginId];
+      changed = true;
+    }
+
+    if (!isPlainRecord(plugins.entries)) {
+      plugins.entries = {};
+      changed = true;
+    }
+
+    const entries = plugins.entries as Record<string, any>;
+    for (const [entryId, entryRaw] of Object.entries(entries)) {
+      const entry = isPlainRecord(entryRaw) ? { ...entryRaw } : {};
+      if (entryId === pluginId) {
+        if (entry.enabled !== true) {
+          entry.enabled = true;
+          entries[entryId] = entry;
+          changed = true;
+        }
+        continue;
+      }
+      if (entry.enabled !== false) {
+        entry.enabled = false;
+        entries[entryId] = entry;
+        changed = true;
+      }
+    }
+
+    if (!isPlainRecord(entries[pluginId])) {
+      entries[pluginId] = { enabled: true };
+      changed = true;
+    }
+
+    if (isPlainRecord(plugins.slots) && plugins.slots.memory) {
+      delete plugins.slots.memory;
+      changed = true;
+      if (Object.keys(plugins.slots).length === 0) {
+        delete plugins.slots;
+      }
+    }
+
+    return changed;
+  };
+
+  const runLoginWithScopedConfig = async (
+    loginCmd: string,
+    timeoutMs: number,
+    options?: { isolateToPluginId?: string; extraEnv?: Record<string, string> },
+  ) => {
     let tempConfigPath: string | null = null;
     try {
       const raw = fs.readFileSync(OPENCLAW_CONFIG_PATH, 'utf8');
@@ -270,7 +338,9 @@ export function registerChannelSetupHandlers(deps: {
       }
 
       const isolated = JSON.parse(JSON.stringify(parsed));
-      const changed = disableOpenClawMemoryPlugin(isolated);
+      const changed = options?.isolateToPluginId
+        ? isolateLoginToChannelPlugin(isolated, options.isolateToPluginId)
+        : disableOpenClawMemoryPlugin(isolated);
       if (!changed) {
         return {
           usedScopedConfig: false,
@@ -286,7 +356,10 @@ export function registerChannelSetupHandlers(deps: {
 
       return {
         usedScopedConfig: true,
-        result: await deps.channelLoginWithQR(loginCmd, timeoutMs, { OPENCLAW_CONFIG_PATH: tempConfigPath }),
+        result: await deps.channelLoginWithQR(loginCmd, timeoutMs, {
+          OPENCLAW_CONFIG_PATH: tempConfigPath,
+          ...(options?.extraEnv || {}),
+        }),
       };
     } catch {
       return {
@@ -597,6 +670,54 @@ export function registerChannelSetupHandlers(deps: {
     const loginCmd = `openclaw channels login --channel ${openclawId} --verbose`;
     let result = await deps.channelLoginWithQR(loginCmd, CHANNEL_LOGIN_IDLE_TIMEOUT_MS);
     let rawFailure = [result.error || '', result.output || ''].join('\n').trim();
+
+    if (!result.success && process.platform === 'win32' && isStackOverflowLike(rawFailure)) {
+      // Retry once with a larger V8 stack budget for plugin-heavy channels (notably WeChat).
+      sendStatus(`channels.status.autoRetrying::${channelLabel}`);
+      result = await deps.channelLoginWithQR(loginCmd, CHANNEL_LOGIN_IDLE_TIMEOUT_MS, {
+        AWARENESS_OPENCLAW_STACK_SIZE_KB: '12288',
+      });
+      rawFailure = [result.error || '', result.output || ''].join('\n').trim();
+    }
+
+    if (!result.success && openclawId === 'openclaw-weixin' && isStackOverflowLike(rawFailure)) {
+      // Upstream 2026.4.5 regression: unrelated plugins can crash during global preload.
+      // Retry once with a scoped config that only enables the target channel plugin.
+      sendStatus(`channels.status.autoRetrying::${channelLabel}`);
+      const scoped = await runLoginWithScopedConfig(loginCmd, CHANNEL_LOGIN_IDLE_TIMEOUT_MS, {
+        isolateToPluginId: openclawId,
+        extraEnv: process.platform === 'win32'
+          ? { AWARENESS_OPENCLAW_STACK_SIZE_KB: '12288' }
+          : undefined,
+      });
+      if (scoped.usedScopedConfig) {
+        result = scoped.result;
+        rawFailure = [result.error || '', result.output || ''].join('\n').trim();
+      }
+    }
+
+    if (!result.success && openclawId === 'openclaw-weixin') {
+      const lowerFailure = (rawFailure || '').toLowerCase();
+      const shouldForceRelink = isTimeoutLike(rawFailure)
+        || lowerFailure.includes('qr code expired')
+        || lowerFailure.includes('logged out')
+        || lowerFailure.includes('session');
+
+      // Keep the existing session when it's still healthy. If WeChat relink fails,
+      // clear stale auth once and retry so users changing accounts can move to a new session.
+      if (shouldForceRelink) {
+        sendStatus(`channels.status.autoRetrying::${channelLabel}`);
+        try {
+          await deps.runAsync(`openclaw channels logout --channel ${openclawId} 2>&1`, CHANNEL_LOGOUT_IDLE_TIMEOUT_MS);
+        } catch {
+          // Best-effort cleanup; retry login even if logout fails.
+        }
+        result = await deps.channelLoginWithQR(loginCmd, CHANNEL_LOGIN_IDLE_TIMEOUT_MS, process.platform === 'win32'
+          ? { AWARENESS_OPENCLAW_STACK_SIZE_KB: '12288' }
+          : undefined);
+        rawFailure = [result.error || '', result.output || ''].join('\n').trim();
+      }
+    }
 
     if (!result.success && process.platform === 'win32' && isNpxEnoentLike(rawFailure) && deps.ensureLocalDaemonReadyForRuntime) {
       // Plugin may still attempt its own auto-start path; force a second daemon preflight and retry once.

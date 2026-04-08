@@ -23,6 +23,7 @@ describe('registerChannelSetupHandlers', () => {
   beforeEach(() => {
     handleMock.mockReset();
     vi.restoreAllMocks();
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false as any);
   });
 
   it('waits for the channel to appear before confirming success', async () => {
@@ -290,6 +291,120 @@ describe('registerChannelSetupHandlers', () => {
     expect(String(result.error || '')).toContain('npx not found in runtime PATH');
   });
 
+  it('retries WeChat login with higher stack when OpenClaw reports plugin crash on Windows', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+
+    const channelLoginWithQR = vi
+      .fn()
+      .mockResolvedValueOnce({ success: false, error: 'OpenClaw crashed while loading plugins. Please retry once.' })
+      .mockResolvedValueOnce({ success: true });
+
+    registerChannelSetupHandlers({
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any),
+      getChannel: () => ({ label: 'WeChat', openclawId: 'openclaw-weixin', pluginPackage: '@tencent-weixin/openclaw-weixin', setupFlow: 'qr-login', saveStrategy: 'json-direct' }),
+      runAsync: vi.fn(async () => 'ok'),
+      safeShellExecAsync: vi.fn(async () => 'ok'),
+      readShellOutputAsync: vi.fn(async () => '[{"id":"openclaw-weixin","status":"linked"}]'),
+      channelLoginWithQR,
+      ensureLocalDaemonReadyForRuntime: vi.fn(async () => true),
+    });
+
+    const handler = getRegisteredSetupHandler();
+    const result = await handler({}, 'wechat');
+
+    expect(result).toMatchObject({ success: true });
+    expect(channelLoginWithQR).toHaveBeenCalledTimes(2);
+    expect(channelLoginWithQR).toHaveBeenNthCalledWith(
+      2,
+      'openclaw channels login --channel openclaw-weixin --verbose',
+      180000,
+      { AWARENESS_OPENCLAW_STACK_SIZE_KB: '12288' },
+    );
+  });
+
+  it('logs out stale WeChat session and retries once after timeout-like reconnect failure', async () => {
+    const runAsync = vi.fn(async () => 'ok');
+    const channelLoginWithQR = vi
+      .fn()
+      .mockResolvedValueOnce({ success: false, error: 'Connection timed out while OpenClaw was still loading. Please retry in 20-60 seconds.' })
+      .mockResolvedValueOnce({ success: true });
+
+    registerChannelSetupHandlers({
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any),
+      getChannel: () => ({ label: 'WeChat', openclawId: 'openclaw-weixin', pluginPackage: '@tencent-weixin/openclaw-weixin', setupFlow: 'qr-login', saveStrategy: 'json-direct' }),
+      runAsync,
+      safeShellExecAsync: vi.fn(async () => 'ok'),
+      readShellOutputAsync: vi.fn(async () => '[{"id":"openclaw-weixin","status":"linked"}]'),
+      channelLoginWithQR,
+    });
+
+    const handler = getRegisteredSetupHandler();
+    const result = await handler({}, 'wechat');
+
+    expect(result).toMatchObject({ success: true });
+    expect(channelLoginWithQR).toHaveBeenCalledTimes(2);
+    expect(runAsync).toHaveBeenCalledWith('openclaw channels logout --channel openclaw-weixin 2>&1', 30000);
+  });
+
+  it('falls back to scoped plugin isolation when WeChat still crashes after high-stack retry', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+
+    const channelLoginWithQR = vi
+      .fn()
+      .mockResolvedValueOnce({ success: false, error: 'OpenClaw crashed while loading plugins. Please retry once.' })
+      .mockResolvedValueOnce({ success: false, error: 'OpenClaw crashed while loading plugins. Please retry once.' })
+      .mockResolvedValueOnce({ success: true });
+
+    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => undefined);
+    const rmSpy = vi.spyOn(fs, 'rmSync').mockImplementation(() => undefined as any);
+    vi.spyOn(fs, 'readFileSync').mockImplementation((filePath: any) => {
+      if (String(filePath).includes('openclaw.json')) {
+        return JSON.stringify({
+          plugins: {
+            allow: ['google', 'minimax', 'openclaw-weixin'],
+            entries: {
+              google: { enabled: true },
+              minimax: { enabled: true },
+              'openclaw-weixin': { enabled: true },
+            },
+          },
+          channels: {
+            'openclaw-weixin': { enabled: true },
+          },
+        }) as any;
+      }
+      throw new Error(`unexpected readFileSync(${String(filePath)})`);
+    });
+
+    registerChannelSetupHandlers({
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any),
+      getChannel: () => ({ label: 'WeChat', openclawId: 'openclaw-weixin', pluginPackage: '@tencent-weixin/openclaw-weixin', setupFlow: 'qr-login', saveStrategy: 'json-direct' }),
+      runAsync: vi.fn(async () => 'ok'),
+      safeShellExecAsync: vi.fn(async () => 'ok'),
+      readShellOutputAsync: vi.fn(async () => '[{"id":"openclaw-weixin","status":"linked"}]'),
+      channelLoginWithQR,
+      ensureLocalDaemonReadyForRuntime: vi.fn(async () => true),
+    });
+
+    const handler = getRegisteredSetupHandler();
+    const result = await handler({}, 'wechat');
+
+    expect(result).toMatchObject({ success: true });
+    expect(channelLoginWithQR).toHaveBeenCalledTimes(3);
+    const scopedEnv = channelLoginWithQR.mock.calls[2]?.[2] as Record<string, string> | undefined;
+    expect(scopedEnv?.OPENCLAW_CONFIG_PATH).toBeTruthy();
+    expect(scopedEnv?.AWARENESS_OPENCLAW_STACK_SIZE_KB).toBe('12288');
+
+    const isolatedWrite = writeSpy.mock.calls.find(([target]) => String(target).includes('awarenessclaw-channel-login'));
+    expect(isolatedWrite).toBeTruthy();
+    const isolatedConfig = JSON.parse(String(isolatedWrite?.[1] || '{}'));
+    expect(isolatedConfig.plugins?.allow).toEqual(['openclaw-weixin']);
+    expect(isolatedConfig.plugins?.entries?.google?.enabled).toBe(false);
+    expect(isolatedConfig.plugins?.entries?.minimax?.enabled).toBe(false);
+    expect(isolatedConfig.plugins?.entries?.['openclaw-weixin']?.enabled).toBe(true);
+    expect(rmSpy).toHaveBeenCalledWith(expect.stringContaining('awarenessclaw-channel-login'), expect.objectContaining({ force: true }));
+  });
+
   it('retries plugin install with command-scoped config on Windows npx ENOENT', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
 
@@ -340,8 +455,8 @@ describe('registerChannelSetupHandlers', () => {
     const result = await handler({}, 'wechat');
 
     expect(result).toMatchObject({ success: true });
-    expect(runAsync).toHaveBeenCalledWith('openclaw plugins install "@tencent-weixin/openclaw-weixin" 2>&1', 60000);
-    expect(runAsync).toHaveBeenCalledWith(expect.stringContaining('OPENCLAW_CONFIG_PATH='), 60000);
+    expect(runAsync).toHaveBeenCalledWith('openclaw plugins install "@tencent-weixin/openclaw-weixin" 2>&1', 120000);
+    expect(runAsync).toHaveBeenCalledWith(expect.stringContaining('OPENCLAW_CONFIG_PATH='), 120000);
     expect(channelLoginWithQR).toHaveBeenCalledTimes(1);
 
     const isolatedWrite = writeSpy.mock.calls.find(([target]) => String(target).includes('awarenessclaw-channel-cmd'));
@@ -444,7 +559,7 @@ describe('registerChannelSetupHandlers', () => {
 
     expect(result).toMatchObject({ success: true });
     expect(channelLoginWithQR).toHaveBeenCalledTimes(1);
-    expect(runAsync).toHaveBeenCalledWith('openclaw plugins install "@tencent-weixin/openclaw-weixin" 2>&1', 60000);
+    expect(runAsync).toHaveBeenCalledWith('openclaw plugins install "@tencent-weixin/openclaw-weixin" 2>&1', 120000);
   });
 
   it('repairs blocking plugin load failures and retries login once', async () => {
@@ -476,7 +591,7 @@ describe('registerChannelSetupHandlers', () => {
     expect(result).toMatchObject({ success: true });
     expect(channelLoginWithQR).toHaveBeenCalledTimes(2);
     expect(runAsync).toHaveBeenCalledWith(expect.stringContaining('openclaw plugins uninstall --force "telegram" 2>&1'), 30000);
-    expect(runAsync).toHaveBeenCalledWith(expect.stringContaining('openclaw plugins install "@openclaw/telegram" 2>&1'), 60000);
+    expect(runAsync).toHaveBeenCalledWith(expect.stringContaining('openclaw plugins install "@openclaw/telegram" 2>&1'), 120000);
     expect(send).toHaveBeenCalledWith('channel:status', 'channels.status.repairingPlugin::telegram');
   });
 
@@ -524,6 +639,6 @@ describe('registerChannelSetupHandlers', () => {
     const result = await handler({}, 'wechat');
 
     expect(result).toMatchObject({ success: true });
-    expect(runAsync).toHaveBeenCalledWith(expect.stringContaining('openclaw plugins install "@openclaw/telegram@beta" 2>&1'), 60000);
+    expect(runAsync).toHaveBeenCalledWith(expect.stringContaining('openclaw plugins install "@openclaw/telegram@beta" 2>&1'), 120000);
   });
 });

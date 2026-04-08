@@ -360,6 +360,16 @@ export function createShellUtils(options: { home: string; app: any }) {
   // (PID survives and serves healthz).
   const NODE_STACK_SIZE_KB = 8192;
 
+  function resolveOpenClawStackSizeKb(env?: Record<string, string>): number {
+    const raw = env?.AWARENESS_OPENCLAW_STACK_SIZE_KB || process.env.AWARENESS_OPENCLAW_STACK_SIZE_KB;
+    if (!raw) return NODE_STACK_SIZE_KB;
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed)) return NODE_STACK_SIZE_KB;
+    // Keep override in a sane range to avoid immediate startup crashes.
+    if (parsed < 1024 || parsed > 12288) return NODE_STACK_SIZE_KB;
+    return parsed;
+  }
+
   function buildOpenClawShellFallbackSync(): string | null {
     const pkgDir = getOpenClawPackageDirSync();
     if (!pkgDir) {
@@ -536,8 +546,9 @@ export function createShellUtils(options: { home: string; app: any }) {
       const entryPath = pkgDir ? getOpenClawEntryPath(pkgDir) : null;
       if (entryPath) {
         const nodeExe = findNodeExecutable();
-        console.log(`[runSpawn] openclaw win32: node=${nodeExe}, entry=${entryPath}, stack=${NODE_STACK_SIZE_KB}`);
-        return spawn(nodeExe, [`--stack-size=${NODE_STACK_SIZE_KB}`, entryPath, ...args], {
+        const stackSizeKb = resolveOpenClawStackSizeKb((spawnOptions as any).env);
+        console.log(`[runSpawn] openclaw win32: node=${nodeExe}, entry=${entryPath}, stack=${stackSizeKb}`);
+        return spawn(nodeExe, [`--stack-size=${stackSizeKb}`, entryPath, ...args], {
           ...spawnOptions,
         });
       }

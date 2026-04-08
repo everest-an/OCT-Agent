@@ -16,6 +16,7 @@ import { registerActiveLogin, unregisterActiveLogin } from '../openclaw-process-
 function watchOpenClawLogForQrUrl(
   onQrFound: (url: string) => void,
   onLoginSuccess?: () => void,
+  onFatalError?: (message: string) => void,
 ): () => void {
   const today = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -54,30 +55,46 @@ function watchOpenClawLogForQrUrl(
       offset = stat.size;
       for (const line of buf.toString('utf8').split('\n')) {
         if (!line.trim() || stopped) continue;
+        let msg = line;
         try {
           const entry = JSON.parse(line);
-          const msg = String(entry['1'] || '');
-          if (!qrFound) {
-            const match = msg.match(/二维码链接:\s*(https?:\/\/\S+)/);
-            if (match) {
-              qrFound = true;
-              onQrFound(match[1]);
-              if (!onLoginSuccess) {
-                stopped = true;
-                return;
-              }
-              continue;
-            }
-          }
-          // After QR is shown, watch for the WeChat login success marker.
-          // openclaw-weixin logs "weixin monitor started (...)" once the bot session
-          // is established post-scan. This is the cleanest single-line success signal.
-          if (qrFound && onLoginSuccess && /weixin monitor started/i.test(msg)) {
+          msg = String(entry['1'] || line);
+        } catch {
+          msg = line;
+        }
+
+        if (onFatalError) {
+          const isWeChatPluginStackOverflow = /openclaw-weixin failed to load/i.test(msg)
+            && /(maximum call stack size exceeded|rangeerror)/i.test(msg);
+          if (isWeChatPluginStackOverflow) {
             stopped = true;
-            onLoginSuccess();
+            onFatalError('WeChat plugin failed to load due to stack overflow. Retrying usually fixes it.');
             return;
           }
-        } catch { /* non-JSON line, skip */ }
+        }
+
+        if (!qrFound) {
+          const hasQrHint = /二维码|qrcode|qr\s*code|scan/i.test(msg);
+          const match = hasQrHint ? msg.match(/https?:\/\/\S+/i) : null;
+          if (match) {
+            qrFound = true;
+            onQrFound(match[0]);
+            if (!onLoginSuccess) {
+              stopped = true;
+              return;
+            }
+            continue;
+          }
+        }
+
+        // After QR is shown, watch for the WeChat login success marker.
+        // openclaw-weixin logs "weixin monitor started (...)" once the bot session
+        // is established post-scan. This is the cleanest single-line success signal.
+        if (qrFound && onLoginSuccess && /weixin monitor started/i.test(msg)) {
+          stopped = true;
+          onLoginSuccess();
+          return;
+        }
       }
     } catch { /* ignore fs errors */ }
   };
@@ -138,7 +155,7 @@ export function createChannelLoginWithQR(deps: {
       let stopLogWatcher: (() => void) | null = null;
 
       // Disable colour everywhere so our QR / line parsing is not foiled by ANSI escapes.
-      // PATH/PATHEXT/ComSpec are injected by runSpawn → buildShellEnv automatically.
+      // PATH/PATHEXT/ComSpec are injected by runSpawn -> buildShellEnv automatically.
       const child = deps.runSpawn('openclaw', args, {
         cwd: os.homedir(),
         stdio: 'pipe',
@@ -228,6 +245,18 @@ export function createChannelLoginWithQR(deps: {
           // no-op once settled.
           send('channel:status', 'channels.status.connected');
           resolve({ success: true, output: 'Connected!' });
+        },
+        (message) => {
+          if (settled) return;
+          settled = true;
+          clearIdleTimer();
+          if (qrFlushTimer) {
+            clearTimeout(qrFlushTimer);
+            qrFlushTimer = null;
+          }
+          stopLogWatcher?.();
+          try { child.kill(); } catch {}
+          resolve({ success: false, error: message });
         },
       );
 
@@ -319,8 +348,11 @@ export function createChannelLoginWithQR(deps: {
           clearTimeout(qrFlushTimer);
           qrFlushTimer = null;
         }
+        const unsignedCode = typeof code === 'number' && code < 0 ? (0x100000000 + code) : code;
         if (code === 0) {
           resolve({ success: true, output: 'Connected!' });
+        } else if (code === -1073741571 || unsignedCode === 3221225725) {
+          resolve({ success: false, error: 'OpenClaw crashed while loading plugins. Please retry once.' });
         } else if (qrShown) {
           resolve({ success: false, error: 'QR code expired. Click "Try again" to get a new QR code.' });
         } else {
