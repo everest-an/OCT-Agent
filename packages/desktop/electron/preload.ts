@@ -174,6 +174,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }) => ipcRenderer.invoke('permissions:update', changes),
   workspaceReadFile: (filename: string) => ipcRenderer.invoke('workspace:read-file', filename),
   workspaceWriteFile: (filename: string, content: string) => ipcRenderer.invoke('workspace:write-file', filename, content),
+  // Active project workspace shared between desktop chat and channel inbound hook.
+  workspaceGetActive: () => ipcRenderer.invoke('workspace:get-active'),
+  workspaceSetActive: (path: string | null) => ipcRenderer.invoke('workspace:set-active', path),
 
   // Agents management
   agentsList: () => ipcRenderer.invoke('agents:list'),

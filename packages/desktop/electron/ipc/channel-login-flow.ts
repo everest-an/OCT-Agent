@@ -301,7 +301,14 @@ export function createChannelLoginWithQR(deps: {
 }) {
   return function channelLoginWithQR(
     loginCmd: string,
-    timeoutMs = 180000,
+    // Idle timeout (NOT total) — only fires after this many ms of stdout/stderr/log silence.
+    // Bumped from 180s → 300s in 2026-04 to ride out OpenClaw v2026.4.5+ regression #62051
+    // (every spawned worker re-loads ALL plugins, sometimes >3 minutes on machines with
+    // many plugins like feishu_doc/chat/wiki/drive/perm + weixin + awareness-memory).
+    // Plugin-loading lines reset the idle timer so this doesn't deadline pure plugin churn,
+    // but the higher cap prevents premature failures during long compat checks (weixin's
+    // Tencent ilinkai handshake stage in particular).
+    timeoutMs = 300000,
     extraEnv: Record<string, string> = {},
   ): Promise<{ success: boolean; output?: string; error?: string }> {
     // Tokenise the legacy string-form command (`openclaw channels login --channel <id> --verbose`)
@@ -555,25 +562,39 @@ export function createChannelLoginWithQR(deps: {
         }
         const unsignedCode = typeof code === 'number' && code < 0 ? (0x100000000 + code) : code;
         const fullOutput = stdout.trim();
+        // Diagnostic output kept on the result.output field for debugging only — never
+        // surfaced as the user-facing `error` message. The wizard previously appended
+        // stdout's last 300 chars to the error string, which on plugin-load failures
+        // produced a giant unreadable wall of "[plugins] feishu_chat: Registered ...".
+        // Now `error` is always a clean human sentence.
+        const diagnostic = fullOutput ? fullOutput.slice(-12000) : undefined;
         if (code === 0) {
           resolve({ success: true, output: 'Connected!' });
         } else if (code === -1073741571 || unsignedCode === 3221225725) {
           resolve({
             success: false,
-            error: 'OpenClaw crashed while loading plugins. Please retry once.',
-            output: fullOutput ? fullOutput.slice(-12000) : undefined,
+            error: 'OpenClaw crashed while loading plugins. Please retry — this is usually transient (OpenClaw upstream issue #62051).',
+            output: diagnostic,
           });
         } else if (qrShown) {
           resolve({
             success: false,
-            error: 'QR code expired. Click "Try again" to get a new QR code.',
-            output: fullOutput ? fullOutput.slice(-12000) : undefined,
+            error: 'QR code expired before scan completed. Click "Re-link" to generate a new QR code.',
+            output: diagnostic,
           });
         } else {
+          // Try to extract the LAST meaningful error line from stdout (an "Error:" /
+          // "ERROR" line, or the very last non-plugin-noise line). Fall back to a
+          // generic friendly hint, NEVER raw stdout.
+          const lines = fullOutput.split('\n').map((l) => l.trim()).filter(Boolean);
+          const noisy = /^\[plugins\]|Registered .* tool|setWeixinRuntime|compat.*check/i;
+          const meaningful = [...lines].reverse().find((l) => /error|fail|cannot|missing/i.test(l) && !noisy.test(l));
+          const cleanError = meaningful?.slice(0, 240)
+            || `OpenClaw exited with code ${code}. Plugin loading may still be in progress — please wait 30s and try again.`;
           resolve({
             success: false,
-            error: fullOutput.slice(-300) || `Exit code ${code}`,
-            output: fullOutput ? fullOutput.slice(-12000) : undefined,
+            error: cleanError,
+            output: diagnostic,
           });
         }
       });

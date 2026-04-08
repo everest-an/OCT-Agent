@@ -750,8 +750,18 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                   {getGuide()}
 
                   {configuredChannels.has(activeWizard) && (
-                    <div className="p-3 bg-amber-600/10 border border-amber-600/20 rounded-lg text-xs text-amber-400">
-                      {t('channels.alreadyConfigured', 'Already connected. You can reconnect or update credentials.')}
+                    <div className="p-3 bg-amber-600/10 border border-amber-600/20 rounded-lg text-xs text-amber-400 space-y-1.5">
+                      <div className="font-semibold">
+                        {t('channels.alreadyConnected', '✅ Already connected')}
+                      </div>
+                      <div className="text-amber-300/80">
+                        {isOneClick
+                          ? t(
+                              'channels.alreadyConnectedRelinkHint',
+                              'This channel is already linked and bot messages should be flowing. Click "Re-link" below ONLY if you want to switch to a different account — it will trigger a fresh QR scan and replace the existing session. Otherwise just close this dialog.',
+                            )
+                          : t('channels.alreadyConfigured', 'Already connected. You can reconnect or update credentials.')}
+                      </div>
                     </div>
                   )}
 
@@ -763,17 +773,31 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
 
                   {supportsPairingApproval && (configuredChannels.has(activeWizard) || disconnectedChannels.has(activeWizard)) && renderPairingApprovalPanel()}
 
-                  <div className="flex justify-end">
+                  <div className="flex justify-end gap-2">
+                    {configuredChannels.has(activeWizard) && (
+                      <button
+                        onClick={closeWizard}
+                        className="px-5 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl text-sm font-medium transition-colors"
+                      >
+                        {t('channels.closeBtn', 'Close')}
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         if (isOneClick) { handleConnect(); setWizardStep('test'); }
                         else { setWizardStep('token'); }
                       }}
-                      className="px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-1.5"
+                      className={`px-5 py-2.5 rounded-xl text-sm font-medium transition-colors flex items-center gap-1.5 text-white ${
+                        configuredChannels.has(activeWizard)
+                          ? 'bg-amber-600 hover:bg-amber-500'
+                          : 'bg-brand-600 hover:bg-brand-500'
+                      }`}
                     >
-                      {isOneClick
-                        ? t('channels.connectBtn', 'Connect')
-                        : <>{t('channels.next')} <ChevronRight size={14} /></>}
+                      {configuredChannels.has(activeWizard) && isOneClick
+                        ? t('channels.relinkBtn', 'Re-link (switch account)')
+                        : isOneClick
+                          ? t('channels.connectBtn', 'Connect')
+                          : <>{t('channels.next')} <ChevronRight size={14} /></>}
                     </button>
                   </div>
                 </>

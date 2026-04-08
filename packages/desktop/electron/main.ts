@@ -22,6 +22,7 @@ import {
 } from './local-daemon';
 import { GatewayClient } from './gateway-ws';
 import { healMainAgentIfNeeded } from './heal-main-agent';
+import { installWorkspaceInjectHook, readActiveWorkspace, writeActiveWorkspace } from './install-workspace-hook';
 import { createChannelLoginWithQR } from './ipc/channel-login-flow';
 import { registerAgentHandlers } from './ipc/register-agent-handlers';
 import { registerAppUtilityHandlers } from './ipc/register-app-utility-handlers';
@@ -1291,6 +1292,24 @@ ipcMain.handle('daemon:mark-connected', () => {
   daemonWatchdog.markConnected();
 });
 
+// Active project workspace — persisted to ~/.awarenessclaw/active-workspace.json so the
+// before_prompt_build hook (deployed to ~/.openclaw/hooks/awareness-workspace-inject) can
+// read it and prepend the project context to channel inbound messages. This is the
+// channel-side counterpart of the desktop-chat workspace prefix injection.
+ipcMain.handle('workspace:get-active', () => {
+  try { return { success: true, path: readActiveWorkspace(HOME) }; }
+  catch (err: any) { return { success: false, error: err?.message?.slice(0, 200) }; }
+});
+
+ipcMain.handle('workspace:set-active', (_e: unknown, workspacePath: string | null) => {
+  try {
+    writeActiveWorkspace(workspacePath, HOME);
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message?.slice(0, 200) };
+  }
+});
+
 registerAppUtilityHandlers({
   safeShellExecAsync,
   readShellOutputAsync,
@@ -1605,6 +1624,20 @@ app.whenReady().then(() => {
     }
   } catch (err) {
     console.warn('[main-heal] unexpected error:', err);
+  }
+
+  // Install the workspace-injection hook so channel inbound messages get the same
+  // "[Project working directory: …]" prefix the desktop chat uses. Idempotent — only
+  // writes if the hook script body or config entry is missing/changed.
+  try {
+    const hookResult = installWorkspaceInjectHook(HOME);
+    if (hookResult.status === 'deployed') {
+      console.log(`[workspace-hook] deployed: ${hookResult.changes?.join(', ')}`);
+    } else if (hookResult.status === 'error') {
+      console.warn('[workspace-hook] error:', hookResult.error);
+    }
+  } catch (err) {
+    console.warn('[workspace-hook] unexpected error:', err);
   }
 
   // Ensure config has required gateway defaults before anything tries to start

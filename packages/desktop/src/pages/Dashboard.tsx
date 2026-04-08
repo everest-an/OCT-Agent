@@ -1039,6 +1039,14 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
   useEffect(() => {
     if (projectRoot) localStorage.setItem(PROJECT_ROOT_KEY, projectRoot);
     else localStorage.removeItem(PROJECT_ROOT_KEY);
+    // Mirror to ~/.awarenessclaw/active-workspace.json so the OpenClaw before_prompt_build
+    // hook (~/.openclaw/hooks/awareness-workspace-inject) can inject the same project
+    // context into channel inbound messages (WeChat, Telegram, etc.). This is the bridge
+    // that makes "channels respect the project folder picked in chat" actually work.
+    const api = window.electronAPI as any;
+    if (api?.workspaceSetActive) {
+      void api.workspaceSetActive(projectRoot || null).catch(() => { /* non-fatal */ });
+    }
   }, [projectRoot]);
 
   // Auto-scroll

@@ -280,6 +280,10 @@ export interface ElectronAPI {
   missionStart?: (params: { missionId: string; goal: string; workDir?: string; agents: Array<{ id: string; name?: string; emoji?: string }> }) => Promise<{ success: boolean; sessionKey?: string; error?: string }>;
   missionCancel?: (missionId: string) => Promise<void>;
   onMissionProgress?: (callback: (data: any) => void) => (() => void) | undefined;
+
+  // Active project workspace (shared between desktop chat and channel inbound hook)
+  workspaceGetActive?: () => Promise<{ success: boolean; path?: string | null; error?: string }>;
+  workspaceSetActive?: (path: string | null) => Promise<{ success: boolean; error?: string }>;
 }
 
 export interface EnvironmentInfo {
