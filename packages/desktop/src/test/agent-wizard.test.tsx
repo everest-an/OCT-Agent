@@ -15,6 +15,7 @@ describe('AgentWizard', () => {
     expect(screen.getByPlaceholderText(/Research/i)).toBeTruthy();
     expect(screen.getByText(/pick an icon/i)).toBeTruthy();
     expect(screen.getByRole('button', { name: '🧠' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '🤖' }).className).toContain('ring-brand-500');
   });
 
   it('has no channel binding step (removed 2026-04-08 — routing managed on Channels page)', async () => {
@@ -62,6 +63,29 @@ describe('AgentWizard', () => {
     if (typeof api.agentsBind?.mock?.calls !== 'undefined') {
       expect(api.agentsBind.mock.calls.length).toBe(0);
     }
+  });
+
+  it('creates agent with default emoji when user does not pick one', async () => {
+    const api = window.electronAPI as any;
+    api.agentsAdd = vi.fn().mockResolvedValue({ success: true, agentId: 'researcher' });
+    api.agentsSetIdentity = vi.fn().mockResolvedValue({ success: true });
+    api.agentsWriteFile = vi.fn().mockResolvedValue({ success: true });
+
+    const onComplete = vi.fn();
+    await act(async () => { render(<AgentWizard onComplete={onComplete} onCancel={vi.fn()} />); });
+
+    await act(async () => { fireEvent.change(screen.getByPlaceholderText(/Research/i), { target: { value: 'Researcher' } }); });
+    await act(async () => { fireEvent.click(screen.getByTestId('agent-create-btn')); });
+
+    await waitFor(() => {
+      expect(api.agentsSetIdentity).toHaveBeenCalledWith('researcher', 'Researcher', '🤖');
+      expect(api.agentsWriteFile).toHaveBeenCalledWith(
+        'researcher',
+        'IDENTITY.md',
+        expect.stringContaining('- **Emoji:** 🤖'),
+      );
+      expect(onComplete).toHaveBeenCalledWith('researcher');
+    });
   });
 
   it('shows error when creation fails (single-step)', async () => {

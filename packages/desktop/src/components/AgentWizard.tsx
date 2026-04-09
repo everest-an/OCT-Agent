@@ -31,6 +31,8 @@ const AGENT_EMOJIS = [
   '🔥', '🐚', '🏠', '🦞', '👨‍💻', '🧪', '📡', '🎭',
 ];
 
+const DEFAULT_AGENT_EMOJI = AGENT_EMOJIS[0];
+
 function buildIdentityMarkdown(name: string, emoji?: string): string {
   const normalizedEmoji = emoji?.trim() || '';
   return [
@@ -50,7 +52,7 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
 
   const [step] = useState(0);
   const [agentName, setAgentName] = useState('');
-  const [agentEmoji, setAgentEmoji] = useState('');
+  const [agentEmoji, setAgentEmoji] = useState(DEFAULT_AGENT_EMOJI);
   const [saving, setSaving] = useState(false);
   const [savingStatus, setSavingStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
