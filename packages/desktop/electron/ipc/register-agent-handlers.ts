@@ -24,7 +24,36 @@ function isAllowedMarkdownFile(fileName: string) {
 
 function normalizeAgentEmoji(value: unknown) {
   const trimmed = typeof value === 'string' ? value.trim() : '';
-  return trimmed.toLowerCase() === 'default' ? '' : trimmed;
+  if (!trimmed || trimmed.toLowerCase() === 'default') {
+    return '';
+  }
+
+  const looksLikeEmoji = (candidate: string) => {
+    if (!candidate || candidate.length > 16) {
+      return false;
+    }
+    let hasNonAscii = false;
+    for (let i = 0; i < candidate.length; i += 1) {
+      if (candidate.charCodeAt(i) > 127) {
+        hasNonAscii = true;
+        break;
+      }
+    }
+    if (!hasNonAscii) {
+      return false;
+    }
+    if (candidate.includes('://') || candidate.includes('/') || candidate.includes('.')) {
+      return false;
+    }
+    return true;
+  };
+
+  if (looksLikeEmoji(trimmed)) {
+    return trimmed;
+  }
+
+  const leadingToken = trimmed.split(/\s+/)[0]?.replace(/[.,;:!?]+$/, '') || '';
+  return looksLikeEmoji(leadingToken) ? leadingToken : '';
 }
 
 function hasLegacyDefaultEmoji(value: unknown) {
@@ -110,11 +139,44 @@ function listMarkdownFilesFromDirectories(directories: string[]) {
 function readIdentityFromMarkdown(filePath: string): { name: string; emoji: string } {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
-    const nameMatch = content.match(/\*\*Name[:\*]+\s*(.*)/i);
-    const emojiMatch = content.match(/\*\*Emoji[:\*]+\s*(.*)/i);
+    let name = '';
+    let emoji = '';
+
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line) continue;
+
+      const cleaned = line.replace(/^\s*-\s*/, '');
+      const colonIndex = cleaned.indexOf(':');
+      if (colonIndex === -1) continue;
+
+      const label = cleaned
+        .slice(0, colonIndex)
+        .replace(/[*_]/g, '')
+        .trim()
+        .toLowerCase();
+      if (!label) continue;
+
+      const value = cleaned
+        .slice(colonIndex + 1)
+        .trim()
+        .replace(/^[*_]+|[*_]+$/g, '')
+        .trim();
+      if (!value) continue;
+
+      if (!name && label === 'name') {
+        name = value;
+      }
+      if (!emoji && label === 'emoji') {
+        emoji = normalizeAgentEmoji(value);
+      }
+
+      if (name && emoji) break;
+    }
+
     return {
-      name: nameMatch?.[1]?.trim() || '',
-      emoji: normalizeAgentEmoji(emojiMatch?.[1]?.trim()),
+      name,
+      emoji,
     };
   } catch {
     return { name: '', emoji: '' };
@@ -175,6 +237,44 @@ function readAgentsFromConfig(home: string): { success: boolean; agents: any[] }
   }
 }
 
+let awarenessPluginRepairPromise: Promise<void> | null = null;
+
+function hasAwarenessPluginInstalled(home: string) {
+  return fs.existsSync(path.join(home, '.openclaw', 'extensions', 'openclaw-memory', 'package.json'));
+}
+
+async function ensureAwarenessPluginInstalledForAgentOps(
+  deps: {
+    home: string;
+    runDoctorFix?: (checkId: string) => Promise<{ success: boolean; message?: string }>;
+  },
+  reason: string,
+) {
+  if (hasAwarenessPluginInstalled(deps.home)) return;
+  if (!deps.runDoctorFix) return;
+
+  if (!awarenessPluginRepairPromise) {
+    awarenessPluginRepairPromise = (async () => {
+      try {
+        const fix = await deps.runDoctorFix?.('plugin-installed');
+        if (!fix?.success) {
+          console.warn(`[agents] Awareness plugin auto-heal failed (${reason}):`, fix?.message || 'unknown error');
+        }
+      } catch (err: any) {
+        console.warn(`[agents] Awareness plugin auto-heal threw (${reason}):`, err?.message || String(err));
+      }
+    })().finally(() => {
+      awarenessPluginRepairPromise = null;
+    });
+  }
+
+  await awarenessPluginRepairPromise;
+
+  if (!hasAwarenessPluginInstalled(deps.home)) {
+    console.warn(`[agents] Awareness plugin still missing after auto-heal (${reason}); continuing in degraded mode.`);
+  }
+}
+
 export function registerAgentHandlers(deps: {
   home: string;
   safeShellExecAsync: (cmd: string, timeoutMs?: number) => Promise<string | null>;
@@ -182,6 +282,7 @@ export function registerAgentHandlers(deps: {
   ensureGatewayRunning: () => Promise<{ ok: boolean; error?: string }>;
   runAsync: (cmd: string, timeoutMs?: number) => Promise<string>;
   runSpawnAsync: (cmd: string, args: string[], timeoutMs?: number) => Promise<string>;
+  runDoctorFix?: (checkId: string) => Promise<{ success: boolean; message?: string }>;
 }) {
   ipcMain.handle('agents:list', async () => {
     // Fast path: read agent list directly from openclaw.json (< 1ms, no CLI spawn).
@@ -245,6 +346,11 @@ export function registerAgentHandlers(deps: {
       // Allow Unicode display names (Chinese, Japanese, etc.) — only strip shell-unsafe chars
       const displayName = name.replace(/["\\\n\r]/g, '').trim();
       if (!displayName) return { success: false, error: 'Invalid agent name' };
+
+      // Self-heal: after clean installs, openclaw-memory may be configured but not yet
+      // physically installed. Repair once before agent operations to avoid slow warnings.
+      await ensureAwarenessPluginInstalledForAgentOps(deps, 'agents:add');
+
       await deps.ensureGatewayRunning();
       // Slug must be ASCII for filesystem safety.
       // Chinese/Japanese/etc names produce empty slug after stripping, so we use oc-<timestamp>.
@@ -334,6 +440,9 @@ export function registerAgentHandlers(deps: {
 
   ipcMain.handle('agents:set-identity', async (_e: any, agentId: string, name: string, emoji: string, avatar?: string, theme?: string) => {
     try {
+      // Same self-heal before another OpenClaw CLI invocation.
+      await ensureAwarenessPluginInstalledForAgentOps(deps, 'agents:set-identity');
+
       const args = ['agents', 'set-identity', '--agent', agentId];
       if (name) { args.push('--name', name); }
       if (emoji) { args.push('--emoji', emoji); }

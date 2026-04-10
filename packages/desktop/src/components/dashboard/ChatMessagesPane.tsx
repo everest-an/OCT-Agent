@@ -1,6 +1,7 @@
 import React from 'react';
 import { AlertTriangle, Check, Copy, File, FolderOpen, Loader2 } from 'lucide-react';
 import { ChatTracePanel, type ChatTraceEvent } from './ChatTracePanel';
+import AgentAvatar from '../AgentAvatar';
 
 type ToolCallInfo = {
   id: string;
@@ -262,11 +263,13 @@ export function ChatMessagesPane({
           ) : (
             <div key={message.id} className="group -mx-4 px-4 py-3 rounded-xl hover:bg-slate-800/30 transition-colors">
               <div className="flex gap-3">
-                {message.agentEmoji ? (
-                  <span className="w-6 h-6 rounded-md mt-0.5 flex-shrink-0 flex items-center justify-center bg-slate-800/60 text-sm">{message.agentEmoji}</span>
-                ) : (
-                  <img src={logoUrl} alt="" className="w-6 h-6 rounded-md mt-0.5 flex-shrink-0" />
-                )}
+                <AgentAvatar
+                  name={message.agentName || currentAgent?.name || t('app.name', 'AwarenessClaw')}
+                  emoji={message.agentEmoji}
+                  size={24}
+                  fallback="logo"
+                  className="mt-0.5 flex-shrink-0"
+                />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-[11px] text-slate-300 font-medium">{message.agentName || currentAgent?.name || t('app.name', 'AwarenessClaw')}</span>
@@ -310,11 +313,13 @@ export function ChatMessagesPane({
         {agentStatus !== 'idle' && (
           <div className="group -mx-4 px-4 py-3 bg-slate-800/20 rounded-xl">
             <div className="flex gap-3">
-              {currentAgent?.emoji ? (
-                <span className={`w-6 h-6 rounded-md mt-0.5 flex-shrink-0 flex items-center justify-center bg-slate-800/60 text-sm ${agentStatus !== 'error' ? 'animate-pulse' : ''}`}>{currentAgent.emoji}</span>
-              ) : (
-                <img src={logoUrl} alt="" className={`w-6 h-6 rounded-md mt-0.5 flex-shrink-0 ${agentStatus !== 'error' ? 'animate-pulse' : ''}`} />
-              )}
+              <AgentAvatar
+                name={currentAgent?.name || t('app.name', 'AwarenessClaw')}
+                emoji={currentAgent?.emoji}
+                size={24}
+                fallback="logo"
+                className={`mt-0.5 flex-shrink-0 ${agentStatus !== 'error' ? 'animate-pulse' : ''}`}
+              />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-[11px] text-slate-300 font-medium">{currentAgent?.name || t('app.name', 'AwarenessClaw')}</span>

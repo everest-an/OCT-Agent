@@ -159,6 +159,39 @@ function getToolLabel(name: string, status: string, t: (key: string, fallback?: 
   return `${name}: ${status}`;
 }
 
+function isLikelyEmoji(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 16) return false;
+
+  let hasNonAscii = false;
+  for (let i = 0; i < trimmed.length; i += 1) {
+    if (trimmed.charCodeAt(i) > 127) {
+      hasNonAscii = true;
+      break;
+    }
+  }
+
+  if (!hasNonAscii) return false;
+  if (trimmed.includes('://') || trimmed.includes('/') || trimmed.includes('.')) return false;
+  return true;
+}
+
+function resolveFallbackAgentEmoji(agentId?: string): string {
+  return agentId === 'main' ? '🦞' : '🤖';
+}
+
+function normalizeAgentEmojiForDisplay(value: unknown, agentId?: string): string {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (!trimmed || trimmed.toLowerCase() === 'default') {
+    return resolveFallbackAgentEmoji(agentId);
+  }
+  if (isLikelyEmoji(trimmed)) {
+    return trimmed;
+  }
+  const leadingToken = trimmed.split(/\s+/)[0]?.replace(/[.,;:!?]+$/, '') || '';
+  return isLikelyEmoji(leadingToken) ? leadingToken : resolveFallbackAgentEmoji(agentId);
+}
+
 // --- Code block with language label + copy button ---
 
 function CodeBlock({ code, language }: { code: string; language?: string }) {
@@ -926,7 +959,10 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     api.agentsList?.().then((res: any) => {
       if (res?.success && res.agents?.length > 0) {
         setAgents(res.agents.map((a: any) => ({
-          id: a.id, name: a.name || a.id, emoji: a.emoji || '🤖', isDefault: a.isDefault,
+          id: a.id,
+          name: a.name || a.id,
+          emoji: normalizeAgentEmojiForDisplay(a.emoji, a.id),
+          isDefault: a.isDefault,
         })));
       }
     }).catch(() => {});
@@ -1095,7 +1131,10 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     api?.agentsList?.().then((res: any) => {
       if (res?.success && res.agents?.length > 0) {
         setAgents(res.agents.map((a: any) => ({
-          id: a.id, name: a.name || a.id, emoji: a.emoji || '🤖', isDefault: a.isDefault,
+          id: a.id,
+          name: a.name || a.id,
+          emoji: normalizeAgentEmojiForDisplay(a.emoji, a.id),
+          isDefault: a.isDefault,
         })));
       }
     }).catch(() => {});
@@ -1716,7 +1755,13 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
           currentAgent={(() => {
             const activeId = config.selectedAgentId || 'main';
             const found = agents.find((a) => a.id === activeId);
-            return found ? { id: found.id, name: found.name, emoji: found.emoji } : { id: activeId, name: activeId === 'main' ? t('app.name', 'AwarenessClaw') : activeId };
+            return found
+              ? { id: found.id, name: found.name, emoji: found.emoji }
+              : {
+                  id: activeId,
+                  name: activeId === 'main' ? t('app.name', 'AwarenessClaw') : activeId,
+                  emoji: resolveFallbackAgentEmoji(activeId),
+                };
           })()}
           onToggleLiveThinking={() => setLiveThinkingExpanded((value) => !value)}
           onSelectProjectRoot={handleSelectProjectRoot}
