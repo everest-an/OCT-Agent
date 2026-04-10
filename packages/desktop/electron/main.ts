@@ -1387,6 +1387,7 @@ registerAgentHandlers({
   ensureGatewayRunning,
   runAsync,
   runSpawnAsync,
+  runDoctorFix: (checkId: string) => getDoctor().runFix(checkId),
 });
 registerChannelConfigHandlers({
   home: HOME,
