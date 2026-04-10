@@ -56,7 +56,7 @@ import {
 } from './runtime-preferences';
 import { createShellUtils } from './shell-utils';
 import { isGatewayRunningOutput, getAgentWorkspaceDir, hasExplicitExecApprovalConfig, writeDesktopExecApprovalDefaults, patchGatewayCmdStackSize } from './openclaw-config';
-import { dedupedChannelsList, killAllActiveLogins, killAllStaleChannelOps, detectRunningChannelLoginWorkers, getTrackedLoginPid, killOrphanWorkerForChannel } from './openclaw-process-guard';
+import { dedupedChannelsList, killAllActiveLogins, killAllOrphanProcesses, killAllStaleChannelOps, detectRunningChannelLoginWorkers, getTrackedLoginPid, killOrphanWorkerForChannel } from './openclaw-process-guard';
 import { resolveDashboardUrl } from './openclaw-dashboard';
 import {
   applyDesktopAwarenessPluginConfig,
@@ -1860,6 +1860,10 @@ app.on('before-quit', (e: Event) => {
   // and over a few app restarts the user accumulates 5-11 GB of zombies that compete
   // with the new app's CLI calls. Fire-and-forget — Electron won't wait on it.
   void killAllActiveLogins().catch(() => { /* best-effort */ });
+  // Last-resort sweep: kill any orphan node/npx processes related to
+  // @awareness-sdk/local or openclaw.mjs that escaped tracked-child cleanup
+  // (e.g. from a prior crashed session or detached daemon spawn).
+  void killAllOrphanProcesses(process.pid).catch(() => { /* best-effort */ });
 });
 
 app.on('window-all-closed', () => {

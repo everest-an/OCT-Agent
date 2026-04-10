@@ -403,6 +403,32 @@ export function killAllStaleChannelOps(): Promise<void> {
 // they ARE the channel bot that receives and routes messages.
 
 /**
+ * Kill ALL orphan processes related to AwarenessClaw that were not tracked by
+ * the in-process child tracking (e.g. spawned by a previous crashed session,
+ * or detached npx/daemon processes). Called from `app.on('before-quit')` as
+ * a last-resort sweep after tracked children have already been killed.
+ *
+ * Targets: node.exe / npx.exe processes whose command line contains
+ * `@awareness-sdk/local` or `openclaw.mjs`. NEVER matches the current
+ * Electron main process itself (filtered by PID).
+ */
+export function killAllOrphanProcesses(currentPid: number): Promise<void> {
+  if (process.platform === 'win32') {
+    return runKillCommand('powershell', [
+      '-NoProfile', '-Command',
+      `Get-CimInstance Win32_Process | Where-Object { ` +
+      `($_.Name -eq 'node.exe' -or $_.Name -eq 'npx.exe') -and ` +
+      `($_.CommandLine -like '*@awareness-sdk/local*' -or $_.CommandLine -like '*openclaw.mjs*') -and ` +
+      `$_.ProcessId -ne ${currentPid} } | ` +
+      `ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`,
+    ]);
+  }
+  return runKillCommand('bash', ['-c',
+    `ps -eo pid,args | grep -E '(@awareness-sdk/local|openclaw\\.mjs)' | grep -v grep | awk '{print $1}' | grep -v '^${currentPid}$' | xargs -r kill -9 2>/dev/null`,
+  ]);
+}
+
+/**
  * Returns a Set of openclaw channel ids that have an active `channels login`
  * process (e.g. `openclaw.mjs channels login --channel openclaw-weixin`).
  * Cross-platform: uses `Get-CimInstance` on Windows, `ps aux` on Unix.
