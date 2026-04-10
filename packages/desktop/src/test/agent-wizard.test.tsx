@@ -99,6 +99,22 @@ describe('AgentWizard', () => {
     await waitFor(() => { expect(screen.getByText(/permission denied/i)).toBeTruthy(); });
   });
 
+  it('rejects id-like name pattern oc-<digits> in wizard', async () => {
+    const api = window.electronAPI as any;
+    api.agentsAdd = vi.fn().mockResolvedValue({ success: true, agentId: 'unexpected' });
+
+    await act(async () => { render(<AgentWizard onComplete={vi.fn()} onCancel={vi.fn()} />); });
+    await act(async () => {
+      fireEvent.change(screen.getByPlaceholderText(/Research/i), { target: { value: 'oc-1775820266907' } });
+    });
+    await act(async () => { fireEvent.click(screen.getByTestId('agent-create-btn')); });
+
+    await waitFor(() => {
+      expect(screen.getByText(/system\/reserved id/i)).toBeInTheDocument();
+    });
+    expect(api.agentsAdd).not.toHaveBeenCalled();
+  });
+
   it('continues when agent already exists (single-step)', async () => {
     const onComplete = vi.fn();
     const api = window.electronAPI as any;

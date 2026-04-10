@@ -47,6 +47,20 @@ function buildIdentityMarkdown(name: string, emoji?: string): string {
   ].join('\n');
 }
 
+function isMeaningfulAgentName(name: string): boolean {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return false;
+  return /[\p{L}\p{N}]/u.test(trimmed);
+}
+
+function isDisallowedAgentName(name: string): boolean {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return false;
+  const lowered = trimmed.toLowerCase();
+  if (lowered === 'main' || lowered === 'default') return true;
+  return /^oc-\d{6,}$/i.test(trimmed);
+}
+
 export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) {
   const { t } = useI18n();
 
@@ -61,6 +75,18 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
     const finalName = agentName.trim();
     if (!finalName) {
       setError(t('agentWizard.error.nameRequired', 'Please enter a name for the agent'));
+      return;
+    }
+    if (!isMeaningfulAgentName(finalName)) {
+      setError(t('agentWizard.error.nameInvalid', 'Use at least one letter or number in the agent name.'));
+      return;
+    }
+    if (isDisallowedAgentName(finalName)) {
+      setError(t('agentWizard.error.nameReserved', 'This name looks like a system/reserved ID. Please choose a human-readable name.'));
+      return;
+    }
+    if (finalName.length > 64) {
+      setError(t('agentWizard.error.nameTooLong', 'Agent name is too long (max 64 characters).'));
       return;
     }
 
@@ -94,13 +120,19 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
       const slug = result.agentId || finalName.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || `oc-${Date.now()}`;
       const normalizedEmoji = agentEmoji.trim();
       if (api.agentsSetIdentity) {
-        await api.agentsSetIdentity(slug, finalName, normalizedEmoji);
+        const identityResult = await api.agentsSetIdentity(slug, finalName, normalizedEmoji);
+        if (!identityResult?.success) {
+          throw new Error(identityResult?.error || t('agentWizard.error.identityFailed', 'Failed to save agent identity.'));
+        }
       }
 
       // 3. Write IDENTITY.md
       setSavingStatus(t('agentWizard.status.workspace', 'Setting up workspace...'));
       if (api.agentsWriteFile) {
-        await api.agentsWriteFile(slug, 'IDENTITY.md', buildIdentityMarkdown(finalName, normalizedEmoji));
+        const writeResult = await api.agentsWriteFile(slug, 'IDENTITY.md', buildIdentityMarkdown(finalName, normalizedEmoji));
+        if (!writeResult?.success) {
+          throw new Error(writeResult?.error || t('agentWizard.error.identityFileFailed', 'Failed to write IDENTITY.md.'));
+        }
       }
 
       // Channel binding removed 2026-04-08. New agents no longer touch

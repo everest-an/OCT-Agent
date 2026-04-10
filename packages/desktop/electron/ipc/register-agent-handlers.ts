@@ -18,6 +18,36 @@ function toAgentSlug(agentId: string) {
   return agentId.toLowerCase().replace(/[^a-z0-9-]/g, '-');
 }
 
+function isMeaningfulAgentDisplayName(name: string) {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return false;
+  // Require at least one letter/number in any language.
+  // This blocks empty/emoji-only/punctuation-only names that would degrade to oc-<timestamp>.
+  return /[\p{L}\p{N}]/u.test(trimmed);
+}
+
+function getInvalidAgentDisplayNameReason(name: string): string | null {
+  const trimmed = String(name || '').trim();
+  if (!trimmed || !isMeaningfulAgentDisplayName(trimmed)) {
+    return 'use at least one letter or number';
+  }
+  if (trimmed.length > 64) {
+    return 'maximum length is 64 characters';
+  }
+
+  const lowered = trimmed.toLowerCase();
+  if (lowered === 'main' || lowered === 'default') {
+    return 'reserved names are not allowed';
+  }
+  // Reject auto-generated id-like names that are easy to confuse with technical ids
+  // and were observed in invalid-session-id troubleshooting.
+  if (/^oc-\d{6,}$/i.test(trimmed)) {
+    return 'auto-generated id style (oc-<digits>) is not allowed';
+  }
+
+  return null;
+}
+
 function isAllowedMarkdownFile(fileName: string) {
   return path.basename(fileName) === fileName && /^[A-Za-z0-9._-]+\.md$/i.test(fileName);
 }
@@ -345,7 +375,10 @@ export function registerAgentHandlers(deps: {
     try {
       // Allow Unicode display names (Chinese, Japanese, etc.) — only strip shell-unsafe chars
       const displayName = name.replace(/["\\\n\r]/g, '').trim();
-      if (!displayName) return { success: false, error: 'Invalid agent name' };
+      const invalidReason = getInvalidAgentDisplayNameReason(displayName);
+      if (invalidReason) {
+        return { success: false, error: `Invalid agent name: ${invalidReason}.` };
+      }
 
       // Self-heal: after clean installs, openclaw-memory may be configured but not yet
       // physically installed. Repair once before agent operations to avoid slow warnings.
@@ -353,10 +386,10 @@ export function registerAgentHandlers(deps: {
 
       await deps.ensureGatewayRunning();
       // Slug must be ASCII for filesystem safety.
-      // Chinese/Japanese/etc names produce empty slug after stripping, so we use oc-<timestamp>.
-      // We also prefix with "oc-" to avoid OpenClaw reserved names like "main".
+      // Chinese/Japanese/etc names may produce an empty ASCII slug after stripping,
+      // so we use a deterministic fallback with letters to avoid id-style confusion.
       const rawSlug = displayName.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-      const slug = rawSlug || `oc-${Date.now()}`;
+      const slug = rawSlug || `agent-${Date.now().toString(36)}`;
       // Use OpenClaw's default workspace path format: ~/.openclaw/workspace-<slug>
       // NOT ~/.openclaw/workspaces/<slug> which is our old convention.
       // --non-interactive requires --workspace, and OpenClaw seeds workspace files

@@ -304,4 +304,58 @@ describe('register-agent-handlers', () => {
     expect(runDoctorFix).toHaveBeenCalledTimes(1);
     expect(runSpawnAsync).toHaveBeenCalledTimes(2);
   });
+
+  it('rejects invalid agent names before invoking openclaw', async () => {
+    const home = '/mock/home';
+    const runSpawnAsync = vi.fn().mockResolvedValue('ok');
+
+    registerAgentHandlers({
+      home,
+      safeShellExecAsync: vi.fn().mockResolvedValue(null),
+      readShellOutputAsync: vi.fn().mockResolvedValue(null),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      runAsync: vi.fn().mockResolvedValue(''),
+      runSpawnAsync,
+      runDoctorFix: vi.fn().mockResolvedValue({ success: true }),
+    });
+
+    const handlers = getHandlers();
+    const onlyEmoji = await handlers['agents:add']({} as any, '🤖🤖');
+    const onlyPunctuation = await handlers['agents:add']({} as any, '---___');
+    const ocNumeric = await handlers['agents:add']({} as any, 'oc-1775820266907');
+    const reservedMain = await handlers['agents:add']({} as any, 'main');
+
+    expect(onlyEmoji.success).toBe(false);
+    expect(onlyEmoji.error).toContain('Invalid agent name');
+    expect(onlyPunctuation.success).toBe(false);
+    expect(onlyPunctuation.error).toContain('Invalid agent name');
+    expect(ocNumeric.success).toBe(false);
+    expect(ocNumeric.error).toContain('Invalid agent name');
+    expect(reservedMain.success).toBe(false);
+    expect(reservedMain.error).toContain('Invalid agent name');
+    expect(runSpawnAsync).not.toHaveBeenCalled();
+  });
+
+  it('rejects overly long agent names before invoking openclaw', async () => {
+    const home = '/mock/home';
+    const runSpawnAsync = vi.fn().mockResolvedValue('ok');
+
+    registerAgentHandlers({
+      home,
+      safeShellExecAsync: vi.fn().mockResolvedValue(null),
+      readShellOutputAsync: vi.fn().mockResolvedValue(null),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      runAsync: vi.fn().mockResolvedValue(''),
+      runSpawnAsync,
+      runDoctorFix: vi.fn().mockResolvedValue({ success: true }),
+    });
+
+    const handlers = getHandlers();
+    const tooLongName = 'a'.repeat(65);
+    const result = await handlers['agents:add']({} as any, tooLongName);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('maximum length is 64');
+    expect(runSpawnAsync).not.toHaveBeenCalled();
+  });
 });

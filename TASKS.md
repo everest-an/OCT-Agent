@@ -59,6 +59,7 @@
 - [x] **拖拽文件视觉反馈**：拖拽文件到聊天区域时显示 drop zone 高亮覆盖层（2026-03-30）
 - [x] **本地项目目录编辑支持**：聊天页可选择当前项目目录，`chat:send` 在该目录下启动 OpenClaw agent，正式支持修改本地项目文件（2026-03-31）
 - [x] **项目目录失效聊天自愈**：当已选择目录失效（缺失/非目录）时，`chat:send` 不再硬中断；自动降级为普通聊天并返回 fallback 元数据，前端自动清空失效 project root 并提示用户重新选择目录后再执行项目文件编辑（2026-04-05）
+- [ ] **长会话压缩区溢出修复**：聊天中存在长会话上下文压缩块未隐藏而溢出的显示问题，需要将压缩会话改为折叠/隐藏并限制渲染高度，避免消息区布局被撑破（P2，2026-04-11 记录）
 
 ### Logo & 品牌
 - [x] **替换所有脑子 emoji**：侧边栏、聊天 AI 头像、安装向导 — 全部换成 Awareness 真实 logo（2026-03-30）
@@ -197,6 +198,9 @@ OpenClaw 的 chat 质量依赖 `~/.openclaw/workspace/` 下的 MD 文档：
 - [x] **Agent 选择器**：聊天输入框底部工具栏新增 Agent 切换下拉菜单（当存在 2+ agents 时显示），选中的 agent ID 持久化到 localStorage + 传给 `chat:send`（2026-03-31）
 - [x] **chat:send 支持 agentId**：main.ts `chat:send` handler 接受 `agentId` 参数，非 main agent 时传 `--agent "<id>"` flag 给 OpenClaw CLI（2026-03-31）
 - [x] **Agent 快速创建入口**：聊天页 Agent 选择器底部加"管理 Agent"跳转链接，点击导航到 Agents 页面（2026-04-01）
+- [x] **Agent 创建命名防错（前后端双校验）**：拒绝会导致 session-id 风险/系统保留风格的名称（含 `oc-<digits>`），并补充向导与 IPC 测试覆盖（2026-04-11）
+- [ ] **旧 Agent 无法删除修复**：多 Agent 管理中历史 Agent 删除失败，需排查 list/source-of-truth 与 delete IPC 的一致性（P2，2026-04-11 记录）
+- [ ] **旧 Agent 无法重命名修复**：多 Agent 管理中历史 Agent 重命名不生效，需排查 UI 编辑态与后端写回链路（P2，2026-04-11 记录）
 
 ---
 
