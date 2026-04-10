@@ -123,6 +123,42 @@ interface ChannelMessage {
   model?: string;
 }
 
+const NON_CHANNEL_SESSION_SEGMENTS = new Set([
+  '',
+  'webchat',
+  'internal',
+  'main',
+  'global',
+  'unknown',
+  'direct',
+  'group',
+  'channel',
+]);
+
+function deriveChannelIdFromSessionKey(sessionKey: string): string {
+  const key = String(sessionKey || '').trim().toLowerCase();
+  if (!key) return '';
+
+  const segments = key.split(':').filter(Boolean);
+  if (segments.length >= 4 && segments[0] === 'agent') {
+    const candidate = segments[2] || '';
+    const hasPeerKind = segments.slice(3, 6).some((segment) => (
+      segment === 'direct' || segment === 'group' || segment === 'channel'
+    ));
+    return hasPeerKind && !NON_CHANNEL_SESSION_SEGMENTS.has(candidate) ? candidate : '';
+  }
+
+  const candidate = segments[0] || '';
+  const hasLegacyPeerKind = segments[1] === 'direct'
+    || segments[1] === 'group'
+    || segments[1] === 'channel'
+    || segments[2] === 'direct'
+    || segments[2] === 'group'
+    || segments[2] === 'channel';
+
+  return hasLegacyPeerKind && !NON_CHANNEL_SESSION_SEGMENTS.has(candidate) ? candidate : '';
+}
+
 type AgentStatus = 'idle' | 'thinking' | 'generating' | 'error';
 type PermissionState = {
   alsoAllow: string[];
@@ -839,6 +875,44 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     if (!window.electronAPI) return;
     const api = window.electronAPI as any;
 
+    const refreshChannelSessionForMessage = async (sessionKey: string, message?: any) => {
+      try {
+        const refreshed = await api.channelSessions?.();
+        const fetchedSessions = refreshed?.success ? (refreshed.sessions || []) : [];
+        if (Array.isArray(fetchedSessions) && fetchedSessions.length > 0) {
+          setChannelSessions((prev) => {
+            const merged = [...prev];
+            fetchedSessions.forEach((session: ChannelSession) => {
+              const index = merged.findIndex((item) => item.sessionKey === session.sessionKey);
+              if (index >= 0) merged[index] = session;
+              else merged.unshift(session);
+            });
+            return merged.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+          });
+          return;
+        }
+      } catch {
+        // Fall through to placeholder insertion below.
+      }
+
+      const derivedChannel = deriveChannelIdFromSessionKey(sessionKey);
+      if (!derivedChannel) return;
+
+      setChannelSessions((prev) => {
+        if (prev.some((session) => session.sessionKey === sessionKey)) return prev;
+        const placeholder: ChannelSession = {
+          sessionKey,
+          sessionId: sessionKey,
+          channel: derivedChannel,
+          displayName: message?.peerName || message?.from || message?.sender || sessionKey,
+          status: 'running',
+          updatedAt: message?.timestamp || Date.now(),
+          model: message?.model,
+        };
+        return [placeholder, ...prev];
+      });
+    };
+
     // Load channel sessions on mount
     api.channelSessions?.().then((res: any) => {
       if (res?.success && res.sessions?.length > 0) {
@@ -849,10 +923,18 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     // Real-time channel message listener
     api.onChannelMessage?.((msg: { sessionKey: string; message: any }) => {
       if (!msg.sessionKey) return;
-      // Update channel sessions list (bump updatedAt)
-      setChannelSessions(prev => prev.map(s =>
-        s.sessionKey === msg.sessionKey ? { ...s, updatedAt: Date.now() } : s
-      ));
+      let knownSession = false;
+      // Update channel sessions list (bump updatedAt) or fetch the new session if this is the first inbound message.
+      setChannelSessions(prev => {
+        knownSession = prev.some(s => s.sessionKey === msg.sessionKey);
+        if (!knownSession) return prev;
+        return prev
+          .map(s => (s.sessionKey === msg.sessionKey ? { ...s, updatedAt: Date.now() } : s))
+          .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      });
+      if (!knownSession) {
+        void refreshChannelSessionForMessage(msg.sessionKey, msg.message);
+      }
       // If this channel is currently viewed, append the message; otherwise increment unread
       setActiveChannelKey(currentKey => {
         if (currentKey === msg.sessionKey && msg.message) {

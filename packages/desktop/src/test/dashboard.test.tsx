@@ -3,13 +3,22 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import Dashboard from '../pages/Dashboard';
 
 describe('Dashboard (Chat)', () => {
+  let onChannelMessageCallback: ((msg: { sessionKey: string; message: any }) => void) | null = null;
+
   beforeEach(() => {
     localStorage.clear();
+    onChannelMessageCallback = null;
     // Set a model so empty state shows suggestions (not "select model" prompt)
     localStorage.setItem('awareness-claw-config', JSON.stringify({
       language: 'zh', providerKey: 'qwen-portal', modelId: 'qwen-turbo-latest',
       bootstrapCompleted: true,
     }));
+
+    const api = window.electronAPI as any;
+    api.channelSessions = vi.fn().mockResolvedValue({ success: true, sessions: [] });
+    api.onChannelMessage = vi.fn((cb: (msg: { sessionKey: string; message: any }) => void) => {
+      onChannelMessageCallback = cb;
+    });
   });
 
   it('renders chat page with empty state', async () => {
@@ -44,6 +53,47 @@ describe('Dashboard (Chat)', () => {
     });
 
     expect(screen.getByTitle(/新对话|New Session/)).toBeInTheDocument();
+  });
+
+  it('adds a new channel session to the sidebar when the first inbound external message arrives', async () => {
+    const api = window.electronAPI as any;
+    api.channelSessions = vi
+      .fn()
+      .mockResolvedValueOnce({ success: true, sessions: [] })
+      .mockResolvedValueOnce({
+        success: true,
+        sessions: [{
+          sessionKey: 'agent:main:feishu:direct:alice',
+          sessionId: 'sid-feishu-1',
+          channel: 'feishu',
+          displayName: 'Alice',
+          status: 'running',
+          updatedAt: 1710000000000,
+        }],
+      });
+
+    await act(async () => { render(<Dashboard />); });
+
+    const sessionListButton = screen.getByTitle(/会话列表|Session list/);
+    await act(async () => {
+      fireEvent.click(sessionListButton);
+    });
+
+    await act(async () => {
+      onChannelMessageCallback?.({
+        sessionKey: 'agent:main:feishu:direct:alice',
+        message: {
+          role: 'user',
+          content: 'hello from feishu',
+          timestamp: 1710000000000,
+          sender: 'Alice',
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Alice')).toBeInTheDocument();
+    });
   });
 
   it('shows bootstrap wizard when onboarding is not completed and USER.md is missing', async () => {
