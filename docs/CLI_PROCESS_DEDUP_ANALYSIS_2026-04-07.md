@@ -158,6 +158,8 @@ function channelsListDeduped(timeoutMs: number): Promise<string | null> {
 ### P2 中期（1 周）
 - [ ] 前端组件共享数据层（store/context），避免多组件各自调 IPC
 - [ ] 页面切换时复用已有数据，只在超过 TTL 后刷新
+- [ ] 聊天长会话压缩区渲染治理：压缩上下文默认折叠/隐藏，限制容器高度并提供按需展开，避免长文本直接溢出聊天布局
+- [ ] 多 Agent 历史项可维护性修复：补齐旧 Agent 删除与重命名链路（列表数据源、前端编辑态、IPC 写回）并增加回归测试
 
 ### P3 长期（1-2 周）
 - [ ] Gateway WebSocket 管理 API：通过 Gateway WS 调用 agents/channels/skills 等管理操作

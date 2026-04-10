@@ -105,6 +105,19 @@ export function isGatewayRunningOutput(output: string | null): boolean {
   if (!output) return false;
 
   const normalized = output.toLowerCase();
+  // Auth-gated handshakes mean the Gateway process is alive but the probing
+  // client is not trusted/paired yet (common with token + device scope upgrade).
+  // Treat this as running to avoid false "Gateway is not running" regressions.
+  const authGatedHandshake =
+    normalized.includes('device-required') ||
+    normalized.includes('pairing-required') ||
+    normalized.includes('pairing required') ||
+    normalized.includes('scope-upgrade');
+
+  if (authGatedHandshake) {
+    return true;
+  }
+
   if (
     normalized.includes('runtime: stopped') ||
     normalized.includes('not running') ||

@@ -20,9 +20,12 @@ export interface ConfigField {
   key: string;
   label: string;
   placeholder?: string;
-  type: 'password' | 'text' | 'file';
+  type: 'password' | 'text' | 'file' | 'select';
+  options?: { value: string; label: string }[];
   hint?: string;
   required?: boolean;
+  /** If true, field is hidden behind an "Advanced Settings" toggle */
+  advanced?: boolean;
   cliFlag: string;
   configPath?: string;
 }
@@ -586,6 +589,44 @@ const VERIFIED_FALLBACK_CONFIG_FIELDS: Record<string, ConfigField[]> = {
       required: true,
       cliFlag: '--app-secret',
       configPath: 'accounts.default',
+    },
+    // --- Advanced: Webhook mode fields (hidden by default) ---
+    {
+      key: 'connectionMode',
+      label: 'Connection Mode',
+      placeholder: 'websocket',
+      type: 'select',
+      options: [
+        { value: 'websocket', label: 'WebSocket (default)' },
+        { value: 'webhook', label: 'Webhook' },
+      ],
+      hint: 'channels.feishu.connectionMode.hint',
+      required: false,
+      advanced: true,
+      cliFlag: '',
+      configPath: '',
+    },
+    {
+      key: 'encryptKey',
+      label: 'Encrypt Key',
+      placeholder: '',
+      type: 'password',
+      hint: 'channels.feishu.encryptKey.hint',
+      required: false,
+      advanced: true,
+      cliFlag: '',
+      configPath: '',
+    },
+    {
+      key: 'verificationToken',
+      label: 'Verification Token',
+      placeholder: '',
+      type: 'password',
+      hint: 'channels.feishu.verificationToken.hint',
+      required: false,
+      advanced: true,
+      cliFlag: '',
+      configPath: '',
     },
   ],
   // Slack Socket Mode requires two tokens: appToken (xapp-...) and botToken (xoxb-...)

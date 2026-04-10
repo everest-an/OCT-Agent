@@ -486,6 +486,56 @@ describe('registerChannelConfigHandlers', () => {
     expect(writtenConfig.channels?.telegram?.dmPolicy).toBe('pairing');
   });
 
+  it('approves Feishu pairing code without WhatsApp notify flag and reports ready connectivity', async () => {
+    const runAsync = vi
+      .fn()
+      .mockResolvedValueOnce('approved')
+      .mockResolvedValueOnce('bind ok');
+
+    const readShellOutputAsync = vi
+      .fn()
+      .mockResolvedValueOnce('OpenClaw: access not configured.\nPairing code: 5MQFD7PH\nopenclaw pairing approve feishu 5MQFD7PH')
+      .mockResolvedValueOnce('Runtime: running\nRPC probe: ok')
+      .mockResolvedValueOnce('feishu configured enabled');
+
+    registerChannelConfigHandlers({
+      home: 'C:/Users/test',
+      safeShellExecAsync: vi.fn(async () => null),
+      readShellOutputAsync,
+      runAsync,
+      discoverOpenClawChannels: vi.fn(),
+      parseCliHelp: vi.fn(() => ({ cliChannels: new Set<string>(), channelFields: new Map() })),
+      applyCliHelp: vi.fn(),
+      mergeCatalog: vi.fn(),
+      mergeChannelOptions: vi.fn(),
+      getAllChannels: vi.fn(() => []),
+      serializeRegistry: vi.fn(() => []),
+      getChannel: vi.fn(() => ({
+        id: 'feishu',
+        openclawId: 'feishu',
+        label: 'Feishu',
+        color: '#3370FF',
+        iconType: 'svg',
+        connectionType: 'multi-field',
+        configFields: [{ key: 'appId' }, { key: 'appSecret' }],
+        saveStrategy: 'json-direct',
+        source: 'openclaw-dynamic',
+        order: 8,
+      })) as any,
+      buildCLIFlags: vi.fn(() => ''),
+      toOpenclawId: vi.fn((id: string) => id),
+    });
+
+    const handler = getRegisteredPairingApproveHandler();
+    const result = await handler({}, 'feishu', 'openclaw pairing approve feishu 5MQFD7PH');
+
+    expect(result).toMatchObject({ success: true });
+    expect(result.connectivity?.ready).toBe(true);
+    expect(runAsync).toHaveBeenCalledWith('openclaw pairing approve --channel feishu 5MQFD7PH 2>&1', 30000);
+    expect(runAsync).not.toHaveBeenCalledWith(expect.stringContaining('--notify'), 30000);
+    expect(runAsync).toHaveBeenCalledWith('openclaw agents bind --agent main --bind feishu 2>&1', 30000);
+  });
+
   it('returns latest pending pairing code for auto-fill', async () => {
     const readShellOutputAsync = vi
       .fn()

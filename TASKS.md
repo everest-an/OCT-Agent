@@ -199,6 +199,11 @@ OpenClaw 的 chat 质量依赖 `~/.openclaw/workspace/` 下的 MD 文档：
 - [x] **chat:send 支持 agentId**：main.ts `chat:send` handler 接受 `agentId` 参数，非 main agent 时传 `--agent "<id>"` flag 给 OpenClaw CLI（2026-03-31）
 - [x] **Agent 快速创建入口**：聊天页 Agent 选择器底部加"管理 Agent"跳转链接，点击导航到 Agents 页面（2026-04-01）
 - [x] **Agent 创建命名防错（前后端双校验）**：拒绝会导致 session-id 风险/系统保留风格的名称（含 `oc-<digits>`），并补充向导与 IPC 测试覆盖（2026-04-11）
+- [ ] **多 Agent 团队任务写盘收口（总）**：团队协作默认保持“单 Gateway、多 Agent 路由”，需要补齐单 writer 约束，避免多个 agent 并发修改同一 `workspacePath` 时互相覆盖、重复 patch、误删文件；影响面：`chat:send` 的 `agentId + workspacePath` 执行链路、Task Center/Workflow 的多 agent 编排、Channels 的默认 inbound-agent 路由文案与约束提示（P2，2026-04-11 记录）
+- [ ] **多 Agent 写盘约束产品化**：定义同一 `workspacePath` 的单 writer 规则、冲突提示文案、只读 agent 降级策略，明确哪些任务允许 review/test/research agent 并行、哪些任务必须串行（P2，2026-04-11 拆分）
+- [ ] **chat:send / CLI fallback 加 workspace writer 锁**：在 `agentId + workspacePath` 执行链路增加同目录写入互斥，命中冲突时禁止第二个 writer 直接落盘，并回退为分析/建议模式或提示用户等待当前 writer 完成（P2，2026-04-11 拆分）
+- [ ] **Task Center / Workflow 多 Agent 编排收口**：多 agent 编排默认采用“单 writer、多 reviewer”模型，spawn/workflow 任务对同一 workspace 自动打标签或串行化，避免 orchestration 层绕过聊天页约束（P2，2026-04-11 拆分）
+- [ ] **多 Agent 路由与回归测试补齐**：补充 channel inbound-agent、Dashboard agent 切换、workflow spawn、CLI fallback 场景的回归测试，证明单 writer 约束不会把默认 channel 路由、会话恢复和子 agent 协作打坏（P2，2026-04-11 拆分）
 - [ ] **旧 Agent 无法删除修复**：多 Agent 管理中历史 Agent 删除失败，需排查 list/source-of-truth 与 delete IPC 的一致性（P2，2026-04-11 记录）
 - [ ] **旧 Agent 无法重命名修复**：多 Agent 管理中历史 Agent 重命名不生效，需排查 UI 编辑态与后端写回链路（P2，2026-04-11 记录）
 

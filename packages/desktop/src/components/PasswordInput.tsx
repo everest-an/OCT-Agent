@@ -7,20 +7,26 @@ interface PasswordInputProps {
   placeholder?: string;
   className?: string;
   autoFocus?: boolean;
+  id?: string;
+  ariaLabel?: string;
+  title?: string;
 }
 
-export default function PasswordInput({ value, onChange, placeholder, className = '', autoFocus }: PasswordInputProps) {
+export default function PasswordInput({ value, onChange, placeholder, className = '', autoFocus, id, ariaLabel, title }: PasswordInputProps) {
   const [visible, setVisible] = useState(false);
 
   return (
     <div className="relative">
       <input
+        id={id}
         type={visible ? 'text' : 'password'}
         value={value}
         onChange={onChange}
         placeholder={placeholder}
         className={`pr-10 ${className}`}
         autoFocus={autoFocus}
+        aria-label={ariaLabel}
+        title={title}
       />
       <button
         type="button"

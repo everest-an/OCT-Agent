@@ -390,6 +390,42 @@ function isGatewaySnapshotHealthy(snapshot: GatewayStatusSnapshot | null): boole
   return !!snapshot.rpc?.ok && (runtimeRunning || portBusy);
 }
 
+/**
+ * Detect whether an OpenClaw gateway process is already running on this machine
+ * by inspecting running processes' command lines.  This catches gateways in the
+ * plugin-loading phase (port not yet bound) — exactly the window where HTTP/TCP
+ * probes fail and startGatewayInUserSession would otherwise spawn a competing
+ * second instance that fights the existing one via --force.
+ */
+async function isGatewayProcessAlive(): Promise<boolean> {
+  try {
+    if (process.platform === 'win32') {
+      // Use `tasklist /FI` which is available on all Windows 10/11 versions
+      // (wmic is deprecated and removed in Windows 11 24H2+).
+      // Filter: node.exe images whose window title or PID exist + post-filter
+      // command line via PowerShell Get-CimInstance (tasklist alone cannot filter
+      // by command line).  We use the lightweight CIM query directly.
+      const output = await readShellOutputAsync(
+        'powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"Name=\'node.exe\'\\" | Where-Object { $_.CommandLine -match \'gateway.*run\' } | Select-Object -ExpandProperty ProcessId" 2>NUL',
+        8000,
+      );
+      return /\d+/.test((output || '').trim());
+    }
+    // macOS / Linux — match "gateway" and "run" anywhere in the command line.
+    // The actual process is `node --stack-size=8192 /path/to/openclaw/dist/index.js gateway run`
+    // so we match "gateway" + "run" (not "openclaw" as the binary name).
+    const output = await readShellOutputAsync(
+      'pgrep -af "gateway.*run" 2>/dev/null || true',
+      5000,
+    );
+    // Exclude our own pgrep process (pgrep -af includes itself in some shells)
+    const lines = (output || '').split('\n').filter(l => l.trim() && !l.includes('pgrep'));
+    return lines.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 async function ensureLocalDaemonReadyForRuntime(send?: (ch: string, data: any) => void): Promise<boolean> {
   const daemonProjectDir = path.join(HOME, '.openclaw');
 
@@ -519,6 +555,16 @@ async function startGatewayInUserSession(send?: (ch: string, data: any) => void)
 
   const launchRecently = (Date.now() - gatewayUserSessionLastLaunchAt) < GATEWAY_USER_SESSION_RELAUNCH_COOLDOWN_MS;
 
+  // Before spawning, check if a gateway process is already running (e.g. from
+  // Windows Scheduled Task, a previous app session, or Doctor auto-fix).
+  // Spawning a second `gateway run --force` while one is loading plugins causes
+  // the two processes to fight each other (both --force → mutual kill loop).
+  const existingGateway = !launchRecently && await isGatewayProcessAlive();
+  if (existingGateway) {
+    console.log('[gateway] Existing gateway process detected — skipping spawn to avoid dual-instance conflict');
+    send?.('chat:status', { type: 'gateway', message: 'Waiting for existing Gateway to finish loading...' });
+  }
+
   try {
     if (process.platform === 'win32') {
       // Guard against global OpenClaw removal: avoid `start ... openclaw` popup.
@@ -531,7 +577,7 @@ async function startGatewayInUserSession(send?: (ch: string, data: any) => void)
         };
       }
 
-      if (!launchRecently) {
+      if (!launchRecently && !existingGateway) {
         // Spawn OpenClaw directly to avoid creating visible cmd.exe /K windows on Windows.
         const child = runSpawn('openclaw', ['gateway', 'run', '--force', '--allow-unconfigured'], {
           cwd: HOME,
@@ -543,7 +589,7 @@ async function startGatewayInUserSession(send?: (ch: string, data: any) => void)
         child.unref();
       }
     } else {
-      if (!launchRecently) {
+      if (!launchRecently && !existingGateway) {
         const child = runSpawn('openclaw', ['gateway', 'run', '--force', '--allow-unconfigured'], {
           cwd: HOME,
           detached: true,
@@ -560,6 +606,9 @@ async function startGatewayInUserSession(send?: (ch: string, data: any) => void)
 
   for (let i = 0; i < 20; i++) {
     await sleep(1000);
+    // Fast pre-filter: skip the expensive CLI snapshot (15s plugin load) when
+    // the port is clearly not listening yet.  tcpProbeGatewayPort is ~10ms.
+    if (!(await tcpProbeGatewayPort())) continue;
     const snapshot = await readGatewayStatusSnapshot();
     if (isGatewaySnapshotHealthy(snapshot)) {
       await sleep(1200);
@@ -586,6 +635,17 @@ async function startGatewayInUserSession(send?: (ch: string, data: any) => void)
 }
 
 async function startGatewayWithRepair(send?: (ch: string, data: any) => void): Promise<{ ok: boolean; error?: string }> {
+  const isAuthGatedGatewayStatus = (output: string | null | undefined): boolean => {
+    const lower = String(output || '').toLowerCase();
+    return lower.includes('device-required')
+      || lower.includes('pairing-required')
+      || lower.includes('pairing required')
+      || lower.includes('scope-upgrade');
+  };
+
+  const authGatedGatewayMessage =
+    'Local Gateway is running, but this device needs local authorization. Please open Settings → Gateway and approve local access, then retry.';
+
   repairOpenClawConfigFile();
 
   // Fast path: HTTP probe avoids the 15-30s CLI plugin preload when the
@@ -661,6 +721,11 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
   // AJV stack overflow on plugin load. User session mode uses runSpawn which
   // now includes --stack-size=8192.
   if (process.platform === 'win32') {
+    // Re-probe: the previous CLI check + stale recovery + daemon bootstrap took
+    // 15-45s — long enough for a scheduled-task gateway to finish plugin loading.
+    // A quick HTTP probe here avoids spawning a redundant second instance.
+    if (await httpProbe()) return { ok: true };
+
     emit('Starting Gateway in your Windows session...');
     const fallback = await startGatewayInUserSession(send);
     if (fallback.ok) {
@@ -750,6 +815,11 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
         ok: false,
         error: 'OpenClaw could not be found on this computer. Please finish Setup first, or reinstall OpenClaw in Settings before chatting.',
       };
+    } else if (isAuthGatedGatewayStatus(message)) {
+      return {
+        ok: false,
+        error: authGatedGatewayMessage,
+      };
     } else {
       return {
         ok: false,
@@ -773,6 +843,16 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
     emit('Gateway service did not stay up, switching to app session mode...');
     const fallback = await startGatewayInUserSession(send);
     if (fallback.ok) return fallback;
+  }
+
+  // Last-chance classification: distinguish auth-gated running Gateway from a
+  // true startup failure so UI does not report a misleading "not running" state.
+  const finalStatusOutput = await readShellOutputAsync('openclaw gateway status 2>&1', 15000);
+  if (isAuthGatedGatewayStatus(finalStatusOutput)) {
+    return {
+      ok: false,
+      error: authGatedGatewayMessage,
+    };
   }
 
   return {
@@ -835,7 +915,11 @@ async function ensureGatewayRunning(): Promise<{ ok: boolean; error?: string }> 
 
     const started = await startGatewayWithRepair(send);
     if (!started.ok) {
-      send('chat:status', { type: 'error', message: 'Gateway failed to start' });
+      const authGated = /needs local authorization|approve local access/i.test(started.error || '');
+      send('chat:status', {
+        type: 'error',
+        message: authGated ? 'Gateway access requires local authorization' : 'Gateway failed to start',
+      });
       return started;
     }
     return started;

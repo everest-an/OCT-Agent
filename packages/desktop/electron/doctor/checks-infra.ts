@@ -237,6 +237,23 @@ export async function fixGatewayStart(ctx: Ctx): Promise<FixResult> {
       } catch (installErr: any) {
         const installMessage = installErr?.message || '';
         if (/EACCES|Access is denied|permission denied|拒绝访问|schtasks create failed/i.test(installMessage)) {
+          // Before spawning a new gateway process, check if one is already running
+          // (e.g. from startGatewayInUserSession in main.ts).  Spawning another
+          // `--force` instance would cause a dual-instance fight.
+          try {
+            const cimOut = await ctx.deps.shellExec(
+              'powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"Name=\'node.exe\'\\" | Where-Object { $_.CommandLine -match \'gateway.*run\' } | Select-Object -ExpandProperty ProcessId" 2>NUL',
+              8000,
+            );
+            if (/\d+/.test((cimOut || '').trim())) {
+              return {
+                id: 'gateway-running',
+                success: true,
+                message: 'Gateway process is already running (started by app session)',
+              };
+            }
+          } catch { /* proceed to Start-Process as fallback */ }
+
           try {
             await ctx.deps.shellRun(
               'where openclaw >nul 2>nul && powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath openclaw -ArgumentList \'gateway\',\'run\',\'--force\',\'--allow-unconfigured\'"',

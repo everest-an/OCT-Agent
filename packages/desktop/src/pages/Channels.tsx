@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Check, CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, Loader2, MessageSquare, Pencil, Radio, Unplug, X } from 'lucide-react';
+import { Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Loader2, MessageSquare, Pencil, Radio, Unplug, X } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { useExternalNavigator } from '../lib/useExternalNavigator';
 import PasswordInput from '../components/PasswordInput';
@@ -11,7 +11,7 @@ import {
 
 type WizardStep = 'intro' | 'token' | 'test';
 
-const PAIRING_APPROVAL_CHANNELS = new Set(['telegram', 'whatsapp']);
+const PAIRING_APPROVAL_CHANNELS = new Set(['telegram', 'whatsapp', 'feishu']);
 
 // ---------------------------------------------------------------------------
 // DynamicConfigForm — renders config fields from registry definition
@@ -24,42 +24,86 @@ function DynamicConfigForm({ channelId, fields, values, onChange, t }: {
   onChange: (key: string, val: string) => void;
   t: (key: string, fallback?: string) => string;
 }) {
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const inputClass = 'w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500';
+
+  const normalFields = fields.filter(f => !f.advanced);
+  const advancedFields = fields.filter(f => f.advanced);
+
+  const renderField = (field: ConfigField) => {
+    const fieldLabel = channelId
+      ? (t(`channels.${channelId}.${field.key}`, '') || t(field.label, field.label))
+      : t(field.label, field.label);
+    const fieldId = `channel-config-${channelId || 'generic'}-${field.key}`;
+
+    return (
+    <div key={field.key}>
+      <label htmlFor={fieldId} className="block text-sm font-medium text-slate-300 mb-2">
+        {fieldLabel}
+      </label>
+      {field.type === 'select' && field.options ? (
+        <select id={fieldId}
+          value={values[field.key] || field.options[0]?.value || ''}
+          onChange={(e) => onChange(field.key, e.target.value)}
+          aria-label={fieldLabel}
+          title={fieldLabel}
+          className={inputClass + ' appearance-none cursor-pointer'}>
+          {field.options.map(opt => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+      ) : field.type === 'file' ? (
+        <div className="flex gap-2">
+          <input id={fieldId}
+            value={values[field.key] || ''} readOnly
+            placeholder={t('channels.gchat.noFile', 'No file selected')}
+            aria-label={fieldLabel}
+            title={fieldLabel}
+            className="flex-1 px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-400" />
+          <button onClick={async () => {
+            if (window.electronAPI) {
+              const result = await (window.electronAPI as any).selectFile?.({ filters: [{ name: 'JSON', extensions: ['json'] }] });
+              if (result?.filePath) onChange(field.key, result.filePath);
+            }
+          }} className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm text-slate-100 whitespace-nowrap">
+            {t('channels.gchat.browse', 'Browse...')}
+          </button>
+        </div>
+      ) : field.type === 'password' ? (
+        <PasswordInput value={values[field.key] || ''} onChange={(e) => onChange(field.key, e.target.value)}
+          placeholder={field.placeholder || ''} className={inputClass} id={fieldId} ariaLabel={fieldLabel} title={fieldLabel} />
+      ) : (
+        <input id={fieldId}
+          value={values[field.key] || ''} onChange={(e) => onChange(field.key, e.target.value)}
+          placeholder={field.placeholder || ''} aria-label={fieldLabel} title={fieldLabel} className={inputClass} />
+      )}
+      {field.hint && (
+        <p className="mt-1.5 text-xs text-slate-500">{t(field.hint, field.hint)}</p>
+      )}
+    </div>
+  );
+  };
+
   return (
     <div className="space-y-4">
-      {fields.map(field => (
-        <div key={field.key}>
-          <label className="block text-sm font-medium text-slate-300 mb-2">
-            {channelId
-              ? (t(`channels.${channelId}.${field.key}`, '') || t(field.label, field.label))
-              : t(field.label, field.label)}
-          </label>
-          {field.type === 'file' ? (
-            <div className="flex gap-2">
-              <input value={values[field.key] || ''} readOnly
-                placeholder={t('channels.gchat.noFile', 'No file selected')}
-                className="flex-1 px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-400" />
-              <button onClick={async () => {
-                if (window.electronAPI) {
-                  const result = await (window.electronAPI as any).selectFile?.({ filters: [{ name: 'JSON', extensions: ['json'] }] });
-                  if (result?.filePath) onChange(field.key, result.filePath);
-                }
-              }} className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm text-slate-100 whitespace-nowrap">
-                {t('channels.gchat.browse', 'Browse...')}
-              </button>
+      {normalFields.map(renderField)}
+      {advancedFields.length > 0 && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors mt-2"
+          >
+            {showAdvanced ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            {t('channels.advanced', 'Advanced Settings')}
+          </button>
+          {showAdvanced && (
+            <div className="space-y-4 pl-3 border-l-2 border-slate-700">
+              {advancedFields.map(renderField)}
             </div>
-          ) : field.type === 'password' ? (
-            <PasswordInput value={values[field.key] || ''} onChange={(e) => onChange(field.key, e.target.value)}
-              placeholder={field.placeholder || ''} className={inputClass} />
-          ) : (
-            <input value={values[field.key] || ''} onChange={(e) => onChange(field.key, e.target.value)}
-              placeholder={field.placeholder || ''} className={inputClass} />
           )}
-          {field.hint && (
-            <p className="mt-1.5 text-xs text-slate-500">{t(field.hint, field.hint)}</p>
-          )}
-        </div>
-      ))}
+        </>
+      )}
     </div>
   );
 }
@@ -117,7 +161,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
   // For these, after connection success we show a usage hint instead of "Open Chat".
   const EXTERNAL_CHANNELS = new Set([
     'whatsapp', 'wechat', 'signal', 'imessage',
-    'telegram', 'discord', 'slack', 'line', 'googlechat',
+    'telegram', 'feishu', 'discord', 'slack', 'line', 'googlechat',
     'irc', 'msteams', 'nostr', 'tlon', 'mattermost',
   ]);
 
@@ -134,6 +178,8 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
         return t('channels.postConnect.imessage', 'Send an iMessage to this Mac (or let someone message you) — your AI agent will reply automatically.');
       case 'telegram':
         return t('channels.postConnect.telegram', 'Open Telegram and send your bot any direct message. If Telegram is still in pairing mode, the bot sends the pairing code only after that first message.');
+      case 'feishu':
+        return t('channels.postConnect.feishu', 'Open Feishu and send your bot a direct message. If OpenClaw asks for access approval, copy the pairing code from the card and approve it below.');
       case 'discord':
         return t('channels.postConnect.discord', 'Go to your Discord server and send a message in the configured channel — your AI agent will respond.');
       case 'slack':
@@ -526,7 +572,12 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
           'channels.pairing.help.telegramSuccess',
           'After you send the first Telegram DM, any pending pairing code will appear here automatically. You can also paste the full "openclaw pairing approve ..." line.',
         )
-      : t('channels.pairing.help', 'Received a pairing prompt? Paste the 8-character code or the full "openclaw pairing approve ..." line here.');
+      : activeWizard === 'feishu'
+        ? t(
+            'channels.pairing.help.feishu',
+            'If Feishu shows an "access not configured" card, paste the 8-character pairing code or the full "openclaw pairing approve ..." line here. AwarenessClaw will approve it for you.',
+          )
+        : t('channels.pairing.help', 'Received a pairing prompt? Paste the 8-character code or the full "openclaw pairing approve ..." line here.');
 
     return (
       <div className="p-3 bg-slate-800/50 border border-slate-700 rounded-lg space-y-2">

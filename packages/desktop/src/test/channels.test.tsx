@@ -354,4 +354,65 @@ describe('Channels Page', () => {
 
     expect(api.channelPairingApprove).toHaveBeenCalledWith('whatsapp', 'KGHQJ8SK');
   });
+
+  it('supports Feishu pairing approval from the channel wizard without requiring terminal usage', async () => {
+    const api = window.electronAPI as any;
+    api.channelGetRegistry = vi.fn().mockResolvedValue({ channels: [
+      { id: 'local', openclawId: 'local', label: 'Local Chat', color: '#6366F1', iconType: 'svg', connectionType: 'one-click', configFields: [], saveStrategy: 'cli', order: 0, source: 'builtin' },
+      { id: 'telegram', openclawId: 'telegram', label: 'Telegram', color: '#26A5E4', iconType: 'svg', connectionType: 'token', configFields: [{ key: 'token', label: 'Token', type: 'password', required: true, cliFlag: '--token' }], saveStrategy: 'cli', order: 1, source: 'openclaw-dynamic' },
+      { id: 'feishu', openclawId: 'feishu', label: 'Feishu', color: '#3370FF', iconType: 'svg', connectionType: 'multi-field', configFields: [{ key: 'appId', label: 'appId', type: 'text', required: true, cliFlag: '--app-id' }, { key: 'appSecret', label: 'appSecret', type: 'password', required: true, cliFlag: '--app-secret' }], saveStrategy: 'json-direct', order: 8, source: 'openclaw-dynamic' },
+      { id: 'discord', openclawId: 'discord', label: 'Discord', color: '#5865F2', iconType: 'svg', connectionType: 'token', configFields: [{ key: 'token', label: 'Token', type: 'password', required: true, cliFlag: '--token' }], saveStrategy: 'cli', order: 2, source: 'openclaw-dynamic' },
+    ] });
+    api.channelSave = vi.fn().mockResolvedValue({ success: true });
+    api.channelTest = vi.fn()
+      .mockResolvedValueOnce({
+        success: true,
+        output: 'Open Feishu and send your bot a direct message. If OpenClaw asks for access approval, copy the pairing code from the card and approve it below.',
+      })
+      .mockResolvedValueOnce({ success: true, output: 'ok' });
+    api.channelPairingApprove = vi.fn().mockResolvedValue({
+      success: true,
+      message: 'Pairing approved and feishu is ready.',
+      connectivity: { ready: true },
+    });
+
+    await act(async () => { render(<Channels />); });
+
+  const feishuBtn = await screen.findByText('Feishu / Lark').then((node) => node.closest('button'));
+    expect(feishuBtn).toBeTruthy();
+    await act(async () => { fireEvent.click(feishuBtn as HTMLButtonElement); });
+
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Next/i })); });
+
+    const appIdInput = screen.getAllByRole('textbox')[0] as HTMLInputElement;
+    const secretInput = document.querySelector('input[type="password"]') as HTMLInputElement | null;
+    expect(secretInput).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.change(appIdInput, { target: { value: 'cli_a94ff56e9af89cc6' } });
+      fireEvent.change(secretInput as HTMLInputElement, { target: { value: 'secret_xyz' } });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Connect$/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/copy the pairing code from the card and approve it below/i).length).toBeGreaterThan(0);
+      expect(screen.getByText(/AwarenessClaw will approve it for you/i)).toBeInTheDocument();
+    });
+
+    const pairingInput = screen.getByPlaceholderText(/Paste code or full approve line/i) as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(pairingInput, { target: { value: 'openclaw pairing approve feishu 5MQFD7PH' } });
+    });
+
+    expect(pairingInput.value).toBe('5MQFD7PH');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    });
+
+    expect(api.channelPairingApprove).toHaveBeenCalledWith('feishu', '5MQFD7PH');
+  });
 });

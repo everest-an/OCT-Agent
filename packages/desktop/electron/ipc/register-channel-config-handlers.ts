@@ -231,6 +231,16 @@ function channelAppearsConfigured(listOutput: string | null, openclawId: string)
 function isGatewayActiveOutput(output: string | null): boolean {
   if (!output) return false;
   const lower = output.toLowerCase();
+  const authGatedHandshake =
+    lower.includes('device-required')
+    || lower.includes('pairing-required')
+    || lower.includes('pairing required')
+    || lower.includes('scope-upgrade');
+
+  if (authGatedHandshake) {
+    return true;
+  }
+
   if (lower.includes('not reachable') || lower.includes('timeout after')) {
     return false;
   }
