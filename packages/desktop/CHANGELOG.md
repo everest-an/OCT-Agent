@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.2.8] - 2026-04-11
+
+### Fixed
+- Memory Wiki: Root cause fixed for slow/missing topic cards. `apiListTopics` now returns `tags[]` for each topic, so TopicView can resolve members purely client-side without needing the MOC card in the preloaded cards list (previously capped at 50, cutting off older MOC cards).
+- TopicView resolution now uses 3-tier priority: (1) topic.tags client-side match — instant; (2) MOC card in preloaded cards fallback; (3) daemon fetch as last resort.
+- Loading indicator after first retry now shows user-friendly “Daemon is building the tag index, please wait...” message instead of cryptic Retry N/M.
+
+## [0.2.7] - 2026-04-11
+
+### Fixed
+- i18n: Added missing tab translation keys (`memory.overview`, `memory.overviewHint`, `memory.graph`, `memory.sync`, `memory.syncHint`) — previously always showed English fallback regardless of locale.
+- Memory Wiki Topic view: Client-side tag-match returning 0 results now correctly falls through to daemon fetch instead of looping through client-side retries indefinitely.
+
+### Improved
+- Memory page tabs: More compact and polished styling — smaller icon boxes, tighter padding, rounded-xl corners, 2px brand accent bar on active tab, three-state text colors.
+- Topic loading: Retry delay reduced from 1500ms → 800ms, MAX_RETRIES increased 3 → 4 for faster recovery when daemon index is warming up.
+
+## [0.2.6] - 2026-04-11
+
+### Fixed
+- i18n: Added missing translation keys for the Memory Wiki module (en + zh). All `memory.wiki.*` labels, sidebar headings, loading states, and error messages are now properly translated.
+- i18n: Added `memory.settings.cloudStatus`, `memory.settings.cloudStatus.desc`, and `memory.noTasks` keys that were previously falling back to hardcoded English.
+
+### Performance
+- Memory Wiki Topic view: Clicking a topic now resolves card members **client-side** from the already-loaded cards array (tag-match), eliminating the previous `fetch /knowledge/:id` → daemon LIKE query → up to 3 × 1.5 s retries flow. Topic cards appear instantly when the preloaded list contains the MOC card.
+
 ## [0.2.5] - 2026-04-11
 
 ### Changed

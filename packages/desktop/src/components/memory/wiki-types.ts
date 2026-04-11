@@ -21,6 +21,8 @@ export interface TopicItem {
   card_count: number;
   summary?: string | null;
   last_updated_at?: string | null;
+  /** MOC tags returned by daemon (>= 0.5.17) — used for client-side member resolution */
+  tags?: string[] | null;
 }
 
 export interface SkillItem {

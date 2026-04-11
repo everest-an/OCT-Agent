@@ -360,7 +360,7 @@ export default function Memory() {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5">
           {memoryTabItems.map((tab) => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
@@ -368,25 +368,29 @@ export default function Memory() {
               <button
                 key={tab.id}
                 onClick={() => switchTab(tab.id)}
-                className={`group inline-flex min-w-[140px] items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-left transition-all ${
+                className={`group relative inline-flex items-center gap-2.5 rounded-xl border px-3 py-2 text-left transition-all duration-150 ${
                   active
-                    ? 'border-brand-500/60 bg-brand-600/12 shadow-[0_0_0_1px_rgba(59,130,246,0.12)]'
-                    : 'border-slate-700/60 bg-slate-900/30 hover:border-slate-600/80 hover:bg-slate-800/45'
+                    ? 'border-brand-500/50 bg-brand-500/10 shadow-sm'
+                    : 'border-slate-700/50 bg-slate-900/40 hover:border-slate-600/70 hover:bg-slate-800/50'
                 }`}
               >
-                <div className={`flex h-9 w-9 flex-none items-center justify-center rounded-xl ${active ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-300 group-hover:bg-slate-700'}`}>
-                    <Icon size={16} />
+                {/* Active accent bar */}
+                {active && (
+                  <span className="absolute inset-x-3 top-0 h-[2px] rounded-b-full bg-brand-400/80" />
+                )}
+                <div className={`flex h-7 w-7 flex-none items-center justify-center rounded-lg transition-colors ${active ? 'bg-brand-500/80 text-white shadow-sm' : 'bg-slate-800/80 text-slate-400 group-hover:bg-slate-700 group-hover:text-slate-300'}`}>
+                  <Icon size={14} />
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <div className="truncate text-sm font-medium text-slate-100">{tab.label}</div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-[13px] font-medium leading-none ${active ? 'text-slate-100' : 'text-slate-300 group-hover:text-slate-200'}`}>{tab.label}</span>
                     {typeof tab.count === 'number' && (
-                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${active ? 'bg-brand-500/20 text-brand-200' : 'bg-slate-800 text-slate-400'}`}>
+                      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${active ? 'bg-brand-500/25 text-brand-200' : 'bg-slate-700/80 text-slate-500'}`}>
                         {tab.count}
                       </span>
                     )}
                   </div>
-                  <div className="mt-0.5 truncate text-xs text-slate-500">{tab.hint}</div>
+                  <div className={`mt-0.5 truncate text-[11px] leading-none ${active ? 'text-slate-400' : 'text-slate-600 group-hover:text-slate-500'}`}>{tab.hint}</div>
                 </div>
               </button>
             );

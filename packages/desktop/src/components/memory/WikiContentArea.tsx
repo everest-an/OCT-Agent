@@ -177,8 +177,8 @@ function TopicView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const MAX_RETRIES = 3;
-  const RETRY_DELAY_MS = 1500;
+  const MAX_RETRIES = 4;
+  const RETRY_DELAY_MS = 800;
 
   // Special case: pseudo-topics from the tag-fallback path. Their ID is
   // `tag_<tagname>`, not a real knowledge_cards row, so we resolve members
@@ -201,11 +201,9 @@ function TopicView({
 
     const resolveResult = (resolved: TopicMemberCard[]) => {
       if (cancelled) return;
-      // Critical safeguard: if the sidebar count says there ARE cards but the
-      // daemon returned zero, don't flash "no cards yet" — that's almost
-      // certainly the daemon still warming up its tag index. Instead, retry
-      // after a short delay, up to MAX_RETRIES times. Only after all retries
-      // fail AND sidebar also reports 0 do we show the empty state.
+      // Critical safeguard: if the sidebar count says there ARE cards but we got
+      // zero, the daemon tag index is probably still warming up after startup.
+      // Retry up to MAX_RETRIES times before giving up.
       if (resolved.length === 0 && expectedCount > 0 && attempt < MAX_RETRIES - 1) {
         retryTimer = setTimeout(() => {
           if (cancelled) return;
@@ -217,13 +215,29 @@ function TopicView({
       setLoading(false);
     };
 
-    if (isTagPseudoTopic) {
-      // If `cards` is still loading (empty array), keep loading=true and wait.
-      // The effect will re-run when cards repopulates.
-      if (cards.length === 0) {
-        setLoading(true);
-        return;
+    /** Client-side tag match: given a list of MOC tags, find member cards from preloaded list */
+    const clientSideMatch = (mocTags: string[]): TopicMemberCard[] | null => {
+      if (cards.length === 0 || mocTags.length === 0) return null;
+      const tagSet = new Set(mocTags.map((t) => t.trim().toLowerCase()).filter(Boolean));
+      const seen = new Set<string>();
+      const matched: TopicMemberCard[] = [];
+      for (const card of cards) {
+        if (card.card_type === 'moc' || card.id === topicId) continue;
+        let cardTags: string[] = [];
+        try {
+          const parsed = typeof card.tags === 'string' ? JSON.parse(card.tags) : card.tags;
+          if (Array.isArray(parsed)) cardTags = parsed.map((tg: string) => String(tg).trim().toLowerCase());
+        } catch { /* ignore */ }
+        if (cardTags.some((tg) => tagSet.has(tg)) && !seen.has(card.id)) {
+          seen.add(card.id);
+          matched.push(card as unknown as TopicMemberCard);
+        }
       }
+      return matched.length > 0 ? matched : null;
+    };
+
+    if (isTagPseudoTopic) {
+      if (cards.length === 0) { setLoading(true); return; }
       const tag = topicId.slice(4).toLowerCase();
       const matched = cards.filter((c) => {
         if (!c.tags) return false;
@@ -233,13 +247,42 @@ function TopicView({
         return parsed.some((tagValue) => String(tagValue).trim().toLowerCase() === tag);
       });
       resolveResult(matched as unknown as TopicMemberCard[]);
-      return () => {
-        cancelled = true;
-        if (retryTimer) clearTimeout(retryTimer);
-      };
+      return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); };
     }
 
-    // Real MOC card — fetch from daemon
+    // --- FAST PATH 1: use topic.tags from sidebar data (available since daemon 0.5.17)
+    // This is the most reliable path: no need to find the MOC card in the preloaded
+    // cards array (which is capped at 50 and may not include older MOC cards).
+    const topicWithTags = topic?.tags;
+    if (Array.isArray(topicWithTags) && topicWithTags.length > 0 && cards.length > 0) {
+      const matched = clientSideMatch(topicWithTags);
+      if (matched !== null) {
+        resolveResult(matched);
+        return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); };
+      }
+      // matched === null: 0 results from client-side → fall through to daemon fetch
+    }
+
+    // --- FAST PATH 2: MOC card in preloaded cards (older daemon without tags in topics)
+    if (cards.length > 0) {
+      const mocCard = cards.find((c) => c.id === topicId && c.card_type === 'moc');
+      if (mocCard) {
+        let mocTags: string[] = [];
+        try {
+          const parsed = typeof mocCard.tags === 'string' ? JSON.parse(mocCard.tags) : mocCard.tags;
+          if (Array.isArray(parsed)) mocTags = parsed.map((tg: string) => String(tg).trim().toLowerCase()).filter(Boolean);
+        } catch { /* ignore */ }
+        const matched = clientSideMatch(mocTags);
+        if (matched !== null) {
+          resolveResult(matched);
+          return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); };
+        }
+      }
+    }
+
+    // --- FALLBACK: fetch from daemon.
+    // Reaches here when: cards not yet loaded, MOC not in preloaded list, OR
+    // client-side tag match returned 0 (tag index may still be warming up).
     setLoading(true);
     fetch(`${DAEMON_API_BASE}/knowledge/${encodeURIComponent(topicId)}`)
       .then(async (res) => {
@@ -251,7 +294,6 @@ function TopicView({
       })
       .catch((err) => {
         if (cancelled) return;
-        // On network error, retry too — daemon might be starting
         if (attempt < MAX_RETRIES - 1) {
           retryTimer = setTimeout(() => {
             if (cancelled) return;
@@ -263,11 +305,8 @@ function TopicView({
         setLoading(false);
       });
 
-    return () => {
-      cancelled = true;
-      if (retryTimer) clearTimeout(retryTimer);
-    };
-  }, [topicId, isTagPseudoTopic, cards, attempt, expectedCount]);
+    return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); };
+  }, [topicId, isTagPseudoTopic, topic, cards, attempt, expectedCount]);
 
   // While loading, show the sidebar count so the header doesn't flash "0 cards".
   const memberCount = loading || members === null
@@ -297,10 +336,8 @@ function TopicView({
             {t('memory.wiki.loadingTopicMembers', 'Loading {count} cards...').replace('{count}', String(expectedCount || ''))}
           </p>
           {attempt > 0 && (
-            <p className="text-[10px] text-slate-600">
-              {t('memory.wiki.retryingAttempt', 'Retry {n}/{max}')
-                .replace('{n}', String(attempt + 1))
-                .replace('{max}', String(MAX_RETRIES))}
+            <p className="text-[10px] text-slate-600 text-center max-w-[220px]">
+              {t('memory.wiki.indexWarming', 'Daemon is building the tag index, please wait...')}
             </p>
           )}
         </div>
