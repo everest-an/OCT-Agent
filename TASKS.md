@@ -20,6 +20,11 @@
 - [x] Awareness logo (icns) 生成
 - [x] GitHub 仓库初始化 + 推送
 
+### P1 回归修复（2026-04-11 记录）
+
+- [ ] **Signal 重复加载路径清理**：`plugins.load.paths` 同时存在 `~/.awareness-claw/openclaw-runtime/.../signal`（桌面端捆绑旧 runtime）与 `~/.npm-global/.../signal`（当前 OpenClaw stock）两条路径，导致重复加载并发生覆盖；需从 `plugins.load.paths` 移除旧的 `~/.awareness-claw` Signal 路径，仅保留当前 runtime/stock 来源。
+- [ ] **WhatsApp 全局旧插件卸载**：OpenClaw 2026.4.10 stock 已内置 `whatsapp`，但 `~/.openclaw/extensions/whatsapp` 仍存在独立安装的 `@openclaw/whatsapp@2026.2.9`（旧），会覆盖 stock；需卸载该旧 global whatsapp 扩展并验证 stock 插件生效。
+
 ---
 
 ## P2 — 核心功能
