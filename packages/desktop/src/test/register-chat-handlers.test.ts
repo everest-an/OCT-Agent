@@ -127,6 +127,51 @@ describe('registerChatHandlers', () => {
     expect(spawnMock).toHaveBeenCalled();
   });
 
+  it('auto-repairs auth-gated gateway preflight and avoids CLI fallback when reconnect succeeds', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: { role: 'assistant', content: 'gateway recovered reply' },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    const sendToRenderer = vi.fn();
+    const getGatewayWs = vi.fn(async () => ws as any);
+
+    registerChatHandlers({
+      sendToRenderer,
+      ensureGatewayRunning: vi.fn(async () => ({ ok: false, error: 'Local Gateway requires one-time device authorization before desktop chat can use Gateway mode.' })),
+      prepareGatewayForChat: vi.fn(async () => ({ ok: false, error: 'Local Gateway requires one-time device authorization before desktop chat can use Gateway mode.' })),
+      getGatewayWs,
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, 'hello', 'test-session', {});
+
+    expect(result).toMatchObject({ success: true, text: 'gateway recovered reply', sessionId: 'test-session' });
+    expect(getGatewayWs).toHaveBeenCalled();
+    expect(getGatewayWs.mock.calls[0]?.[0]).toMatchObject({
+      onPairingRepairStart: expect.any(Function),
+      onPairingRepair: expect.any(Function),
+    });
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(sendToRenderer).toHaveBeenCalledWith(
+      'chat:status',
+      expect.objectContaining({ message: 'Gateway recovered. Sending this message through fast mode.' }),
+    );
+  });
+
   it('filters Node internal stack lines and returns a friendly runtime repair hint for npx ENOENT', async () => {
     const fakeChild = createCliFallbackErrorChild([
       '[openclaw] Uncaught exception: Error: spawn npx ENOENT',
@@ -1265,6 +1310,7 @@ describe('registerChatHandlers', () => {
     const [cmd, args, opts] = runSpawn.mock.calls[0] as unknown as [string, string[], Record<string, unknown>];
     expect(cmd).toBe('openclaw');
     expect(args).toEqual(expect.arrayContaining(['agent', '--session-id', 'test-session', '-m', '--verbose', 'full']));
+    expect(args).toEqual(expect.arrayContaining(['--local']));
     const messageArgIndex = args.indexOf('-m');
     expect(messageArgIndex).toBeGreaterThanOrEqual(0);
     expect(args[messageArgIndex + 1]).toContain(`[Project working directory: ${workspaceDir}]`);

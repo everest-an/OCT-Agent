@@ -278,6 +278,7 @@ export interface ElectronAPI {
 
   // Mission (multi-agent workflow)
   missionStart?: (params: { missionId: string; goal: string; workDir?: string; agents: Array<{ id: string; name?: string; emoji?: string }> }) => Promise<{ success: boolean; sessionKey?: string; error?: string }>;
+  missionListActive?: () => Promise<{ missionIds: string[] }>;
   missionCancel?: (missionId: string) => Promise<void>;
   onMissionProgress?: (callback: (data: any) => void) => (() => void) | undefined;
 

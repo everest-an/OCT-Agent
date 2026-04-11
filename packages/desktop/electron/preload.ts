@@ -311,6 +311,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Mission (multi-agent workflow)
   missionStart: (params: { missionId: string; goal: string; workDir?: string; agents: Array<{ id: string; name?: string; emoji?: string }> }) =>
     ipcRenderer.invoke('mission:start', params),
+  missionListActive: () => ipcRenderer.invoke('mission:list-active'),
   missionCancel: (missionId: string) => ipcRenderer.invoke('mission:cancel', missionId),
   onMissionProgress: (callback: (data: any) => void) => {
     const listener = (_e: any, data: any) => callback(data);

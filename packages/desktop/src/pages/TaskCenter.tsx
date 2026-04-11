@@ -54,8 +54,44 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
   // Streaming content per mission (accumulated delta text)
   const [streamingText, setStreamingText] = useState<Record<string, string>>({});
 
-  // Load on mount
-  useEffect(() => { setMissions(loadMissions()); }, []);
+  // Load on mount, then reconcile persisted non-terminal missions with active mission ids from main process.
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const persisted = loadMissions();
+      let next = persisted;
+
+      try {
+        const active = await window.electronAPI?.missionListActive?.();
+        const activeMissionIds = new Set(active?.missionIds || []);
+        const finalizedAt = new Date().toISOString();
+        let changed = false;
+
+        next = persisted.map((mission) => {
+          const isNonTerminal = mission.status === 'running' || mission.status === 'planning' || mission.status === 'paused';
+          if (!isNonTerminal) return mission;
+          if (activeMissionIds.has(mission.id)) return mission;
+
+          changed = true;
+          return {
+            ...mission,
+            status: 'failed',
+            completedAt: mission.completedAt || finalizedAt,
+            error: mission.error || 'Mission was interrupted or detached from runtime state.',
+          };
+        });
+
+        if (changed) saveMissions(next);
+      } catch {
+        // Keep persisted state when runtime mission reconciliation is unavailable.
+      }
+
+      if (!cancelled) setMissions(next);
+    })();
+
+    return () => { cancelled = true; };
+  }, []);
   useEffect(() => {
     if (missions.length > 0 || localStorage.getItem('awareness-claw-missions')) {
       saveMissions(missions);

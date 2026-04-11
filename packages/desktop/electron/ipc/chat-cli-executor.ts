@@ -114,14 +114,18 @@ export async function chatSendViaCli(
     const escapedMsg = requestMessage.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\\$').replace(/`/g, '\\`');
     // Note: openclaw CLI does not support --reasoning flag; reasoning is controlled via
     // openclaw.json agents.defaults.reasoningDefault (set in syncToOpenClaw)
-    const command = `openclaw agent --session-id "${sid}" -m "${escapedMsg}" --verbose full${thinkingFlag}${agentFlag}`;
     const openclawArgs = ['agent', '--session-id', sid, '-m', requestMessage, '--verbose', 'full'];
+    if (options?.forceLocal) {
+      openclawArgs.splice(1, 0, '--local');
+    }
     if (options?.thinkingLevel && options.thinkingLevel !== 'off') {
       openclawArgs.push('--thinking', options.thinkingLevel);
     }
     if (sanitizedAgentId) {
       openclawArgs.push('--agent', sanitizedAgentId);
     }
+    const localFlag = options?.forceLocal ? ' --local' : '';
+    const commandWithMode = `openclaw agent${localFlag} --session-id "${sid}" -m "${escapedMsg}" --verbose full${thinkingFlag}${agentFlag}`;
     const cwd = options?.workspacePath || os.homedir();
     const spawnChatProcess = deps.spawnChatProcess || spawn;
     const child = deps.runSpawn
@@ -129,8 +133,8 @@ export async function chatSendViaCli(
       : (() => {
           const enhancedPath = deps.getEnhancedPath();
           return process.platform === 'win32'
-            ? spawnChatProcess(deps.wrapWindowsCommand(command), [], { cwd, shell: 'cmd.exe', env: { ...process.env, PATH: enhancedPath, NO_COLOR: '1', FORCE_COLOR: '0' } })
-            : spawnChatProcess('/bin/bash', ['--norc', '--noprofile', '-c', `export PATH="${enhancedPath}"; ${command}`], { cwd, env: { ...process.env, PATH: enhancedPath } });
+            ? spawnChatProcess(deps.wrapWindowsCommand(commandWithMode), [], { cwd, shell: 'cmd.exe', env: { ...process.env, PATH: enhancedPath, NO_COLOR: '1', FORCE_COLOR: '0' } })
+            : spawnChatProcess('/bin/bash', ['--norc', '--noprofile', '-c', `export PATH="${enhancedPath}"; ${commandWithMode}`], { cwd, env: { ...process.env, PATH: enhancedPath } });
         })();
 
     const isNoiseLine = (line: string) => {

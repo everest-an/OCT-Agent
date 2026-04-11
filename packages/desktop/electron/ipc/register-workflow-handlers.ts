@@ -805,17 +805,46 @@ export function registerWorkflowHandlers(deps: WorkflowHandlerDeps) {
     ) => {
       attachSubagentListener(deps);
 
+      const gatewayErrText = (err: unknown): string => {
+        if (!err) return '';
+        if (typeof err === 'string') return err;
+        const anyErr = err as any;
+        return String(anyErr?.message || anyErr?.error || anyErr);
+      };
+
+      const isPairingOrDeviceRequired = (text: string): boolean =>
+        /pairing required|pairing-required|device-required|needs local authorization|scope-upgrade|1008/i.test(text);
+
+      const isHandshakeLikeFailure = (text: string): boolean =>
+        /handshake timeout|1006|1000 normal closure|gateway closed|connect failed|connection timed out|rpc probe: fail/i.test(text);
+
       try {
         // Gateway WS may not be ready on first call after app start — retry up to 3x
         let ws: Awaited<ReturnType<typeof deps.getGatewayWs>> | null = null;
         let lastErr: any = null;
+        let restartedGateway = false;
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
             ws = await deps.getGatewayWs();
             break;
           } catch (err) {
             lastErr = err;
-            console.warn(`[mission:start] gateway connect attempt ${attempt + 1}/3 failed:`, (err as any)?.message);
+            const detail = gatewayErrText(err);
+            console.warn(`[mission:start] gateway connect attempt ${attempt + 1}/3 failed:`, detail || (err as any)?.message);
+
+            if (isPairingOrDeviceRequired(detail)) {
+              throw new Error('Local authorization is required before Team Tasks can start. Please approve device pairing in OpenClaw, then retry.');
+            }
+
+            // One-time self-heal for handshake races / transient gateway closes.
+            if (!restartedGateway && isHandshakeLikeFailure(detail)) {
+              restartedGateway = true;
+              try {
+                await deps.runAsync('openclaw gateway restart', 30000);
+              } catch {
+                // Best effort: continue retry loop.
+              }
+            }
             await new Promise(r => setTimeout(r, 1500));
           }
         }
@@ -1255,6 +1284,11 @@ Start by planning which sub-agents to use, then spawn them.`;
       }
     },
   );
+
+  /** Cancel a running mission. */
+  ipcMain.handle('mission:list-active', async () => {
+    return { missionIds: [...activeMissions.keys()] };
+  });
 
   /** Cancel a running mission. */
   ipcMain.handle('mission:cancel', async (_e, missionId: string) => {

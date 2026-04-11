@@ -188,7 +188,7 @@ export function registerChatHandlers(deps: {
   ensureGatewayRunning: () => Promise<{ ok: boolean; error?: string }>;
   prepareGatewayForChat?: () => Promise<{ ok: boolean; error?: string }>;
   prepareCliFallback?: () => Promise<void>;
-  getGatewayWs: () => Promise<GatewayClient>;
+  getGatewayWs: (options?: { onPairingRepairStart?: () => void; onPairingRepair?: () => void }) => Promise<GatewayClient>;
   getConnectedGatewayWs: () => GatewayClient | null;
   callMcpStrict: (toolName: string, args: Record<string, any>, timeoutMs?: number) => Promise<any>;
   getEnhancedPath: () => string;
@@ -431,10 +431,55 @@ ${message}`;
       ? deps.prepareGatewayForChat()
       : deps.ensureGatewayRunning());
     if (!gatewayReady.ok) {
+      const gatewayErrorText = String(gatewayReady.error || '');
+      const authGated = /needs local authorization|device authorization|device-required|pairing required|pairing-required|scope-upgrade/i.test(gatewayErrorText);
+      const now = Date.now();
+      const canAttemptAuthRepair = authGated && (now - chatState.lastGatewayAuthRepairAt > 60_000);
+
+      if (canAttemptAuthRepair) {
+        chatState.lastGatewayAuthRepairAt = now;
+        send('chat:status', {
+          type: 'gateway',
+          message: 'Local authorization required. Attempting automatic repair...',
+        });
+        try {
+          await deps.getGatewayWs({
+            onPairingRepairStart: () => send('chat:status', {
+              type: 'gateway',
+              message: 'Approving local Gateway access...',
+            }),
+            onPairingRepair: () => send('chat:status', {
+              type: 'gateway',
+              message: 'Local access approved. Reconnecting Gateway...',
+            }),
+          });
+          if (deps.getConnectedGatewayWs()?.isConnected) {
+            send('chat:status', {
+              type: 'gateway',
+              message: 'Gateway recovered. Sending this message through fast mode.',
+            });
+          } else {
+            throw new Error('Gateway connection not established after auth repair');
+          }
+        } catch (repairErr: any) {
+          console.warn('[chat] Gateway auth auto-repair did not recover connection:', repairErr?.message || repairErr);
+        }
+      }
+
+      if (deps.getConnectedGatewayWs()?.isConnected) {
+        // Recovery succeeded in the branch above; continue with normal Gateway path.
+      } else {
       console.warn('[chat] Gateway preflight failed, falling back to CLI:', gatewayReady.error || 'unknown error');
       send('chat:status', {
         type: 'gateway',
         message: gatewayReady.error || 'Gateway unavailable. Falling back to direct OpenClaw chat...',
+      });
+      requestedOptions.forceLocal = true;
+      send('chat:status', {
+        type: 'gateway',
+        message: authGated
+          ? 'Local authorization is pending. Sending this message through local fallback mode.'
+          : 'Gateway is still warming up. Sending this message through local fallback mode.',
       });
       const preparedCli = await prepareCliFallbackWithDaemonRetry(deps.prepareCliFallback, send);
       if (!preparedCli.ok) {
@@ -473,6 +518,7 @@ ${message}`;
       }
       maybeSelfHealGateway1006(cliResult, send, deps.runSpawn, deps.getEnhancedPath(), deps.startGatewayInUserSession, deps.runAsync);
       return withWorkspaceFallbackMeta(cliResult);
+      }
     }
 
     let fullResponseText = '';
@@ -1114,6 +1160,11 @@ ${message}`;
         if (/pairing required/i.test(errorMsg)) {
           deps.getGatewayWs().catch(() => { /* background repair — don't block fallback */ });
         }
+        requestedOptions.forceLocal = true;
+        send('chat:status', {
+          type: 'gateway',
+          message: 'Gateway connection is unstable. Sending this message through local fallback mode.',
+        });
         const preparedCli = await prepareCliFallbackWithDaemonRetry(deps.prepareCliFallback, send);
         if (!preparedCli.ok) {
           const detail = preparedCli.error || 'unknown error';

@@ -975,6 +975,14 @@ async function prepareGatewayForChat(): Promise<{ ok: boolean; error?: string }>
   const send = (ch: string, data: any) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(ch, data);
   };
+  const isAuthGatedGatewayError = (input: string | null | undefined): boolean => {
+    const lower = String(input || '').toLowerCase();
+    return lower.includes('device-required')
+      || lower.includes('pairing-required')
+      || lower.includes('pairing required')
+      || lower.includes('scope-upgrade')
+      || lower.includes('needs local authorization');
+  };
 
   try {
     const installed = await checkOpenclawInstalled();
@@ -1018,12 +1026,19 @@ async function prepareGatewayForChat(): Promise<{ ok: boolean; error?: string }>
           return { ok: true };
         }
       } catch (err: any) {
+        const detail = err?.message || String(err || '');
+        if (isAuthGatedGatewayError(detail)) {
+          return {
+            ok: false,
+            error: 'Local Gateway requires one-time device authorization before desktop chat can use Gateway mode.',
+          };
+        }
         // WS connect failed despite the port being open. This usually means
         // Gateway is mid-startup and not yet accepting protocol-level connects
         // (handshake races plugin loader — see openclaw#46256). Fall through to
         // CLI fallback so the user still gets an answer, and kick a background
         // repair so the next message will likely hit the fast path.
-        console.warn('[chat] Gateway WS connect failed despite open port:', err?.message || err);
+        console.warn('[chat] Gateway WS connect failed despite open port:', detail);
       }
     }
 
