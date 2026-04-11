@@ -262,12 +262,44 @@ describe('register-agent-handlers', () => {
     expect(result).toMatchObject({ success: true });
     expect(runDoctorFix).toHaveBeenCalledTimes(1);
     expect(runDoctorFix).toHaveBeenCalledWith('plugin-installed');
-    expect(ensureGatewayRunning).toHaveBeenCalledTimes(1);
+    expect(ensureGatewayRunning).not.toHaveBeenCalled();
     expect(runSpawnAsync).toHaveBeenCalledWith(
       'openclaw',
       ['agents', 'add', 'research-agent', '--non-interactive', '--workspace', path.join(home, '.openclaw', 'workspace-research-agent')],
-      45000,
+      120000,
     );
+  });
+
+  it('falls back to openclaw.json creation when agents:add times out', async () => {
+    const home = '/mock/home';
+    const configPath = path.join(home, '.openclaw', 'openclaw.json');
+    let configRaw = JSON.stringify({ agents: { list: [{ id: 'main' }] } });
+
+    existsSyncMock.mockImplementation((target: string) => target === configPath);
+    readFileSyncMock.mockImplementation((target: string) => {
+      if (target === configPath) return configRaw;
+      throw new Error(`Unexpected read: ${target}`);
+    });
+    writeFileSyncMock.mockImplementation((target: string, content: string) => {
+      if (target === configPath) configRaw = String(content);
+    });
+
+    registerAgentHandlers({
+      home,
+      safeShellExecAsync: vi.fn().mockResolvedValue(null),
+      readShellOutputAsync: vi.fn().mockResolvedValue(null),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      runAsync: vi.fn().mockResolvedValue(''),
+      runSpawnAsync: vi.fn().mockRejectedValue(new Error('Command timed out')),
+      runDoctorFix: vi.fn().mockResolvedValue({ success: true }),
+    });
+
+    const handlers = getHandlers();
+    const result = await handlers['agents:add']({} as any, 'Research Agent');
+    const finalConfig = JSON.parse(configRaw);
+
+    expect(result).toMatchObject({ success: true, agentId: 'research-agent' });
+    expect(finalConfig.agents.list.map((a: any) => a.id)).toEqual(['main', 'research-agent']);
   });
 
   it('deduplicates awareness plugin auto-heal across concurrent agent operations', async () => {
@@ -357,5 +389,137 @@ describe('register-agent-handlers', () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain('maximum length is 64');
     expect(runSpawnAsync).not.toHaveBeenCalled();
+  });
+
+  it('cleans openclaw.json and redirects orphan bindings when CLI delete reports not found', async () => {
+    const home = '/mock/home';
+    const configPath = path.join(home, '.openclaw', 'openclaw.json');
+    const deletedAgent = 'research-agent';
+    let configRaw = JSON.stringify({
+      agents: {
+        list: [
+          { id: 'main' },
+          { id: deletedAgent },
+        ],
+      },
+      bindings: [
+        { type: 'route', agentId: deletedAgent, match: { channel: 'openclaw-weixin' } },
+      ],
+    });
+
+    existsSyncMock.mockImplementation((target: string) => target.includes('/mock/home/.openclaw/'));
+    readFileSyncMock.mockImplementation((target: string) => {
+      if (target === configPath) return configRaw;
+      throw new Error(`Unexpected read: ${target}`);
+    });
+    writeFileSyncMock.mockImplementation((target: string, content: string) => {
+      if (target === configPath) {
+        configRaw = String(content);
+      }
+    });
+
+    registerAgentHandlers({
+      home,
+      safeShellExecAsync: vi.fn().mockResolvedValue(null),
+      readShellOutputAsync: vi.fn().mockResolvedValue(null),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      runAsync: vi.fn().mockResolvedValue(''),
+      runSpawnAsync: vi.fn().mockRejectedValue(new Error('agent not found')),
+      runDoctorFix: vi.fn().mockResolvedValue({ success: true }),
+    });
+
+    const handlers = getHandlers();
+    const result = await handlers['agents:delete']({} as any, deletedAgent);
+    const finalConfig = JSON.parse(configRaw);
+
+    expect(result).toMatchObject({ success: true, removedFromConfig: true, redirectedBindings: 1 });
+    expect(finalConfig.agents.list.map((a: any) => a.id)).toEqual(['main']);
+    expect(finalConfig.bindings[0].agentId).toBe('main');
+  });
+
+  it('rejects invalid display name in set-identity before invoking openclaw', async () => {
+    const home = '/mock/home';
+    const runSpawnAsync = vi.fn().mockResolvedValue('ok');
+
+    registerAgentHandlers({
+      home,
+      safeShellExecAsync: vi.fn().mockResolvedValue(null),
+      readShellOutputAsync: vi.fn().mockResolvedValue(null),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      runAsync: vi.fn().mockResolvedValue(''),
+      runSpawnAsync,
+      runDoctorFix: vi.fn().mockResolvedValue({ success: true }),
+    });
+
+    const handlers = getHandlers();
+    const result = await handlers['agents:set-identity']({} as any, 'main', '🤖🤖', '', '', '');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid agent name');
+    expect(runSpawnAsync).not.toHaveBeenCalled();
+  });
+
+  it('ignores non-emoji emoji input and still updates display name', async () => {
+    const home = '/mock/home';
+    const runSpawnAsync = vi.fn().mockResolvedValue('ok');
+
+    registerAgentHandlers({
+      home,
+      safeShellExecAsync: vi.fn().mockResolvedValue(null),
+      readShellOutputAsync: vi.fn().mockResolvedValue(null),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      runAsync: vi.fn().mockResolvedValue(''),
+      runSpawnAsync,
+      runDoctorFix: vi.fn().mockResolvedValue({ success: true }),
+    });
+
+    const handlers = getHandlers();
+    const result = await handlers['agents:set-identity']({} as any, 'main', 'Optic', 'Opti', '', '');
+
+    expect(result).toMatchObject({ success: true });
+    expect(runSpawnAsync).toHaveBeenCalledWith(
+      'openclaw',
+      ['agents', 'set-identity', '--agent', 'main', '--name', 'Optic'],
+      60000,
+    );
+  });
+
+  it('falls back to openclaw.json identity update when set-identity times out', async () => {
+    const home = '/mock/home';
+    const configPath = path.join(home, '.openclaw', 'openclaw.json');
+    let configRaw = JSON.stringify({
+      agents: {
+        list: [
+          { id: 'main', identity: { name: 'Main Agent' } },
+        ],
+      },
+    });
+
+    existsSyncMock.mockImplementation((target: string) => target === configPath);
+    readFileSyncMock.mockImplementation((target: string) => {
+      if (target === configPath) return configRaw;
+      throw new Error(`Unexpected read: ${target}`);
+    });
+    writeFileSyncMock.mockImplementation((target: string, content: string) => {
+      if (target === configPath) configRaw = String(content);
+    });
+
+    registerAgentHandlers({
+      home,
+      safeShellExecAsync: vi.fn().mockResolvedValue(null),
+      readShellOutputAsync: vi.fn().mockResolvedValue(null),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      runAsync: vi.fn().mockResolvedValue(''),
+      runSpawnAsync: vi.fn().mockRejectedValue(new Error('Command timed out')),
+      runDoctorFix: vi.fn().mockResolvedValue({ success: true }),
+    });
+
+    const handlers = getHandlers();
+    const result = await handlers['agents:set-identity']({} as any, 'main', 'Optic', '🧠', '', '');
+    const finalConfig = JSON.parse(configRaw);
+
+    expect(result).toMatchObject({ success: true });
+    expect(finalConfig.agents.list[0].identity.name).toBe('Optic');
+    expect(finalConfig.agents.list[0].identity.emoji).toBe('🧠');
   });
 });

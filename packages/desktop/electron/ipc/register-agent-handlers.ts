@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { ipcMain } from 'electron';
 import { parseJsonShellOutput } from '../openclaw-shell-output';
+import { redirectOrphanBindings } from '../bindings-manager';
 
 const DEFAULT_AGENT_IDS = new Set(['main', 'default']);
 const PREFERRED_MARKDOWN_ORDER = [
@@ -383,8 +384,6 @@ export function registerAgentHandlers(deps: {
       // Self-heal: after clean installs, openclaw-memory may be configured but not yet
       // physically installed. Repair once before agent operations to avoid slow warnings.
       await ensureAwarenessPluginInstalledForAgentOps(deps, 'agents:add');
-
-      await deps.ensureGatewayRunning();
       // Slug must be ASCII for filesystem safety.
       // Chinese/Japanese/etc names may produce an empty ASCII slug after stripping,
       // so we use a deterministic fallback with letters to avoid id-style confusion.
@@ -403,8 +402,21 @@ export function registerAgentHandlers(deps: {
       const spawnArgs = ['agents', 'add', slug, '--non-interactive', '--workspace', wsDir];
       const safeModel = model ? model.replace(/[^a-zA-Z0-9/_:.-]/g, '') : '';
       if (safeModel) { spawnArgs.push('--model', safeModel); }
-      // OpenClaw loads all plugins on every CLI invocation (15-20s), so 45s timeout is needed
-      await deps.runSpawnAsync('openclaw', spawnArgs, 45000);
+      // OpenClaw loads all plugins on every CLI invocation. Give enough idle timeout
+      // headroom, then fall back to direct config write if CLI still stalls.
+      try {
+        await deps.runSpawnAsync('openclaw', spawnArgs, 120000);
+      } catch (cliErr: any) {
+        const raw = cliErr?.message || String(cliErr || '');
+        if (/timed out|timeout/i.test(raw)) {
+          const fallback = addAgentToConfigFallback(deps.home, slug, { model: safeModel || null });
+          if (!fallback.success && !fallback.alreadyExists) {
+            return { success: false, error: `Agent creation timed out and fallback failed: ${fallback.error || 'unknown error'}` };
+          }
+        } else {
+          throw cliErr;
+        }
+      }
       // Strip the auto-generated `workspace` field that `openclaw agents add`
       // wrote into openclaw.json. When that field is set, OpenClaw's write/exec
       // tools refuse to operate outside ~/.openclaw/workspace-<slug>, so users
@@ -465,7 +477,8 @@ export function registerAgentHandlers(deps: {
           fs.rmSync(dir, { recursive: true, force: true });
         }
       }
-      return { success: true };
+      const healed = removeAgentFromConfigAndHealBindings(deps.home, agentId);
+      return { success: true, removedFromConfig: healed.removed, redirectedBindings: healed.redirected };
     } catch (err: any) {
       return { success: false, error: err.message?.slice(0, 200) };
     }
@@ -473,16 +486,42 @@ export function registerAgentHandlers(deps: {
 
   ipcMain.handle('agents:set-identity', async (_e: any, agentId: string, name: string, emoji: string, avatar?: string, theme?: string) => {
     try {
+      if (name) {
+        const invalidReason = getInvalidAgentDisplayNameReason(name);
+        if (invalidReason) {
+          return { success: false, error: `Invalid agent name: ${invalidReason}.` };
+        }
+      }
+
       // Same self-heal before another OpenClaw CLI invocation.
       await ensureAwarenessPluginInstalledForAgentOps(deps, 'agents:set-identity');
 
       const args = ['agents', 'set-identity', '--agent', agentId];
+      const safeEmoji = normalizeAgentEmoji(emoji);
       if (name) { args.push('--name', name); }
-      if (emoji) { args.push('--emoji', emoji); }
+      // Ignore non-emoji text in the emoji field so name updates still succeed.
+      if (safeEmoji) { args.push('--emoji', safeEmoji); }
       if (avatar) { args.push('--avatar', avatar); }
       if (theme) { args.push('--theme', theme); }
       if (args.length <= 4) return { success: false, error: 'No changes' };
-      await deps.runSpawnAsync('openclaw', args, 30000);
+      try {
+        await deps.runSpawnAsync('openclaw', args, 60000);
+      } catch (cliErr: any) {
+        const raw = cliErr?.message || String(cliErr || '');
+        if (/timed out|timeout/i.test(raw)) {
+          const fallback = applyAgentIdentityFallback(deps.home, agentId, {
+            name: name || undefined,
+            emoji: safeEmoji || undefined,
+            avatar: avatar || undefined,
+            theme: theme || undefined,
+          });
+          if (!fallback.success) {
+            return { success: false, error: `Set identity timed out and fallback failed: ${fallback.error || 'unknown error'}` };
+          }
+        } else {
+          throw cliErr;
+        }
+      }
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message?.slice(0, 200) };
@@ -580,4 +619,93 @@ export function registerAgentHandlers(deps: {
       return { success: false, error: err.message?.slice(0, 200) };
     }
   });
+}
+
+function removeAgentFromConfigAndHealBindings(home: string, deletedAgentId: string): { removed: boolean; redirected: number } {
+  try {
+    const configPath = path.join(home, '.openclaw', 'openclaw.json');
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    const cfg = JSON.parse(raw);
+    const list: any[] = Array.isArray(cfg?.agents?.list) ? cfg.agents.list : [];
+    const nextList = list.filter((a) => String(a?.id || '') !== deletedAgentId);
+    const removed = nextList.length !== list.length;
+
+    if (removed) {
+      cfg.agents = cfg.agents || {};
+      cfg.agents.list = nextList;
+      fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), 'utf-8');
+    }
+
+    const known = new Set<string>(nextList.map((a) => String(a?.id || '')).filter(Boolean));
+    known.add('main');
+    const redirected = redirectOrphanBindings(known, 'main', home).length;
+    return { removed, redirected };
+  } catch {
+    return { removed: false, redirected: 0 };
+  }
+}
+
+function addAgentToConfigFallback(
+  home: string,
+  agentId: string,
+  options?: { model?: string | null },
+): { success: boolean; error?: string; alreadyExists?: boolean } {
+  try {
+    const configPath = path.join(home, '.openclaw', 'openclaw.json');
+    let cfg: any = {};
+    if (fs.existsSync(configPath)) {
+      cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    }
+
+    cfg.agents = cfg.agents || {};
+    const list: any[] = Array.isArray(cfg.agents.list) ? cfg.agents.list : [];
+    if (list.some((entry) => String(entry?.id || '') === agentId)) {
+      return { success: false, alreadyExists: true, error: 'Agent already exists' };
+    }
+
+    const nextEntry: any = { id: agentId };
+    const safeModel = String(options?.model || '').trim();
+    if (safeModel) {
+      nextEntry.model = safeModel;
+    }
+
+    list.push(nextEntry);
+    cfg.agents.list = list;
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), 'utf-8');
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to update openclaw.json' };
+  }
+}
+
+function applyAgentIdentityFallback(
+  home: string,
+  agentId: string,
+  identity: { name?: string; emoji?: string; avatar?: string; theme?: string },
+): { success: boolean; error?: string } {
+  try {
+    const configPath = path.join(home, '.openclaw', 'openclaw.json');
+    if (!fs.existsSync(configPath)) {
+      return { success: false, error: 'openclaw.json not found' };
+    }
+
+    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const list: any[] = Array.isArray(cfg?.agents?.list) ? cfg.agents.list : [];
+    const entry = list.find((item) => String(item?.id || '') === agentId);
+    if (!entry) {
+      return { success: false, error: 'Agent not found in config' };
+    }
+
+    entry.identity = entry.identity || {};
+    if (identity.name) entry.identity.name = identity.name;
+    if (identity.emoji) entry.identity.emoji = identity.emoji;
+    if (identity.avatar) entry.identity.avatar = identity.avatar;
+    if (identity.theme) entry.identity.theme = identity.theme;
+
+    fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), 'utf-8');
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to update identity in config' };
+  }
 }
