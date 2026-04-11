@@ -9,6 +9,16 @@ export interface MemoryKnowledgeCard {
   tokens_est?: number;
   days_ago?: number;
   tags?: string;
+  // F-031 Phase 1 personal-wiki fields (all optional for back-compat).
+  question_this_answers?: string | null;
+  body?: string | null;
+  body_format?: "markdown" | "text" | string | null;
+  growth_stage?: "seedling" | "budding" | "evergreen" | string | null;
+  card_type?: "atomic" | "moc" | string | null;
+  link_count_incoming?: number | null;
+  link_count_outgoing?: number | null;
+  language?: string | null;
+  last_touched_at?: string | null;
 }
 
 export interface ParsedMemoryContext {

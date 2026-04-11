@@ -67,7 +67,7 @@ export interface DaemonHealth {
   error?: string;
 }
 
-export type TabView = 'timeline' | 'knowledge' | 'self-improvement' | 'graph' | 'settings';
+export type TabView = 'overview' | 'wiki' | 'graph' | 'sync' | 'settings';
 
 // ---------------------------------------------------------------------------
 // Category & Source display config

@@ -23,6 +23,7 @@ export interface MemoryDataActions {
   setLoading: React.Dispatch<React.SetStateAction<boolean>>;
   setError: React.Dispatch<React.SetStateAction<string | null>>;
   setEventsOffset: React.Dispatch<React.SetStateAction<number>>;
+  setEventsTotal: React.Dispatch<React.SetStateAction<number>>;
   loadCards: () => Promise<void>;
   loadEvents: (offset?: number, append?: boolean, currentSourceView?: 'chat' | 'dev' | 'all') => Promise<void>;
   loadContext: () => Promise<boolean>;
@@ -208,6 +209,7 @@ export function useMemoryData(
     setLoading,
     setError,
     setEventsOffset,
+    setEventsTotal,
     loadCards,
     loadEvents,
     loadContext,

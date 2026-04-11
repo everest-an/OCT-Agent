@@ -1,31 +1,67 @@
-import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
-import { Search, RefreshCw, Loader2, AlertCircle, Zap, HardDrive, Cloud, ChevronDown, ChevronRight, Calendar, Play, Clock, FileText, Share2, SlidersHorizontal, AlarmClock, Bell, Brain, FileCode, Lightbulb, Sparkles, TriangleAlert } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import {
+  Search, RefreshCw, Loader2, AlertCircle, HardDrive, Cloud,
+  Clock, Share2, SlidersHorizontal, Brain, Play, BookOpen, ArrowDownUp,
+  FolderOpen,
+} from 'lucide-react';
 import { useI18n } from '../lib/i18n';
-import { parseMemoryContextResponse } from '../lib/memory-context';
 import { useExternalNavigator } from '../lib/useExternalNavigator';
 import { useMemorySettings } from '../hooks/useMemorySettings';
+import { useDaemonConnection } from '../hooks/useDaemonConnection';
+import { useMemoryData } from '../hooks/useMemoryData';
+import { useMemorySearch } from '../hooks/useMemorySearch';
+import { useWikiData } from '../hooks/useWikiData';
 import './memory-graph.css';
 import { MemorySettingsPanel } from '../components/memory/MemorySettingsPanel';
-import { SelfImprovementPanel } from '../components/memory/SelfImprovementPanel';
+import { SyncConflictPanel } from '../components/SyncConflictPanel';
 import { TimelineTab } from '../components/memory/TimelineTab';
-import { KnowledgeCardsTab } from '../components/memory/KnowledgeCardsTab';
-import { useSelfImprovement } from '../hooks/useSelfImprovement';
+import { WikiSidebar } from '../components/memory/WikiSidebar';
+import { WikiContentArea } from '../components/memory/WikiContentArea';
 import { SettingsCloudAuthModal } from '../components/settings/SettingsCloudAuthModal';
-import {
-  type PerceptionSignal,
-  type KnowledgeCard,
-  type MemoryEvent,
-  type DaemonHealth,
-  type TabView,
-  getCategoryDisplay,
-  getSourceDisplay,
-  parseCodeChangeContent,
-  formatRelativeTime,
-  parseMcpResponse,
-  memoryMarkdownComponents,
-} from '../components/memory/memory-helpers.js';
+import type { TabView } from '../components/memory/memory-helpers.js';
+import type { WikiSelectedItem } from '../components/memory/wiki-types';
+
+/**
+ * Small header chip showing which workspace the Memory page is currently
+ * reading from. Mirrors the chat header workspace selector — any change there
+ * propagates here via the `workspace:changed` IPC event.
+ */
+interface WorkspaceIndicatorProps {
+  activePath: string | null;
+  daemonProjectDir: string | null;
+  t: (key: string, fallback?: string) => string;
+}
+
+function WorkspaceIndicator({ activePath, daemonProjectDir, t }: WorkspaceIndicatorProps) {
+  // Resolve a short display label: the basename of the active workspace, or
+  // "OpenClaw" when the daemon is using the global default.
+  const resolved = activePath && activePath.trim() ? activePath : daemonProjectDir;
+  const isDefault = !activePath || !activePath.trim();
+
+  const label = (() => {
+    if (isDefault) return t('memory.workspace.openclawDefault', 'OpenClaw');
+    const parts = (resolved || '').split(/[/\\]/).filter(Boolean);
+    return parts[parts.length - 1] || resolved || 'unknown';
+  })();
+
+  const titleText = isDefault
+    ? t('memory.workspace.openclawTooltip', 'Global workspace: {path}').replace('{path}', resolved || '~/.openclaw')
+    : t('memory.workspace.projectTooltip', 'Project workspace: {path}').replace('{path}', resolved || '');
+
+  return (
+    <div
+      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border ${
+        isDefault
+          ? 'border-slate-700/60 bg-slate-800/40 text-slate-400'
+          : 'border-brand-500/40 bg-brand-600/10 text-brand-200'
+      }`}
+      title={titleText}
+    >
+      <FolderOpen size={12} className={isDefault ? 'text-slate-500' : 'text-brand-300'} />
+      <span className="truncate max-w-[180px]">{label}</span>
+    </div>
+  );
+}
 
 function MemoryLayerInfo({ className = '' }: { className?: string }) {
   const { t } = useI18n();
@@ -36,7 +72,7 @@ function MemoryLayerInfo({ className = '' }: { className?: string }) {
         onClick={() => setExpanded(!expanded)}
         className="flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-slate-300 transition-colors"
       >
-        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {expanded ? '▾' : '▸'}
         <span>{t('memory.architecture')}</span>
       </button>
       {expanded && (
@@ -63,349 +99,82 @@ function MemoryLayerInfo({ className = '' }: { className?: string }) {
 
 const KnowledgeGraph = lazy(() => import('../components/memory/KnowledgeGraph'));
 
-/** Highlight matching search terms in text */
-function HighlightText({ text, query }: { text: string; query: string }) {
-  if (!query.trim() || !text) return <>{text}</>;
-  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const parts = text.split(new RegExp(`(${escaped})`, 'gi'));
-  return (
-    <>
-      {parts.map((part, i) =>
-        part.toLowerCase() === query.toLowerCase()
-          ? <mark key={i} className="bg-amber-500/30 text-amber-200 rounded-sm px-0.5">{part}</mark>
-          : part
-      )}
-    </>
-  );
-}
-
 export default function Memory() {
   const { t } = useI18n();
   const { openExternal, isOpening } = useExternalNavigator();
   const {
-    config,
-    cloudMode,
-    showCloudAuth,
-    cloudAuthStep,
-    cloudUserCode,
-    cloudVerifyUrl,
-    cloudMemories,
-    setCloudAuthStep,
-    openCloudAuth,
-    closeCloudAuth,
-    startCloudAuth,
-    selectCloudMemory,
-    disconnectCloud,
-    selectMemoryMode,
-    toggleMemoryOption,
-    setRecallLimit,
-    setBlockedSourceAllowed,
-    clearAllMemories,
+    config, cloudMode, showCloudAuth, cloudAuthStep, cloudUserCode, cloudVerifyUrl,
+    cloudMemories, setCloudAuthStep, openCloudAuth, closeCloudAuth, startCloudAuth,
+    selectCloudMemory, disconnectCloud, selectMemoryMode, toggleMemoryOption,
+    setRecallLimit, setBlockedSourceAllowed, clearAllMemories,
   } = useMemorySettings();
-  const [activeTab, setActiveTab] = useState<TabView>('timeline');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [cards, setCards] = useState<KnowledgeCard[]>([]);
-  const [events, setEvents] = useState<MemoryEvent[]>([]);
-  const [eventsTotal, setEventsTotal] = useState(0);
-  const [eventsOffset, setEventsOffset] = useState(0);
-  const [tasks, setTasks] = useState<Array<{ id: string; title: string; description?: string; priority: string; status: string; created_at?: string }>>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [searchResults, setSearchResults] = useState<any[] | null>(null);
-  const [fullEvents, setFullEvents] = useState<MemoryEvent[]>([]);
-  const [signals, setSignals] = useState<PerceptionSignal[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [dailySummary, setDailySummary] = useState<{ recentCards: KnowledgeCard[]; openTasks: number } | null>(null);
-  const [expandedEvent, setExpandedEvent] = useState<string | null>(null);
-  const [selectedEventType, setSelectedEventType] = useState<string>('all');
-  // Source filter: 'chat' = OpenClaw conversations only (default), 'dev' = Claude Code, 'all' = everything
-  const [sourceView, setSourceView] = useState<'chat' | 'dev' | 'all'>('chat');
-  const graphContainerRef = useRef<HTMLDivElement>(null);
-  // Card detail + evolution chain
-  const [expandedCard, setExpandedCard] = useState<string | null>(null);
-  const [cardEvolution, setCardEvolution] = useState<any[] | null>(null);
-  const [evolutionLoading, setEvolutionLoading] = useState(false);
-  const [graphSize, setGraphSize] = useState({ width: 600, height: 400 });
 
-  // Measure graph container when Graph tab is visible and keep it in sync with viewport changes.
+  const [activeTab, setActiveTab] = useState<TabView>('overview');
+  const [selectedEventType, setSelectedEventType] = useState<string>('all');
+  const [expandedEvent, setExpandedEvent] = useState<string | null>(null);
+  const [sourceView, setSourceView] = useState<'chat' | 'dev' | 'all'>('chat');
+  const [graphSize, setGraphSize] = useState({ width: 600, height: 400 });
+  const [wikiSelectedItem, setWikiSelectedItem] = useState<WikiSelectedItem>({ type: 'overview' });
+  const [activeWorkspace, setActiveWorkspace] = useState<{ path: string | null; daemonProjectDir: string | null }>({ path: null, daemonProjectDir: null });
+  const graphContainerRef = useRef<HTMLDivElement>(null);
+  const autoStartAttemptedRef = useRef(false);
+
+  const api = window.electronAPI as any;
+
+  // Stable no-op callbacks (Self-Improvement removed)
+  const noop = useRef(async () => {}).current;
+
+  // Data loading
+  const memoryData = useMemoryData(api, t, sourceView, noop, noop);
+  const {
+    cards, events, fullEvents, eventsTotal, eventsOffset, tasks, loading,
+    error, setEvents, setLoading, setError, setEventsOffset,
+    loadCards, loadEvents, loadContext, loadPerception, loadDailySummary, loadTasks,
+    reloadMemoryData,
+  } = memoryData;
+
+  // Wiki data (topics, skills, timeline days from daemon REST API)
+  const wikiData = useWikiData();
+  const { topics, skills, timelineDays, loadAllWikiData } = wikiData;
+
+  // Daemon connection
+  const daemon = useDaemonConnection(api, t, reloadMemoryData);
+  const { daemonHealth, daemonStarting, daemonConnected, checkHealth, startDaemonAndReload, handleStartDaemon } = daemon;
+
+  // Search
+  const search = useMemorySearch(api, activeTab === 'overview' ? 'timeline' : activeTab, setEvents, memoryData.setEventsTotal);
+  const { searchQuery, searchResults, searching, setSearchQuery, setSearchResults, handleSearch } = search;
+
+  // Graph container measurement
   useEffect(() => {
     if (activeTab !== 'graph') return;
-
     let frameId: number | null = null;
-
     const measure = () => {
       const el = graphContainerRef.current;
       if (!el) return;
       const { width, height } = el.getBoundingClientRect();
       const nextWidth = Math.floor(width);
       const nextHeight = Math.floor(height);
-
       if (nextWidth > 0 && nextHeight > 0) {
         setGraphSize((prev) => (
-          prev.width === nextWidth && prev.height === nextHeight
-            ? prev
-            : { width: nextWidth, height: nextHeight }
+          prev.width === nextWidth && prev.height === nextHeight ? prev : { width: nextWidth, height: nextHeight }
         ));
       } else {
         frameId = requestAnimationFrame(measure);
       }
     };
-
-    // First measure after layout
     frameId = requestAnimationFrame(measure);
-
     const el = graphContainerRef.current;
-    if (!el) {
-      return () => {
-        if (frameId !== null) cancelAnimationFrame(frameId);
-      };
-    }
-
-    const ro = new ResizeObserver(() => {
-      measure();
-    });
+    if (!el) return () => { if (frameId !== null) cancelAnimationFrame(frameId); };
+    const ro = new ResizeObserver(() => { measure(); });
     ro.observe(el);
-
     window.addEventListener('resize', measure);
-
     return () => {
       ro.disconnect();
       window.removeEventListener('resize', measure);
       if (frameId !== null) cancelAnimationFrame(frameId);
     };
   }, [activeTab]);
-
-  // Daemon connection state
-  const [daemonHealth, setDaemonHealth] = useState<DaemonHealth | null>(null);
-  const [daemonStarting, setDaemonStarting] = useState(false);
-  const [daemonConnected, setDaemonConnected] = useState(false);
-  const daemonStartingRef = useRef(false);
-  const autoStartAttemptedRef = useRef(false);
-  const selfImprovement = useSelfImprovement(config.selectedAgentId || 'main');
-  const { loadLearningStatus, loadPromotionProposals } = selfImprovement;
-
-  const api = window.electronAPI as any;
-
-  // Check daemon health on mount
-  const checkHealth = useCallback(async () => {
-    if (!api) return;
-    try {
-      const health = await api.memoryCheckHealth();
-      if (health?.status === 'ok') {
-        setDaemonHealth(health);
-        setDaemonConnected(true);
-        // Notify watchdog that daemon is alive
-        if (window.electronAPI) (window.electronAPI as any).daemonMarkConnected?.();
-        return true;
-      }
-      setDaemonConnected(false);
-      return false;
-    } catch {
-      setDaemonConnected(false);
-      return false;
-    }
-  }, [api]);
-
-  // Load evolution chain for a card
-  const loadEvolution = useCallback(async (cardId: string) => {
-    if (!api) return;
-    setEvolutionLoading(true);
-    try {
-      const result = await api.memoryGetCardEvolution(cardId);
-      setCardEvolution(Array.isArray(result?.chain) ? result.chain : Array.isArray(result) ? result : []);
-    } catch {
-      setCardEvolution([]);
-    } finally {
-      setEvolutionLoading(false);
-    }
-  }, [api]);
-
-  // Toggle card expansion — load evolution on first expand
-  const toggleCardExpand = useCallback((cardId: string) => {
-    if (expandedCard === cardId) {
-      setExpandedCard(null);
-      setCardEvolution(null);
-    } else {
-      setExpandedCard(cardId);
-      loadEvolution(cardId);
-    }
-  }, [expandedCard, loadEvolution]);
-
-  const loadCards = useCallback(async () => {
-    if (!api) return;
-    try {
-      const result = await api.memoryGetCards();
-      const parsed = parseMcpResponse(result);
-      if (parsed.errorKey) {
-        setError(t(parsed.errorKey));
-        setCards([]);
-      } else {
-        setCards(parsed.cards);
-        setError(null);
-      }
-    } catch {
-      setError(t('memory.cannotConnect', 'Cannot connect to Local Daemon.'));
-      setCards([]);
-    }
-  }, [api, t]);
-
-  const loadTasks = useCallback(async () => {
-    if (!api?.memoryGetTasks) return;
-    try {
-      const result = await api.memoryGetTasks();
-      const text = result?.content?.[0]?.text || result?.result?.content?.[0]?.text || '[]';
-      const parsed = typeof text === 'string' ? JSON.parse(text) : text;
-      setTasks(Array.isArray(parsed) ? parsed : []);
-    } catch {
-      // tasks are optional
-    }
-  }, [api]);
-
-  const loadContext = useCallback(async () => {
-    if (!api) return false;
-    try {
-      const result = await api.memoryGetContext();
-      const parsed = parseMemoryContextResponse(result);
-      if (!parsed.hasStructuredContext) {
-        return false;
-      }
-      setCards(parsed.cards);
-      setDailySummary(
-        parsed.cards.length > 0 || parsed.openTasks > 0
-          ? { recentCards: parsed.cards.slice(0, 5), openTasks: parsed.openTasks }
-          : null,
-      );
-      setError(null);
-      return true;
-    } catch {
-      return false;
-    }
-  }, [api]);
-
-  const loadEvents = useCallback(async (offset = 0, append = false, currentSourceView?: 'chat' | 'dev' | 'all') => {
-    if (!api) return;
-    try {
-      // Translate sourceView to API-level filter for efficiency
-      const view = currentSourceView ?? sourceView;
-      const opts: Record<string, unknown> = { limit: 50, offset };
-      if (view === 'chat') opts.source_exclude = 'mcp';
-      else if (view === 'dev') opts.source = 'mcp';
-      const result = await api.memoryGetEvents(opts);
-      if (result?.error) return;
-      const items = result?.items || [];
-      setEvents(prev => append ? [...prev, ...items] : items);
-      if (!append) {
-        setFullEvents(items);
-      } else {
-        setFullEvents(prev => [...prev, ...items]);
-      }
-      setEventsTotal(result?.total || 0);
-      setEventsOffset(offset + items.length);
-    } catch {
-      setLoading(false);
-    }
-  }, [api, sourceView]);
-
-  const loadPerception = useCallback(async () => {
-    if (!api) return;
-    try {
-      const result = await api.memoryGetPerception();
-      const text = result?.result?.content?.[0]?.text;
-      if (text) {
-        const parsed = JSON.parse(text);
-        setSignals(parsed.signals || []);
-      }
-    } catch { /* no perception data */ }
-  }, [api]);
-
-  const loadDailySummary = useCallback(async () => {
-    if (!api) return;
-    try {
-      const result = await api.memoryGetDailySummary();
-      const cardsText = result?.cards?.result?.content?.[0]?.text;
-      const tasksText = result?.tasks?.result?.content?.[0]?.text;
-      let recentCards: KnowledgeCard[] = [];
-      let openTasks = 0;
-      if (cardsText) {
-        try {
-          const parsed = JSON.parse(cardsText);
-          recentCards = (parsed.knowledge_cards || []).slice(0, 5);
-        } catch { /* ignore */ }
-      }
-      if (tasksText) {
-        try {
-          const parsed = JSON.parse(tasksText);
-          openTasks = (parsed.action_items || parsed.items || []).length;
-        } catch { /* ignore */ }
-      }
-      if (recentCards.length > 0 || openTasks > 0) {
-        setDailySummary({ recentCards, openTasks });
-      } else {
-        setDailySummary(null);
-      }
-    } catch { /* daemon not running */ }
-  }, [api]);
-
-  // loadLearningStatus and loadPromotionProposals are provided by useSelfImprovement hook above
-
-  const reloadMemoryData = useCallback(async () => {
-    const contextLoaded = await loadContext();
-    await Promise.all([
-      contextLoaded ? Promise.resolve() : loadCards(),
-      loadEvents(0),
-      loadPerception(),
-      contextLoaded ? Promise.resolve() : loadDailySummary(),
-      loadLearningStatus(),
-      loadPromotionProposals(),
-      loadTasks(),
-    ]);
-  }, [
-    loadContext,
-    loadCards,
-    loadEvents,
-    loadPerception,
-    loadDailySummary,
-    loadLearningStatus,
-    loadPromotionProposals,
-    loadTasks,
-  ]);
-
-  const startDaemonAndReload = useCallback(async (silentFailure = false) => {
-    if (!api || daemonStartingRef.current) return false;
-    daemonStartingRef.current = true;
-    setDaemonStarting(true);
-    if (!silentFailure) {
-      setError(null);
-    }
-    try {
-      const result = await api.startDaemon();
-      if (!result?.success) {
-        if (!silentFailure) {
-          setError(result?.error || t('memory.daemonStartFailed'));
-        }
-        return false;
-      }
-
-      setDaemonConnected(true);
-      if (window.electronAPI) (window.electronAPI as any).daemonMarkConnected?.();
-      await checkHealth();
-      await reloadMemoryData();
-      setError(null);
-      return true;
-    } catch {
-      if (!silentFailure) {
-        setError(t('memory.daemonStartFailed'));
-      }
-      return false;
-    } finally {
-      daemonStartingRef.current = false;
-      setDaemonStarting(false);
-    }
-  }, [api, t, checkHealth, reloadMemoryData]);
-
-
-
 
   // Initial load
   useEffect(() => {
@@ -414,15 +183,18 @@ export default function Memory() {
       try {
         const connected = await checkHealth();
         if (connected) {
-          await reloadMemoryData();
+          await Promise.all([reloadMemoryData(), loadAllWikiData()]);
         } else {
           let autoStarted = false;
           if (!autoStartAttemptedRef.current) {
             autoStartAttemptedRef.current = true;
             autoStarted = await startDaemonAndReload(true);
+            if (autoStarted) {
+              await loadAllWikiData();
+            }
           }
           if (!autoStarted) {
-            await Promise.all([loadLearningStatus(), loadPromotionProposals(), loadTasks()]);
+            await loadTasks();
           }
         }
       } finally {
@@ -430,7 +202,53 @@ export default function Memory() {
       }
     };
     init();
-  }, [checkHealth, reloadMemoryData, startDaemonAndReload, loadLearningStatus, loadPromotionProposals, loadTasks]);
+  }, [checkHealth, reloadMemoryData, loadAllWikiData, startDaemonAndReload, loadTasks, setLoading]);
+
+  // Read initial active workspace on mount (shared with chat header via ~/.awarenessclaw/active-workspace.json)
+  useEffect(() => {
+    const readInitial = async () => {
+      if (!api?.workspaceGetActive) return;
+      try {
+        const result = await api.workspaceGetActive();
+        if (result?.success) {
+          setActiveWorkspace({ path: result.path || null, daemonProjectDir: null });
+        }
+      } catch { /* preload API may not exist in older builds */ }
+    };
+    readInitial();
+  }, [api]);
+
+  // Subscribe to workspace changes (triggered by chat header picking a new directory)
+  // so Memory UI reloads cards/topics/skills/timeline for the new project.
+  useEffect(() => {
+    if (!api?.onWorkspaceChanged) return undefined;
+    const unsubscribe = api.onWorkspaceChanged(async (payload: {
+      path: string | null;
+      daemonProjectDir: string;
+      daemonSwitched: boolean;
+      daemonError: string | null;
+    }) => {
+      setActiveWorkspace({ path: payload.path, daemonProjectDir: payload.daemonProjectDir });
+      if (!payload.daemonSwitched) {
+        setError(t('memory.workspaceSwitchFailed', 'Failed to switch workspace: {error}').replace('{error}', payload.daemonError || 'unknown error'));
+        return;
+      }
+      // Reload all memory + wiki data for the new workspace
+      setLoading(true);
+      setError(null);
+      try {
+        const connected = await checkHealth();
+        if (connected) {
+          await Promise.all([reloadMemoryData(), loadAllWikiData()]);
+        }
+      } finally {
+        setLoading(false);
+      }
+    });
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [api, checkHealth, reloadMemoryData, loadAllWikiData, setLoading, setError, t]);
 
   // Reload events when source view changes
   useEffect(() => {
@@ -441,7 +259,7 @@ export default function Memory() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceView, daemonConnected]);
 
-  // Auto-refresh when window regains focus (3.3)
+  // Auto-refresh on focus
   useEffect(() => {
     const onFocus = () => {
       if (daemonConnected) {
@@ -449,6 +267,7 @@ export default function Memory() {
         loadEvents(0, false, sourceView);
         loadCards();
         loadPerception();
+        loadAllWikiData();
       }
     };
     window.addEventListener('focus', onFocus);
@@ -467,169 +286,37 @@ export default function Memory() {
         loadEvents(0),
         loadPerception(),
         contextLoaded ? Promise.resolve() : loadDailySummary(),
-        loadLearningStatus(),
-        loadPromotionProposals(),
+        loadAllWikiData(),
       ]);
-    } else {
-      await Promise.all([loadLearningStatus(), loadPromotionProposals()]);
     }
     setLoading(false);
   };
 
-  const handleStartDaemon = async () => {
-    await startDaemonAndReload(false);
-  };
+  // Derived state
+  const displayedEvents = events.filter((event) => selectedEventType === 'all' || event.type === selectedEventType);
 
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) {
-      setSearchResults(null);
-      return;
-    }
-    if (activeTab !== 'timeline' && activeTab !== 'knowledge') {
-      return;
-    }
-    setSearching(true);
-    if (api) {
-      try {
-        if (activeTab === 'timeline') {
-          // Search timeline events via REST API
-          const result = await api.memoryGetEvents({ limit: 50, search: searchQuery });
-          if (result?.items) {
-            setEvents(result.items);
-            setEventsTotal(result.total || result.items.length);
-          }
-          setSearchResults([]); // marker that search is active
-        } else {
-          // Search knowledge cards via MCP semantic recall (structured JSON response)
-          const result = await api.memorySearch(searchQuery);
-          const content = result?.result?.content;
-          const textBlock = content?.[0]?.text || '';
-          const metaBlock = content?.[1]?.text || '';
-
-          // Parse structured IDs and metadata from the JSON block
-          let parsedMeta: any = {};
-          try { parsedMeta = JSON.parse(metaBlock); } catch { /* ignore */ }
-          const ids: string[] = parsedMeta._ids || [];
-
-          // Parse readable text to extract titles and summaries (line-based)
-          const searchCards: KnowledgeCard[] = [];
-          const entries = textBlock.split(/\n\n/).filter((block: string) => /^\d+\.\s/.test(block.trim()));
-
-          for (let i = 0; i < entries.length; i++) {
-            const block = entries[i].trim();
-            // Extract: "1. [type] title (score, time, tokens)\n   summary"
-            const headerMatch = block.match(/^\d+\.\s+\[([^\]]*)\]\s+(.*?)(?:\s+\(([^)]+)\))?\s*$/m);
-            const summaryLines = block.split('\n').slice(1).map((l: string) => l.trim()).filter(Boolean);
-            const title = headerMatch?.[2] || block.split('\n')[0].replace(/^\d+\.\s*/, '');
-            const category = headerMatch?.[1] || 'key_point';
-            const meta = headerMatch?.[3] || '';
-
-            // Parse meta: "85%, 2d ago, ~120tok"
-            const scoreMatch = meta.match(/(\d+)%/);
-            const daysMatch = meta.match(/(\d+)d\s*ago/);
-            const todayMatch = meta.match(/\btoday\b/);
-            const tokensMatch = meta.match(/~(\d+)tok/);
-
-            searchCards.push({
-              id: ids[i] || `search-${i}`,
-              category,
-              title,
-              summary: summaryLines.join(' ') || title,
-              status: 'active',
-              confidence: scoreMatch ? parseInt(scoreMatch[1]) / 100 : undefined,
-              days_ago: todayMatch ? 0 : daysMatch ? parseInt(daysMatch[1]) : undefined,
-              tokens_est: tokensMatch ? parseInt(tokensMatch[1]) : undefined,
-              tags: '',
-            });
-          }
-
-          setSearchResults(searchCards.length > 0 ? searchCards : []);
-        }
-      } catch {
-        setSearchResults([]);
-      }
-    }
-    setSearching(false);
-  };
-
-  // Compute filtered event list based on selectedEventType only
-  // (source filtering is now done at the API level via source_exclude param)
-  const displayedEvents = events.filter((event) => {
-    if (selectedEventType === 'all') return true;
-    return event.type === selectedEventType;
-  });
-
-  const filteredCards = cards.filter((card) => {
-    if (selectedCategory !== 'all' && card.category !== selectedCategory) return false;
-    if (searchQuery && !searchResults && !card.title?.includes(searchQuery) && !card.summary?.includes(searchQuery)) return false;
-    return true;
-  });
-
-  const displayCards = searchResults && activeTab === 'knowledge' ? searchResults : filteredCards;
-
-  // Stats reflect the current source view, not the global total
   const filteredEventCount = events.filter(e => {
     if (sourceView === 'chat') return e.source !== 'mcp';
     if (sourceView === 'dev') return e.source === 'mcp';
     return true;
   }).length;
-  const showSearchControls = activeTab === 'timeline' || activeTab === 'knowledge';
-  const memoryTabItems: Array<{
-    id: TabView;
-    label: string;
-    hint: string;
-    icon: typeof Clock;
-    count?: number;
-  }> = [
-    {
-      id: 'timeline',
-      label: t('memory.timeline'),
-      hint: t('memory.timelineHint', 'Sessions and raw events'),
-      icon: Clock,
-      count: daemonHealth?.stats?.totalMemories,
-    },
-    {
-      id: 'knowledge',
-      label: t('memory.knowledgeCards'),
-      hint: t('memory.knowledgeHint', 'Durable cards and signals'),
-      icon: FileText,
-      count: cards.length,
-    },
-    {
-      id: 'self-improvement',
-      label: t('memory.selfImprovement.tab', t('memory.selfImprovement.badge', 'Self Improvement')),
-      hint: t('memory.selfImprovement.tabHint', 'Learnings, proposals, approvals'),
-      icon: Sparkles,
-      count: selfImprovement.learningStatus?.promotionProposalCount,
-    },
-    {
-      id: 'graph',
-      label: t('memory.graph', 'Graph'),
-      hint: t('memory.graphHint', 'Relationships across memories'),
-      icon: Share2,
-    },
-    {
-      id: 'settings',
-      label: t('memory.settingsTab', 'Settings'),
-      hint: t('memory.settingsTabHint', 'Capture, sync, privacy'),
-      icon: SlidersHorizontal,
-    },
+
+  const memoryTabItems: Array<{ id: TabView; label: string; hint: string; icon: typeof Clock; count?: number }> = [
+    { id: 'overview', label: t('memory.overview', 'Overview'), hint: t('memory.overviewHint', 'Timeline and recent activity'), icon: Clock, count: daemonHealth?.stats?.totalMemories },
+    { id: 'wiki', label: t('memory.wiki', 'Wiki'), hint: t('memory.wikiHint', 'Knowledge base and skills'), icon: BookOpen, count: daemonHealth?.stats?.totalKnowledge ?? cards.length },
+    { id: 'graph', label: t('memory.graph', 'Graph'), hint: t('memory.graphHint', 'Relationships across memories'), icon: Share2 },
+    { id: 'sync', label: t('memory.sync', 'Sync'), hint: t('memory.syncHint', 'Cloud sync and conflicts'), icon: ArrowDownUp },
+    { id: 'settings', label: t('memory.settingsTab', 'Settings'), hint: t('memory.settingsTabHint', 'Capture, sync, privacy'), icon: SlidersHorizontal },
   ];
+
   const switchTab = (tab: TabView) => {
     setActiveTab(tab);
     setSearchQuery('');
     setSearchResults(null);
-    if (tab !== 'timeline') {
-      setEvents(fullEvents);
-      setSelectedEventType('all');
-    }
-    if (tab !== 'knowledge') {
-      setSelectedCategory('all');
-    }
+    if (tab !== 'overview') { setEvents(fullEvents); setSelectedEventType('all'); }
   };
-  const activeModeText = config.memoryMode === 'cloud'
-    ? t('settings.memory.cloud', 'Cloud')
-    : t('settings.memory.local', 'Local');
+
+  const activeModeText = config.memoryMode === 'cloud' ? t('settings.memory.cloud', 'Cloud') : t('settings.memory.local', 'Local');
   const cloudStateText = cloudMode === 'hybrid' || cloudMode === 'cloud'
     ? t('memory.settings.cloudConnected', 'Connected')
     : t('memory.settings.cloudDisconnected', 'Local only');
@@ -656,14 +343,21 @@ export default function Memory() {
                 : t('memory.subtitle')}
             </p>
           </div>
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 rounded-lg transition-colors"
-          >
-            {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-            {t('common.refresh')}
-          </button>
+          <div className="flex items-center gap-2">
+            <WorkspaceIndicator
+              activePath={activeWorkspace.path}
+              daemonProjectDir={activeWorkspace.daemonProjectDir}
+              t={t}
+            />
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 rounded-lg transition-colors"
+            >
+              {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              {t('common.refresh')}
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -674,7 +368,7 @@ export default function Memory() {
               <button
                 key={tab.id}
                 onClick={() => switchTab(tab.id)}
-                className={`group inline-flex min-w-[168px] items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-left transition-all ${
+                className={`group inline-flex min-w-[140px] items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-left transition-all ${
                   active
                     ? 'border-brand-500/60 bg-brand-600/12 shadow-[0_0_0_1px_rgba(59,130,246,0.12)]'
                     : 'border-slate-700/60 bg-slate-900/30 hover:border-slate-600/80 hover:bg-slate-800/45'
@@ -699,7 +393,8 @@ export default function Memory() {
           })}
         </div>
 
-        {showSearchControls && (
+        {/* Search bar for Overview tab */}
+        {activeTab === 'overview' && (
           <div className="relative mt-4">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
             <input
@@ -712,57 +407,13 @@ export default function Memory() {
             {searching && <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-brand-400" />}
           </div>
         )}
-
-        {activeTab === 'knowledge' && (
-          <div className="mt-3 flex gap-2 flex-wrap">
-            <button
-              onClick={() => { setSelectedCategory('all'); setSearchResults(null); }}
-              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
-                selectedCategory === 'all' ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-              }`}
-            >
-              {t('memory.all')} ({cards.length})
-            </button>
-            {[...new Set(cards.map(c => c.category).filter(Boolean))].map((cat) => {
-              const count = cards.filter(c => c.category === cat).length;
-              const display = getCategoryDisplay(cat);
-              const CategoryIcon = display.icon;
-              return (
-                <button
-                  key={cat}
-                  onClick={() => { setSelectedCategory(cat); setSearchResults(null); }}
-                  className={`px-3 py-1 text-xs rounded-lg transition-colors ${
-                    selectedCategory === cat ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                  }`}
-                >
-                  <span className="inline-flex items-center gap-1.5">
-                    <CategoryIcon size={12} />
-                    {t(display.label, display.label)} ({count})
-                  </span>
-                </button>
-              );
-            })}
-            {/* Tasks quick filter */}
-            <button
-              onClick={() => { setSelectedCategory('_tasks'); setSearchResults(null); }}
-              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
-                selectedCategory === '_tasks' ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-              }`}
-            >
-              <span className="inline-flex items-center gap-1.5">
-                <Play size={12} />
-                Tasks ({tasks.length})
-              </span>
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-3">
+      <div className={`flex-1 overflow-hidden ${activeTab === 'wiki' ? 'flex' : 'overflow-y-auto'}`}>
         {/* Daemon offline state */}
         {!loading && !daemonConnected && (
-          <div className="flex flex-col items-center justify-center py-16 space-y-4">
+          <div className="flex flex-col items-center justify-center py-16 space-y-4 w-full">
             <div className="w-16 h-16 rounded-2xl bg-slate-800 flex items-center justify-center">
               <HardDrive size={28} className="text-slate-500" />
             </div>
@@ -784,124 +435,77 @@ export default function Memory() {
           </div>
         )}
 
-        {/* Loading */}
         {loading && (
-          <div className="flex items-center justify-center py-12">
+          <div className="flex items-center justify-center py-12 w-full">
             <Loader2 size={24} className="animate-spin text-brand-500" />
           </div>
         )}
 
-        {/* Connected content */}
         {!loading && daemonConnected && (
           <>
-            {/* Search degradation notice — shown when vector search is unavailable */}
-            {daemonHealth?.search_mode && daemonHealth.search_mode !== 'hybrid' && (
-              <div className="flex items-start gap-2.5 p-3 rounded-xl border border-amber-500/30 bg-amber-500/5 mb-3">
+            {/* Degraded search warning */}
+            {daemonHealth?.search_mode && daemonHealth.search_mode !== 'hybrid' && activeTab !== 'wiki' && (
+              <div className="flex items-start gap-2.5 p-3 rounded-xl border border-amber-500/30 bg-amber-500/5 mx-6 mt-3">
                 <AlertCircle size={14} className="text-amber-400 mt-0.5 flex-shrink-0" />
                 <div>
                   <p className="text-xs font-medium text-amber-400">{t('memory.searchDegraded', 'Semantic search unavailable')}</p>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    {t('memory.searchDegraded.hint', 'Text search is active, but vector similarity is disabled. This usually means the embedding model failed to load. Restart the daemon to retry.')}
+                    {t('memory.searchDegraded.hint', 'Text search is active, but vector similarity is disabled.')}
                   </p>
                 </div>
               </div>
             )}
 
-            {/* Daily Summary */}
-            {dailySummary && activeTab === 'knowledge' && (
-              <div className="p-4 bg-brand-500/5 border border-brand-500/20 rounded-xl">
-                <div className="flex items-center gap-2 mb-2">
-                  <Calendar size={14} className="text-brand-400" />
-                  <span className="text-xs font-medium text-brand-400">{t('memory.dailySummary') || 'Daily Summary'}</span>
-                  {dailySummary.openTasks > 0 && (
-                    <span className="ml-auto text-[10px] text-amber-400">{dailySummary.openTasks} {t('memory.openTasks') || 'open tasks'}</span>
-                  )}
-                </div>
-                <div className="space-y-1">
-                  {dailySummary.recentCards.map((card, i) => {
-                    const cfg = getCategoryDisplay(card.category);
-                    const CardIcon = cfg.icon;
-                    return (
-                      <div key={i} className="flex items-start gap-2 text-[11px]">
-                        <CardIcon size={13} className="mt-0.5 text-slate-300" />
-                        <span className="text-slate-300 line-clamp-1">{card.title || card.summary}</span>
-                      </div>
-                    );
-                  })}
-                </div>
+            {/* ── Overview Tab ─────────────────────────────────── */}
+            {activeTab === 'overview' && (
+              <div className="p-6 space-y-3">
+                <TimelineTab
+                  events={events}
+                  displayedEvents={displayedEvents}
+                  eventsTotal={eventsTotal}
+                  eventsOffset={eventsOffset}
+                  sourceView={sourceView}
+                  selectedEventType={selectedEventType}
+                  expandedEvent={expandedEvent}
+                  searchQuery={searchQuery}
+                  searchResults={searchResults}
+                  setSourceView={setSourceView}
+                  setSelectedEventType={setSelectedEventType}
+                  setExpandedEvent={setExpandedEvent}
+                  loadEvents={loadEvents}
+                />
               </div>
             )}
 
-            {/* Perception Signals */}
-            {signals.length > 0 && activeTab === 'knowledge' && (
-              <div className="space-y-2 mb-4">
-                <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                  <Zap size={12} /> {t('memory.perception')}
-                </h3>
-                {signals.map((signal, i) => {
-                  const config: Record<string, { icon: typeof Lightbulb; color: string }> = {
-                    contradiction: { icon: TriangleAlert, color: 'border-red-500/30 bg-red-500/5' },
-                    pattern: { icon: RefreshCw, color: 'border-amber-500/30 bg-amber-500/5' },
-                    resonance: { icon: Sparkles, color: 'border-purple-500/30 bg-purple-500/5' },
-                    staleness: { icon: AlarmClock, color: 'border-slate-500/30 bg-slate-500/5' },
-                  };
-                  const c = config[signal.type] || { icon: Lightbulb, color: 'border-brand-500/30 bg-brand-500/5' };
-                  const SignalIcon = c.icon;
-                  return (
-                    <div key={i} className={`p-3 rounded-xl border ${c.color} flex items-start gap-2.5`}>
-                      <SignalIcon size={16} className="mt-0.5 text-slate-200/85" />
-                      <p className="text-sm text-slate-200">{signal.message}</p>
-                    </div>
-                  );
-                })}
-              </div>
+            {/* ── Wiki Tab ────────────────────────────────────── */}
+            {activeTab === 'wiki' && (
+              <>
+                <WikiSidebar
+                  cards={cards}
+                  topics={topics}
+                  skills={skills}
+                  timelineDays={timelineDays}
+                  tasks={tasks}
+                  selectedItem={wikiSelectedItem}
+                  onSelect={setWikiSelectedItem}
+                />
+                <main className="flex-1 overflow-y-auto">
+                  <WikiContentArea
+                    selectedItem={wikiSelectedItem}
+                    onSelect={setWikiSelectedItem}
+                    cards={cards}
+                    topics={topics}
+                    skills={skills}
+                    timelineDays={timelineDays}
+                    tasks={tasks}
+                  />
+                </main>
+              </>
             )}
 
-            {/* === TIMELINE TAB === */}
-            {activeTab === 'timeline' && (
-              <TimelineTab
-                events={events}
-                displayedEvents={displayedEvents}
-                eventsTotal={eventsTotal}
-                eventsOffset={eventsOffset}
-                sourceView={sourceView}
-                selectedEventType={selectedEventType}
-                expandedEvent={expandedEvent}
-                searchQuery={searchQuery}
-                searchResults={searchResults}
-                setSourceView={setSourceView}
-                setSelectedEventType={setSelectedEventType}
-                setExpandedEvent={setExpandedEvent}
-                loadEvents={loadEvents}
-              />
-            )}
-
-            {/* === KNOWLEDGE CARDS TAB === */}
-            {activeTab === 'knowledge' && (
-              <KnowledgeCardsTab
-                displayCards={displayCards}
-                loading={loading}
-                searchQuery={searchQuery}
-                searchResults={searchResults}
-                selectedCategory={selectedCategory}
-                setSelectedCategory={setSelectedCategory}
-                expandedCard={expandedCard}
-                toggleCardExpand={toggleCardExpand}
-                cardEvolution={cardEvolution}
-                evolutionLoading={evolutionLoading}
-                signals={signals}
-                tasks={tasks}
-              />
-            )}
-
-            {/* === SELF IMPROVEMENT TAB === */}
-            {activeTab === 'self-improvement' && (
-              <SelfImprovementPanel {...selfImprovement} />
-            )}
-
-            {/* === KNOWLEDGE GRAPH TAB === */}
+            {/* ── Graph Tab ───────────────────────────────────── */}
             {activeTab === 'graph' && (
-              <div ref={graphContainerRef} className="flex-1 -mx-6 -mb-3 memory-graph-container">
+              <div ref={graphContainerRef} className="flex-1 memory-graph-container h-full">
                 <Suspense fallback={
                   <div className="flex items-center justify-center h-full">
                     <Loader2 size={24} className="animate-spin text-brand-500" />
@@ -917,8 +521,16 @@ export default function Memory() {
               </div>
             )}
 
+            {/* ── Sync Tab ────────────────────────────────────── */}
+            {activeTab === 'sync' && (
+              <div className="p-6 space-y-4">
+                <SyncConflictPanel memoryId={(daemonHealth as { memory_id?: string } | null)?.memory_id || ''} />
+              </div>
+            )}
+
+            {/* ── Settings Tab ────────────────────────────────── */}
             {activeTab === 'settings' && (
-              <div className="space-y-4">
+              <div className="p-6 space-y-4">
                 <div className="rounded-[24px] border border-slate-700/60 bg-slate-900/55 p-5">
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
@@ -943,7 +555,6 @@ export default function Memory() {
                       </div>
                     </div>
                   </div>
-
                   <MemoryLayerInfo className="mt-4" />
                 </div>
 

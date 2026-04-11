@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, act, waitFor, fireEvent } from '@testing-library/react';
 import Memory from '../pages/Memory';
 
@@ -16,20 +16,25 @@ function connectedDaemonApi(overrides: Record<string, any> = {}) {
   };
 }
 
-describe('Memory Page — Daily Summary', () => {
+describe('Memory Page — Wiki Overview shows cards', () => {
   let origAPI: any;
 
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem('awareness-claw-config', JSON.stringify({ language: 'en' }));
     origAPI = (window as any).electronAPI;
+    // Mock global fetch for useWikiData daemon REST API calls
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ topics: [], skills: [], items: [], days: [] }),
+    }) as any;
   });
 
   afterEach(() => {
     (window as any).electronAPI = origAPI;
   });
 
-  it('shows Daily Summary when memoryGetDailySummary returns data', async () => {
+  it('shows cards in Wiki overview when context returns data', async () => {
     (window as any).electronAPI = connectedDaemonApi({
       memoryGetContext: () => Promise.resolve({
         result: { content: [{ text: JSON.stringify({
@@ -41,30 +46,23 @@ describe('Memory Page — Daily Summary', () => {
       }),
       memoryGetCards: () => Promise.resolve({
         result: { content: [{ text: JSON.stringify({ knowledge_cards: [
-          { id: 'k1', category: 'decision', title: 'Use PostgreSQL', summary: 'Chose PG for pgvector' },
+          { id: 'k1', category: 'decision', title: 'Test decision', summary: 'Test' },
         ] }) }] },
-      }),
-      memoryGetDailySummary: () => Promise.resolve({
-        cards: { result: { content: [{ text: JSON.stringify({ knowledge_cards: [
-          { category: 'decision', title: 'Test decision', summary: 'Test' },
-        ] }) }] } },
-        tasks: { result: { content: [{ text: JSON.stringify({ action_items: [{ title: 'Task 1' }] }) }] } },
       }),
     });
 
     await act(async () => { render(<Memory />); });
-    // Switch to knowledge tab to see Daily Summary
-    await waitFor(() => expect(screen.getAllByText(/Knowledge Cards/).length).toBeGreaterThan(0));
-    await act(async () => { fireEvent.click(screen.getAllByText(/Knowledge Cards/)[0]); });
+    // Switch to Wiki tab
+    await waitFor(() => expect(screen.getByText('Wiki')).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText('Wiki')); });
 
+    // Overview should show the card in the "Recently Added" section
     await waitFor(() => {
-      expect(screen.getByText('Daily Summary')).toBeInTheDocument();
+      expect(screen.getAllByText('Test decision').length).toBeGreaterThan(0);
     });
-    expect(screen.getAllByText('Test decision').length).toBeGreaterThan(0);
-    expect(screen.getByText(/open tasks/)).toBeInTheDocument();
   });
 
-  it('uses memoryGetContext as the primary source for cards and summary', async () => {
+  it('uses memoryGetContext as the primary source for cards', async () => {
     (window as any).electronAPI = connectedDaemonApi({
       memoryGetContext: () => Promise.resolve({
         result: { content: [{ text: JSON.stringify({
@@ -75,54 +73,41 @@ describe('Memory Page — Daily Summary', () => {
         }) }] },
       }),
       memoryGetCards: () => Promise.resolve({ error: 'should not be needed' }),
-      memoryGetDailySummary: () => Promise.resolve({
-        cards: { result: { content: [{ text: JSON.stringify({ knowledge_cards: [] }) }] } },
-        tasks: { result: { content: [{ text: JSON.stringify({ action_items: [] }) }] } },
-      }),
     });
 
     await act(async () => { render(<Memory />); });
-    await waitFor(() => expect(screen.getAllByText(/Knowledge Cards/).length).toBeGreaterThan(0));
-    await act(async () => { fireEvent.click(screen.getAllByText(/Knowledge Cards/)[0]); });
+    await waitFor(() => expect(screen.getByText('Wiki')).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText('Wiki')); });
 
     await waitFor(() => {
-      expect(screen.getByText('Daily Summary')).toBeInTheDocument();
+      expect(screen.getAllByText('Context-first card').length).toBeGreaterThan(0);
     });
-    expect(screen.getAllByText('Context-first card').length).toBeGreaterThan(0);
   });
 
-  it('does not show Daily Summary when memoryGetDailySummary returns empty data', async () => {
+  it('shows empty state in Wiki when no cards exist', async () => {
     (window as any).electronAPI = connectedDaemonApi({
       memoryGetContext: () => Promise.resolve({
         result: { content: [{ text: JSON.stringify({ knowledge_cards: [], open_tasks: [] }) }] },
       }),
       memoryGetCards: () => Promise.resolve({
-        result: { content: [{ text: JSON.stringify({ knowledge_cards: [
-          { id: 'k1', category: 'insight', title: 'Some insight', summary: 'Detail' },
-        ] }) }] },
-      }),
-      memoryGetDailySummary: () => Promise.resolve({
-        cards: { result: { content: [{ text: JSON.stringify({ knowledge_cards: [] }) }] } },
-        tasks: { result: { content: [{ text: JSON.stringify({ action_items: [] }) }] } },
+        result: { content: [{ text: JSON.stringify({ knowledge_cards: [] }) }] },
       }),
     });
 
     await act(async () => { render(<Memory />); });
-    await waitFor(() => expect(screen.getAllByText(/Knowledge Cards/).length).toBeGreaterThan(0));
-    await act(async () => { fireEvent.click(screen.getAllByText(/Knowledge Cards/)[0]); });
+    await waitFor(() => expect(screen.getByText('Wiki')).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText('Wiki')); });
 
     await waitFor(() => {
-      expect(screen.getByText('Some insight')).toBeInTheDocument();
+      expect(screen.getByText(/No memory data yet/i)).toBeInTheDocument();
     });
-    expect(screen.queryByText('Daily Summary')).not.toBeInTheDocument();
   });
 
-  it('does not show Daily Summary when daemon is offline', async () => {
-    // Default mock: daemon not connected → shows Start Daemon, no Daily Summary
+  it('does not show Wiki content when daemon is offline', async () => {
+    // Default mock: daemon not connected → shows Start Daemon
     await act(async () => { render(<Memory />); });
     await waitFor(() => {
       expect(screen.getByText('Start Daemon')).toBeInTheDocument();
     });
-    expect(screen.queryByText('Daily Summary')).not.toBeInTheDocument();
   });
 });

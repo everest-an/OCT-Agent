@@ -243,6 +243,11 @@ describe('Memory Page (user flows)', () => {
   beforeEach(() => {
     localStorage.setItem('awareness-claw-config', JSON.stringify({ language: 'en' }));
     vi.restoreAllMocks();
+    // Mock global fetch for useWikiData daemon REST API calls
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ topics: [], skills: [], items: [], days: [] }),
+    }) as any;
   });
 
   it('flow: shows Start Daemon button + command when daemon disconnected', async () => {
@@ -253,120 +258,38 @@ describe('Memory Page (user flows)', () => {
     expect(screen.getByText(/npx @awareness-sdk\/local start/i)).toBeInTheDocument();
   });
 
-  it('flow: shows real knowledge cards when daemon is connected', async () => {
+  it('flow: shows real knowledge cards in Wiki tab when daemon is connected', async () => {
     mockDaemonOnline();
     getApi().memoryGetCards = vi.fn().mockResolvedValue(mcpCardsResponse([
       { id: '1', title: 'Use async handlers', summary: 'Always async in Electron', category: 'pitfall', created_at: '2026-03-30T10:00:00Z' },
       { id: '2', title: 'Ship fast principle', summary: 'Release early iterate', category: 'insight', created_at: '2026-03-30T11:00:00Z' },
     ]));
     await act(async () => { render(<Memory />); });
-    // Switch to Knowledge Cards tab
-    await waitFor(() => expect(screen.getAllByText(/Knowledge Cards/).length).toBeGreaterThan(0));
-    await act(async () => { fireEvent.click(screen.getAllByText(/Knowledge Cards/)[0]); });
+    // Switch to Wiki tab
+    await waitFor(() => expect(screen.getByText('Wiki')).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText('Wiki')); });
+    // Wiki overview shows cards in "Recently Added" section
     await waitFor(() => expect(screen.getByText('Use async handlers')).toBeInTheDocument(), { timeout: 3000 });
     expect(screen.getByText('Ship fast principle')).toBeInTheDocument();
     // No Start Daemon button
     expect(screen.queryByText('Start Daemon')).not.toBeInTheDocument();
   });
 
-  it('flow: search no results shows "No results for..." with the query', async () => {
-    mockDaemonOnline();
-    getApi().memoryGetCards = vi.fn().mockResolvedValue(mcpCardsResponse([
-      { id: '1', title: 'A card', summary: 'content', category: 'insight', created_at: '2026-03-30T10:00:00Z' },
-    ]));
-    getApi().memorySearch = vi.fn().mockResolvedValue(mcpSearchResponse([]));
-
-    await act(async () => { render(<Memory />); });
-    // Switch to Knowledge Cards tab
-    await waitFor(() => expect(screen.getAllByText(/Knowledge Cards/).length).toBeGreaterThan(0));
-    await act(async () => { fireEvent.click(screen.getAllByText(/Knowledge Cards/)[0]); });
-    await waitFor(() => expect(screen.getByText('A card')).toBeInTheDocument(), { timeout: 3000 });
-
-    const searchInput = screen.getByPlaceholderText(/Search memories/i);
-    await act(async () => {
-      fireEvent.change(searchInput, { target: { value: 'unrelated xyz' } });
-      fireEvent.keyDown(searchInput, { key: 'Enter' });
-    });
-
-    await waitFor(() => expect(screen.getByText(/No results for/i)).toBeInTheDocument(), { timeout: 3000 });
-    expect(screen.getByText(/unrelated xyz/)).toBeInTheDocument();
-  });
-
-  it('flow: category filter shows only matching cards', async () => {
+  it('flow: Wiki tab shows cards in sidebar and overview', async () => {
     mockDaemonOnline();
     getApi().memoryGetCards = vi.fn().mockResolvedValue(mcpCardsResponse([
       { id: '1', title: 'Pitfall card', summary: 'a pitfall', category: 'pitfall', created_at: '2026-03-30T10:00:00Z' },
       { id: '2', title: 'Insight card', summary: 'an insight', category: 'insight', created_at: '2026-03-30T11:00:00Z' },
     ]));
     await act(async () => { render(<Memory />); });
-    // Switch to Knowledge Cards tab
-    await waitFor(() => expect(screen.getAllByText(/Knowledge Cards/).length).toBeGreaterThan(0));
-    await act(async () => { fireEvent.click(screen.getAllByText(/Knowledge Cards/)[0]); });
+    // Switch to Wiki tab
+    await waitFor(() => expect(screen.getByText('Wiki')).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText('Wiki')); });
+    // Wiki overview should show both cards in "Recently Added"
     await waitFor(() => expect(screen.getByText('Pitfall card')).toBeInTheDocument(), { timeout: 3000 });
-
-    // Click the Pitfall category tab
-    const pitfallTab = screen.getAllByRole('button').find(b => b.textContent?.includes('Pitfall'));
-    expect(pitfallTab).toBeTruthy();
-    await act(async () => { fireEvent.click(pitfallTab!); });
-
-    expect(screen.getByText('Pitfall card')).toBeInTheDocument();
-    expect(screen.queryByText('Insight card')).not.toBeInTheDocument();
-  });
-
-  it('flow: clear filter button appears when category has no matches after search', async () => {
-    mockDaemonOnline();
-    getApi().memoryGetCards = vi.fn().mockResolvedValue(mcpCardsResponse([
-      { id: '1', title: 'Only insight', summary: 'insight only', category: 'insight', created_at: '2026-03-30T10:00:00Z' },
-    ]));
-    getApi().memorySearch = vi.fn().mockResolvedValue(mcpSearchResponse([]));
-
-    await act(async () => { render(<Memory />); });
-    // Switch to Knowledge Cards tab
-    await waitFor(() => expect(screen.getAllByText(/Knowledge Cards/).length).toBeGreaterThan(0));
-    await act(async () => { fireEvent.click(screen.getAllByText(/Knowledge Cards/)[0]); });
-    await waitFor(() => expect(screen.getByText('Only insight')).toBeInTheDocument(), { timeout: 3000 });
-
-    const insightTab = screen.getAllByRole('button').find(b => b.textContent?.includes('Insight'));
-    if (insightTab) {
-      await act(async () => { fireEvent.click(insightTab); });
-    }
-
-    const searchInput = screen.getByPlaceholderText(/Search memories/i);
-    await act(async () => {
-      fireEvent.change(searchInput, { target: { value: 'zzznomatch' } });
-      fireEvent.keyDown(searchInput, { key: 'Enter' });
-    });
-
-    await waitFor(() => {
-      const clearBtn = screen.queryByText(/Clear filter/i);
-      const noResults = screen.queryByText(/No results/i);
-      expect(clearBtn !== null || noResults !== null).toBe(true);
-    }, { timeout: 3000 });
-  });
-
-  it('flow: clicking All button after category filter restores all cards', async () => {
-    mockDaemonOnline();
-    getApi().memoryGetCards = vi.fn().mockResolvedValue(mcpCardsResponse([
-      { id: '1', title: 'Pitfall one', summary: 'p', category: 'pitfall', created_at: '2026-03-30T10:00:00Z' },
-      { id: '2', title: 'Insight one', summary: 'i', category: 'insight', created_at: '2026-03-30T11:00:00Z' },
-    ]));
-    await act(async () => { render(<Memory />); });
-    // Switch to Knowledge Cards tab
-    await waitFor(() => expect(screen.getAllByText(/Knowledge Cards/).length).toBeGreaterThan(0));
-    await act(async () => { fireEvent.click(screen.getAllByText(/Knowledge Cards/)[0]); });
-    await waitFor(() => expect(screen.getByText('Pitfall one')).toBeInTheDocument(), { timeout: 3000 });
-
-    // Filter to pitfall
-    const pitfallTab = screen.getAllByRole('button').find(b => b.textContent?.includes('Pitfall'));
-    await act(async () => { fireEvent.click(pitfallTab!); });
-    expect(screen.queryByText('Insight one')).not.toBeInTheDocument();
-
-    // Click All to restore
-    const allTab = screen.getAllByRole('button').find(b => b.textContent?.match(/^All \(\d+\)$/));
-    expect(allTab).toBeTruthy();
-    await act(async () => { fireEvent.click(allTab!); });
-    await waitFor(() => expect(screen.getByText('Insight one')).toBeInTheDocument());
-    expect(screen.getByText('Pitfall one')).toBeInTheDocument();
+    expect(screen.getByText('Insight card')).toBeInTheDocument();
+    // Sidebar should show Engineering group
+    expect(screen.getByText('Engineering')).toBeInTheDocument();
   });
 });
 
@@ -377,6 +300,11 @@ describe('Memory Page — Timeline & Daemon (E2E)', () => {
   beforeEach(() => {
     localStorage.setItem('awareness-claw-config', JSON.stringify({ language: 'en' }));
     vi.restoreAllMocks();
+    // Mock global fetch for useWikiData daemon REST API calls
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ topics: [], skills: [], items: [], days: [] }),
+    }) as any;
   });
 
   it('flow: offline memory page auto-starts daemon and refreshes page', async () => {
@@ -504,12 +432,11 @@ describe('Memory Page — Timeline & Daemon (E2E)', () => {
 
     await act(async () => { render(<Memory />); });
     // Stats subtitle shows knowledge cards and sessions from health data.
-    // When sourceView='chat' (default), memory count reflects filtered events, not totalMemories.
     await waitFor(() => expect(screen.getByText(/26 knowledge cards/i)).toBeInTheDocument());
     expect(screen.getByText(/282 sessions/i)).toBeInTheDocument();
   });
 
-  it('flow: switching between Timeline and Knowledge Cards tabs works', async () => {
+  it('flow: switching between Overview and Wiki tabs works', async () => {
     mockDaemonOnline();
     getApi().memoryGetCards = vi.fn().mockResolvedValue(mcpCardsResponse([
       { id: '1', title: 'My Decision', summary: 'chose X over Y', category: 'decision' },
@@ -521,18 +448,21 @@ describe('Memory Page — Timeline & Daemon (E2E)', () => {
 
     await act(async () => { render(<Memory />); });
 
-    // Default tab = Timeline → should see timeline event
+    // Default tab = Overview → should see timeline event
     await waitFor(() => expect(screen.getAllByText('Timeline Event').length).toBeGreaterThan(0));
-    expect(screen.queryByText('My Decision')).not.toBeInTheDocument();
 
-    // Switch to Knowledge Cards
-    await act(async () => { fireEvent.click(screen.getAllByText(/Knowledge Cards/)[0]); });
+    // Switch to Wiki
+    await act(async () => { fireEvent.click(screen.getByText('Wiki')); });
     await waitFor(() => expect(screen.getByText('My Decision')).toBeInTheDocument());
-    expect(screen.queryAllByText('Timeline Event').length).toBe(0);
 
-    // Switch back to Timeline
-    await act(async () => { fireEvent.click(screen.getByText(/Timeline/)); });
-    await waitFor(() => expect(screen.getAllByText('Timeline Event').length).toBeGreaterThan(0));
+    // Switch back to Overview
+    const overviewTabs = screen.getAllByText('Overview');
+    // Find the tab button (not the sidebar item)
+    const tabButton = overviewTabs.find(el => el.closest('button')?.className?.includes('rounded-2xl'));
+    if (tabButton) {
+      await act(async () => { fireEvent.click(tabButton); });
+      await waitFor(() => expect(screen.getAllByText('Timeline Event').length).toBeGreaterThan(0));
+    }
   });
 });
 

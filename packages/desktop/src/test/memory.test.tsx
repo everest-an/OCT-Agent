@@ -35,6 +35,11 @@ describe('Memory Page', () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem('awareness-claw-config', JSON.stringify({ language: 'en' }));
+    // Mock global fetch for useWikiData daemon REST API calls
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ topics: [], skills: [], items: [], days: [] }),
+    }));
   });
 
   it('renders memory page header', async () => {
@@ -43,7 +48,7 @@ describe('Memory Page', () => {
     expect(headers.length).toBeGreaterThan(0);
   });
 
-  it('renders search input', async () => {
+  it('renders search input on overview tab', async () => {
     await act(async () => { render(<Memory />); });
     expect(screen.getByPlaceholderText(/Search|search/)).toBeInTheDocument();
   });
@@ -58,13 +63,16 @@ describe('Memory Page', () => {
     expect(screen.getByText(/Refresh/)).toBeInTheDocument();
   });
 
-  it('shows category filter on knowledge tab when connected', async () => {
+  it('renders 5 tabs: Overview, Wiki, Graph, Sync, Settings', async () => {
     mockDaemonConnected();
     await act(async () => { render(<Memory />); });
-    // Switch to knowledge tab
-    await waitFor(() => expect(screen.getByText('Knowledge Cards')).toBeInTheDocument());
-    await act(async () => { fireEvent.click(screen.getByText('Knowledge Cards')); });
-    expect(screen.getByRole('button', { name: /^All/ })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Overview')).toBeInTheDocument();
+      expect(screen.getByText('Wiki')).toBeInTheDocument();
+      expect(screen.getByText('Graph')).toBeInTheDocument();
+      expect(screen.getByText('Sync')).toBeInTheDocument();
+      expect(screen.getByText('Settings')).toBeInTheDocument();
+    });
   });
 
   it('renders moved memory settings on dedicated settings tab when connected', async () => {
@@ -99,71 +107,14 @@ describe('Memory Page', () => {
     expect(screen.getByText('OpenClaw Local')).toBeInTheDocument();
   });
 
-  it('renders self improvement panel and saves a learning entry in dedicated tab', async () => {
-    const memoryLogLearning = vi.fn(() => Promise.resolve({
-      success: true,
-      id: 'LRN-20260405-001',
-      filePath: '/Users/test/.openclaw/workspace/.learnings/LEARNINGS.md',
-      promotion: { generatedCount: 1, proposalIds: ['PROMO-20260405-001'] },
-    }));
-
-    mockDaemonConnected({
-      memoryLearningStatus: () => Promise.resolve({
-        success: true,
-        rootDir: '/Users/test/.openclaw/workspace',
-        learningsDir: '/Users/test/.openclaw/workspace/.learnings',
-        pendingCount: 2,
-        highPriorityPendingCount: 1,
-        promotionProposalCount: 1,
-        readyForPromotionCount: 1,
-        todayProcessedCount: 1,
-        todayApprovedCount: 1,
-        todayRejectedCount: 0,
-      }),
-      memoryPromotionList: () => Promise.resolve({
-        success: true,
-        items: [{
-          id: 'PROMO-20260405-001',
-          status: 'proposed',
-          target: 'TOOLS.md',
-          patternKey: 'TOOLS.md|learning|docs|verify openclaw cli flags',
-          summary: 'Verify OpenClaw CLI flags before changing chat command arguments',
-          ruleText: 'Before running chat workflow changes, verify CLI flags first.',
-          evidenceCount: 3,
-          evidenceIds: ['LRN-20260405-001'],
-          createdAt: '2026-04-05T00:00:00.000Z',
-        }],
-      }),
-      memoryLogLearning,
-    });
-
+  it('switches to Wiki tab and shows sidebar', async () => {
+    mockDaemonConnected();
     await act(async () => { render(<Memory />); });
-    await waitFor(() => expect(screen.getByText('Self Improvement')).toBeInTheDocument());
-    await act(async () => { fireEvent.click(screen.getByText('Self Improvement')); });
-    await waitFor(() => expect(screen.getByPlaceholderText('One-line description of what happened')).toBeInTheDocument());
-
-    fireEvent.change(screen.getByPlaceholderText('One-line description of what happened'), {
-      target: { value: 'Verify CLI flags before updating desktop chat flow' },
+    await waitFor(() => expect(screen.getByText('Wiki')).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText('Wiki')); });
+    // Wiki sidebar should render with filter input and at least one section
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/Filter/i)).toBeInTheDocument();
     });
-    fireEvent.change(screen.getByPlaceholderText('Include context, what was wrong, and what changed.'), {
-      target: { value: 'The CLI failed silently until the flag list was checked against --help output.' },
-    });
-    fireEvent.change(screen.getByPlaceholderText('What should we do differently next time?'), {
-      target: { value: 'Verify supported flags before shipping chat command changes.' },
-    });
-
-    await act(async () => { fireEvent.click(screen.getByText('Save Entry')); });
-
-    await waitFor(() => expect(memoryLogLearning).toHaveBeenCalledTimes(1));
-    expect(memoryLogLearning).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'learning',
-      summary: 'Verify CLI flags before updating desktop chat flow',
-      area: 'docs',
-      priority: 'medium',
-      category: 'insight',
-      agentId: 'main',
-    }));
-    expect(screen.getByText(/Generated promotion proposals:/)).toBeInTheDocument();
-    expect(screen.getByText('Promotion Queue')).toBeInTheDocument();
   });
 });

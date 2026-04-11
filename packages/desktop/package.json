@@ -1,6 +1,6 @@
 {
   "name": "awareness-claw-desktop",
-  "version": "0.1.0",
+  "version": "0.2.5",
   "description": "AwarenessClaw Desktop — Visual AI agent manager with persistent memory",
   "author": "edwin-hao-ai",
   "main": "dist-electron/main.js",
@@ -74,6 +74,32 @@
       ],
       "category": "public.app-category.productivity",
       "icon": "resources/icon.icns"
+    },
+    "dmg": {
+      "window": {
+        "width": 640,
+        "height": 480
+      },
+      "contents": [
+        {
+          "x": 150,
+          "y": 200,
+          "type": "file"
+        },
+        {
+          "x": 490,
+          "y": 200,
+          "type": "link",
+          "path": "/Applications"
+        },
+        {
+          "x": 320,
+          "y": 380,
+          "type": "file",
+          "path": "scripts/fix-app.command",
+          "name": "⚠️ 首次打开必读 First-Run Fix.command"
+        }
+      ]
     },
     "win": {
       "target": [

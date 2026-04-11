@@ -177,6 +177,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Active project workspace shared between desktop chat and channel inbound hook.
   workspaceGetActive: () => ipcRenderer.invoke('workspace:get-active'),
   workspaceSetActive: (path: string | null) => ipcRenderer.invoke('workspace:set-active', path),
+  // Subscribe to workspace changes. Called when workspace:set-active runs successfully,
+  // including the daemon projectDir that was switched to. Returns an unsubscribe function.
+  onWorkspaceChanged: (
+    callback: (payload: {
+      path: string | null;
+      daemonProjectDir: string;
+      daemonSwitched: boolean;
+      daemonError: string | null;
+    }) => void,
+  ) => {
+    const handler = (_e: unknown, payload: any) => {
+      try { callback(payload); } catch { /* swallow renderer-side errors */ }
+    };
+    ipcRenderer.on('workspace:changed', handler);
+    return () => ipcRenderer.removeListener('workspace:changed', handler);
+  },
   // Channel-level inbound agent routing ("which agent answers WeChat / Telegram / ...").
   channelGetInboundAgent: (channelId: string) => ipcRenderer.invoke('channel:get-inbound-agent', channelId),
   channelSetInboundAgent: (channelId: string, agentId: string) => ipcRenderer.invoke('channel:set-inbound-agent', channelId, agentId),

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import Memory from '../pages/Memory';
 
@@ -6,6 +6,11 @@ describe('Memory page daemon connection states', () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem('awareness-claw-config', JSON.stringify({ language: 'en' }));
+    // Mock global fetch for useWikiData daemon REST API calls
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ topics: [], skills: [], items: [], days: [] }),
+    }) as any;
   });
 
   it('shows Start Daemon button when daemon is not connected', async () => {
@@ -17,7 +22,7 @@ describe('Memory page daemon connection states', () => {
     });
   });
 
-  it('shows real cards without daemon offline state when daemon returns data', async () => {
+  it('shows cards in Wiki tab without daemon offline state when daemon returns data', async () => {
     const origApi = (window as any).electronAPI;
     (window as any).electronAPI = {
       ...origApi,
@@ -25,24 +30,26 @@ describe('Memory page daemon connection states', () => {
         status: 'ok', version: '0.4.1', search_mode: 'hybrid',
         stats: { totalMemories: 5, totalKnowledge: 1, totalTasks: 0, totalSessions: 2 },
       }),
+      memoryGetContext: () => Promise.resolve({
+        result: { content: [{ text: JSON.stringify({
+          knowledge_cards: [
+            { id: '1', category: 'decision', title: 'Real card', summary: 'Real data' },
+          ],
+          open_tasks: [],
+        }) }] },
+      }),
       memoryGetCards: () => Promise.resolve({
-        result: {
-          content: [{
-            text: JSON.stringify({
-              knowledge_cards: [
-                { id: '1', category: 'decision', title: 'Real card', summary: 'Real data' },
-              ],
-            }),
-          }],
-        },
+        result: { content: [{ text: JSON.stringify({ knowledge_cards: [
+          { id: '1', category: 'decision', title: 'Real card', summary: 'Real data' },
+        ] }) }] },
       }),
       memoryGetEvents: () => Promise.resolve({ items: [], total: 0 }),
     };
 
     await act(async () => { render(<Memory />); });
-    // Switch to knowledge tab to see cards
-    await waitFor(() => expect(screen.getAllByText(/Knowledge Cards/).length).toBeGreaterThan(0));
-    await act(async () => { screen.getAllByText(/Knowledge Cards/)[0].click(); });
+    // Switch to Wiki tab to see cards in overview
+    await waitFor(() => expect(screen.getByText('Wiki')).toBeInTheDocument());
+    await act(async () => { screen.getByText('Wiki').click(); });
     await waitFor(() => {
       expect(screen.getByText('Real card')).toBeInTheDocument();
       expect(screen.queryByText('Start Daemon')).not.toBeInTheDocument();

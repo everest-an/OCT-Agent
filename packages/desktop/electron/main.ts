@@ -1404,14 +1404,81 @@ ipcMain.handle('workspace:get-active', () => {
   catch (err: any) { return { success: false, error: err?.message?.slice(0, 200) }; }
 });
 
-ipcMain.handle('workspace:set-active', (_e: unknown, workspacePath: string | null) => {
+ipcMain.handle('workspace:set-active', async (_e: unknown, workspacePath: string | null) => {
   try {
     writeActiveWorkspace(workspacePath, HOME);
-    return { success: true };
+    // Tell the Awareness daemon to switch its projectDir so that the Memory
+    // wiki reflects the same workspace as the chat. Empty/null falls back to
+    // the OpenClaw global workspace (~/.openclaw) — the daemon's default.
+    const daemonTarget = workspacePath && workspacePath.trim()
+      ? workspacePath
+      : path.join(HOME, '.openclaw');
+    const switchResult = await switchDaemonWorkspace(daemonTarget);
+    // Broadcast to all renderers so Memory.tsx can reload.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('workspace:changed', {
+        path: workspacePath || null,
+        daemonProjectDir: daemonTarget,
+        daemonSwitched: switchResult.ok,
+        daemonError: switchResult.error || null,
+      });
+    }
+    return { success: true, daemonSwitched: switchResult.ok, daemonError: switchResult.error || null };
   } catch (err: any) {
     return { success: false, error: err?.message?.slice(0, 200) };
   }
 });
+
+/**
+ * Call the local Awareness daemon's POST /workspace/switch API to hot-swap
+ * its project directory. Returns { ok: true } on success, { ok: false, error }
+ * when the daemon is unreachable or rejects the path. Never throws.
+ */
+async function switchDaemonWorkspace(
+  projectDir: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    const body = JSON.stringify({ project_dir: projectDir });
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port: 37800,
+        path: '/api/v1/workspace/switch',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+        },
+        timeout: 10_000,
+      },
+      (res) => {
+        let chunks = '';
+        res.on('data', (c) => { chunks += c.toString(); });
+        res.on('end', () => {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            resolve({ ok: true });
+          } else {
+            let detail = `HTTP ${res.statusCode}`;
+            try {
+              const parsed = JSON.parse(chunks);
+              if (parsed?.error) detail = String(parsed.error).slice(0, 200);
+            } catch { /* ignore parse error */ }
+            resolve({ ok: false, error: detail });
+          }
+        });
+      },
+    );
+    req.on('error', (err) => {
+      resolve({ ok: false, error: err?.message?.slice(0, 200) || 'daemon unreachable' });
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({ ok: false, error: 'daemon switch timeout' });
+    });
+    req.write(body);
+    req.end();
+  });
+}
 
 // Channel-level inbound agent routing (simple default "which agent answers this
 // channel" dropdown on the Channels page). Backed by bindings-manager which
@@ -1801,6 +1868,35 @@ app.whenReady().then(() => {
 
   createWindow();
   createTray();
+
+  // Fire-and-forget: on app startup, sync the persisted active workspace to
+  // the Awareness daemon so that Memory / Wiki data reflects the workspace the
+  // user last chose in the chat header. Without this, the daemon would stay at
+  // its autostart default (~/.openclaw) even though chat messages are being
+  // written against a user-selected project directory. Retries for up to 30s
+  // because the daemon may still be spinning up at app launch.
+  void (async () => {
+    const persisted = readActiveWorkspace(HOME);
+    const target = persisted && persisted.trim() ? persisted : path.join(HOME, '.openclaw');
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const result = await switchDaemonWorkspace(target);
+      if (result.ok) {
+        console.log(`[startup] daemon workspace synced to: ${target}`);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('workspace:changed', {
+            path: persisted || null,
+            daemonProjectDir: target,
+            daemonSwitched: true,
+            daemonError: null,
+          });
+        }
+        return;
+      }
+      // Daemon probably not up yet — wait and retry.
+      await sleep(5000);
+    }
+    console.warn('[startup] daemon workspace sync gave up after 30s — Memory may show stale workspace until user triggers set-active');
+  })();
 
   // Best-effort: start Gateway early so it's ready when user sends first message.
   // Once that completes, also pre-warm the Gateway WebSocket connection in the
