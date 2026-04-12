@@ -454,9 +454,13 @@ export function registerSetupHandlers(deps: {
         };
       }
       if (/EACCES|permission denied|Access is denied/i.test(msg) || /EACCES|permission denied/i.test(lastError)) {
+        const isWin = process.platform === 'win32';
+        const fallbackCmd = isWin 
+          ? 'npm config set prefix "%APPDATA%\\npm" && npm install -g openclaw'
+          : 'npm config set prefix ~/.npm-global && export PATH=~/.npm-global/bin:$PATH && npm install -g openclaw';
         return {
           success: false,
-          error: 'Permission denied during installation. Please run in terminal:\n  npm config set prefix ~/.npm-global\n  export PATH=~/.npm-global/bin:$PATH\n  npm install -g openclaw',
+          error: `Permission denied during installation. Please run in terminal:\n  ${fallbackCmd}`,
         };
       }
       return { success: false, error: msg, hint: 'Install OpenClaw manually: npm install -g openclaw' };
