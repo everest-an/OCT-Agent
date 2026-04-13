@@ -62,15 +62,18 @@ describe('Config sync (useAppConfig)', () => {
 
     const { result } = renderHook(() => useAppConfig());
 
-    expect(result.current.config.providerProfiles['qwen-portal']).toBeDefined();
-    expect(result.current.config.providerProfiles['qwen-portal'].apiKey).toBe('legacy-key');
-    expect(result.current.config.providerProfiles['qwen-portal'].baseUrl).toBe('https://legacy.example/v1');
+    // qwen-portal migrates to qwen
+    expect(result.current.config.providerKey).toBe('qwen');
+    expect(result.current.config.providerProfiles['qwen']).toBeDefined();
+    expect(result.current.config.providerProfiles['qwen'].apiKey).toBe('legacy-key');
+    expect(result.current.config.providerProfiles['qwen'].baseUrl).toBe('https://legacy.example/v1');
+    expect(result.current.config.providerProfiles['qwen-portal']).toBeUndefined();
   });
 
   it('restores saved provider credentials when switching across providers', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       language: 'en',
-      providerKey: 'qwen-portal',
+      providerKey: 'qwen',
       modelId: 'qwen-turbo-latest',
       providerProfiles: {
         openai: {
@@ -85,10 +88,9 @@ describe('Config sync (useAppConfig)', () => {
 
     act(() => {
       result.current.saveProviderConfig({
-        providerKey: 'qwen-portal',
+        providerKey: 'qwen',
         modelId: 'qwen-plus-latest',
         apiKey: 'qwen-key',
-        baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
       }, MODEL_PROVIDERS);
     });
 
@@ -111,11 +113,12 @@ describe('Config sync (useAppConfig)', () => {
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       language: 'en',
-      providerKey: 'qwen-portal',
+      providerKey: 'qwen',
       modelId: 'qwen-turbo-latest',
       providerProfiles: {
-        'qwen-portal': {
+        'qwen': {
           apiKey: 'qwen-key',
+          // baseUrl matches hardcoded default — should NOT be written to openclaw.json
           baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
           models: [{ id: 'qwen-turbo-latest', label: 'Qwen Turbo' }],
         },
@@ -136,9 +139,13 @@ describe('Config sync (useAppConfig)', () => {
     expect(saveConfigMock).toHaveBeenCalledTimes(1);
     const payload = saveConfigMock.mock.calls[0][0];
     expect(payload.plugins.allow).toEqual(expect.arrayContaining(['openclaw-memory', 'browser']));
-    expect(payload.models.providers['qwen-portal']).toBeDefined();
+    expect(payload.models.providers['qwen']).toBeDefined();
+    // baseUrl should NOT be written when it matches the hardcoded default
+    expect(payload.models.providers['qwen'].baseUrl).toBeUndefined();
     expect(payload.models.providers.openai).toBeDefined();
     expect(payload.models.providers.openai.apiKey).toBe('openai-key');
-    expect(payload.agents.defaults.model.primary).toBe('qwen-portal/qwen-turbo-latest');
+    // openai baseUrl also matches default — should not be written
+    expect(payload.models.providers.openai.baseUrl).toBeUndefined();
+    expect(payload.agents.defaults.model.primary).toBe('qwen/qwen-turbo-latest');
   });
 });

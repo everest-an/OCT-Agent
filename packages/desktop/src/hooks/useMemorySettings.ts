@@ -48,7 +48,7 @@ export function useMemorySettings() {
     setCloudVerifyUrl(`${res.verification_uri}?code=${res.user_code}`);
     setCloudAuthStep('waiting');
 
-    const expiresIn = (res.expires_in || 600) * 1000;
+    const expiresIn = (res.expires_in || 900) * 1000;
     const startTime = Date.now();
     const deviceCode = res.device_code;
 

@@ -126,11 +126,40 @@ function normalizeProviderProfiles(profiles: unknown): Record<string, ProviderPr
   return normalized;
 }
 
+// Migrate legacy provider keys to OpenClaw-aligned keys (one-time, idempotent)
+const LEGACY_KEY_MAP: Record<string, string> = {
+  'qwen-portal': 'qwen',
+  'zhipu': 'zai',
+  'alibaba': 'qwen',
+};
+
+function migrateProviderKeys(profiles: Record<string, ProviderProfile>, activeKey: string): { profiles: Record<string, ProviderProfile>; activeKey: string } {
+  const migrated = { ...profiles };
+  let newActiveKey = activeKey;
+  for (const [oldKey, newKey] of Object.entries(LEGACY_KEY_MAP)) {
+    if (migrated[oldKey]) {
+      if (!migrated[newKey]) {
+        migrated[newKey] = migrated[oldKey];
+      }
+      delete migrated[oldKey];
+      if (newActiveKey === oldKey) newActiveKey = newKey;
+    }
+  }
+  return { profiles: migrated, activeKey: newActiveKey };
+}
+
 function normalizeConfig(raw: Partial<AppConfig>): AppConfig {
+  const rawProfiles = normalizeProviderProfiles(raw.providerProfiles);
+  const { profiles: migratedProfiles, activeKey: migratedProviderKey } = migrateProviderKeys(
+    rawProfiles,
+    raw.providerKey || DEFAULT_CONFIG.providerKey,
+  );
+
   const next: AppConfig = {
     ...DEFAULT_CONFIG,
     ...raw,
-    providerProfiles: normalizeProviderProfiles(raw.providerProfiles),
+    providerKey: LEGACY_KEY_MAP[raw.providerKey || ''] || raw.providerKey || DEFAULT_CONFIG.providerKey,
+    providerProfiles: migratedProfiles,
   };
 
   if (next.providerKey) {
@@ -336,7 +365,12 @@ async function syncToOpenClaw(config: AppConfig, providers: ModelProviderDef[]) 
   for (const providerKey of providerKeys) {
     const provider = providers.find((item) => item.key === providerKey);
     const profile = getProviderProfile(config, providerKey);
-    const effectiveBaseUrl = profile.baseUrl || provider?.baseUrl || '';
+    // Only write baseUrl to openclaw.json when the user explicitly overrode the default.
+    // Built-in providers (OpenAI, Anthropic, Qwen, etc.) have auto-resolved endpoints
+    // inside OpenClaw — writing the hardcoded default would shadow future upstream changes.
+    const userBaseUrl = profile.baseUrl || '';
+    const hardcodedBaseUrl = provider?.baseUrl || '';
+    const isCustomBaseUrl = userBaseUrl && userBaseUrl !== hardcodedBaseUrl;
     const effectiveApiKey = profile.apiKey || '';
     const effectiveModels = (profile.models?.length ? profile.models : getFallbackModels(providerKey, providers))
       .map((model) => ({
@@ -348,10 +382,10 @@ async function syncToOpenClaw(config: AppConfig, providers: ModelProviderDef[]) 
         input: Array.isArray(model.input) && model.input.length > 0 ? model.input : ['text'],
       }));
 
-    if (!effectiveBaseUrl && effectiveModels.length === 0 && !effectiveApiKey) continue;
+    if (!isCustomBaseUrl && effectiveModels.length === 0 && !effectiveApiKey) continue;
 
     syncedProviders[providerKey] = {
-      ...(effectiveBaseUrl ? { baseUrl: effectiveBaseUrl } : {}),
+      ...(isCustomBaseUrl ? { baseUrl: userBaseUrl } : {}),
       ...(effectiveApiKey ? { apiKey: effectiveApiKey } : {}),
       ...(profile.apiType || provider?.apiType ? { api: profile.apiType || provider?.apiType } : {}),
       ...(effectiveModels.length > 0 ? { models: effectiveModels } : {}),
@@ -443,18 +477,20 @@ export interface ModelProviderDef {
   needsKey: boolean;
 }
 
-// All base URLs and model IDs verified from official documentation (2026-03)
+// UI-only provider catalog — keys match OpenClaw's built-in provider IDs.
+// baseUrl is kept ONLY as a placeholder hint for the UI input field.
+// syncToOpenClaw() will NOT write baseUrl to openclaw.json unless the user
+// explicitly overrides it (OpenClaw auto-resolves built-in endpoints).
 export const MODEL_PROVIDERS: ModelProviderDef[] = [
   {
-    key: 'qwen-portal', name: '通义千问 Qwen', emoji: '☁️', tag: '🆓 每模型100万免费',
+    key: 'qwen', name: '通义千问 Qwen', emoji: '☁️', tag: '🆓 每模型100万免费',
     desc: '阿里云百炼，中文最强，多模态',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    apiType: 'openai-completions',
     models: [
+      { id: 'qwen3.5-plus', label: 'Qwen 3.5 Plus（推荐）' },
       { id: 'qwen-turbo-latest', label: 'Qwen Turbo（最快最便宜）' },
-      { id: 'qwen-plus-latest', label: 'Qwen Plus（均衡推荐）' },
+      { id: 'qwen-plus-latest', label: 'Qwen Plus（均衡）' },
       { id: 'qwen-max-latest', label: 'Qwen Max（最强）' },
-      { id: 'qwen3-235b-a22b', label: 'Qwen3 235B（开源最强）' },
       { id: 'qwq-plus', label: 'QwQ Plus（深度推理）' },
       { id: 'qwen-long', label: 'Qwen Long（超长文本）' },
     ],
@@ -493,13 +529,13 @@ export const MODEL_PROVIDERS: ModelProviderDef[] = [
     needsKey: true,
   },
   {
-    key: 'zhipu', name: '智谱 AI', emoji: '🇨🇳', tag: '🆓 Flash 免费',
+    key: 'zai', name: '智谱 AI', emoji: '🇨🇳', tag: '🆓 Flash 免费',
     desc: 'GLM 系列，Flash 模型完全免费',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4/',
     models: [
+      { id: 'glm-5.1', label: 'GLM 5.1（最新）' },
       { id: 'glm-4-flash-250414', label: 'GLM-4 Flash（免费）' },
       { id: 'glm-4-plus', label: 'GLM-4 Plus（高性能）' },
-      { id: 'glm-5', label: 'GLM-5（最新第五代）' },
     ],
     needsKey: true,
   },
@@ -515,23 +551,22 @@ export const MODEL_PROVIDERS: ModelProviderDef[] = [
     needsKey: true,
   },
   {
-    key: 'volcengine', name: '豆包 / 火山引擎', emoji: '🔥', tag: '字节跳动',
-    desc: '豆包大模型，性价比高',
-    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    key: 'xai', name: 'xAI Grok', emoji: '🚀', tag: '推理强',
+    desc: 'Grok 系列，推理能力突出',
+    baseUrl: 'https://api.x.ai/v1',
     models: [
-      { id: 'doubao-1-5-pro-32k-250115', label: '豆包 1.5 Pro' },
-      { id: 'doubao-1-5-thinking-pro-250415', label: '豆包 Thinking Pro' },
-      { id: 'doubao-1-5-lite', label: '豆包 1.5 Lite（快速）' },
+      { id: 'grok-4', label: 'Grok 4（最新）' },
+      { id: 'grok-3', label: 'Grok 3' },
     ],
     needsKey: true,
   },
   {
-    key: 'qianfan', name: '文心一言 / 千帆', emoji: '🏛️', tag: '百度',
-    desc: 'ERNIE 系列',
-    baseUrl: 'https://qianfan.baidubce.com/v2',
+    key: 'mistral', name: 'Mistral', emoji: '🌊', tag: '欧洲开源',
+    desc: '开源旗舰，多语言',
+    baseUrl: 'https://api.mistral.ai/v1',
     models: [
-      { id: 'ernie-4.0-8k', label: 'ERNIE 4.0 8K' },
-      { id: 'ernie-speed-128k', label: 'ERNIE Speed 128K' },
+      { id: 'mistral-large-latest', label: 'Mistral Large（旗舰）' },
+      { id: 'mistral-small-latest', label: 'Mistral Small（快速）' },
     ],
     needsKey: true,
   },
@@ -546,13 +581,11 @@ export const MODEL_PROVIDERS: ModelProviderDef[] = [
     needsKey: true,
   },
   {
-    key: 'siliconflow', name: 'SiliconFlow', emoji: '🚀', tag: '🆓 $1 新用户',
-    desc: '聚合多模型',
-    baseUrl: 'https://api.siliconflow.cn/v1',
+    key: 'openrouter', name: 'OpenRouter', emoji: '🔀', tag: '聚合路由',
+    desc: '聚合多模型，统一 API',
+    baseUrl: 'https://openrouter.ai/api/v1',
     models: [
-      { id: 'deepseek-v3-2', label: 'DeepSeek V3.2' },
-      { id: 'deepseek-r1', label: 'DeepSeek R1' },
-      { id: 'kimi-k2-instruct', label: 'Kimi K2' },
+      { id: 'auto', label: 'Auto（智能路由）' },
     ],
     needsKey: true,
   },
@@ -661,7 +694,7 @@ export function useDynamicProviders(): { providers: ModelProviderDef[]; loading:
         return {
           ...hardcodedProvider,
           name: dynamicProvider.name || hardcodedProvider.name,
-          desc: dynamicProvider.baseUrl || hardcodedProvider.desc,
+          desc: hardcodedProvider.desc,
           baseUrl: dynamicProvider.baseUrl || hardcodedProvider.baseUrl,
           apiType: dynamicProvider.apiType || hardcodedProvider.apiType,
           models: mergedModels,
@@ -676,7 +709,7 @@ export function useDynamicProviders(): { providers: ModelProviderDef[]; loading:
             name: dynamicProvider.name || key,
             emoji: dynamicProvider.emoji || '🔌',
             tag: dynamicProvider.tag || 'Custom',
-            desc: dynamicProvider.baseUrl || dynamicProvider.desc || 'Custom provider',
+            desc: dynamicProvider.desc || dynamicProvider.baseUrl || 'Custom provider',
             baseUrl: dynamicProvider.baseUrl || '',
             apiType: dynamicProvider.apiType,
             models: (dynamicProvider.models || []).map((model: any) => ({

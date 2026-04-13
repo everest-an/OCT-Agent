@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.9] - 2026-04-13
+
+### Fixed
+- Model config: Provider keys now align with OpenClaw built-in IDs (`qwen-portal`→`qwen`, `zhipu`→`zai`). Existing user configs auto-migrate.
+- Model config: `desc` field no longer incorrectly overwritten by `baseUrl` in the provider dialog header.
+- Model config: `syncToOpenClaw` no longer writes default `baseUrl` to openclaw.json — lets OpenClaw auto-resolve built-in endpoints, preventing stale hardcoded URLs from shadowing upstream changes.
+
+### Added
+- New providers: xAI Grok, Mistral, OpenRouter added to provider catalog.
+- API Base URL input now shows the OpenClaw default endpoint with hint text. Users can override for proxies/custom gateways; unchanged defaults are not written to openclaw.json.
+- Legacy provider key migration (`qwen-portal`→`qwen`, `zhipu`→`zai`, `alibaba`→`qwen`) — seamless for existing users.
+
 ## [0.2.8] - 2026-04-11
 
 ### Fixed

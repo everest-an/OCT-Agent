@@ -129,6 +129,8 @@ function buildProviderDraft(provider: ModelProviderDef, config: ReturnType<typeo
   return {
     providerKey: provider.key,
     providerName: profile.name || provider.name,
+    // Show user-customized baseUrl; fall back to hardcoded default for display only.
+    // syncToOpenClaw will skip writing baseUrl if it equals the hardcoded default.
     baseUrl: profile.baseUrl || provider.baseUrl || '',
     apiType: profile.apiType || provider.apiType || DEFAULT_API_TYPE,
     needsKey: typeof profile.needsKey === 'boolean' ? profile.needsKey : provider.needsKey,
@@ -314,13 +316,16 @@ export default function Models() {
 
   const saveProvider = async () => {
     const effectiveModelId = selectedModelId || models[0]?.id || '';
-    if (!effectiveProviderKey || !providerName.trim() || !baseUrl.trim() || !effectiveModelId) return;
+    // Built-in providers don't require baseUrl (OpenClaw auto-resolves endpoints);
+    // only custom providers must have an explicit baseUrl.
+    if (!effectiveProviderKey || !providerName.trim() || !effectiveModelId) return;
+    if (customMode && !baseUrl.trim()) return;
 
     saveProviderConfig({
       providerKey: effectiveProviderKey,
       modelId: effectiveModelId,
       apiKey,
-      baseUrl: baseUrl.trim(),
+      baseUrl: baseUrl.trim() || undefined,
       apiType: apiType.trim() || undefined,
       name: providerName.trim(),
       needsKey,
@@ -332,7 +337,7 @@ export default function Models() {
     setEditingProviderKey(null);
   };
 
-  const saveDisabled = !effectiveProviderKey || !providerName.trim() || !baseUrl.trim() || !models.length || !selectedModelId || (needsKey && !apiKey.trim());
+  const saveDisabled = !effectiveProviderKey || !providerName.trim() || !models.length || !selectedModelId || (needsKey && !apiKey.trim()) || (customMode && !baseUrl.trim());
   const sourceSummary = useMemo(() => {
     if (customMode) return t('models.source.customDraft', 'This provider lives in your local profile until you save it.');
     if (!editingProvider) return t('models.source.empty', 'Choose a provider to inspect its live model catalog.');
@@ -585,7 +590,9 @@ export default function Models() {
                     </div>
 
                     <div>
-                      <label htmlFor="models-base-url" className="block text-xs font-medium text-slate-400 mb-1">{t('settings.model.baseUrl', 'API Base URL')}</label>
+                      <label htmlFor="models-base-url" className="block text-xs font-medium text-slate-400 mb-1">
+                        {t('settings.model.baseUrl', 'API Base URL')}
+                      </label>
                       <input
                         id="models-base-url"
                         type="text"
@@ -594,6 +601,11 @@ export default function Models() {
                         className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-brand-500 focus:outline-none"
                         placeholder="https://api.example.com/v1"
                       />
+                      {!customMode && baseUrl === (editingProvider?.baseUrl || '') && (
+                        <div className="mt-1 text-[11px] text-slate-500">
+                          {t('models.baseUrlDefault', 'Default endpoint from OpenClaw. Change it if you use a proxy or custom gateway.')}
+                        </div>
+                      )}
                     </div>
                   </div>
 

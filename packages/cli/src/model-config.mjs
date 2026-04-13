@@ -4,13 +4,15 @@
 
 import { createInterface } from 'node:readline';
 
+// Built-in providers use OpenClaw's auto-resolved endpoints — no baseUrl needed.
+// Only Custom and Ollama (local) need explicit baseUrl.
 const PROVIDERS = [
-  { name: 'DeepSeek', key: 'deepseek', baseUrl: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'] },
-  { name: 'OpenAI', key: 'openai', baseUrl: 'https://api.openai.com/v1', models: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'] },
-  { name: 'Anthropic', key: 'anthropic', baseUrl: 'https://api.anthropic.com/v1', models: ['claude-sonnet-4-20250514', 'claude-haiku-4-5-20251001'] },
-  { name: 'Zhipu (智谱)', key: 'zhipu', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-4-plus', 'glm-4-flash'] },
-  { name: 'Moonshot (月之暗面)', key: 'moonshot', baseUrl: 'https://api.moonshot.cn/v1', models: ['moonshot-v1-auto'] },
-  { name: 'Alibaba (通义千问)', key: 'alibaba', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen-max', 'qwen-plus'] },
+  { name: 'DeepSeek', key: 'deepseek', models: ['deepseek-chat', 'deepseek-reasoner'] },
+  { name: 'OpenAI', key: 'openai', models: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'] },
+  { name: 'Anthropic', key: 'anthropic', models: ['claude-sonnet-4-20250514', 'claude-haiku-4-5-20251001'] },
+  { name: 'Zhipu (智谱)', key: 'zai', models: ['glm-5.1', 'glm-4-plus'] },
+  { name: 'Moonshot (月之暗面)', key: 'moonshot', models: ['kimi-k2.5', 'moonshot-v1-auto'] },
+  { name: 'Qwen (通义千问)', key: 'qwen', models: ['qwen3.5-plus', 'qwen-max', 'qwen-plus'] },
   { name: 'Ollama (Local)', key: 'ollama', baseUrl: 'http://localhost:11434/v1', models: ['llama3.1', 'qwen2.5', 'deepseek-r1'], noApiKey: true },
   { name: 'Custom Provider', key: 'custom', baseUrl: '', models: [] },
 ];
@@ -29,11 +31,11 @@ export async function configureModel() {
   const choice = parseInt(await ask('\n  Enter number (1-8): '), 10) - 1;
   const provider = PROVIDERS[Math.max(0, Math.min(choice, PROVIDERS.length - 1))];
 
-  let baseUrl = provider.baseUrl;
+  let baseUrl = provider.baseUrl || '';
   let apiKey = '';
   let model = provider.models[0] || '';
 
-  // Custom provider
+  // Custom provider — must provide baseUrl and model name
   if (provider.key === 'custom') {
     baseUrl = await ask('  Base URL: ');
     model = await ask('  Model name: ');

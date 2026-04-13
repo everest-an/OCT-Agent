@@ -38,9 +38,9 @@ describe('MODEL_PROVIDERS', () => {
 
   it('should include major Chinese providers', () => {
     const keys = MODEL_PROVIDERS.map(p => p.key);
-    expect(keys).toContain('qwen-portal');
+    expect(keys).toContain('qwen');
     expect(keys).toContain('deepseek');
-    expect(keys).toContain('zhipu');
+    expect(keys).toContain('zai');
     expect(keys).toContain('moonshot');
   });
 
