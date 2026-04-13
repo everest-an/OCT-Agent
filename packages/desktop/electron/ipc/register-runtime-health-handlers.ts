@@ -2,6 +2,26 @@ import fs from 'fs';
 import path from 'path';
 import { ipcMain } from 'electron';
 
+/** Well-known default baseUrls for built-in providers (used to auto-repair missing baseUrl in openclaw.json). */
+const PROVIDER_DEFAULT_BASE_URLS: Record<string, string> = {
+  qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  deepseek: 'https://api.deepseek.com/v1',
+  openai: 'https://api.openai.com/v1',
+  anthropic: 'https://api.anthropic.com/v1',
+  zai: 'https://open.bigmodel.cn/api/paas/v4/',
+  zhipu: 'https://open.bigmodel.cn/api/paas/v4/',
+  moonshot: 'https://api.moonshot.cn/v1',
+  xai: 'https://api.x.ai/v1',
+  mistral: 'https://api.mistral.ai/v1',
+  minimax: 'https://api.minimaxi.com/v1',
+  openrouter: 'https://openrouter.ai/api/v1',
+  groq: 'https://api.groq.com/openai/v1',
+  ollama: 'http://localhost:11434/v1',
+  volcengine: 'https://ark.cn-beijing.volces.com/api/v3',
+  qianfan: 'https://qianfan.baidubce.com/v2',
+  siliconflow: 'https://api.siliconflow.cn/v1',
+};
+
 function normalizeModelsUrl(baseUrl: string): string {
   const trimmed = (baseUrl || '').trim().replace(/\/+$/, '');
   if (!trimmed) return '';
@@ -107,6 +127,19 @@ export function registerRuntimeHealthHandlers(deps: {
       const config = JSON.parse(raw);
       const providers = config?.models?.providers || {};
       const primaryModel = config?.agents?.defaults?.model?.primary || '';
+
+      // Auto-repair: fill missing baseUrl for known providers (prevents openclaw doctor validation errors)
+      let needsRepair = false;
+      for (const [key, prov] of Object.entries(providers) as [string, any][]) {
+        if (!prov.baseUrl && PROVIDER_DEFAULT_BASE_URLS[key]) {
+          prov.baseUrl = PROVIDER_DEFAULT_BASE_URLS[key];
+          needsRepair = true;
+        }
+      }
+      if (needsRepair) {
+        try { fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8'); } catch { /* best-effort */ }
+      }
+
       const result: Array<{
         key: string;
         baseUrl: string;
