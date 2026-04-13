@@ -26,12 +26,17 @@ describe('Models Page', () => {
     expect(screen.getAllByText(/gpt-4o/i).length).toBeGreaterThan(0);
   });
 
-  it('allows adding a custom provider and custom model, then saves through providerProfiles', async () => {
+  it('allows adding a custom provider and saving a discovered model through providerProfiles', async () => {
     const saveConfigMock = vi.fn().mockResolvedValue({ success: true });
+    const modelsDiscoverMock = vi.fn().mockResolvedValue({
+      success: true,
+      models: [{ id: 'proxy-model-1', name: 'Proxy Model 1' }],
+    });
     (window as any).electronAPI = {
       ...(window as any).electronAPI,
       saveConfig: saveConfigMock,
       modelsReadProviders: () => Promise.resolve({ success: true, providers: [], primaryModel: '' }),
+      modelsDiscover: modelsDiscoverMock,
     };
 
     await act(async () => { render(<Models />); });
@@ -44,11 +49,12 @@ describe('Models Page', () => {
       fireEvent.change(screen.getByPlaceholderText('My Provider'), { target: { value: 'Proxy Hub' } });
       fireEvent.change(screen.getByPlaceholderText('https://api.example.com/v1'), { target: { value: 'https://proxy.example/v1' } });
       fireEvent.change(screen.getByPlaceholderText('Paste your API Key...'), { target: { value: 'proxy-key' } });
-      fireEvent.change(screen.getByPlaceholderText('Add model ID, for example gpt-4.1-mini'), { target: { value: 'proxy-model-1' } });
+      fireEvent.click(screen.getByRole('button', { name: /Refresh from OpenClaw/i }));
     });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /Add Model/i }));
+    await waitFor(() => {
+      expect(modelsDiscoverMock).toHaveBeenCalled();
+      expect(screen.getByText('Proxy Model 1')).toBeInTheDocument();
     });
 
     await act(async () => {
@@ -149,6 +155,63 @@ describe('Models Page', () => {
     expect(screen.getByText(/Anthropic-style request and header conventions/i)).toBeInTheDocument();
   });
 
+  it('persists edited baseUrl for existing provider after save and rerender', async () => {
+    const saveConfigMock = vi.fn().mockResolvedValue({ success: true });
+    const modelsDiscoverMock = vi.fn().mockResolvedValue({
+      success: true,
+      models: [{ id: 'gpt-4o', name: 'GPT-4o' }],
+    });
+    (window as any).electronAPI = {
+      ...(window as any).electronAPI,
+      saveConfig: saveConfigMock,
+      modelsReadProviders: () => Promise.resolve({ success: true, providers: [], primaryModel: '' }),
+      modelsDiscover: modelsDiscoverMock,
+    };
+
+    const { unmount } = render(<Models />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /OpenAI/i }));
+    });
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('API Base URL'), {
+        target: { value: 'https://ai-gateway.vercel.sh/v1' },
+      });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Refresh from OpenClaw/i }));
+    });
+
+    await waitFor(() => {
+      expect(modelsDiscoverMock).toHaveBeenCalled();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Save & Activate/i }));
+    });
+
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem('awareness-claw-config') || '{}');
+      expect(stored.providerProfiles.openai.baseUrl).toBe('https://ai-gateway.vercel.sh/v1');
+      expect(stored.baseUrl).toBe('https://ai-gateway.vercel.sh/v1');
+    });
+
+    unmount();
+
+    await act(async () => {
+      render(<Models />);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /OpenAI/i }));
+    });
+
+    expect(screen.getByLabelText('API Base URL')).toHaveValue('https://ai-gateway.vercel.sh/v1');
+    expect(saveConfigMock).toHaveBeenCalled();
+  });
+
   it('keeps presets simple and allows custom api types in advanced settings', async () => {
     await act(async () => { render(<Models />); });
 
@@ -174,5 +237,37 @@ describe('Models Page', () => {
     });
 
     expect(screen.getByLabelText('Custom API type')).toHaveValue('proxy-anthropic');
+  });
+
+  it('blocks saving until endpoint validation succeeds for a custom endpoint', async () => {
+    const saveConfigMock = vi.fn().mockResolvedValue({ success: true });
+    (window as any).electronAPI = {
+      ...(window as any).electronAPI,
+      saveConfig: saveConfigMock,
+      modelsReadProviders: () => Promise.resolve({ success: true, providers: [], primaryModel: '' }),
+      modelsDiscover: vi.fn().mockResolvedValue({
+        success: true,
+        models: [{ id: 'gpt-4o', name: 'GPT-4o' }],
+      }),
+    };
+
+    await act(async () => { render(<Models />); });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /OpenAI/i }));
+    });
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('API Base URL'), {
+        target: { value: 'https://ai-gateway.vercel.sh/v1' },
+      });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Save & Activate/i }));
+    });
+
+    expect(screen.getByText(/Endpoint not validated yet/i)).toBeInTheDocument();
+    expect(saveConfigMock).not.toHaveBeenCalled();
   });
 });

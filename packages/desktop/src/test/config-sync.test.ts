@@ -104,6 +104,42 @@ describe('Config sync (useAppConfig)', () => {
     expect(result.current.config.baseUrl).toBe('https://api.openai.com/v1');
   });
 
+  it('keeps updated baseUrl for active provider without rolling back to stale top-level value', () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      language: 'en',
+      providerKey: 'openai',
+      modelId: 'gpt-4o',
+      apiKey: 'openai-key',
+      baseUrl: 'https://api.openai.com/v1',
+      providerProfiles: {
+        openai: {
+          apiKey: 'openai-key',
+          baseUrl: 'https://api.openai.com/v1',
+          models: [{ id: 'gpt-4o', label: 'GPT-4o' }],
+        },
+      },
+    }));
+
+    const { result } = renderHook(() => useAppConfig());
+
+    act(() => {
+      result.current.saveProviderConfig({
+        providerKey: 'openai',
+        modelId: 'gpt-4o',
+        apiKey: 'openai-key',
+        baseUrl: 'https://ai-gateway.vercel.sh/v1',
+        models: [{ id: 'gpt-4o', label: 'GPT-4o' }],
+      }, MODEL_PROVIDERS);
+    });
+
+    expect(result.current.config.providerProfiles.openai.baseUrl).toBe('https://ai-gateway.vercel.sh/v1');
+    expect(result.current.config.baseUrl).toBe('https://ai-gateway.vercel.sh/v1');
+
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
+    expect(stored.providerProfiles.openai.baseUrl).toBe('https://ai-gateway.vercel.sh/v1');
+    expect(stored.baseUrl).toBe('https://ai-gateway.vercel.sh/v1');
+  });
+
   it('syncConfig writes all saved provider profiles into openclaw payload', async () => {
     const saveConfigMock = vi.fn().mockResolvedValue({ success: true });
     (window as any).electronAPI = {
@@ -146,5 +182,70 @@ describe('Config sync (useAppConfig)', () => {
     expect(payload.models.providers.openai.apiKey).toBe('openai-key');
     expect(payload.models.providers.openai.baseUrl).toBe('https://api.openai.com/v1');
     expect(payload.agents.defaults.model.primary).toBe('qwen/qwen-turbo-latest');
+  });
+
+  it('syncConfig(nextConfig) persists latest provider/model without stale snapshot race', async () => {
+    const saveConfigMock = vi.fn().mockResolvedValue({ success: true });
+    (window as any).electronAPI = {
+      ...(window as any).electronAPI,
+      saveConfig: saveConfigMock,
+    };
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      language: 'en',
+      providerKey: 'qwen',
+      modelId: 'qwen-turbo-latest',
+      providerProfiles: {
+        qwen: {
+          apiKey: 'qwen-key',
+          baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+          models: [{ id: 'qwen-turbo-latest', label: 'Qwen Turbo' }],
+        },
+      },
+    }));
+
+    const { result } = renderHook(() => useAppConfig());
+
+    let next: ReturnType<typeof result.current.selectModel>;
+    act(() => {
+      next = result.current.selectModel('openai', 'gpt-4o', MODEL_PROVIDERS);
+    });
+
+    await act(async () => {
+      await result.current.syncConfig(MODEL_PROVIDERS, next);
+    });
+
+    const payload = saveConfigMock.mock.calls.at(-1)?.[0];
+    expect(payload.agents.defaults.model.primary).toBe('openai/gpt-4o');
+  });
+
+  it('syncConfig keeps namespaced model IDs unchanged', async () => {
+    const saveConfigMock = vi.fn().mockResolvedValue({ success: true });
+    (window as any).electronAPI = {
+      ...(window as any).electronAPI,
+      saveConfig: saveConfigMock,
+    };
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      language: 'en',
+      providerKey: 'vecel',
+      modelId: 'alibaba/qwen-3-14b',
+      providerProfiles: {
+        vecel: {
+          apiKey: 'test-key',
+          baseUrl: 'https://ai-gateway.vercel.sh/v1',
+          models: [{ id: 'alibaba/qwen-3-14b', label: 'Qwen 3 14B' }],
+        },
+      },
+    }));
+
+    const { result } = renderHook(() => useAppConfig());
+
+    await act(async () => {
+      await result.current.syncConfig(MODEL_PROVIDERS);
+    });
+
+    const payload = saveConfigMock.mock.calls.at(-1)?.[0];
+    expect(payload.agents.defaults.model.primary).toBe('alibaba/qwen-3-14b');
   });
 });

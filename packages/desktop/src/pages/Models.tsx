@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bot, Check, Database, Loader2, Plus, RefreshCw, Sparkles, X } from 'lucide-react';
 import PasswordInput from '../components/PasswordInput';
 import ProviderIcon from '../components/ProviderIcon';
@@ -161,7 +161,11 @@ export default function Models() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [discovering, setDiscovering] = useState(false);
   const [discoverState, setDiscoverState] = useState<'idle' | 'success' | 'error'>('idle');
+  const [discoveredModelIds, setDiscoveredModelIds] = useState<Set<string>>(new Set());
+  const [saveError, setSaveError] = useState('');
   const [savedState, setSavedState] = useState<'idle' | 'done'>('idle');
+  const lastAutoDiscoverKeyRef = useRef('');
+  const lastAutoSavedKeyRef = useRef('');
 
   const activeProvider = allProviders.find((provider) => provider.key === config.providerKey);
   const activeModel = activeProvider?.models.find((model) => model.id === config.modelId);
@@ -209,6 +213,15 @@ export default function Models() {
     ? apiType.trim()
     : CUSTOM_API_TYPE;
   const selectedApiTypeMeta = apiTypeOptions.find((option) => option.value === apiType.trim()) || null;
+  const currentProviderDefaultBaseUrl = editingProvider?.baseUrl || '';
+  const baseUrlTrimmed = baseUrl.trim();
+  const hasEndpointOverride = customMode
+    || (!!baseUrlTrimmed && !currentProviderDefaultBaseUrl)
+    || (!!baseUrlTrimmed && !!currentProviderDefaultBaseUrl && baseUrlTrimmed !== currentProviderDefaultBaseUrl.trim());
+  const shouldAutoValidate = modalOpen && !!effectiveProviderKey && !!baseUrlTrimmed && (!needsKey || !!apiKey.trim());
+  const selectedModelInCatalog = models.some((model) => model.id === selectedModelId);
+  const selectedModelDiscovered = discoveredModelIds.has(selectedModelId);
+  const requiresStrictValidation = hasEndpointOverride;
 
   useEffect(() => {
     if (customMode || !editingProviderKey) return;
@@ -226,6 +239,7 @@ export default function Models() {
     setShowAdvanced(!isKnownApiType(draft.apiType, allProviders));
     setCustomModelInput('');
     setDiscoverState('idle');
+    setDiscoveredModelIds(new Set());
   }, [allProviders, config, customMode, editingProviderKey]);
 
   const beginCustomProvider = () => {
@@ -242,7 +256,9 @@ export default function Models() {
     setShowAdvanced(false);
     setCustomModelInput('');
     setDiscoverState('idle');
+    setDiscoveredModelIds(new Set());
     setSavedState('idle');
+    setSaveError('');
   };
 
   const openProviderModal = (providerKey: string) => {
@@ -257,6 +273,8 @@ export default function Models() {
     setEditingProviderKey(null);
     setCustomModelInput('');
     setDiscoverState('idle');
+    setDiscoveredModelIds(new Set());
+    setSaveError('');
   };
 
   const addCustomModel = () => {
@@ -267,6 +285,7 @@ export default function Models() {
     setSelectedModelId((current) => current || normalizedId);
     setCustomModelInput('');
     setDiscoverState('idle');
+    setSaveError('');
   };
 
   const removeModel = (modelId: string) => {
@@ -276,14 +295,41 @@ export default function Models() {
       setSelectedModelId(nextModels[0]?.id || '');
     }
     setDiscoverState('idle');
+    setSaveError('');
   };
 
-  const discoverModels = async () => {
+  const persistProviderSelection = async (effectiveModelId: string, nextModels: EditableModel[]) => {
+    if (!effectiveProviderKey || !providerName.trim() || !effectiveModelId) return;
+    if (customMode && !baseUrl.trim()) return;
+
+    const next = saveProviderConfig({
+      providerKey: effectiveProviderKey,
+      modelId: effectiveModelId,
+      apiKey,
+      baseUrl: baseUrl.trim() || undefined,
+      apiType: apiType.trim() || undefined,
+      name: providerName.trim(),
+      needsKey,
+      models: toStoredModels(nextModels),
+    }, allProviders);
+    await syncConfig(allProviders, next);
+    setSaveError('');
+    setSavedState('done');
+    setCustomMode(false);
+    setEditingProviderKey(null);
+  };
+
+  const discoverModels = async (options?: { silent?: boolean; force?: boolean; autoActivateFirst?: boolean }) => {
     const api = window.electronAPI as any;
     if (!api?.modelsDiscover || !baseUrl || !effectiveProviderKey) return;
 
+    const discoverKey = `${effectiveProviderKey}::${baseUrl.trim()}::${apiType.trim()}::${needsKey ? 'key' : 'nokey'}`;
+    if (!options?.force && options?.silent && lastAutoDiscoverKeyRef.current === discoverKey && discoverState === 'success') {
+      return;
+    }
+
     setDiscovering(true);
-    setDiscoverState('idle');
+    if (!options?.silent) setDiscoverState('idle');
     try {
       const result = await api.modelsDiscover({
         providerKey: effectiveProviderKey,
@@ -300,19 +346,46 @@ export default function Models() {
         const relevantDetectedModels = filterRelevantDiscoveredModels(editingProvider, models, detectedModels);
         const customModels = models.filter((model) => model.source === 'custom');
         const nextModels = mergeModels(relevantDetectedModels, customModels);
+        const firstDetectedModelId = relevantDetectedModels[0]?.id || '';
         setModels(nextModels);
-        if (!nextModels.some((model) => model.id === selectedModelId)) {
+        setDiscoveredModelIds(new Set(relevantDetectedModels.map((model) => model.id)));
+        if (options?.autoActivateFirst && firstDetectedModelId) {
+          setSelectedModelId(firstDetectedModelId);
+        } else if (!nextModels.some((model) => model.id === selectedModelId)) {
           setSelectedModelId(nextModels[0]?.id || '');
         }
         setDiscoverState(nextModels.length > 0 ? 'success' : 'error');
+        if (nextModels.length > 0) {
+          lastAutoDiscoverKeyRef.current = discoverKey;
+        }
+
+        if (options?.autoActivateFirst && firstDetectedModelId) {
+          const autoSaveKey = `${discoverKey}::${firstDetectedModelId}`;
+          if (lastAutoSavedKeyRef.current !== autoSaveKey) {
+            await persistProviderSelection(firstDetectedModelId, nextModels);
+            lastAutoSavedKeyRef.current = autoSaveKey;
+          }
+        }
       } else {
         setDiscoverState('error');
+        setDiscoveredModelIds(new Set());
       }
     } catch {
       setDiscoverState('error');
+      setDiscoveredModelIds(new Set());
     }
     setDiscovering(false);
   };
+
+  useEffect(() => {
+    if (!shouldAutoValidate) return;
+
+    const timer = setTimeout(() => {
+      void discoverModels({ silent: true, autoActivateFirst: true });
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [apiKey, baseUrl, effectiveProviderKey, apiType, needsKey, shouldAutoValidate]);
 
   const saveProvider = async () => {
     const effectiveModelId = selectedModelId || models[0]?.id || '';
@@ -321,20 +394,23 @@ export default function Models() {
     if (!effectiveProviderKey || !providerName.trim() || !effectiveModelId) return;
     if (customMode && !baseUrl.trim()) return;
 
-    saveProviderConfig({
-      providerKey: effectiveProviderKey,
-      modelId: effectiveModelId,
-      apiKey,
-      baseUrl: baseUrl.trim() || undefined,
-      apiType: apiType.trim() || undefined,
-      name: providerName.trim(),
-      needsKey,
-      models: toStoredModels(models),
-    }, allProviders);
-    await syncConfig(allProviders);
-    setSavedState('done');
-    setCustomMode(false);
-    setEditingProviderKey(null);
+    if (!selectedModelInCatalog) {
+      setSaveError(t('models.saveInvalidModel', 'Selected model is invalid. Please choose a model from the catalog.'));
+      return;
+    }
+
+    if (requiresStrictValidation) {
+      if (discoverState !== 'success') {
+        setSaveError(t('models.saveNeedsValidation', 'Endpoint not validated yet. Please wait for auto-check or click Refresh from OpenClaw.'));
+        return;
+      }
+      if (!selectedModelDiscovered) {
+        setSaveError(t('models.saveModelNotDiscovered', 'Model name is invalid for this endpoint. Please select a model returned by the auto-fetched list.'));
+        return;
+      }
+    }
+
+    await persistProviderSelection(effectiveModelId, models);
   };
 
   const saveDisabled = !effectiveProviderKey || !providerName.trim() || !models.length || !selectedModelId || (needsKey && !apiKey.trim()) || (customMode && !baseUrl.trim());
@@ -522,6 +598,11 @@ export default function Models() {
             )}
           >
             <div className="p-6 space-y-6">
+              {!!saveError && (
+                <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+                  {saveError}
+                </div>
+              )}
               <div className="rounded-2xl border border-slate-700 bg-slate-900/50 px-4 py-4">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>

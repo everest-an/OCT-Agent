@@ -169,10 +169,12 @@ function normalizeConfig(raw: Partial<AppConfig>): AppConfig {
       models: [],
     };
 
-    next.providerProfiles[next.providerKey] = {
+    const activeProfile: ProviderProfile = {
       ...existing,
-      apiKey: next.apiKey || existing.apiKey || '',
-      baseUrl: next.baseUrl || existing.baseUrl || '',
+      // For the active provider, keep providerProfiles as source-of-truth.
+      // This avoids stale top-level fields overriding freshly saved profile values.
+      apiKey: existing.apiKey || next.apiKey || '',
+      baseUrl: existing.baseUrl || next.baseUrl || '',
       models: existing.models || [],
       ...(existing.apiType ? { apiType: existing.apiType } : {}),
       ...(existing.name ? { name: existing.name } : {}),
@@ -182,6 +184,10 @@ function normalizeConfig(raw: Partial<AppConfig>): AppConfig {
       ...(typeof existing.needsKey === 'boolean' ? { needsKey: existing.needsKey } : {}),
       ...(existing.lastSyncedAt ? { lastSyncedAt: existing.lastSyncedAt } : {}),
     };
+
+    next.providerProfiles[next.providerKey] = activeProfile;
+    next.apiKey = activeProfile.apiKey || '';
+    next.baseUrl = activeProfile.baseUrl || '';
   }
 
   return next;
@@ -197,8 +203,9 @@ export function getProviderProfile(config: AppConfig, providerKey: string): Prov
   if (providerKey && providerKey === config.providerKey) {
     return {
       ...existing,
-      apiKey: config.apiKey || existing.apiKey || '',
-      baseUrl: config.baseUrl || existing.baseUrl || '',
+      // Prefer profile values to avoid regressing to stale top-level fields.
+      apiKey: existing.apiKey || config.apiKey || '',
+      baseUrl: existing.baseUrl || config.baseUrl || '',
       models: existing.models || [],
     };
   }
@@ -390,6 +397,22 @@ async function syncToOpenClaw(config: AppConfig, providers: ModelProviderDef[]) 
   }
 
   if (config.modelId) {
+    const activeProvider = providers.find((item) => item.key === config.providerKey);
+    const activeProfile = getProviderProfile(config, config.providerKey);
+    const profileModelIds = (activeProfile.models?.length
+      ? activeProfile.models
+      : getFallbackModels(config.providerKey, providers)
+    )
+      .map((model) => String(model.id || '').trim())
+      .filter(Boolean);
+
+    const selectedModelId = String(config.modelId || '').trim();
+    const fallbackModelId = profileModelIds[0] || activeProvider?.models[0]?.id || '';
+    const effectiveModelId = selectedModelId || fallbackModelId;
+    const normalizedModelId = effectiveModelId.includes('/')
+      ? effectiveModelId
+      : `${config.providerKey}/${effectiveModelId}`;
+
     openclawConfig.models = {
       providers: syncedProviders,
     };
@@ -397,7 +420,7 @@ async function syncToOpenClaw(config: AppConfig, providers: ModelProviderDef[]) 
     const reasoningDefault = config.reasoningDisplay && config.reasoningDisplay !== 'off' ? config.reasoningDisplay : 'on';
     openclawConfig.agents = {
       defaults: {
-        model: { primary: `${config.providerKey}/${config.modelId}` },
+        model: { primary: normalizedModelId },
         verboseDefault: 'full',
         thinkingDefault: config.thinkingLevel || 'low',
       },
@@ -413,6 +436,7 @@ async function syncToOpenClaw(config: AppConfig, providers: ModelProviderDef[]) 
 // React hook — all instances share state via CustomEvent
 export function useAppConfig() {
   const [config, setConfigState] = useState<AppConfig>(loadConfig);
+  const configRef = useRef<AppConfig>(config);
 
   // Listen for config changes from other components (e.g. Settings → Sidebar language sync)
   useEffect(() => {
@@ -421,25 +445,30 @@ export function useAppConfig() {
     return () => window.removeEventListener('awareness-config-changed', handler);
   }, []);
 
-  const updateConfig = useCallback((partial: Partial<AppConfig>) => {
-    setConfigState((prev) => {
-      const next = normalizeConfig({ ...prev, ...partial });
-      saveConfig(next);
-      return next;
-    });
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
+
+  const applyConfig = useCallback((updater: (prev: AppConfig) => AppConfig): AppConfig => {
+    const prev = normalizeConfig(configRef.current);
+    const next = updater(prev);
+    configRef.current = next;
+    saveConfig(next);
+    setConfigState(next);
+    return next;
   }, []);
 
-  const syncConfig = useCallback(async (providers: ModelProviderDef[]) => {
-    await syncToOpenClaw(loadConfig(), providers);
+  const updateConfig = useCallback((partial: Partial<AppConfig>) => {
+    return applyConfig((prev) => normalizeConfig({ ...prev, ...partial }));
+  }, [applyConfig]);
+
+  const syncConfig = useCallback(async (providers: ModelProviderDef[], nextConfig?: AppConfig) => {
+    await syncToOpenClaw(nextConfig || normalizeConfig(configRef.current), providers);
   }, []);
 
   const selectModel = useCallback((providerKey: string, modelId: string, providers: ModelProviderDef[]) => {
-    setConfigState((prev) => {
-      const next = selectProviderModel(normalizeConfig(prev), providerKey, modelId, providers);
-      saveConfig(next);
-      return next;
-    });
-  }, []);
+    return applyConfig((prev) => selectProviderModel(prev, providerKey, modelId, providers));
+  }, [applyConfig]);
 
   const saveProviderConfig = useCallback((input: {
     providerKey: string;
@@ -451,12 +480,8 @@ export function useAppConfig() {
     name?: string;
     needsKey?: boolean;
   }, providers: ModelProviderDef[]) => {
-    setConfigState((prev) => {
-      const next = saveProviderSelection(normalizeConfig(prev), input, providers);
-      saveConfig(next);
-      return next;
-    });
-  }, []);
+    return applyConfig((prev) => saveProviderSelection(prev, input, providers));
+  }, [applyConfig]);
 
   return { config, updateConfig, syncConfig, selectModel, saveProviderConfig };
 }
