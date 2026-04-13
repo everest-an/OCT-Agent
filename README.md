@@ -19,19 +19,48 @@
 AwarenessClaw's memory system is evaluated on **[LongMemEval](https://arxiv.org/abs/2410.10813)** — the industry standard benchmark for long-term conversational memory.
 
 ```
-Recall@1    77.6%    (388 / 500)
-Recall@3    91.8%    (459 / 500)
-Recall@5    95.6%    (478 / 500)    ◀ primary metric
-Recall@10   97.4%    (487 / 500)
+╔══════════════════════════════════════════════════════════════╗
+║   Awareness Memory — LongMemEval Benchmark Results           ║
+║                                                              ║
+║   Recall@1    77.6%       Recall@5    95.6%  ◀ PRIMARY       ║
+║   Recall@3    91.8%       Recall@10   97.4%                  ║
+║                                                              ║
+║   Method:     Hybrid RRF (BM25 + Vector)                     ║
+║   LLM Calls:  0       Hardware:  M1 8GB, 14 min             ║
+╚══════════════════════════════════════════════════════════════╝
 ```
 
-| System | Score | | Capability | R@5 |
-|--------|-------|-|------------|-----|
-| MemPalace | 96.6% | | Knowledge Update | **100%** |
-| **Awareness** | **95.6%** | | Multi-Session | **98.5%** |
-| OMEGA | 95.4% | | Temporal Reasoning | 94.7% |
-| Supermemory | 81.6% | | Preference Inference | 86.7% |
-| GPT-4o full | 60.6% | | | |
+```
+┌─────────────────────────────────────────────────────────────┐
+│          Long-Term Memory Retrieval — R@5 Leaderboard       │
+├─────────────────────────────────┬───────────┬───────────────┤
+│  System                         │  R@5      │  Note         │
+├─────────────────────────────────┼───────────┼───────────────┤
+│  MemPalace (ChromaDB raw)       │  96.6%    │  R@5 only *   │
+│  ★ Awareness Memory (Hybrid)    │  95.6%    │  Hybrid RRF   │
+│  OMEGA                          │  95.4%    │  QA Accuracy  │
+│  Supermemory                    │  81.6%    │  QA Accuracy  │
+│  Zep / Graphiti                 │  71.2%    │  QA Accuracy  │
+│  GPT-4o (full context)          │  60.6%    │  QA Accuracy  │
+├─────────────────────────────────┴───────────┴───────────────┤
+│  * MemPalace 96.6% is R@5 only, not QA Accuracy.           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│     R@5 by Question Type                                    │
+│                                                             │
+│  knowledge-update        ████████████████████████████ 100%  │
+│  multi-session           ███████████████████████████▋  98.5%│
+│  single-session-asst     ███████████████████████████▌  98.2%│
+│  temporal-reasoning      █████████████████████████▊    94.7%│
+│  single-session-user     ████████████████████████▎     88.6%│
+│  single-session-pref     ███████████████████████▏      86.7%│
+│                                                             │
+│  Overall                 █████████████████████████▉    95.6%│
+└─────────────────────────────────────────────────────────────┘
+```
 
 Zero LLM calls. Hybrid BM25+Vector retrieval. [Full benchmark details →](https://github.com/edwin-hao-ai/Awareness/tree/main/benchmarks/longmemeval)
 
