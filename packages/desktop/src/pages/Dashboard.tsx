@@ -240,18 +240,18 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
   };
   const lang = language?.replace(/^language-/, '') || '';
   return (
-    <div className="rounded-xl overflow-hidden border border-slate-700/60 my-2 text-xs">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-slate-800/80 border-b border-slate-700/50">
-        <span className="text-[10px] text-slate-500 font-mono uppercase tracking-wide">{lang || t('code.label', 'code')}</span>
+    <div className="chat-code-block rounded-xl overflow-hidden my-2 text-xs">
+      <div className="chat-code-block__header flex items-center justify-between px-3 py-1.5">
+        <span className="chat-code-block__lang text-[10px] font-mono uppercase tracking-wide">{lang || t('code.label', 'code')}</span>
         <button
           onClick={copyCode}
-          className="flex items-center gap-1 text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
+          className="chat-code-block__copy flex items-center gap-1 text-[10px] transition-colors"
         >
           {copied ? <><Check size={10} /> {t('common.copied', 'copied')}</> : <><Copy size={10} /> {t('common.copy', 'copy')}</>}
         </button>
       </div>
-      <pre className="bg-slate-950 p-3 overflow-x-auto leading-relaxed">
-        <code className={language}>{code}</code>
+      <pre className="chat-code-block__pre p-3 overflow-x-auto leading-relaxed">
+        <code className={`${language || ''} chat-code-block__code`}>{code}</code>
       </pre>
     </div>
   );
@@ -442,14 +442,14 @@ function TypewriterMessage({ content, isNew }: { content: string; isNew: boolean
   const text = isNew ? displayed : content;
 
   return (
-    <div className="prose prose-sm max-w-none dark:prose-invert">
+    <div className="chat-markdown prose prose-sm max-w-none dark:prose-invert">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
           code({ children, className, ...props }) {
             const isInline = !className;
             if (isInline) {
-              return <code className="px-1.5 py-0.5 bg-slate-700/80 rounded text-brand-300 text-[12px]" {...props}>{children}</code>;
+              return <code className="chat-inline-code px-1.5 py-0.5 rounded text-[12px]" {...props}>{children}</code>;
             }
             return <CodeBlock code={String(children).replace(/\n$/, '')} language={className} />;
           },
@@ -460,9 +460,9 @@ function TypewriterMessage({ content, isNew }: { content: string; isNew: boolean
           h2({ children }) { return <h4 className="text-sm font-bold mb-2 mt-3">{children}</h4>; },
           h3({ children }) { return <h5 className="text-sm font-semibold mb-1.5 mt-2">{children}</h5>; },
           blockquote({ children }) { return <blockquote className="border-l-2 border-brand-500/40 pl-3 text-slate-400 italic my-2">{children}</blockquote>; },
-          table({ children }) { return <div className="overflow-x-auto my-3"><table className="text-xs w-full border-collapse">{children}</table></div>; },
-          th({ children }) { return <th className="px-3 py-1.5 bg-slate-800 text-left font-medium border border-slate-700/50">{children}</th>; },
-          td({ children }) { return <td className="px-3 py-1.5 border border-slate-700/30">{children}</td>; },
+          table({ children }) { return <div className="overflow-x-auto my-3"><table className="chat-md-table text-xs w-full border-collapse">{children}</table></div>; },
+          th({ children }) { return <th className="chat-md-th px-3 py-1.5 text-left font-medium">{children}</th>; },
+          td({ children }) { return <td className="chat-md-td px-3 py-1.5">{children}</td>; },
         }}
       >
         {text}
@@ -575,6 +575,33 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
   const { providers: allProviders } = useDynamicProviders();
   const currentProvider = allProviders.find(p => p.key === config.providerKey);
   const projectRootName = projectRoot.split(/[/\\]/).filter(Boolean).pop() || '';
+  const modelSyncRepairAttemptedRef = useRef(false);
+
+  // Runtime self-heal: if OpenClaw lost model config (for example after reinstall/cache cleanup),
+  // re-sync from the current user-selected Desktop config. Do not hardcode any provider/model.
+  useEffect(() => {
+    if (modelSyncRepairAttemptedRef.current) return;
+    if (!config.providerKey || !config.modelId) return;
+    if (!allProviders.length) return;
+    if (!window.electronAPI) return;
+
+    const api = window.electronAPI as any;
+    if (!api.modelsReadProviders) return;
+
+    modelSyncRepairAttemptedRef.current = true;
+
+    void (async () => {
+      try {
+        const status = await api.modelsReadProviders();
+        const primaryModel = String(status?.primaryModel || '').trim();
+        if (!primaryModel) {
+          await syncConfig(allProviders);
+        }
+      } catch {
+        // Keep silent in UI. User can still continue with current local config.
+      }
+    })();
+  }, [allProviders, config.modelId, config.providerKey, syncConfig]);
 
   // Ensure active session exists
   useEffect(() => {
@@ -1386,6 +1413,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
       const result = await (window.electronAPI as any).chatSend(trimmed, activeSessionId, {
         thinkingLevel: config.thinkingLevel || 'low',
         reasoningDisplay: config.reasoningDisplay || 'on',
+        model: `${config.providerKey}/${config.modelId}`,
         files: filePaths,
         workspacePath: projectRoot || undefined,
         agentId: options?.targetAgentId || config.selectedAgentId || 'main',
@@ -1675,11 +1703,11 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
   };
 
   const renderStreamingContent = useCallback((content: string) => (
-    <div className="prose prose-sm max-w-none dark:prose-invert">
+    <div className="chat-markdown prose prose-sm max-w-none dark:prose-invert">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
         code({ children, className }) {
           const isInline = !className;
-          if (isInline) return <code className="px-1.5 py-0.5 bg-slate-700/80 rounded text-brand-300 text-[12px]">{children}</code>;
+          if (isInline) return <code className="chat-inline-code px-1.5 py-0.5 rounded text-[12px]">{children}</code>;
           return <CodeBlock code={String(children).replace(/\n$/, '')} language={className} />;
         },
         p({ children }) { return <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>; },
@@ -1797,8 +1825,10 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
           onToggleModelSelector={() => setShowModelSelector(!showModelSelector)}
           onCloseModelSelector={() => setShowModelSelector(false)}
           onNavigateModels={() => onNavigate?.('models')}
-          onSelectModel={(providerKey, modelId) => selectModel(providerKey, modelId, allProviders)}
-          onSyncConfig={() => { void syncConfig(allProviders); }}
+          onSelectModel={(providerKey, modelId) => {
+            const next = selectModel(providerKey, modelId, allProviders);
+            void syncConfig(allProviders, next);
+          }}
           onOpenDashboard={() => { void openDashboard('chat-dashboard'); }}
           dashboardOpening={isOpening('chat-dashboard')}
         />

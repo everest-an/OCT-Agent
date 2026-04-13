@@ -260,6 +260,12 @@ export function registerChatHandlers(deps: {
     };
 
     const requestedOptions: ChatSendOptions = options ? { ...options } : {};
+    const requestedModelRef = typeof requestedOptions.model === 'string'
+      ? requestedOptions.model.trim()
+      : '';
+    const sanitizedModelRef = requestedModelRef && /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:-]*$/i.test(requestedModelRef)
+      ? requestedModelRef
+      : '';
 
     // Agent routing is done via the session key format, not a separate agentId param.
     // Gateway session keys: agent:<agentId>:main (operator), agent:<agentId>:webchat:<id> (desktop).
@@ -867,6 +873,17 @@ ${message}`;
 
       ws.on('event:chat', chatEventHandler);
       send('chat:status', { type: 'thinking' });
+
+      if (sanitizedModelRef) {
+        // OpenClaw official flow: model switch is a session override via sessions.patch,
+        // not a chat.send payload field.
+        try {
+          await ws.sessionPatch(sid, { model: sanitizedModelRef });
+        } catch {
+          // Best-effort compatibility with older Gateway builds.
+          try { await ws.sessionPatch(sid, { modelRef: sanitizedModelRef }); } catch { /* best-effort */ }
+        }
+      }
 
       await ws.chatSend(sid, fullMessage, {
         thinking: requestedOptions.thinkingLevel && requestedOptions.thinkingLevel !== 'off' ? requestedOptions.thinkingLevel : undefined,

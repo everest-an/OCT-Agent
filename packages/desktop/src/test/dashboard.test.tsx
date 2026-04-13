@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import Dashboard from '../pages/Dashboard';
 
+const TRACE_HEADER_RE = /Thinking & tools|思考与工具|detail\(s\)|详情/;
+const THOUGHT_LABEL_RE = /Thinking process|Thinking…|Thinking\.\.\.|Thought process|思考过程|思考|思路/;
+
 describe('Dashboard (Chat)', () => {
   let onChannelMessageCallback: ((msg: { sessionKey: string; message: any }) => void) | null = null;
 
@@ -40,6 +43,37 @@ describe('Dashboard (Chat)', () => {
   it('renders input area', async () => {
     await act(async () => { render(<Dashboard />); });
     expect(screen.getByPlaceholderText(/输入消息/)).toBeInTheDocument();
+  });
+
+  it('repairs missing runtime model config by syncing current user config (not hardcoded model)', async () => {
+    localStorage.setItem('awareness-claw-config', JSON.stringify({
+      language: 'zh',
+      providerKey: 'qwen-portal',
+      modelId: 'qwen-turbo-latest',
+      bootstrapCompleted: true,
+      providerProfiles: {
+        'qwen-portal': {
+          apiKey: 'qwen-key',
+          baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+          models: [{ id: 'qwen-turbo-latest', label: 'Qwen Turbo' }],
+        },
+      },
+    }));
+
+    const api = window.electronAPI as any;
+    const saveConfigMock = vi.fn().mockResolvedValue({ success: true });
+    api.saveConfig = saveConfigMock;
+    api.modelsReadProviders = vi.fn().mockResolvedValue({ success: true, providers: [], primaryModel: '' });
+
+    await act(async () => { render(<Dashboard />); });
+
+    await waitFor(() => {
+      expect(saveConfigMock).toHaveBeenCalled();
+    });
+
+    const payload = saveConfigMock.mock.calls.at(-1)?.[0] || {};
+    expect(payload?.agents?.defaults?.model?.primary).toBe('qwen/qwen-turbo-latest');
+    expect(payload?.agents?.defaults?.model?.primary).not.toBe('openai/gpt-5.4');
   });
 
   it('opens session sidebar from header toggle', async () => {
@@ -505,15 +539,19 @@ describe('Dashboard (Chat)', () => {
       thinkingCallback?.('step 1\nstep 2');
     });
 
-    expect(screen.getAllByText(/Thinking process|思考过程/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(THOUGHT_LABEL_RE).length).toBeGreaterThan(0);
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole('button', { name: THOUGHT_LABEL_RE })[0]);
+    });
+
     expect(screen.getAllByText(/step 1\s*step 2/).length).toBeGreaterThan(0);
 
     await act(async () => {
       statusCallback?.({ type: 'generating' });
     });
 
-    expect(screen.getAllByText(/step 1\s*step 2/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Thinking & tools|思考与工具/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(THOUGHT_LABEL_RE).length).toBeGreaterThan(0);
 
     await act(async () => {
       resolveChat?.({ success: true, text: 'done', sessionId: 'test-session' });
@@ -600,7 +638,7 @@ describe('Dashboard (Chat)', () => {
 
     await act(async () => { render(<Dashboard />); });
 
-    expect(screen.getByText(/Thinking & tools|思考与工具/)).toBeInTheDocument();
+    expect(screen.getAllByText(/awareness_recall|Awareness Memory/).length).toBeGreaterThan(0);
   });
 
   it('hides raw gateway debug noise and finalizes active tool calls on successful completion', async () => {
@@ -635,11 +673,25 @@ describe('Dashboard (Chat)', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getAllByText(/Thinking & tools|思考与工具/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(TRACE_HEADER_RE).length).toBeGreaterThan(0);
+      expect(screen.queryByText(/\[gw:tool\.exec\.started\]/)).not.toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole('button', { name: TRACE_HEADER_RE })[0]);
+    });
+
+    await waitFor(() => {
       expect(screen.getAllByText(/Gateway started in app session/).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/open https:\/\/google.com/).length).toBeGreaterThan(0);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole('button', { name: THOUGHT_LABEL_RE })[0]);
+    });
+
+    await waitFor(() => {
       expect(screen.getAllByText(/先检查是否可以调用浏览器工具/).length).toBeGreaterThan(0);
-      expect(screen.queryByText(/\[gw:tool\.exec\.started\]/)).not.toBeInTheDocument();
     });
 
     await act(async () => {
@@ -648,8 +700,7 @@ describe('Dashboard (Chat)', () => {
 
     await waitFor(() => {
       expect(screen.getByText('done')).toBeInTheDocument();
-      expect(screen.getAllByText(/Thinking & tools|思考与工具/).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/Gateway started in app session/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(TRACE_HEADER_RE).length).toBeGreaterThan(0);
     });
 
     const sessions = JSON.parse(localStorage.getItem('awareness-claw-sessions') || '[]');
@@ -754,14 +805,17 @@ describe('Dashboard (Chat)', () => {
       expect(screen.getByText('Done.')).toBeInTheDocument();
     });
 
+    await waitFor(() => {
+      expect(screen.getAllByText(/filePath: \/tmp\/demo\.txt/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/file contents/).length).toBeGreaterThan(0);
+    });
+
     await act(async () => {
-      fireEvent.click(screen.getByText(/Thinking & tools|思考与工具/));
+      fireEvent.click(screen.getAllByRole('button', { name: THOUGHT_LABEL_RE })[0]);
     });
 
     await waitFor(() => {
       expect(screen.getAllByText(/inspect files first/).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/filePath: \/tmp\/demo\.txt/).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/file contents/).length).toBeGreaterThan(0);
     });
   });
 
@@ -803,7 +857,7 @@ describe('Dashboard (Chat)', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getAllByText(/Thinking & tools|思考与工具/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(TRACE_HEADER_RE).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/pwd/).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/\/tmp\/project/).length).toBeGreaterThan(0);
     });
@@ -842,7 +896,7 @@ describe('Dashboard (Chat)', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getAllByText(/inspect files before editing/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(THOUGHT_LABEL_RE).length).toBeGreaterThan(0);
     });
 
     await act(async () => {
@@ -877,14 +931,16 @@ describe('Dashboard (Chat)', () => {
     });
 
     expect(screen.getByText('▊')).toBeInTheDocument();
-    expect(screen.getAllByText(/Assistant streaming|流式输出/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/partial answer/)).toBeInTheDocument();
 
     await act(async () => {
       streamEndCallback?.();
     });
 
-    expect(screen.queryByText('▊')).not.toBeInTheDocument();
-    expect(screen.getAllByText(/Assistant stream complete|流已完成/).length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(screen.queryByText('▊')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/partial answer/)).toBeInTheDocument();
 
     await act(async () => {
       resolveChat?.({ success: true, text: 'partial answer', sessionId: 'test-session' });
@@ -918,7 +974,7 @@ describe('Dashboard (Chat)', () => {
     });
 
     await act(async () => {
-      fireEvent.click(screen.getAllByText(/Thinking & tools|思考与工具/)[0]);
+      fireEvent.click(screen.getAllByText(TRACE_HEADER_RE)[0]);
     });
 
     expect(screen.getAllByText(/Agent status|代理状态/).length).toBe(1);

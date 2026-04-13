@@ -30,7 +30,6 @@ export function DashboardHeader({
   onCloseModelSelector,
   onNavigateModels,
   onSelectModel,
-  onSyncConfig,
   onOpenDashboard,
   dashboardOpening,
 }: {
@@ -48,7 +47,6 @@ export function DashboardHeader({
   onCloseModelSelector: () => void;
   onNavigateModels: () => void;
   onSelectModel: (providerKey: string, modelId: string) => void;
-  onSyncConfig: () => void;
   onOpenDashboard: () => void;
   dashboardOpening: boolean;
 }) {
@@ -120,7 +118,6 @@ export function DashboardHeader({
                             return;
                           }
                           onSelectModel(provider.key, model.id);
-                          onSyncConfig();
                           onCloseModelSelector();
                         }}
                         className={`w-full text-left px-4 py-1.5 text-xs transition-colors ${

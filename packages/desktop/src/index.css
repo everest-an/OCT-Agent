@@ -582,3 +582,104 @@
   }
 }
 
+/* Chat markdown styles (OpenClaw-style centralized theme layer) */
+.chat-markdown :where(code) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+}
+
+.chat-inline-code {
+  background: rgb(51 65 85 / 0.8);
+  color: rgb(125 211 252);
+  border: 1px solid rgb(100 116 139 / 0.45);
+}
+
+.chat-code-block {
+  border: 1px solid rgb(51 65 85 / 0.7);
+}
+
+.chat-code-block__header {
+  background: rgb(30 41 59 / 0.8);
+  border-bottom: 1px solid rgb(51 65 85 / 0.6);
+}
+
+.chat-code-block__lang,
+.chat-code-block__copy {
+  color: rgb(148 163 184);
+}
+
+.chat-code-block__copy:hover {
+  color: rgb(226 232 240);
+}
+
+.chat-code-block__pre {
+  background: rgb(2 6 23);
+  color: rgb(241 245 249);
+}
+
+.chat-code-block__code {
+  color: inherit;
+}
+
+.chat-md-table {
+  color: rgb(226 232 240);
+}
+
+.chat-md-th,
+.chat-md-td {
+  border: 1px solid rgb(71 85 105 / 0.55);
+}
+
+.chat-md-th {
+  background: rgb(30 41 59 / 0.9);
+}
+
+.chat-md-td {
+  background: transparent;
+}
+
+:root:not(.dark) .chat-inline-code {
+  background: rgb(15 23 42 / 0.08);
+  color: rgb(30 41 59);
+  border-color: rgb(15 23 42 / 0.12);
+}
+
+:root:not(.dark) .chat-code-block {
+  border-color: rgb(148 163 184 / 0.4);
+}
+
+:root:not(.dark) .chat-code-block__header {
+  background: rgb(241 245 249);
+  border-bottom-color: rgb(148 163 184 / 0.35);
+}
+
+:root:not(.dark) .chat-code-block__lang,
+:root:not(.dark) .chat-code-block__copy {
+  color: rgb(71 85 105);
+}
+
+:root:not(.dark) .chat-code-block__copy:hover {
+  color: rgb(15 23 42);
+}
+
+:root:not(.dark) .chat-code-block__pre {
+  background: rgb(248 250 252);
+  color: rgb(30 41 59);
+}
+
+:root:not(.dark) .chat-md-table {
+  color: rgb(30 41 59);
+}
+
+:root:not(.dark) .chat-md-th,
+:root:not(.dark) .chat-md-td {
+  border-color: rgb(148 163 184 / 0.35);
+}
+
+:root:not(.dark) .chat-md-th {
+  background: rgb(241 245 249);
+}
+
+:root:not(.dark) .chat-md-td {
+  background: rgb(255 255 255);
+}
+

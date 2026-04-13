@@ -288,7 +288,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
       setValidationError('');
     }
 
-    saveProviderConfig({
+    const next = saveProviderConfig({
       providerKey: selectedProvider,
       modelId: selectedModel,
       apiKey,
@@ -302,7 +302,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
         name: model.label,
       })),
     }, PROVIDERS);
-    await syncConfig(PROVIDERS);
+    await syncConfig(PROVIDERS, next);
     setStep('memory');
   };
 
@@ -543,7 +543,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                                 onClick={() => {
                                   setValidationError('');
                                   const prov = PROVIDERS.find((p) => p.key === selectedProvider);
-                                  saveProviderConfig({
+                                  const next = saveProviderConfig({
                                     providerKey: selectedProvider!,
                                     modelId: selectedModel,
                                     apiKey,
@@ -557,7 +557,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                                       name: model.label,
                                     })),
                                   }, PROVIDERS);
-                                  syncConfig(PROVIDERS);
+                                  void syncConfig(PROVIDERS, next);
                                   setStep('memory');
                                 }}
                                 className="text-xs text-slate-400 hover:text-slate-200 underline mt-1"

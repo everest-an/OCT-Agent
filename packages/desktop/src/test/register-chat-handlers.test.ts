@@ -21,6 +21,7 @@ import { registerChatHandlers } from '../../electron/ipc/register-chat-handlers'
 
 class FakeGatewayClient extends EventEmitter {
   isConnected = true;
+  sessionPatch = vi.fn(async () => ({ ok: true }));
   chatSend = vi.fn(async () => ({ status: 'started' }));
   chatAbort = vi.fn(async () => undefined);
   chatHistory: ReturnType<typeof vi.fn> = vi.fn(async () => [] as any[]);
@@ -161,7 +162,8 @@ describe('registerChatHandlers', () => {
 
     expect(result).toMatchObject({ success: true, text: 'gateway recovered reply', sessionId: 'test-session' });
     expect(getGatewayWs).toHaveBeenCalled();
-    expect(getGatewayWs.mock.calls[0]?.[0]).toMatchObject({
+    const firstGatewayWsCall = getGatewayWs.mock.calls[0] as unknown[] | undefined;
+    expect(firstGatewayWsCall?.[0]).toMatchObject({
       onPairingRepairStart: expect.any(Function),
       onPairingRepair: expect.any(Function),
     });
@@ -169,6 +171,45 @@ describe('registerChatHandlers', () => {
     expect(sendToRenderer).toHaveBeenCalledWith(
       'chat:status',
       expect.objectContaining({ message: 'Gateway recovered. Sending this message through fast mode.' }),
+    );
+  });
+
+  it('patches session model before chatSend so the current session can switch models', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: { role: 'assistant', content: 'switched model in-session' },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    registerChatHandlers({
+      sendToRenderer: vi.fn(),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, 'continue in same session', 'test-session', {
+      model: 'openai/gpt-4o',
+    });
+
+    expect(result).toMatchObject({ success: true, text: 'switched model in-session', sessionId: 'test-session' });
+    expect(ws.sessionPatch).toHaveBeenCalledWith('test-session', { model: 'openai/gpt-4o' });
+    expect(ws.chatSend).toHaveBeenCalledWith(
+      'test-session',
+      expect.any(String),
+      expect.not.objectContaining({ model: expect.anything() }),
     );
   });
 
