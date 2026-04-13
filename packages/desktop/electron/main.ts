@@ -1152,6 +1152,49 @@ function discoverOpenClawChannels(): void {
 
 // --- Channel Conversations (Unified Inbox) ---
 
+function parseLatestPairingSelection(raw: string): { requestId?: string; approveCommand?: string } {
+  const text = String(raw || '').trim();
+  if (!text) return {};
+
+  const jsonStart = text.indexOf('{');
+  if (jsonStart >= 0) {
+    try {
+      const parsed = JSON.parse(text.slice(jsonStart));
+      return {
+        requestId: parsed?.selected?.requestId,
+        approveCommand: parsed?.approveCommand,
+      };
+    } catch {
+      // Fall through to plain-text parsing.
+    }
+  }
+
+  const plainMatch = text.match(/Selected pending device request\s+([a-f0-9-]{20,})/i);
+  return { requestId: plainMatch?.[1] };
+}
+
+function looksLikePairingAuthError(message: string): boolean {
+  return /pairing required|pairing-required|device-required|needs local authorization|device authorization|scope-upgrade/i.test(String(message || ''));
+}
+
+async function tryRepairGatewayPairing(): Promise<boolean> {
+  const latestRaw = await runAsync('openclaw devices approve --latest --json 2>&1', 30000).catch(() => '');
+  const latest = parseLatestPairingSelection(latestRaw);
+
+  if (latest.approveCommand) {
+    const output = await runAsync(`${latest.approveCommand} 2>&1`, 30000).catch(() => '');
+    if (/Approved\s+/i.test(output || '')) return true;
+  }
+
+  if (latest.requestId) {
+    const output = await runAsync(`openclaw devices approve ${latest.requestId} 2>&1`, 30000).catch(() => '');
+    if (/Approved\s+/i.test(output || '')) return true;
+  }
+
+  const legacyOutput = await runAsync('openclaw devices approve --latest 2>&1', 30000).catch(() => '');
+  return /Approved\s+/i.test(legacyOutput || '');
+}
+
 /**
  * Get or create a persistent Gateway WS client for channel session queries.
  * Lazy-connects on first use, auto-reconnects on disconnect.
@@ -1186,7 +1229,7 @@ async function getGatewayWs(options?: { onPairingRepairStart?: () => void; onPai
         await gatewayWsClient!.connect();
       } catch (err: any) {
         const message = err?.message || '';
-        if (!/pairing required/i.test(message)) throw err;
+        if (!looksLikePairingAuthError(message)) throw err;
 
         options?.onPairingRepairStart?.();
 
@@ -1197,8 +1240,8 @@ async function getGatewayWs(options?: { onPairingRepairStart?: () => void; onPai
           });
         }
 
-        const approvalOutput = await runAsync('openclaw devices approve --latest 2>&1', 30000).catch(() => '');
-        if (!/Approved\s+/i.test(approvalOutput || '')) {
+        const repaired = await tryRepairGatewayPairing();
+        if (!repaired) {
           throw err;
         }
 
@@ -1215,9 +1258,9 @@ async function getGatewayWs(options?: { onPairingRepairStart?: () => void; onPai
           await gatewayWsClient!.warmUpWriteScopes();
         } catch (scopeErr: any) {
           const scopeMsg = scopeErr?.message || '';
-          if (/pairing required/i.test(scopeMsg)) {
-            const approvalOutput = await runAsync('openclaw devices approve --latest 2>&1', 30000).catch(() => '');
-            if (/Approved\s+/i.test(approvalOutput || '')) {
+          if (looksLikePairingAuthError(scopeMsg)) {
+            const repaired = await tryRepairGatewayPairing();
+            if (repaired) {
               try {
                 await gatewayWsClient!.warmUpWriteScopes();
               } catch {
