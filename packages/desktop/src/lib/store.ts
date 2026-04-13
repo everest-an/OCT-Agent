@@ -365,12 +365,9 @@ async function syncToOpenClaw(config: AppConfig, providers: ModelProviderDef[]) 
   for (const providerKey of providerKeys) {
     const provider = providers.find((item) => item.key === providerKey);
     const profile = getProviderProfile(config, providerKey);
-    // Only write baseUrl to openclaw.json when the user explicitly overrode the default.
-    // Built-in providers (OpenAI, Anthropic, Qwen, etc.) have auto-resolved endpoints
-    // inside OpenClaw — writing the hardcoded default would shadow future upstream changes.
-    const userBaseUrl = profile.baseUrl || '';
-    const hardcodedBaseUrl = provider?.baseUrl || '';
-    const isCustomBaseUrl = userBaseUrl && userBaseUrl !== hardcodedBaseUrl;
+    // OpenClaw schema requires baseUrl to be a non-empty string for every provider entry.
+    // Use user-customized value if set, otherwise fall back to the hardcoded default.
+    const effectiveBaseUrl = profile.baseUrl || provider?.baseUrl || '';
     const effectiveApiKey = profile.apiKey || '';
     const effectiveModels = (profile.models?.length ? profile.models : getFallbackModels(providerKey, providers))
       .map((model) => ({
@@ -382,10 +379,10 @@ async function syncToOpenClaw(config: AppConfig, providers: ModelProviderDef[]) 
         input: Array.isArray(model.input) && model.input.length > 0 ? model.input : ['text'],
       }));
 
-    if (!isCustomBaseUrl && effectiveModels.length === 0 && !effectiveApiKey) continue;
+    if (!effectiveBaseUrl && effectiveModels.length === 0 && !effectiveApiKey) continue;
 
     syncedProviders[providerKey] = {
-      ...(isCustomBaseUrl ? { baseUrl: userBaseUrl } : {}),
+      ...(effectiveBaseUrl ? { baseUrl: effectiveBaseUrl } : {}),
       ...(effectiveApiKey ? { apiKey: effectiveApiKey } : {}),
       ...(profile.apiType || provider?.apiType ? { api: profile.apiType || provider?.apiType } : {}),
       ...(effectiveModels.length > 0 ? { models: effectiveModels } : {}),

@@ -140,12 +140,11 @@ describe('Config sync (useAppConfig)', () => {
     const payload = saveConfigMock.mock.calls[0][0];
     expect(payload.plugins.allow).toEqual(expect.arrayContaining(['openclaw-memory', 'browser']));
     expect(payload.models.providers['qwen']).toBeDefined();
-    // baseUrl should NOT be written when it matches the hardcoded default
-    expect(payload.models.providers['qwen'].baseUrl).toBeUndefined();
+    // baseUrl is always written (OpenClaw schema requires it)
+    expect(payload.models.providers['qwen'].baseUrl).toBe('https://dashscope.aliyuncs.com/compatible-mode/v1');
     expect(payload.models.providers.openai).toBeDefined();
     expect(payload.models.providers.openai.apiKey).toBe('openai-key');
-    // openai baseUrl also matches default — should not be written
-    expect(payload.models.providers.openai.baseUrl).toBeUndefined();
+    expect(payload.models.providers.openai.baseUrl).toBe('https://api.openai.com/v1');
     expect(payload.agents.defaults.model.primary).toBe('qwen/qwen-turbo-latest');
   });
 });
