@@ -14,6 +14,27 @@
 - **Auto Upgrade**: Follows OpenClaw releases automatically.
 - **Cross-Platform**: Windows, macOS, Linux.
 
+## Benchmark: LongMemEval (ICLR 2025)
+
+AwarenessClaw's memory system is evaluated on **[LongMemEval](https://arxiv.org/abs/2410.10813)** — the industry standard benchmark for long-term conversational memory.
+
+```
+Recall@1    77.6%    (388 / 500)
+Recall@3    91.8%    (459 / 500)
+Recall@5    95.6%    (478 / 500)    ◀ primary metric
+Recall@10   97.4%    (487 / 500)
+```
+
+| System | Score | | Capability | R@5 |
+|--------|-------|-|------------|-----|
+| MemPalace | 96.6% | | Knowledge Update | **100%** |
+| **Awareness** | **95.6%** | | Multi-Session | **98.5%** |
+| OMEGA | 95.4% | | Temporal Reasoning | 94.7% |
+| Supermemory | 81.6% | | Preference Inference | 86.7% |
+| GPT-4o full | 60.6% | | | |
+
+Zero LLM calls. Hybrid BM25+Vector retrieval. [Full benchmark details →](https://github.com/edwin-hao-ai/Awareness/tree/main/benchmarks/longmemeval)
+
 ## Quick Start
 
 ### Option 1: Desktop App (Recommended)
