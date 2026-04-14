@@ -22,6 +22,7 @@
 
 ### P1 回归修复（2026-04-11 记录）
 
+- [ ] **Qwen 模型污染（未修复，根因已确认，2026-04-15）**：当前问题不是“单机环境异常”，而是产品链路缺陷；当上游 OpenAI-compatible `/models` 返回混合模型池（例如 `vanchin/deepseek-*`、`MiniMax/*` 与 `qwen*` 同时出现）时，桌面端模型发现流程会在缺少 provider-model 一致性校验的情况下把不属于 qwen 家族的模型写入 `models.providers.qwen.models`，并在 silent discover/autoActivateFirst 场景自动落盘，导致 `agents.defaults.model.primary` 被污染或在后续运行中被错误回写。该问题会表现为“Qwen key 正确但界面/实际路由显示 DeepSeek”；同版本同 API key 在不同机器是否复现，取决于是否触发自动发现写回、当时 `/models` 返回顺序、以及本地历史配置状态，不影响根因归属。影响面：`Models.tsx` 的 discover + autoActivateFirst + persistProviderSelection + syncConfig 链路，以及运行时 `openclaw.json` 持久化一致性。验收标准：保存前强制 provider-model 校验（qwen 仅允许 `qwen|wan|qwq` 前缀）、禁用 silent 自动首项落盘、发现混合池时仅提示不写盘，并补充回归测试覆盖“混合返回不污染配置”。
 - [ ] **Signal 重复加载路径清理**：`plugins.load.paths` 同时存在 `~/.awareness-claw/openclaw-runtime/.../signal`（桌面端捆绑旧 runtime）与 `~/.npm-global/.../signal`（当前 OpenClaw stock）两条路径，导致重复加载并发生覆盖；需从 `plugins.load.paths` 移除旧的 `~/.awareness-claw` Signal 路径，仅保留当前 runtime/stock 来源。
 - [ ] **WhatsApp 全局旧插件卸载**：OpenClaw 2026.4.10 stock 已内置 `whatsapp`，但 `~/.openclaw/extensions/whatsapp` 仍存在独立安装的 `@openclaw/whatsapp@2026.2.9`（旧），会覆盖 stock；需卸载该旧 global whatsapp 扩展并验证 stock 插件生效。
 
