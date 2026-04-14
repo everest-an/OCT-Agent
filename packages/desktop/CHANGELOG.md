@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.1] - 2026-04-14
+
+### Fixed
+- **Zombie gateway processes auto-cleanup**: When a previous OpenClaw gateway crashed mid-startup or was orphaned (process alive but not bound to port 18789), the app would incorrectly treat it as "healthy" and skip starting a real gateway, causing chat to hang. Now detects and SIGKILLs zombie gateway PIDs before spawning a fresh instance.
+- Test isolation: enabled `fileParallelism: false` in vitest to eliminate cross-file state races (localStorage / window.electronAPI). Previously 4 models.test.tsx tests failed intermittently under parallel execution.
+
 ## [0.3.0] - 2026-04-14
 
 ### Fixed

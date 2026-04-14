@@ -391,36 +391,104 @@ function isGatewaySnapshotHealthy(snapshot: GatewayStatusSnapshot | null): boole
 }
 
 /**
- * Detect whether an OpenClaw gateway process is already running on this machine
- * by inspecting running processes' command lines.  This catches gateways in the
- * plugin-loading phase (port not yet bound) — exactly the window where HTTP/TCP
- * probes fail and startGatewayInUserSession would otherwise spawn a competing
- * second instance that fights the existing one via --force.
+ * List all gateway process PIDs (command line matches `gateway run`).
+ * Used by isGatewayProcessAlive and killZombieGatewayProcesses.
  */
-async function isGatewayProcessAlive(): Promise<boolean> {
+async function listGatewayProcessPids(): Promise<number[]> {
   try {
     if (process.platform === 'win32') {
-      // Use `tasklist /FI` which is available on all Windows 10/11 versions
-      // (wmic is deprecated and removed in Windows 11 24H2+).
-      // Filter: node.exe images whose window title or PID exist + post-filter
-      // command line via PowerShell Get-CimInstance (tasklist alone cannot filter
-      // by command line).  We use the lightweight CIM query directly.
       const output = await readShellOutputAsync(
         'powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"Name=\'node.exe\'\\" | Where-Object { $_.CommandLine -match \'gateway.*run\' } | Select-Object -ExpandProperty ProcessId" 2>NUL',
         8000,
       );
-      return /\d+/.test((output || '').trim());
+      return (output || '').split(/\r?\n/).map(s => parseInt(s.trim(), 10)).filter(n => Number.isFinite(n) && n > 0);
     }
-    // macOS / Linux — match "gateway" and "run" anywhere in the command line.
-    // The actual process is `node --stack-size=8192 /path/to/openclaw/dist/index.js gateway run`
-    // so we match "gateway" + "run" (not "openclaw" as the binary name).
+    const output = await readShellOutputAsync('pgrep -af "gateway.*run" 2>/dev/null || true', 5000);
+    const pids: number[] = [];
+    for (const line of (output || '').split('\n')) {
+      if (!line.trim() || line.includes('pgrep')) continue;
+      const match = line.match(/^(\d+)\s/);
+      if (match) pids.push(parseInt(match[1], 10));
+    }
+    return pids;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Check whether a given PID is bound to port 18789 (the gateway loopback port).
+ * A gateway process that exists but doesn't listen on 18789 is a zombie.
+ */
+async function isPidListeningOnGatewayPort(pid: number): Promise<boolean> {
+  try {
+    if (process.platform === 'win32') {
+      // netstat -ano | findstr :18789 → lines end with the PID
+      const output = await readShellOutputAsync('netstat -ano -p TCP | findstr "LISTENING" | findstr ":18789"', 5000);
+      const pattern = new RegExp(`\\s${pid}\\s*$`, 'm');
+      return pattern.test(output || '');
+    }
+    // lsof -iTCP:18789 -sTCP:LISTEN -P -n -a -p <pid>
     const output = await readShellOutputAsync(
-      'pgrep -af "gateway.*run" 2>/dev/null || true',
+      `lsof -iTCP:18789 -sTCP:LISTEN -P -n -a -p ${pid} 2>/dev/null || true`,
       5000,
     );
-    // Exclude our own pgrep process (pgrep -af includes itself in some shells)
-    const lines = (output || '').split('\n').filter(l => l.trim() && !l.includes('pgrep'));
-    return lines.length > 0;
+    return (output || '').includes(`:18789`);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Kill zombie gateway processes: processes matching `gateway run` in cmdline
+ * but NOT listening on port 18789. These happen when a previous gateway
+ * crashed mid-startup or was orphaned by a failed upgrade/restart.
+ *
+ * Returns the list of zombie PIDs killed.
+ */
+async function killZombieGatewayProcesses(): Promise<number[]> {
+  const pids = await listGatewayProcessPids();
+  if (pids.length === 0) return [];
+  const zombies: number[] = [];
+  for (const pid of pids) {
+    const listening = await isPidListeningOnGatewayPort(pid);
+    if (!listening) zombies.push(pid);
+  }
+  for (const pid of zombies) {
+    try {
+      if (process.platform === 'win32') {
+        await readShellOutputAsync(`taskkill /F /PID ${pid} 2>NUL`, 5000);
+      } else {
+        process.kill(pid, 'SIGKILL');
+      }
+      console.log(`[gateway] Killed zombie gateway pid=${pid} (not listening on 18789)`);
+    } catch (err) {
+      console.warn(`[gateway] Failed to kill zombie gateway pid=${pid}:`, err);
+    }
+  }
+  return zombies;
+}
+
+/**
+ * Detect whether a HEALTHY OpenClaw gateway process is already running on this machine.
+ * Healthy = matching `gateway run` cmdline AND listening on port 18789 (or in plugin-load
+ * phase on a recently-started PID).
+ *
+ * Zombie processes (matching cmdline but not bound to port) are killed as a side effect
+ * so the next spawn attempt gets a clean slate.
+ */
+async function isGatewayProcessAlive(): Promise<boolean> {
+  try {
+    const pids = await listGatewayProcessPids();
+    if (pids.length === 0) return false;
+    // If any PID is listening on the gateway port, treat as healthy and skip spawn.
+    for (const pid of pids) {
+      if (await isPidListeningOnGatewayPort(pid)) return true;
+    }
+    // No listeners — all matching processes are zombies. Clean them up so the
+    // caller can spawn a fresh gateway without the dual-instance conflict.
+    await killZombieGatewayProcesses();
+    return false;
   } catch {
     return false;
   }
