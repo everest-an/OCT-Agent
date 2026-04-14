@@ -3,10 +3,10 @@
  * Renders file details, document previews, and wiki page content
  * fetched from the local daemon scan API.
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ArrowLeft, Loader2, Code2, FileText, GitBranch, Link2,
-  Brain, FolderOpen, RefreshCw, BookType, Layers, Sparkles,
+  Brain, FolderOpen, RefreshCw, BookType, Layers, Sparkles, Search,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -15,6 +15,7 @@ import { memoryMarkdownComponents, getCategoryDisplay } from './memory-helpers';
 import type { KnowledgeCard } from './memory-helpers';
 import type {
   WikiSelectedItem, WorkspaceFileDetail, ScanStatus, WorkspaceStats, WikiPageItem,
+  WorkspaceFileItem,
 } from './wiki-types';
 import { DAEMON_API_BASE } from './wiki-types';
 
@@ -212,7 +213,9 @@ export function WorkspaceFileView({ fileId, fileTitle, cards, onSelect }: Worksp
   const meta = detail.metadata ?? {};
   const symbols = (detail.edges ?? []).filter((e) => e.type === 'contains');
   const imports = (detail.edges ?? []).filter((e) => e.type === 'import');
-  const docRefs = (detail.edges ?? []).filter((e) => e.type === 'doc_reference');
+  // Dedup doc references by target id to avoid showing the same file multiple times
+  const docRefsRaw = (detail.edges ?? []).filter((e) => e.type === 'doc_reference');
+  const docRefs = [...new Map(docRefsRaw.map((e) => [e.to, e])).values()];
   const similars = (detail.edges ?? []).filter((e) => e.type === 'similarity')
     .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
   const language = (meta.language as string) ?? (meta.category as string) ?? '';
@@ -381,6 +384,23 @@ export function WorkspaceFileView({ fileId, fileTitle, cards, onSelect }: Worksp
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* Source preview */}
+      {detail.content && (
+        <div>
+          <SectionHeader
+            icon={<FileText size={14} />}
+            title={symbols.length > 0 || imports.length > 0 || docRefs.length > 0
+              ? t('memory.wiki.sourcePreview', 'Source Preview')
+              : t('memory.wiki.fileContent', 'File Content')}
+          />
+          <pre className="rounded-xl border border-slate-700/50 bg-slate-950/60 p-4 overflow-x-auto text-xs leading-relaxed text-slate-400 max-h-[500px] overflow-y-auto whitespace-pre-wrap break-all font-mono">
+            {detail.content.length > 3000
+              ? detail.content.substring(0, 3000) + '\n\n... (truncated)'
+              : detail.content}
+          </pre>
         </div>
       )}
     </div>
@@ -629,6 +649,183 @@ export function WikiPageView({ pageId, pageTitle, cards, onSelect }: WikiPageVie
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ── WorkspaceListView — full list for Code/Docs/Wiki ── */
+
+type ListCategory = 'code' | 'docs' | 'wiki';
+
+interface WorkspaceListViewProps {
+  category: ListCategory;
+  files: WorkspaceFileItem[];
+  wikiPages: WikiPageItem[];
+  onSelect: (item: WikiSelectedItem) => void;
+}
+
+const LIST_ICONS: Record<ListCategory, React.ReactNode> = {
+  code: <Code2 size={18} className="text-sky-400" />,
+  docs: <FileText size={18} className="text-amber-400" />,
+  wiki: <BookType size={18} className="text-purple-400" />,
+};
+
+const LIST_TITLES: Record<ListCategory, string> = {
+  code: 'Code Files',
+  docs: 'Documents',
+  wiki: 'Wiki Pages',
+};
+
+export function WorkspaceListView({ category, files, wikiPages, onSelect }: WorkspaceListViewProps) {
+  const { t } = useI18n();
+  const [filter, setFilter] = useState('');
+  const q = filter.toLowerCase().trim();
+
+  const items = category === 'wiki' ? wikiPages : files;
+
+  const filtered = useMemo(
+    () => items.filter((f) => {
+      if (!q) return true;
+      const searchable = ('relativePath' in f ? (f as WorkspaceFileItem).relativePath ?? '' : '') + ' ' + (f.title ?? '') + ' ' + (f.id ?? '');
+      return searchable.toLowerCase().includes(q);
+    }),
+    [items, q],
+  );
+
+  // For wiki: group by modules/concepts
+  const wikiModules = useMemo(
+    () => category === 'wiki' ? filtered.filter((p) => p.id?.startsWith('wiki:modules/')) : [],
+    [category, filtered],
+  );
+  const wikiConcepts = useMemo(
+    () => category === 'wiki' ? filtered.filter((p) => p.id?.startsWith('wiki:concepts/')) : [],
+    [category, filtered],
+  );
+
+  // For code/docs: group by directory
+  const dirGroups = useMemo(() => {
+    if (category === 'wiki') return [];
+    const map = new Map<string, WorkspaceFileItem[]>();
+    for (const f of filtered as WorkspaceFileItem[]) {
+      const rel = f.relativePath ?? f.title ?? '';
+      const parts = rel.split('/');
+      const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '(root)';
+      const arr = map.get(dir) ?? [];
+      arr.push(f);
+      map.set(dir, arr);
+    }
+    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [category, filtered]);
+
+  return (
+    <div className="flex-1 overflow-y-auto p-6 max-w-3xl mx-auto space-y-5">
+      <BackButton onClick={() => onSelect({ type: 'workspace_overview' })} />
+
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
+          {LIST_ICONS[category]}
+          {LIST_TITLES[category]}
+          <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-500">
+            {filtered.length}
+          </span>
+        </h2>
+        <div className="relative">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+          <input
+            type="text"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder={t('memory.wiki.filterPlaceholder', 'Filter...')}
+            className="rounded-lg border border-slate-700/60 bg-slate-950/50 pl-8 pr-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-brand-500/50 w-48"
+          />
+        </div>
+      </div>
+
+      {filtered.length === 0 && (
+        <p className="text-sm text-slate-500 italic">
+          {t('memory.wiki.noMatchingItems', 'No items match your filter.')}
+        </p>
+      )}
+
+      {/* Wiki: modules + concepts */}
+      {category === 'wiki' && (
+        <>
+          {wikiModules.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-slate-300 mb-2 flex items-center gap-1.5">
+                <span>{'📘'}</span> Modules
+                <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-500">{wikiModules.length}</span>
+              </h3>
+              <div className="rounded-xl border border-slate-700/50 divide-y divide-slate-700/30">
+                {wikiModules.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => onSelect({ type: 'wiki_page', id: p.id, title: p.title })}
+                    className="flex items-center gap-2 px-3 py-2 text-sm w-full text-left text-slate-300 hover:bg-slate-800/30 transition-colors"
+                  >
+                    <span className="text-sm">{'📘'}</span>
+                    <span className="flex-1 truncate">{p.title || p.id}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {wikiConcepts.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-slate-300 mb-2 flex items-center gap-1.5">
+                <span>{'📗'}</span> Concepts
+                <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-500">{wikiConcepts.length}</span>
+              </h3>
+              <div className="rounded-xl border border-slate-700/50 divide-y divide-slate-700/30">
+                {wikiConcepts.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => onSelect({ type: 'wiki_page', id: p.id, title: p.title })}
+                    className="flex items-center gap-2 px-3 py-2 text-sm w-full text-left text-slate-300 hover:bg-slate-800/30 transition-colors"
+                  >
+                    <span className="text-sm">{'📗'}</span>
+                    <span className="flex-1 truncate">{p.title || p.id}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Code/Docs: grouped by directory */}
+      {category !== 'wiki' && dirGroups.map(([dir, dirFiles]) => (
+        <div key={dir}>
+          <div className="flex items-center gap-1.5 mb-2 text-sm font-semibold text-slate-300">
+            <FolderOpen size={14} className="text-sky-400/70" />
+            {dir}
+            <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-500">{dirFiles.length}</span>
+          </div>
+          <div className="rounded-xl border border-slate-700/50 divide-y divide-slate-700/30">
+            {dirFiles.map((f) => {
+              const fileName = (f.relativePath ?? f.title).split('/').pop() ?? f.title;
+              const navType = category === 'code' ? 'workspace_file' : 'workspace_doc';
+              const sizeStr = f.size ? formatBytes(f.size) : '';
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => onSelect({ type: navType, id: f.id, title: f.title })}
+                  className="flex items-center gap-2 px-3 py-2 text-sm w-full text-left text-slate-300 hover:bg-slate-800/30 transition-colors"
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${category === 'code' ? 'bg-cyan-400' : 'bg-amber-400'}`} />
+                  <span className="flex-1 font-mono text-xs truncate">{fileName}</span>
+                  {sizeStr && (
+                    <span className="text-[10px] text-slate-600">{sizeStr}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

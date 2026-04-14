@@ -17,7 +17,10 @@ export type WikiSelectedItem =
   | { type: 'workspace_overview' }
   | { type: 'workspace_file'; id: string; title: string }
   | { type: 'workspace_doc'; id: string; title: string }
-  | { type: 'wiki_page'; id: string; title: string };
+  | { type: 'wiki_page'; id: string; title: string }
+  | { type: 'workspace_code_list' }
+  | { type: 'workspace_docs_list' }
+  | { type: 'workspace_wiki_list' };
 
 export interface TopicItem {
   id: string;

@@ -279,6 +279,7 @@ export function WikiSidebar({
               icon={<Code2 size={14} />}
               expanded={expandedGroups.ws_code}
               onToggle={() => toggleGroup('ws_code')}
+              onLabelClick={() => onSelect({ type: 'workspace_code_list' })}
             >
               {wsFilesByDir.length === 0 ? (
                 <SidebarEmpty label={t('memory.wiki.noFiles', 'No code files indexed')} />
@@ -300,6 +301,7 @@ export function WikiSidebar({
                 icon={<FileText size={14} />}
                 expanded={expandedGroups.ws_docs}
                 onToggle={() => toggleGroup('ws_docs')}
+                onLabelClick={() => onSelect({ type: 'workspace_docs_list' })}
               >
                 {filteredWsDocs.map((doc) => (
                   <SidebarItem
@@ -321,6 +323,7 @@ export function WikiSidebar({
                 icon={<BookType size={14} />}
                 expanded={expandedGroups.ws_wiki}
                 onToggle={() => toggleGroup('ws_wiki')}
+                onLabelClick={() => onSelect({ type: 'workspace_wiki_list' })}
               >
                 {filteredWikiPages.map((page) => {
                   const isModule = page.id?.startsWith('wiki:modules/');
@@ -406,6 +409,7 @@ function SidebarGroup({
   icon,
   expanded,
   onToggle,
+  onLabelClick,
   children,
 }: {
   label: string;
@@ -413,28 +417,48 @@ function SidebarGroup({
   icon: ReactNode;
   expanded: boolean;
   onToggle: () => void;
+  onLabelClick?: () => void;
   children: ReactNode;
 }) {
   return (
     <div>
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-slate-800/60 transition-colors"
-      >
+      <div className="flex w-full items-center gap-1.5 px-2.5 py-1.5 hover:bg-slate-800/60 transition-colors">
         <span className="shrink-0 text-slate-500">{icon}</span>
-        <span className="flex-1 text-sm text-slate-400 truncate">{label}</span>
+        {onLabelClick ? (
+          <button
+            type="button"
+            onClick={onLabelClick}
+            className="flex-1 text-sm text-slate-400 truncate text-left hover:text-slate-200 transition-colors"
+            title={`View all ${label}`}
+          >
+            {label}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onToggle}
+            className="flex-1 text-sm text-slate-400 truncate text-left"
+          >
+            {label}
+          </button>
+        )}
         {count > 0 && (
           <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-500">
             {count}
           </span>
         )}
-        {expanded ? (
-          <ChevronDown size={12} className="text-slate-600 shrink-0" />
-        ) : (
-          <ChevronRight size={12} className="text-slate-600 shrink-0" />
-        )}
-      </button>
+        <button
+          type="button"
+          onClick={onToggle}
+          className="shrink-0 p-0.5 text-slate-600 hover:text-slate-400 transition-colors"
+        >
+          {expanded ? (
+            <ChevronDown size={12} />
+          ) : (
+            <ChevronRight size={12} />
+          )}
+        </button>
+      </div>
       {expanded && <div className="pb-1">{children}</div>}
     </div>
   );

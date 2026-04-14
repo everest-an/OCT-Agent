@@ -5,11 +5,11 @@ import remarkGfm from 'remark-gfm';
 import { useI18n } from '../../lib/i18n';
 import { getCategoryDisplay, memoryMarkdownComponents, getSourceDisplay } from './memory-helpers';
 import type { KnowledgeCard } from './memory-helpers';
-import type { WikiSelectedItem, TopicItem, SkillItem, TimelineDayItem, TimelineEventItem, ScanStatus, WorkspaceStats } from './wiki-types';
+import type { WikiSelectedItem, TopicItem, SkillItem, TimelineDayItem, TimelineEventItem, ScanStatus, WorkspaceStats, WorkspaceFileItem, WikiPageItem } from './wiki-types';
 import { DAEMON_API_BASE } from './wiki-types';
 import { WikiOverviewView } from './WikiOverviewView';
 import { WikiArticleView } from './WikiArticleView';
-import { WorkspaceOverviewView, WorkspaceFileView, WorkspaceDocView, WikiPageView } from './WorkspaceViews';
+import { WorkspaceOverviewView, WorkspaceFileView, WorkspaceDocView, WikiPageView, WorkspaceListView } from './WorkspaceViews';
 
 const PRIORITY_ICON: Record<string, string> = { high: '🔴', medium: '🟡', low: '🟢' };
 
@@ -25,6 +25,9 @@ interface WikiContentAreaProps {
   scanStatus?: ScanStatus | null;
   workspaceStats?: WorkspaceStats | null;
   onTriggerScan?: (mode?: 'full' | 'incremental') => Promise<void>;
+  workspaceFiles?: WorkspaceFileItem[];
+  workspaceDocs?: WorkspaceFileItem[];
+  wikiPages?: WikiPageItem[];
 }
 
 export function WikiContentArea({
@@ -38,6 +41,9 @@ export function WikiContentArea({
   scanStatus,
   workspaceStats,
   onTriggerScan,
+  workspaceFiles = [],
+  workspaceDocs = [],
+  wikiPages = [],
 }: WikiContentAreaProps) {
   const { t } = useI18n();
 
@@ -184,6 +190,40 @@ export function WikiContentArea({
         pageId={selectedItem.id}
         pageTitle={selectedItem.title}
         cards={cards}
+        onSelect={onSelect}
+      />
+    );
+  }
+
+  /* ── Workspace list views ─────────────────────────── */
+  if (selectedItem.type === 'workspace_code_list') {
+    return (
+      <WorkspaceListView
+        category="code"
+        files={workspaceFiles}
+        wikiPages={wikiPages}
+        onSelect={onSelect}
+      />
+    );
+  }
+
+  if (selectedItem.type === 'workspace_docs_list') {
+    return (
+      <WorkspaceListView
+        category="docs"
+        files={workspaceDocs}
+        wikiPages={wikiPages}
+        onSelect={onSelect}
+      />
+    );
+  }
+
+  if (selectedItem.type === 'workspace_wiki_list') {
+    return (
+      <WorkspaceListView
+        category="wiki"
+        files={[]}
+        wikiPages={wikiPages}
         onSelect={onSelect}
       />
     );

@@ -527,6 +527,9 @@ export default function Memory() {
                     scanStatus={scanStatus}
                     workspaceStats={workspaceStats}
                     onTriggerScan={triggerScan}
+                    workspaceFiles={workspaceFiles}
+                    workspaceDocs={workspaceDocs}
+                    wikiPages={wikiPages}
                   />
                 </main>
               </>
