@@ -391,107 +391,143 @@ function isGatewaySnapshotHealthy(snapshot: GatewayStatusSnapshot | null): boole
 }
 
 /**
- * List all gateway process PIDs (command line matches `gateway run`).
- * Used by isGatewayProcessAlive and killZombieGatewayProcesses.
+ * Return the PID currently listening on port 18789, or null if nothing is.
+ *
+ * This is the authoritative signal for "gateway is healthy". Command-line
+ * matching (pgrep) is unreliable because:
+ *   - macOS LaunchAgent renames the process to `openclaw-gateway` (no "gateway run" in argv)
+ *   - Linux systemd services may use their own arg layout
+ *   - Windows Scheduled Tasks spawn via a wrapper
+ * Port ownership is platform-agnostic and unambiguous.
  */
-async function listGatewayProcessPids(): Promise<number[]> {
+async function getGatewayPortOwnerPid(): Promise<number | null> {
   try {
     if (process.platform === 'win32') {
       const output = await readShellOutputAsync(
-        'powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"Name=\'node.exe\'\\" | Where-Object { $_.CommandLine -match \'gateway.*run\' } | Select-Object -ExpandProperty ProcessId" 2>NUL',
-        8000,
+        'netstat -ano -p TCP | findstr "LISTENING" | findstr ":18789"',
+        5000,
       );
-      return (output || '').split(/\r?\n/).map(s => parseInt(s.trim(), 10)).filter(n => Number.isFinite(n) && n > 0);
+      for (const line of (output || '').split(/\r?\n/)) {
+        const match = line.trim().match(/(\d+)\s*$/);
+        if (match) {
+          const pid = parseInt(match[1], 10);
+          if (Number.isFinite(pid) && pid > 0) return pid;
+        }
+      }
+      return null;
     }
-    const output = await readShellOutputAsync('pgrep -af "gateway.*run" 2>/dev/null || true', 5000);
-    const pids: number[] = [];
-    for (const line of (output || '').split('\n')) {
-      if (!line.trim() || line.includes('pgrep')) continue;
-      const match = line.match(/^(\d+)\s/);
-      if (match) pids.push(parseInt(match[1], 10));
-    }
-    return pids;
+    // lsof -tiTCP:18789 -sTCP:LISTEN prints only PIDs (one per line).
+    // Graceful when no process is listening (exit 1 → `|| true` swallows it).
+    const output = await readShellOutputAsync(
+      'lsof -tiTCP:18789 -sTCP:LISTEN -P -n 2>/dev/null || true',
+      5000,
+    );
+    const firstLine = (output || '').split(/\r?\n/).map(s => s.trim()).find(Boolean);
+    if (!firstLine) return null;
+    const pid = parseInt(firstLine, 10);
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
   } catch {
-    return [];
+    return null;
   }
 }
 
 /**
- * Check whether a given PID is bound to port 18789 (the gateway loopback port).
- * A gateway process that exists but doesn't listen on 18789 is a zombie.
+ * Check whether PID's executable path points at the OpenClaw gateway bundle.
+ * Used as a safety check before SIGKILL-ing a suspected zombie, so we never
+ * kill unrelated processes that happened to match a loose pattern.
  */
-async function isPidListeningOnGatewayPort(pid: number): Promise<boolean> {
+async function isOpenClawGatewayPid(pid: number): Promise<boolean> {
   try {
     if (process.platform === 'win32') {
-      // netstat -ano | findstr :18789 → lines end with the PID
-      const output = await readShellOutputAsync('netstat -ano -p TCP | findstr "LISTENING" | findstr ":18789"', 5000);
-      const pattern = new RegExp(`\\s${pid}\\s*$`, 'm');
-      return pattern.test(output || '');
+      const output = await readShellOutputAsync(
+        `powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"ProcessId=${pid}\\" | Select-Object -ExpandProperty CommandLine" 2>NUL`,
+        5000,
+      );
+      return /openclaw[\\/]dist[\\/]index\.js|openclaw[\\/]openclaw\.mjs|openclaw-gateway/i.test(output || '');
     }
-    // lsof -iTCP:18789 -sTCP:LISTEN -P -n -a -p <pid>
-    const output = await readShellOutputAsync(
-      `lsof -iTCP:18789 -sTCP:LISTEN -P -n -a -p ${pid} 2>/dev/null || true`,
-      5000,
-    );
-    return (output || '').includes(`:18789`);
+    // ps -p <pid> -o command= returns the full command (may be truncated but
+    // openclaw path is short enough). Also check with `args` for full argv.
+    const output = await readShellOutputAsync(`ps -p ${pid} -o command= 2>/dev/null || true`, 5000);
+    const argsOutput = await readShellOutputAsync(`ps -p ${pid} -o args= 2>/dev/null || true`, 5000);
+    const combined = `${output}\n${argsOutput}`;
+    return /openclaw\/dist\/index\.js|openclaw\/openclaw\.mjs|openclaw-gateway/i.test(combined);
   } catch {
     return false;
   }
 }
 
 /**
- * Kill zombie gateway processes: processes matching `gateway run` in cmdline
- * but NOT listening on port 18789. These happen when a previous gateway
- * crashed mid-startup or was orphaned by a failed upgrade/restart.
+ * Kill orphan OpenClaw gateway processes that do NOT own port 18789.
+ * These arise from crashed/interrupted upgrades or dual-start race conditions.
  *
- * Returns the list of zombie PIDs killed.
+ * Safety rails:
+ *   - Never kill the PID currently owning port 18789 (that's the real gateway).
+ *   - Double-check the PID's cmdline contains the openclaw path before SIGKILL.
+ *   - Skip our own process.
  */
 async function killZombieGatewayProcesses(): Promise<number[]> {
-  const pids = await listGatewayProcessPids();
-  if (pids.length === 0) return [];
-  const zombies: number[] = [];
-  for (const pid of pids) {
-    const listening = await isPidListeningOnGatewayPort(pid);
-    if (!listening) zombies.push(pid);
+  const portOwner = await getGatewayPortOwnerPid();
+  let pids: number[] = [];
+  try {
+    if (process.platform === 'win32') {
+      const output = await readShellOutputAsync(
+        'powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match \'openclaw.*(dist[\\\\/]index\\.js|openclaw\\.mjs).*gateway\' } | Select-Object -ExpandProperty ProcessId" 2>NUL',
+        8000,
+      );
+      pids = (output || '').split(/\r?\n/).map(s => parseInt(s.trim(), 10)).filter(n => Number.isFinite(n) && n > 0);
+    } else {
+      // macOS pgrep has no `-a` flag — it silently outputs PIDs only.
+      // Use `-f` to match full cmdline, then read each PID's args separately.
+      // This works identically on macOS and Linux.
+      const pidOutput = await readShellOutputAsync(
+        'pgrep -f "openclaw" 2>/dev/null || true',
+        5000,
+      );
+      const candidatePids: number[] = [];
+      for (const line of (pidOutput || '').split(/\r?\n/)) {
+        const pid = parseInt(line.trim(), 10);
+        if (Number.isFinite(pid) && pid > 0 && pid !== process.pid) candidatePids.push(pid);
+      }
+      // Confirm each candidate actually has "gateway" in its args.
+      for (const pid of candidatePids) {
+        const args = await readShellOutputAsync(`ps -p ${pid} -o args= 2>/dev/null || true`, 3000);
+        if (/gateway/i.test(args || '')) pids.push(pid);
+      }
+    }
+  } catch {
+    return [];
   }
+  const selfPid = process.pid;
+  const zombies = pids.filter(pid => pid !== portOwner && pid !== selfPid);
+  const killed: number[] = [];
   for (const pid of zombies) {
+    // Safety: confirm it really is an OpenClaw gateway process before SIGKILL.
+    if (!(await isOpenClawGatewayPid(pid))) continue;
     try {
       if (process.platform === 'win32') {
         await readShellOutputAsync(`taskkill /F /PID ${pid} 2>NUL`, 5000);
       } else {
         process.kill(pid, 'SIGKILL');
       }
+      killed.push(pid);
       console.log(`[gateway] Killed zombie gateway pid=${pid} (not listening on 18789)`);
     } catch (err) {
       console.warn(`[gateway] Failed to kill zombie gateway pid=${pid}:`, err);
     }
   }
-  return zombies;
+  return killed;
 }
 
 /**
- * Detect whether a HEALTHY OpenClaw gateway process is already running on this machine.
- * Healthy = matching `gateway run` cmdline AND listening on port 18789 (or in plugin-load
- * phase on a recently-started PID).
+ * Detect whether a HEALTHY OpenClaw gateway is bound to port 18789.
+ * Port ownership is the single source of truth — if something listens, it's up.
  *
- * Zombie processes (matching cmdline but not bound to port) are killed as a side effect
- * so the next spawn attempt gets a clean slate.
+ * Zombie cleanup (orphan processes that exist but don't own the port) is
+ * performed lazily by killZombieGatewayProcesses() on the spawn path.
  */
 async function isGatewayProcessAlive(): Promise<boolean> {
-  try {
-    const pids = await listGatewayProcessPids();
-    if (pids.length === 0) return false;
-    // If any PID is listening on the gateway port, treat as healthy and skip spawn.
-    for (const pid of pids) {
-      if (await isPidListeningOnGatewayPort(pid)) return true;
-    }
-    // No listeners — all matching processes are zombies. Clean them up so the
-    // caller can spawn a fresh gateway without the dual-instance conflict.
-    await killZombieGatewayProcesses();
-    return false;
-  } catch {
-    return false;
-  }
+  const pid = await getGatewayPortOwnerPid();
+  return pid !== null;
 }
 
 async function ensureLocalDaemonReadyForRuntime(send?: (ch: string, data: any) => void): Promise<boolean> {
@@ -629,8 +665,19 @@ async function startGatewayInUserSession(send?: (ch: string, data: any) => void)
   // the two processes to fight each other (both --force → mutual kill loop).
   const existingGateway = !launchRecently && await isGatewayProcessAlive();
   if (existingGateway) {
-    console.log('[gateway] Existing gateway process detected — skipping spawn to avoid dual-instance conflict');
+    console.log('[gateway] Healthy gateway already listening on 18789 — skipping spawn to avoid dual-instance conflict');
     send?.('chat:status', { type: 'gateway', message: 'Waiting for existing Gateway to finish loading...' });
+  } else if (!launchRecently) {
+    // No one owns the port — clean up any orphan openclaw gateway processes
+    // before spawning a fresh one, so the new instance doesn't fight leftovers.
+    try {
+      const killed = await killZombieGatewayProcesses();
+      if (killed.length > 0) {
+        console.log(`[gateway] Cleaned up ${killed.length} orphan gateway process(es) before spawn`);
+      }
+    } catch (err) {
+      console.warn('[gateway] Zombie cleanup failed (non-fatal):', err);
+    }
   }
 
   try {

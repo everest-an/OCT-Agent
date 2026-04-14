@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.2] - 2026-04-14
+
+### Fixed (Critical)
+- **Gateway detection was broken on macOS** (caused chat hangs / repeat spawn): v0.3.1 used `pgrep -af "gateway.*run"` to find running gateways, but macOS `pgrep` doesn't support the `-a` flag (it silently returns PIDs only) AND LaunchAgent-managed gateways rename their process to `openclaw-gateway` with no "run" in argv. Result: the detection never found real gateways, chat would either hang waiting or spawn a competing instance.
+- Switched to **port ownership** as the source of truth (`lsof -tiTCP:18789` on macOS/Linux, `netstat -ano` on Windows). If port 18789 has an owner, the gateway is up — no ambiguity.
+- Zombie cleanup now uses cross-platform `pgrep -f "openclaw"` + per-PID `ps -p <pid> -o args=` confirmation, plus a `isOpenClawGatewayPid` safety check that verifies the path before SIGKILL. Will never kill the port owner or unrelated processes.
+
+### Verified
+- Live end-to-end test against actual running gateway (LaunchAgent + renamed process) confirms detection works on macOS.
+- Web-searched OpenClaw issues #21073, #19521, #46012, #47916 to confirm LaunchAgent/systemd supervision behavior.
+
 ## [0.3.1] - 2026-04-14
 
 ### Fixed
