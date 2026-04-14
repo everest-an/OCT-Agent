@@ -530,6 +530,124 @@ async function isGatewayProcessAlive(): Promise<boolean> {
   return pid !== null;
 }
 
+/**
+ * Extract a semver string (e.g. "2026.4.12") from an arbitrary text. Ignores
+ * commit hashes and other digit tokens.
+ */
+function extractSemver(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const match = text.match(/(\d+\.\d+\.\d+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Read the OpenClaw version reported by the running gateway process.
+ * On macOS LaunchAgent and Linux systemd, the version is exposed via the
+ * `OPENCLAW_SERVICE_VERSION` env var on the process. We read it with `ps eww`
+ * (Unix) / CIM (Windows) rather than calling `openclaw --version` twice.
+ */
+async function getRunningGatewayVersion(): Promise<string | null> {
+  const pid = await getGatewayPortOwnerPid();
+  if (!pid) return null;
+  try {
+    if (process.platform === 'win32') {
+      const output = await readShellOutputAsync(
+        `powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"ProcessId=${pid}\\" | Select-Object -ExpandProperty CommandLine" 2>NUL`,
+        5000,
+      );
+      return extractSemver(output);
+    }
+    // On macOS, `ps eww -p <pid>` can't read LaunchAgent env without root,
+    // but `pgrep -lf` surfaces OPENCLAW_SERVICE_VERSION from the service
+    // process name line for free. Try pgrep first, fall back to ps eww for
+    // Linux / non-LaunchAgent cases.
+    const pgrepOut = await readShellOutputAsync('pgrep -lf "openclaw" 2>/dev/null || true', 5000);
+    for (const line of pgrepOut.split(/\r?\n/)) {
+      if (!line.startsWith(`${pid} `)) continue;
+      const m = line.match(/OPENCLAW_SERVICE_VERSION=(\d+\.\d+\.\d+)/);
+      if (m) return m[1];
+    }
+    const psOut = await readShellOutputAsync(`ps eww -p ${pid} 2>/dev/null || true`, 5000);
+    const m2 = psOut.match(/OPENCLAW_SERVICE_VERSION=(\d+\.\d+\.\d+)/);
+    return m2 ? m2[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Compare semver strings (a > b returns 1, a < b returns -1, equal returns 0).
+ * Non-numeric parts are compared lexicographically.
+ */
+function compareSemver(a: string, b: string): number {
+  const pa = a.split('.').map(n => parseInt(n, 10) || 0);
+  const pb = b.split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const na = pa[i] ?? 0;
+    const nb = pb[i] ?? 0;
+    if (na > nb) return 1;
+    if (na < nb) return -1;
+  }
+  return 0;
+}
+
+let gatewayVersionAutoRepairAt = 0;
+const GATEWAY_VERSION_REPAIR_COOLDOWN_MS = 5 * 60 * 1000;
+
+/**
+ * Detect a CLI-vs-gateway version mismatch and auto-repair via
+ * `openclaw gateway install --force` to regenerate the LaunchAgent/Systemd
+ * unit pointing at the new bundle.
+ *
+ * Root cause: when users upgrade `openclaw` globally (npm install -g openclaw),
+ * the on-disk bundle updates but the service unit still references the old
+ * path or old env. The old gateway keeps running — in 2026.3.8 this triggers
+ * self-induced restart loops (openclaw#58620), manifesting as "Connecting to
+ * local Gateway…" on every chat + Invalid session ID errors.
+ *
+ * This runs silently on startup and every 5 min after. Throttled so a stuck
+ * repair can't turn into a hot loop.
+ */
+async function maybeRepairGatewayVersionMismatch(
+  send?: (ch: string, data: any) => void,
+): Promise<{ repaired: boolean; cliVersion: string | null; gatewayVersion: string | null }> {
+  const now = Date.now();
+  if (now - gatewayVersionAutoRepairAt < GATEWAY_VERSION_REPAIR_COOLDOWN_MS) {
+    return { repaired: false, cliVersion: null, gatewayVersion: null };
+  }
+
+  const [cliRaw, gatewayVersion] = await Promise.all([
+    safeShellExecAsync('openclaw --version', 8000),
+    getRunningGatewayVersion(),
+  ]);
+  const cliVersion = extractSemver(cliRaw);
+
+  // If either version is unknown, or they already match, do nothing.
+  if (!cliVersion || !gatewayVersion) {
+    return { repaired: false, cliVersion, gatewayVersion };
+  }
+  if (compareSemver(cliVersion, gatewayVersion) <= 0) {
+    return { repaired: false, cliVersion, gatewayVersion };
+  }
+
+  console.warn(`[gateway] Version mismatch detected: CLI=${cliVersion} gateway=${gatewayVersion} — auto-repairing via "openclaw gateway install --force"`);
+  send?.('chat:status', {
+    type: 'gateway',
+    message: `Updating Gateway service from ${gatewayVersion} to ${cliVersion}...`,
+  });
+
+  gatewayVersionAutoRepairAt = now;
+
+  try {
+    await runAsync('openclaw gateway install --force', 60000);
+    console.log('[gateway] Version mismatch repaired — LaunchAgent/service regenerated');
+    return { repaired: true, cliVersion, gatewayVersion };
+  } catch (err: any) {
+    console.warn('[gateway] Version mismatch repair failed:', err?.message || err);
+    return { repaired: false, cliVersion, gatewayVersion };
+  }
+}
+
 async function ensureLocalDaemonReadyForRuntime(send?: (ch: string, data: any) => void): Promise<boolean> {
   const daemonProjectDir = path.join(HOME, '.openclaw');
 
@@ -1960,6 +2078,15 @@ async function autoReconnectChannelWorkers(): Promise<void> {
 app.whenReady().then(() => {
   // Deploy internal hook for awareness memory backup (idempotent, version-gated)
   ensureInternalHook(HOME);
+
+  // Detect CLI/gateway version mismatch (e.g. user upgraded openclaw via npm
+  // but LaunchAgent still runs the old bundle — triggers restart loops on
+  // 2026.3.8, openclaw#58620). Fire-and-forget so we don't block startup.
+  // Non-blocking: typically <200ms for the detection, repair (if needed)
+  // runs asynchronously and completes in 5-15s.
+  maybeRepairGatewayVersionMismatch().catch((err) => {
+    console.warn('[gateway-version] Auto-repair skipped:', err?.message || err);
+  });
 
   // Self-heal the OpenClaw `main` agent if it has degraded into a skeleton entry
   // (no workspace / agentDir). This is the default agent that every channel binding

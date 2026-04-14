@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.3] - 2026-04-14
+
+### Fixed
+- **CLI/Gateway version mismatch auto-repair**: detects when the running gateway bundle is older than the installed `openclaw` CLI (e.g. after `npm install -g openclaw` upgrades the binary but LaunchAgent/systemd unit still references the old path). When mismatch is detected on startup, silently runs `openclaw gateway install --force` to regenerate the service unit pointing at the new bundle. No hardcoded version comparisons — pure dynamic `openclaw --version` vs `OPENCLAW_SERVICE_VERSION` env, repaired only when CLI > Gateway. 5-minute cooldown prevents hot loops.
+- Root cause for "Connecting to local Gateway..." on every chat: stuck gateway with 2026.3.8 self-induced restart loop bug (openclaw#58620), unaware CLI had already moved past it. Auto-repair closes the gap.
+
+### Performance
+- Version detection is fire-and-forget at app startup (~860ms total: lsof 133ms + pgrep 171ms + `openclaw --version` 559ms) and does NOT block UI.
+
 ## [0.3.2] - 2026-04-14
 
 ### Fixed (Critical)
