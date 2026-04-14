@@ -107,6 +107,8 @@ export interface ScanStatus {
   total_files?: number;
   processed_files?: number;
   percent?: number;
+  embed_total?: number;
+  embed_done?: number;
 }
 
 export interface WorkspaceStats {

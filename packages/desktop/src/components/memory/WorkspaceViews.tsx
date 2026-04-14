@@ -124,21 +124,39 @@ export function WorkspaceOverviewView({ stats, scanStatus, onSelect, onTriggerSc
           <div className="flex items-center gap-2 mb-2">
             <Loader2 size={14} className="text-sky-400 animate-spin" />
             <span className="text-sm font-medium text-sky-300">
-              {scanStatus.phase ?? t('memory.wiki.scanInProgress', 'Scanning workspace...')}
+              {scanStatus.phase === 'embedding'
+                ? t('memory.wiki.embedding', 'Embedding vectors...')
+                : scanStatus.phase ?? t('memory.wiki.scanInProgress', 'Scanning workspace...')}
             </span>
           </div>
-          {typeof scanStatus.percent === 'number' && (
-            <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
-              <div
-                className="h-full rounded-full bg-sky-500 transition-all duration-300"
-                style={{ width: `${Math.min(100, scanStatus.percent)}%` }}
-              />
-            </div>
-          )}
-          {scanStatus.total_files != null && (
-            <div className="text-[11px] text-slate-500 mt-1.5">
-              {scanStatus.processed_files ?? 0} / {scanStatus.total_files} files
-            </div>
+          {scanStatus.phase === 'embedding' && (scanStatus.embed_total ?? 0) > 0 ? (
+            <>
+              <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-cyan-500 transition-all duration-300"
+                  style={{ width: `${Math.min(100, Math.round(((scanStatus.embed_done ?? 0) / scanStatus.embed_total!) * 100))}%` }}
+                />
+              </div>
+              <div className="text-[11px] text-slate-500 mt-1.5">
+                {scanStatus.embed_done ?? 0} / {scanStatus.embed_total} nodes
+              </div>
+            </>
+          ) : (
+            <>
+              {typeof scanStatus.percent === 'number' && (
+                <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-sky-500 transition-all duration-300"
+                    style={{ width: `${Math.min(100, scanStatus.percent)}%` }}
+                  />
+                </div>
+              )}
+              {scanStatus.total_files != null && (
+                <div className="text-[11px] text-slate-500 mt-1.5">
+                  {scanStatus.processed_files ?? 0} / {scanStatus.total_files} files
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
