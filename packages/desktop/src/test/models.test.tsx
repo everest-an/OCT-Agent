@@ -1,9 +1,22 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react';
 import Models from '../pages/Models';
 
+// Helper: wait for a button to appear then click it (handles async rendering under parallel execution)
+async function waitAndClick(name: RegExp) {
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name })).toBeInTheDocument();
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name }));
+  });
+}
+
 describe('Models Page', () => {
+  let originalElectronAPI: any;
+
   beforeEach(() => {
+    originalElectronAPI = { ...(window as any).electronAPI };
     localStorage.clear();
     localStorage.setItem('awareness-claw-config', JSON.stringify({
       language: 'en',
@@ -17,6 +30,11 @@ describe('Models Page', () => {
         },
       },
     }));
+  });
+
+  afterEach(() => {
+    cleanup();
+    (window as any).electronAPI = originalElectronAPI;
   });
 
   it('renders the standalone models page and current model summary', async () => {
@@ -41,8 +59,10 @@ describe('Models Page', () => {
 
     await act(async () => { render(<Models />); });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /Add Custom Provider/i }));
+    await waitAndClick(/Add Custom Provider/i);
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('My Provider')).toBeInTheDocument();
     });
 
     await act(async () => {
@@ -85,9 +105,7 @@ describe('Models Page', () => {
 
     await act(async () => { render(<Models />); });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /OpenAI/i }));
-    });
+    await waitAndClick(/OpenAI/i);
 
     await act(async () => {
       fireEvent.change(screen.getByPlaceholderText('Add model ID, for example gpt-4.1-mini'), { target: { value: 'manual-model' } });
@@ -122,9 +140,7 @@ describe('Models Page', () => {
 
     await act(async () => { render(<Models />); });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /OpenAI/i }));
-    });
+    await waitAndClick(/OpenAI/i);
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /Refresh from OpenClaw/i }));
@@ -141,9 +157,7 @@ describe('Models Page', () => {
   it('updates the api type preset immediately for an existing provider', async () => {
     await act(async () => { render(<Models />); });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /OpenAI/i }));
-    });
+    await waitAndClick(/OpenAI/i);
 
     expect(screen.getByRole('combobox', { name: 'API Type' })).toHaveValue('openai-completions');
 
@@ -170,9 +184,7 @@ describe('Models Page', () => {
 
     const { unmount } = render(<Models />);
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /OpenAI/i }));
-    });
+    await waitAndClick(/OpenAI/i);
 
     await act(async () => {
       fireEvent.change(screen.getByLabelText('API Base URL'), {
@@ -204,9 +216,7 @@ describe('Models Page', () => {
       render(<Models />);
     });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /OpenAI/i }));
-    });
+    await waitAndClick(/OpenAI/i);
 
     expect(screen.getByLabelText('API Base URL')).toHaveValue('https://ai-gateway.vercel.sh/v1');
     expect(saveConfigMock).toHaveBeenCalled();
@@ -253,9 +263,7 @@ describe('Models Page', () => {
 
     await act(async () => { render(<Models />); });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /OpenAI/i }));
-    });
+    await waitAndClick(/OpenAI/i);
 
     await act(async () => {
       fireEvent.change(screen.getByLabelText('API Base URL'), {
