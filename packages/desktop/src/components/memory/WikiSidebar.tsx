@@ -12,10 +12,17 @@ import {
   AlertTriangle,
   Clock,
   Zap,
+  Code2,
+  FileText,
+  BookType,
+  FolderOpen,
 } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import type { KnowledgeCard } from './memory-helpers';
-import type { WikiSelectedItem, TopicItem, SkillItem, TimelineDayItem } from './wiki-types';
+import type {
+  WikiSelectedItem, TopicItem, SkillItem, TimelineDayItem,
+  WorkspaceFileItem, WikiPageItem,
+} from './wiki-types';
 
 /* ── Category grouping ──────────────────────────────── */
 const ENGINEERING_CATS = ['problem_solution', 'decision', 'workflow', 'key_point', 'pitfall', 'insight'];
@@ -49,6 +56,10 @@ interface WikiSidebarProps {
   tasks: Array<{ id: string; title: string; priority: string; status: string }>;
   selectedItem: WikiSelectedItem;
   onSelect: (item: WikiSelectedItem) => void;
+  // Workspace scanner data
+  workspaceFiles?: WorkspaceFileItem[];
+  workspaceDocs?: WorkspaceFileItem[];
+  wikiPages?: WikiPageItem[];
 }
 
 export function WikiSidebar({
@@ -59,6 +70,9 @@ export function WikiSidebar({
   tasks,
   selectedItem,
   onSelect,
+  workspaceFiles = [],
+  workspaceDocs = [],
+  wikiPages = [],
 }: WikiSidebarProps) {
   const { t } = useI18n();
   const [localFilter, setLocalFilter] = useState('');
@@ -69,6 +83,9 @@ export function WikiSidebar({
     tasks: true,
     risks: false,
     timeline: true,
+    ws_code: false,
+    ws_docs: false,
+    ws_wiki: true,
   });
 
   const toggleGroup = (key: string) =>
@@ -102,6 +119,39 @@ export function WikiSidebar({
     [timelineDays, q],
   );
 
+  /* ── Workspace filtering ───────────────────────────── */
+  const filteredWsFiles = useMemo(
+    () => workspaceFiles.filter((f) => !q || (f.title ?? '').toLowerCase().includes(q) || (f.relativePath ?? '').toLowerCase().includes(q)),
+    [workspaceFiles, q],
+  );
+
+  const filteredWsDocs = useMemo(
+    () => workspaceDocs.filter((f) => !q || (f.title ?? '').toLowerCase().includes(q)),
+    [workspaceDocs, q],
+  );
+
+  const filteredWikiPages = useMemo(
+    () => wikiPages.filter((p) => !q || (p.title ?? '').toLowerCase().includes(q)),
+    [wikiPages, q],
+  );
+
+  /** Group workspace code files by top-level directory for tree-like rendering */
+  const wsFilesByDir = useMemo(() => {
+    const map = new Map<string, WorkspaceFileItem[]>();
+    for (const f of filteredWsFiles) {
+      const rel = f.relativePath ?? f.title;
+      const parts = rel.split('/');
+      const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '.';
+      const arr = map.get(dir) ?? [];
+      arr.push(f);
+      map.set(dir, arr);
+    }
+    // Sort directories alphabetically
+    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [filteredWsFiles]);
+
+  const hasWorkspaceData = workspaceFiles.length > 0 || workspaceDocs.length > 0 || wikiPages.length > 0;
+
   /* ── Selection helpers ──────────────────────────────── */
   const isSelected = (item: WikiSelectedItem): boolean => {
     if (item.type !== selectedItem.type) return false;
@@ -110,6 +160,9 @@ export function WikiSidebar({
     if (item.type === 'task' && selectedItem.type === 'task') return item.id === selectedItem.id;
     if (item.type === 'risk' && selectedItem.type === 'risk') return item.id === selectedItem.id;
     if (item.type === 'timeline_day' && selectedItem.type === 'timeline_day') return item.date === selectedItem.date;
+    if (item.type === 'workspace_file' && selectedItem.type === 'workspace_file') return item.id === selectedItem.id;
+    if (item.type === 'workspace_doc' && selectedItem.type === 'workspace_doc') return item.id === selectedItem.id;
+    if (item.type === 'wiki_page' && selectedItem.type === 'wiki_page') return item.id === selectedItem.id;
     return true;
   };
 
@@ -208,6 +261,85 @@ export function WikiSidebar({
           onClick={() => onSelect({ type: 'skills' })}
         />
 
+        {/* ── Project Workspace ─────────────────────────── */}
+        {hasWorkspaceData && (
+          <>
+            <div className="mx-2.5 my-2 flex items-center gap-2">
+              <div className="h-px flex-1 bg-slate-700/50" />
+              <span className="text-[10px] uppercase tracking-widest text-slate-600 select-none">
+                {t('memory.wiki.project', 'Project')}
+              </span>
+              <div className="h-px flex-1 bg-slate-700/50" />
+            </div>
+
+            {/* Code files grouped by directory */}
+            <SidebarGroup
+              label={t('memory.wiki.code', 'Code')}
+              count={filteredWsFiles.length}
+              icon={<Code2 size={14} />}
+              expanded={expandedGroups.ws_code}
+              onToggle={() => toggleGroup('ws_code')}
+            >
+              {wsFilesByDir.length === 0 ? (
+                <SidebarEmpty label={t('memory.wiki.noFiles', 'No code files indexed')} />
+              ) : (
+                <WorkspaceDirTree
+                  dirs={wsFilesByDir}
+                  selectedItem={selectedItem}
+                  onSelect={onSelect}
+                  isSelected={isSelected}
+                />
+              )}
+            </SidebarGroup>
+
+            {/* Documents */}
+            {filteredWsDocs.length > 0 && (
+              <SidebarGroup
+                label={t('memory.wiki.docs', 'Docs')}
+                count={filteredWsDocs.length}
+                icon={<FileText size={14} />}
+                expanded={expandedGroups.ws_docs}
+                onToggle={() => toggleGroup('ws_docs')}
+              >
+                {filteredWsDocs.map((doc) => (
+                  <SidebarItem
+                    key={doc.id}
+                    label={doc.relativePath ?? doc.title}
+                    selected={isSelected({ type: 'workspace_doc', id: doc.id, title: doc.title })}
+                    onClick={() => onSelect({ type: 'workspace_doc', id: doc.id, title: doc.title })}
+                    indent
+                  />
+                ))}
+              </SidebarGroup>
+            )}
+
+            {/* Wiki pages */}
+            {filteredWikiPages.length > 0 && (
+              <SidebarGroup
+                label={t('memory.wiki.wikiPages', 'Wiki Pages')}
+                count={filteredWikiPages.length}
+                icon={<BookType size={14} />}
+                expanded={expandedGroups.ws_wiki}
+                onToggle={() => toggleGroup('ws_wiki')}
+              >
+                {filteredWikiPages.map((page) => {
+                  const isModule = page.id?.startsWith('wiki:modules/');
+                  return (
+                    <SidebarItem
+                      key={page.id}
+                      label={page.title}
+                      icon={isModule ? '📘' : '📗'}
+                      selected={isSelected({ type: 'wiki_page', id: page.id, title: page.title })}
+                      onClick={() => onSelect({ type: 'wiki_page', id: page.id, title: page.title })}
+                      indent
+                    />
+                  );
+                })}
+              </SidebarGroup>
+            )}
+          </>
+        )}
+
         {/* Tasks */}
         <SidebarGroup
           label={t('memory.wiki.tasks', 'Tasks')}
@@ -260,6 +392,7 @@ export function WikiSidebar({
       {/* Stats footer */}
       <div className="border-t border-slate-700/40 px-3 py-2 text-[10px] text-slate-500">
         {cards.length} cards · {topics.length} topics · {skills.length} skills
+        {hasWorkspaceData && ` · ${workspaceFiles.length} files`}
       </div>
     </aside>
   );
@@ -427,6 +560,65 @@ function CardCategoryList({
                   <span className="flex-1 truncate">{card.title}</span>
                 </button>
               ))}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/* ── WorkspaceDirTree — code files grouped by directory ── */
+function WorkspaceDirTree({
+  dirs,
+  selectedItem,
+  onSelect,
+  isSelected,
+}: {
+  dirs: Array<[string, WorkspaceFileItem[]]>;
+  selectedItem: WikiSelectedItem;
+  onSelect: (item: WikiSelectedItem) => void;
+  isSelected: (item: WikiSelectedItem) => boolean;
+}) {
+  const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({});
+  const toggleDir = (dir: string) =>
+    setExpandedDirs((prev) => ({ ...prev, [dir]: !prev[dir] }));
+
+  return (
+    <>
+      {dirs.map(([dir, files]) => {
+        const dirExpanded = expandedDirs[dir] ?? false;
+        const dirLabel = dir === '.' ? '(root)' : dir;
+        return (
+          <div key={dir}>
+            <button
+              type="button"
+              onClick={() => toggleDir(dir)}
+              className="flex w-full items-center gap-1.5 pl-5 pr-2.5 py-1 text-left hover:bg-slate-800/50 transition-colors"
+            >
+              <FolderOpen size={12} className="text-sky-400/70 shrink-0" />
+              <span className="flex-1 truncate text-slate-400 text-xs">{dirLabel}</span>
+              <span className="rounded bg-slate-800 px-1 py-0.5 text-[10px] text-slate-500">
+                {files.length}
+              </span>
+              {dirExpanded ? (
+                <ChevronDown size={11} className="text-slate-600 shrink-0" />
+              ) : (
+                <ChevronRight size={11} className="text-slate-600 shrink-0" />
+              )}
+            </button>
+            {dirExpanded &&
+              files.slice(0, 50).map((file) => {
+                const fileName = (file.relativePath ?? file.title).split('/').pop() ?? file.title;
+                return (
+                  <SidebarItem
+                    key={file.id}
+                    label={fileName}
+                    selected={isSelected({ type: 'workspace_file', id: file.id, title: file.title })}
+                    onClick={() => onSelect({ type: 'workspace_file', id: file.id, title: file.title })}
+                    indent
+                  />
+                );
+              })}
           </div>
         );
       })}

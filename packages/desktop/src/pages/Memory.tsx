@@ -133,9 +133,13 @@ export default function Memory() {
     reloadMemoryData,
   } = memoryData;
 
-  // Wiki data (topics, skills, timeline days from daemon REST API)
+  // Wiki data (topics, skills, timeline days, workspace files from daemon REST API)
   const wikiData = useWikiData();
-  const { topics, skills, timelineDays, loadAllWikiData } = wikiData;
+  const {
+    topics, skills, timelineDays, loadAllWikiData,
+    workspaceFiles, workspaceDocs, wikiPages,
+    scanStatus, workspaceStats, triggerScan, loadScanStatus,
+  } = wikiData;
 
   // Daemon connection
   const daemon = useDaemonConnection(api, t, reloadMemoryData);
@@ -411,6 +415,21 @@ export default function Memory() {
             {searching && <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-brand-400" />}
           </div>
         )}
+
+        {/* Scan progress indicator — shown below tabs when scan is in progress */}
+        {scanStatus && scanStatus.status !== 'idle' && (
+          <div className="mt-2 flex items-center gap-2 px-1">
+            <div className="flex-1 h-1 rounded-full bg-slate-800 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-sky-500/80 transition-all duration-500 ease-out"
+                style={{ width: `${typeof scanStatus.percent === 'number' ? Math.min(100, scanStatus.percent) : 30}%` }}
+              />
+            </div>
+            <span className="text-[10px] text-slate-500 whitespace-nowrap shrink-0">
+              {scanStatus.phase ?? 'Scanning...'}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Content */}
@@ -492,6 +511,9 @@ export default function Memory() {
                   tasks={tasks}
                   selectedItem={wikiSelectedItem}
                   onSelect={setWikiSelectedItem}
+                  workspaceFiles={workspaceFiles}
+                  workspaceDocs={workspaceDocs}
+                  wikiPages={wikiPages}
                 />
                 <main className="flex-1 overflow-y-auto">
                   <WikiContentArea
@@ -502,6 +524,9 @@ export default function Memory() {
                     skills={skills}
                     timelineDays={timelineDays}
                     tasks={tasks}
+                    scanStatus={scanStatus}
+                    workspaceStats={workspaceStats}
+                    onTriggerScan={triggerScan}
                   />
                 </main>
               </>

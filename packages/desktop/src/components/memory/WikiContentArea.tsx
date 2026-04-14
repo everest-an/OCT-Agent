@@ -5,10 +5,11 @@ import remarkGfm from 'remark-gfm';
 import { useI18n } from '../../lib/i18n';
 import { getCategoryDisplay, memoryMarkdownComponents, getSourceDisplay } from './memory-helpers';
 import type { KnowledgeCard } from './memory-helpers';
-import type { WikiSelectedItem, TopicItem, SkillItem, TimelineDayItem, TimelineEventItem } from './wiki-types';
+import type { WikiSelectedItem, TopicItem, SkillItem, TimelineDayItem, TimelineEventItem, ScanStatus, WorkspaceStats } from './wiki-types';
 import { DAEMON_API_BASE } from './wiki-types';
 import { WikiOverviewView } from './WikiOverviewView';
 import { WikiArticleView } from './WikiArticleView';
+import { WorkspaceOverviewView, WorkspaceFileView, WorkspaceDocView, WikiPageView } from './WorkspaceViews';
 
 const PRIORITY_ICON: Record<string, string> = { high: '🔴', medium: '🟡', low: '🟢' };
 
@@ -20,6 +21,10 @@ interface WikiContentAreaProps {
   skills: SkillItem[];
   timelineDays: TimelineDayItem[];
   tasks: Array<{ id: string; title: string; description?: string; priority: string; status: string; created_at?: string }>;
+  // Workspace scanner data
+  scanStatus?: ScanStatus | null;
+  workspaceStats?: WorkspaceStats | null;
+  onTriggerScan?: (mode?: 'full' | 'incremental') => Promise<void>;
 }
 
 export function WikiContentArea({
@@ -30,6 +35,9 @@ export function WikiContentArea({
   skills,
   timelineDays,
   tasks,
+  scanStatus,
+  workspaceStats,
+  onTriggerScan,
 }: WikiContentAreaProps) {
   const { t } = useI18n();
 
@@ -135,6 +143,50 @@ export function WikiContentArea({
 
   if (selectedItem.type === 'skills') {
     return <SkillsView skills={skills} />;
+  }
+
+  /* ── Workspace views ───────────────────────────────── */
+  if (selectedItem.type === 'workspace_overview') {
+    return (
+      <WorkspaceOverviewView
+        stats={workspaceStats ?? null}
+        scanStatus={scanStatus ?? null}
+        onSelect={onSelect}
+        onTriggerScan={onTriggerScan}
+      />
+    );
+  }
+
+  if (selectedItem.type === 'workspace_file') {
+    return (
+      <WorkspaceFileView
+        fileId={selectedItem.id}
+        fileTitle={selectedItem.title}
+        cards={cards}
+        onSelect={onSelect}
+      />
+    );
+  }
+
+  if (selectedItem.type === 'workspace_doc') {
+    return (
+      <WorkspaceDocView
+        docId={selectedItem.id}
+        docTitle={selectedItem.title}
+        onSelect={onSelect}
+      />
+    );
+  }
+
+  if (selectedItem.type === 'wiki_page') {
+    return (
+      <WikiPageView
+        pageId={selectedItem.id}
+        pageTitle={selectedItem.title}
+        cards={cards}
+        onSelect={onSelect}
+      />
+    );
   }
 
   return null;
