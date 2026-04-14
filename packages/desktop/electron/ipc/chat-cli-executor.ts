@@ -242,7 +242,7 @@ export async function chatSendViaCli(
       const rawCombined = rawOutputLines.join('\n');
 
       if (code !== 0) {
-        if (/spawn\s+npx(?:\.cmd)?\s+ENOENT/i.test(`${rawCombined}\n${clean}`)) {
+        if (/spawn\s+(?:npx|openclaw)(?:\.cmd)?\s+ENOENT/i.test(`${rawCombined}\n${clean}`)) {
           finalize({
             success: false,
             error: 'OpenClaw could not start the local helper runtime. Please rerun Setup to repair your runtime, then retry.',
@@ -301,7 +301,7 @@ export async function chatSendViaCli(
     });
     child.on('error', (err) => {
       const message = String(err);
-      if (/spawn\s+npx(?:\.cmd)?\s+ENOENT/i.test(message)) {
+      if (/spawn\s+(?:npx|openclaw)(?:\.cmd)?\s+ENOENT/i.test(message)) {
         finalize({
           success: false,
           error: 'OpenClaw could not start the local helper runtime. Please rerun Setup to repair your runtime, then retry.',

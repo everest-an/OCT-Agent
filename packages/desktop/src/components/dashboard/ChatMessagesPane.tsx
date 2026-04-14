@@ -150,6 +150,7 @@ export function ChatMessagesPane({
   onApproveTool,
   onCopyApproval,
   onStopRequest,
+  errorHint,
   onDismissError,
   renderStreamingContent,
   TypewriterMessage,
@@ -179,6 +180,7 @@ export function ChatMessagesPane({
   onApproveTool: (toolCall: ToolCallInfo) => void | Promise<void>;
   onCopyApproval: (toolCall: ToolCallInfo) => void;
   onStopRequest: () => void | Promise<void>;
+  errorHint?: string | null;
   onDismissError: () => void;
   renderStreamingContent: (content: string) => React.ReactNode;
   TypewriterMessage: ({ content, isNew }: { content: string; isNew: boolean }) => React.ReactNode;
@@ -345,12 +347,19 @@ export function ChatMessagesPane({
                       />
 
                       {agentStatus === 'error' && (
-                        <div className="flex items-center gap-2 text-sm text-red-400">
-                          <AlertTriangle size={14} />
-                          <span>{t('chat.status.error', 'Response timed out or failed')}</span>
-                          <button onClick={onDismissError} className="ml-2 px-2 py-0.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors">
-                            {t('chat.dismiss', 'Dismiss')}
-                          </button>
+                        <div className="flex flex-col gap-1.5 text-sm text-red-400">
+                          <div className="flex items-center gap-2">
+                            <AlertTriangle size={14} />
+                            <span>{errorHint
+                              ? t(`chat.errorHint.${errorHint}`, t('chat.status.error', 'Response timed out or failed'))
+                              : t('chat.status.error', 'Response timed out or failed')}</span>
+                            <button onClick={onDismissError} className="ml-2 px-2 py-0.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors">
+                              {t('chat.dismiss', 'Dismiss')}
+                            </button>
+                          </div>
+                          {errorHint && t(`chat.errorHint.${errorHint}.tip`, '') ? (
+                            <p className="text-xs text-slate-400 ml-6">{t(`chat.errorHint.${errorHint}.tip`)}</p>
+                          ) : null}
                         </div>
                       )}
 

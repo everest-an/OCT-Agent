@@ -93,6 +93,48 @@ import { chatSendViaCli, chatSendViaCliWithWebCompatibilityRetry, prepareCliFall
  *     message benefits from the fresh server.
  *   - Notify the renderer via chat:status so the user understands what happened.
  */
+/**
+ * Classify raw provider/Gateway errors into user-friendly messages.
+ * Keeps technical details out of the UI — small-white-user-first.
+ */
+function classifyProviderError(rawError: string, state: string): string {
+  const lower = rawError.toLowerCase();
+
+  // Provider internal error (Qwen, OpenAI, etc.)
+  if (/internal error|internal server error|500/i.test(rawError)) {
+    return 'provider_internal';
+  }
+  // Rate limit / quota
+  if (/rate.?limit|too many requests|429|quota|exceeded|insufficient/i.test(rawError)) {
+    return 'rate_limit';
+  }
+  // Auth / API key
+  if (/unauthorized|401|403|invalid.*key|api.?key|authentication|forbidden/i.test(rawError)) {
+    return 'auth_error';
+  }
+  // Timeout
+  if (/timeout|timed?\s*out|ETIMEDOUT|ECONNABORTED/i.test(rawError)) {
+    return 'timeout';
+  }
+  // Network
+  if (/ECONNREFUSED|ENOTFOUND|network|fetch failed|ECONNRESET|socket hang up/i.test(rawError)) {
+    return 'network';
+  }
+  // Model not found
+  if (/model.*not found|does not exist|unsupported model|unknown model/i.test(rawError)) {
+    return 'model_not_found';
+  }
+  // Context length
+  if (/context.?length|too long|token limit|max.?tokens|content.?too.?large/i.test(rawError)) {
+    return 'context_length';
+  }
+  // Aborted
+  if (state === 'aborted') {
+    return 'aborted';
+  }
+  return 'unknown';
+}
+
 function maybeSelfHealGateway1006(
   result: any,
   send: (channel: string, payload: any) => void,
@@ -864,7 +906,9 @@ ${message}`;
           clearTimeout(absoluteChatTimeout);
           chatResolve();
         } else if (state === 'aborted' || state === 'error') {
-          send('chat:status', { type: 'error' });
+          const rawError = payload.error || payload.message?.error || '';
+          const errorStr = typeof rawError === 'string' ? rawError : JSON.stringify(rawError);
+          send('chat:status', { type: 'error', message: classifyProviderError(errorStr, state) });
           if (chatTimeout) clearTimeout(chatTimeout);
           clearTimeout(absoluteChatTimeout);
           chatResolve();

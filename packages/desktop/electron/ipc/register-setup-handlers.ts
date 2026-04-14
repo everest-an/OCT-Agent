@@ -349,7 +349,8 @@ export function registerSetupHandlers(deps: {
   async function _installOpenclawCore(): Promise<{ success: boolean; alreadyInstalled?: boolean; version?: string; method?: string; error?: string; hint?: string }> {
     const npmRoot = await deps.safeShellExecAsync('npm root -g', 5000);
     if (npmRoot) {
-      const globalOpenClawPkg = path.join(npmRoot.trim(), 'openclaw', 'package.json');
+      const openclawDir = path.join(npmRoot.trim(), 'openclaw');
+      const globalOpenClawPkg = path.join(openclawDir, 'package.json');
       if (fs.existsSync(globalOpenClawPkg)) {
         sendOpenClawStatus('setup.install.openclawStatus.foundPackage');
         const ver = await deps.safeShellExecAsync('openclaw --version', 8000);
@@ -360,6 +361,15 @@ export function registerSetupHandlers(deps: {
             version: ver,
           };
         }
+        // package.json exists but openclaw --version fails: corrupted install.
+        // Remove the broken directory so npm install -g can proceed cleanly.
+        console.warn('[setup] openclaw package.json exists but binary is broken — removing corrupted install at', openclawDir);
+        try { fs.rmSync(openclawDir, { recursive: true, force: true }); } catch {}
+      } else if (fs.existsSync(openclawDir)) {
+        // Directory exists but no package.json (interrupted install / corrupted).
+        // npm install -g will fail with ENOTEMPTY if we don't clean up first.
+        console.warn('[setup] openclaw directory exists without package.json — removing corrupted install at', openclawDir);
+        try { fs.rmSync(openclawDir, { recursive: true, force: true }); } catch {}
       }
     }
 

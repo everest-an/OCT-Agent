@@ -490,6 +490,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
   );
   const [input, setInput] = useState('');
   const [agentStatus, setAgentStatus] = useState<AgentStatus>('idle');
+  const [lastErrorHint, setLastErrorHint] = useState<string | null>(null);
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
@@ -816,6 +817,9 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         });
       } else if (status.type === 'thinking' || status.type === 'generating' || status.type === 'error') {
         setAgentStatus(status.type as AgentStatus);
+        if (status.type === 'error' && status.message) {
+          setLastErrorHint(status.message);
+        }
         recordTraceEvent({
           kind: 'status',
           label: t('chat.trace.agentStatus', 'Agent status'),
@@ -1883,6 +1887,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
           onApproveTool={handleApproveTool}
           onCopyApproval={handleCopyApproval}
           onStopRequest={handleStopActiveRequest}
+          errorHint={lastErrorHint}
           onDismissError={() => {
             if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
             streamingRef.current = '';
@@ -1892,6 +1897,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
             traceEventsRef.current = [];
             setTraceEvents([]);
             setAgentStatus('idle');
+            setLastErrorHint(null);
           }}
           renderStreamingContent={renderStreamingContent}
           TypewriterMessage={TypewriterMessage}

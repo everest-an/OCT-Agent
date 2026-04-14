@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0] - 2026-04-14
+
+### Fixed
+- OpenClaw upgrade interruption (network issues, etc.) no longer leaves a corrupted install that blocks chat. The app now auto-detects and cleans up broken packages before reinstalling.
+- ENOENT error detection expanded to catch `spawn openclaw ENOENT` (previously only caught `npx` ENOENT), enabling automatic recovery when OpenClaw binary is missing.
+
+### Added
+- **User-friendly error messages**: Chat errors from AI providers now show actionable, non-technical messages instead of raw error strings. 8 error categories with localized hints (EN + CN):
+  - Provider internal error → "AI service is temporarily unavailable" + suggestion to switch models
+  - Rate limit → "Too many requests" + wait suggestion
+  - Auth/API key issues → "Check Settings" guidance
+  - Network problems → "Check Wi-Fi" guidance
+  - Model not found, context length exceeded, timeout — each with clear next steps
+
 ## [0.2.9] - 2026-04-13
 
 ### Fixed

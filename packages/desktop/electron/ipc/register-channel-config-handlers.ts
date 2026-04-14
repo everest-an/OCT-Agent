@@ -58,7 +58,7 @@ function isTimeoutLike(message: string): boolean {
 }
 
 function isNpxEnoentLike(message: string): boolean {
-  return /spawn\s+npx(?:\.cmd)?\s+ENOENT/i.test(message || '');
+  return /spawn\s+(?:npx|openclaw)(?:\.cmd)?\s+ENOENT/i.test(message || '');
 }
 
 function isPlainRecord(value: unknown): value is Record<string, any> {
