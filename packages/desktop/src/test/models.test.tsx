@@ -154,6 +154,48 @@ describe('Models Page', () => {
     expect(screen.queryByText('tts-1')).not.toBeInTheDocument();
   });
 
+  it('does not perpetuate historically polluted model ids during refresh', async () => {
+    localStorage.setItem('awareness-claw-config', JSON.stringify({
+      language: 'en',
+      providerKey: 'openai',
+      modelId: 'deepseek-v3',
+      providerProfiles: {
+        openai: {
+          apiKey: 'sk-openai',
+          baseUrl: 'https://api.openai.com/v1',
+          models: [
+            { id: 'deepseek-v3', label: 'deepseek-v3' },
+            { id: 'gpt-4o', label: 'GPT-4o' },
+          ],
+        },
+      },
+    }));
+
+    (window as any).electronAPI = {
+      ...(window as any).electronAPI,
+      modelsReadProviders: () => Promise.resolve({ success: true, providers: [], primaryModel: '' }),
+      modelsDiscover: vi.fn().mockResolvedValue({
+        success: true,
+        models: [
+          { id: 'gpt-4.1', name: 'GPT-4.1' },
+        ],
+      }),
+    };
+
+    await act(async () => { render(<Models />); });
+    await waitAndClick(/OpenAI/i);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Refresh from OpenClaw/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('GPT-4.1')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('deepseek-v3', { selector: '.text-sm.font-medium.text-slate-100.truncate' })).not.toBeInTheDocument();
+  });
+
   it('updates the api type preset immediately for an existing provider', async () => {
     await act(async () => { render(<Models />); });
 
@@ -277,5 +319,39 @@ describe('Models Page', () => {
 
     expect(screen.getByText(/Endpoint not validated yet/i)).toBeInTheDocument();
     expect(saveConfigMock).not.toHaveBeenCalled();
+  });
+
+  it('does not auto-save provider selection during silent endpoint validation', async () => {
+    const saveConfigMock = vi.fn().mockResolvedValue({ success: true });
+    const modelsDiscoverMock = vi.fn().mockResolvedValue({
+      success: true,
+      models: [{ id: 'gpt-4.1', name: 'GPT-4.1' }],
+    });
+
+    (window as any).electronAPI = {
+      ...(window as any).electronAPI,
+      saveConfig: saveConfigMock,
+      modelsReadProviders: () => Promise.resolve({ success: true, providers: [], primaryModel: '' }),
+      modelsDiscover: modelsDiscoverMock,
+    };
+
+    await act(async () => { render(<Models />); });
+    await waitAndClick(/OpenAI/i);
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('API Base URL'), {
+        target: { value: 'https://ai-gateway.vercel.sh/v1' },
+      });
+    });
+
+    await waitFor(() => {
+      expect(modelsDiscoverMock).toHaveBeenCalled();
+    });
+
+    expect(saveConfigMock).not.toHaveBeenCalled();
+
+    const stored = JSON.parse(localStorage.getItem('awareness-claw-config') || '{}');
+    expect(stored.providerKey).toBe('openai');
+    expect(stored.modelId).toBe('gpt-4o');
   });
 });

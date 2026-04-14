@@ -6,6 +6,7 @@ import { SettingsModalShell, SettingsSection } from '../components/settings/Sett
 import { useI18n } from '../lib/i18n';
 import {
   getProviderProfile,
+  MODEL_PROVIDERS,
   useAppConfig,
   useDynamicProviders,
   type ModelProviderDef,
@@ -57,7 +58,7 @@ function tokenizeModelId(value: string): string[] {
     .filter((token) => token.length >= 3);
 }
 
-function buildProviderAffinityTokens(provider: ModelProviderDef, models: EditableModel[]): Set<string> {
+function buildProviderAffinityTokens(provider: ModelProviderDef): Set<string> {
   const tokens = new Set<string>();
 
   for (const token of tokenizeModelId(provider.key)) {
@@ -65,12 +66,6 @@ function buildProviderAffinityTokens(provider: ModelProviderDef, models: Editabl
   }
 
   for (const model of provider.models) {
-    for (const token of tokenizeModelId(model.id)) {
-      tokens.add(token);
-    }
-  }
-
-  for (const model of models) {
     for (const token of tokenizeModelId(model.id)) {
       tokens.add(token);
     }
@@ -85,7 +80,7 @@ function filterRelevantDiscoveredModels(provider: ModelProviderDef | undefined, 
     return chatLikeModels;
   }
 
-  const affinityTokens = buildProviderAffinityTokens(provider, currentModels);
+  const affinityTokens = buildProviderAffinityTokens(provider);
   const affinityMatches = chatLikeModels.filter((model) => {
     const haystack = `${model.id} ${model.label}`.toLowerCase();
     for (const token of affinityTokens) {
@@ -165,7 +160,8 @@ export default function Models() {
   const [saveError, setSaveError] = useState('');
   const [savedState, setSavedState] = useState<'idle' | 'done'>('idle');
   const lastAutoDiscoverKeyRef = useRef('');
-  const lastAutoSavedKeyRef = useRef('');
+  const legacyCustomModelIdsRef = useRef<Set<string>>(new Set());
+  const sessionCustomModelIdsRef = useRef<Set<string>>(new Set());
 
   const activeProvider = allProviders.find((provider) => provider.key === config.providerKey);
   const activeModel = activeProvider?.models.find((model) => model.id === config.modelId);
@@ -235,11 +231,17 @@ export default function Models() {
     setNeedsKey(draft.needsKey);
     setApiKey(draft.apiKey);
     setModels(draft.models);
+    legacyCustomModelIdsRef.current = new Set(
+      draft.models
+        .filter((model) => model.source === 'custom')
+        .map((model) => model.id),
+    );
     setSelectedModelId(draft.selectedModelId);
     setShowAdvanced(!isKnownApiType(draft.apiType, allProviders));
     setCustomModelInput('');
     setDiscoverState('idle');
     setDiscoveredModelIds(new Set());
+    sessionCustomModelIdsRef.current = new Set();
   }, [allProviders, config, customMode, editingProviderKey]);
 
   const beginCustomProvider = () => {
@@ -257,6 +259,8 @@ export default function Models() {
     setCustomModelInput('');
     setDiscoverState('idle');
     setDiscoveredModelIds(new Set());
+    legacyCustomModelIdsRef.current = new Set();
+    sessionCustomModelIdsRef.current = new Set();
     setSavedState('idle');
     setSaveError('');
   };
@@ -274,6 +278,8 @@ export default function Models() {
     setCustomModelInput('');
     setDiscoverState('idle');
     setDiscoveredModelIds(new Set());
+    legacyCustomModelIdsRef.current = new Set();
+    sessionCustomModelIdsRef.current = new Set();
     setSaveError('');
   };
 
@@ -281,6 +287,8 @@ export default function Models() {
     const normalizedId = customModelInput.trim();
     if (!normalizedId) return;
     const nextModels = mergeModels(models, [{ id: normalizedId, label: normalizedId, source: 'custom' }]);
+    legacyCustomModelIdsRef.current.delete(normalizedId);
+    sessionCustomModelIdsRef.current.add(normalizedId);
     setModels(nextModels);
     setSelectedModelId((current) => current || normalizedId);
     setCustomModelInput('');
@@ -290,6 +298,8 @@ export default function Models() {
 
   const removeModel = (modelId: string) => {
     const nextModels = models.filter((model) => model.id !== modelId);
+    legacyCustomModelIdsRef.current.delete(modelId);
+    sessionCustomModelIdsRef.current.delete(modelId);
     setModels(nextModels);
     if (selectedModelId === modelId) {
       setSelectedModelId(nextModels[0]?.id || '');
@@ -319,7 +329,7 @@ export default function Models() {
     setEditingProviderKey(null);
   };
 
-  const discoverModels = async (options?: { silent?: boolean; force?: boolean; autoActivateFirst?: boolean }) => {
+  const discoverModels = async (options?: { silent?: boolean; force?: boolean }) => {
     const api = window.electronAPI as any;
     if (!api?.modelsDiscover || !baseUrl || !effectiveProviderKey) return;
 
@@ -344,27 +354,23 @@ export default function Models() {
           source: 'detected' as const,
         }));
         const relevantDetectedModels = filterRelevantDiscoveredModels(editingProvider, models, detectedModels);
-        const customModels = models.filter((model) => model.source === 'custom');
-        const nextModels = mergeModels(relevantDetectedModels, customModels);
-        const firstDetectedModelId = relevantDetectedModels[0]?.id || '';
+        const hardcodedCatalogModels = MODEL_PROVIDERS.find((provider) => provider.key === effectiveProviderKey)?.models || [];
+        const providerCatalogModelIds = new Set(hardcodedCatalogModels.map((model) => model.id));
+        const filteredDetectedModels = relevantDetectedModels.filter(
+          (model) => !legacyCustomModelIdsRef.current.has(model.id)
+            || sessionCustomModelIdsRef.current.has(model.id)
+            || providerCatalogModelIds.has(model.id),
+        );
+        const customModels = models.filter((model) => model.source === 'custom' && sessionCustomModelIdsRef.current.has(model.id));
+        const nextModels = mergeModels(filteredDetectedModels, customModels);
         setModels(nextModels);
         setDiscoveredModelIds(new Set(relevantDetectedModels.map((model) => model.id)));
-        if (options?.autoActivateFirst && firstDetectedModelId) {
-          setSelectedModelId(firstDetectedModelId);
-        } else if (!nextModels.some((model) => model.id === selectedModelId)) {
+        if (!nextModels.some((model) => model.id === selectedModelId)) {
           setSelectedModelId(nextModels[0]?.id || '');
         }
         setDiscoverState(nextModels.length > 0 ? 'success' : 'error');
         if (nextModels.length > 0) {
           lastAutoDiscoverKeyRef.current = discoverKey;
-        }
-
-        if (options?.autoActivateFirst && firstDetectedModelId) {
-          const autoSaveKey = `${discoverKey}::${firstDetectedModelId}`;
-          if (lastAutoSavedKeyRef.current !== autoSaveKey) {
-            await persistProviderSelection(firstDetectedModelId, nextModels);
-            lastAutoSavedKeyRef.current = autoSaveKey;
-          }
         }
       } else {
         setDiscoverState('error');
@@ -381,7 +387,7 @@ export default function Models() {
     if (!shouldAutoValidate) return;
 
     const timer = setTimeout(() => {
-      void discoverModels({ silent: true, autoActivateFirst: true });
+      void discoverModels({ silent: true });
     }, 500);
 
     return () => clearTimeout(timer);
