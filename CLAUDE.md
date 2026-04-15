@@ -575,3 +575,67 @@ AwarenessClaw/
 - **正确方式**：在 `npm scripts` 中用 `electron .`（npm 自动加 PATH），或使用根 `node_modules/.bin/electron`
 - **tsconfig.electron.json rootDir**：必须保持 `"electron"`，不能改成 `"."`（否则编译输出目录结构变化，`package.json main` 路径断裂）
 - **共享文件**：需要被 Electron 和前端同时 import 的文件（如 channel-registry.ts）放在 `electron/` 目录，前端通过 `src/lib/` re-export
+## 🛡️ 上线门禁方法论：5 层测试金字塔（MANDATORY）
+
+**为什么要有**：v0.3.0 前后连续几次"测试全绿但用户打开就崩"的事故。根因：测试验证的是代码路径，不是用户路径。
+
+本文件与 `/Users/edwinhao/Awareness/CLAUDE.md` 的方法论保持同步，AwarenessClaw 桌面端（Electron + React）也必须按同一标准。
+
+### Layer 1 · Static + Contract Guards
+- **IPC 契约**：每条 `ipcRenderer.invoke(...)` 必须有后端 handler。加 `scripts/verify-ipc.mjs`（扫 `window.api.*` 调用 vs `ipcMain.handle` 注册表）
+- **按钮 wire 检查**：对 React 组件，`onClick={undefined}` 或缺 handler → 编译期 TS 报错（`strict: true` + `noImplicitAny`）
+- **Channel 名字单一来源**：`electron/channel-registry.ts` 必须覆盖前后端所有 channel；新增 IPC 前先在 registry 里声明，否则 TS 报错
+
+### Layer 2 · Integration Tests
+- vitest + @testing-library/react
+- 每个 React hook + service 模块必须有集成测试
+- **允许**：mock Electron API（electronAPI）、LLM 调用、文件系统
+- **禁止**：mock 同进程的 React 组件
+
+### Layer 3 · Failure-Mode / Chaos Tests
+- 每条 `window.api.x()` 调用必须测 3 种返回：success / rejected with Error / promise hangs (timeout)
+- LLM provider 故障必须测：`classifyProviderError()` 的 8 类错误每类一个测试（已有，保持扩充）
+- OpenClaw CLI spawn 失败：stderr 丢失、进程僵死、ENOENT 都要有对应测试
+
+### Layer 4 · User Journey E2E — 零 Mock（Playwright + Electron）
+- 位置：`AwarenessClaw/packages/desktop/test/e2e/user-journeys/`
+- 工具：`@playwright/test` + Playwright Electron 模式
+- **ESLint 规则**：禁止在此目录下用任何 `page.route` 或 `mockIpc`
+- 每条 journey 对应一份 `docs/acceptance/<F>.md` Given/When/Then
+- 典型 journey：
+  - 首次打开 → 选工作区 → 启动 OpenClaw → 发一条消息
+  - 连云端 → 切工作区 → Memory UI 刷新
+  - 升级检测 → 点击 banner → 打开下载页
+- **断言**：用户可见文字/窗口标题/IPC 事件的最终可见效果，不是内部 store state
+
+### Layer 5 · Mutation Testing
+- Stryker on `electron/memory-client.ts` + `electron/register-setup-handlers.ts` + `src/lib/provider-errors.ts`
+- ≥ 80% mutation score 才能 tag release
+
+### Definition of Done（PR 合并清单，桌面端）
+1. [ ] 新 IPC handler → `channel-registry.ts` 声明 + `verify-ipc.mjs` 过
+2. [ ] 新 `window.api.x()` 调用 → 有 L3 success / reject / timeout 测试
+3. [ ] 新按钮/菜单项 → onClick handler 非 undefined + 有 E2E 点击
+4. [ ] 新功能 → 有 `docs/acceptance/<F>.md`
+5. [ ] 对应的 `test/e2e/user-journeys/<slug>.spec.mjs` 零 mock
+6. [ ] `npm run ship-gate` 全绿
+7. [ ] CHANGELOG 写"用户感知的变化"
+8. [ ] 亲手在 DMG 打包后的 app 里走过一遍（不是 dev mode）
+
+### DMG 发布前 Smoke Playbook（必跑）
+每次 `npm run package:mac` 产出 DMG 后，执行 `bash scripts/dmg-smoke.sh`：
+1. 从全新临时用户目录启动（不污染当前配置）
+2. 检查主窗口标题、菜单、默认工作区
+3. 启动 OpenClaw，发一条消息，断言消息回显
+4. 检查升级 banner 正确显示/隐藏
+5. 关窗口，重开，断言状态恢复
+任一步失败 → 禁止上传分发、禁止更新 `app-versions.json`
+
+### 禁止项
+- ❌ `test/e2e/user-journeys/` 下的 `page.route` / `mockIpc`
+- ❌ 只测 happy path 不测 `rejected` 分支的 IPC 调用测试
+- ❌ 新 IPC handler 没进 `channel-registry.ts`
+- ❌ onClick 事件 handler 是 `undefined` 或 `() => {}` 空函数
+- ❌ 未在真实 DMG 里走过 happy path 就 bump 版本
+
+> 与主仓同步：任何方法论改动**两个 CLAUDE.md 同时更新**，保持一致。
