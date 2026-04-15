@@ -1401,6 +1401,11 @@ const en: Record<string, string> = {
   'scanSettings.err.totalFiles': 'Must be at least 100',
   'scanSettings.err.depth': 'Must be between 1 and 50',
   'scanSettings.open': 'Scan Settings',
+  // Global scan status bar (T-025)
+  'scanBar.scanning': 'Scanning…',
+  'scanBar.synced': 'Synced',
+  'scanBar.files': 'files',
+  'scanBar.embedding': 'Embedding',
 };
 
 const zh: Record<string, string> = {
@@ -2789,6 +2794,11 @@ const zh: Record<string, string> = {
   'scanSettings.err.totalFiles': '至少 100',
   'scanSettings.err.depth': '取值范围 1 ~ 50',
   'scanSettings.open': '扫描设置',
+  // Global scan status bar (T-025)
+  'scanBar.scanning': '扫描中…',
+  'scanBar.synced': '已同步',
+  'scanBar.files': '文件',
+  'scanBar.embedding': '嵌入中',
 };
 
 // Japanese and Korean use English as fallback for now

@@ -11,6 +11,7 @@ import TaskCenter from './pages/TaskCenter';
 import Settings from './pages/Settings';
 import Sidebar, { type Page } from './components/Sidebar';
 import UpdateBanner from './components/UpdateBanner';
+import { GlobalScanStatusBar } from './components/GlobalScanStatusBar';
 import { useAppConfig } from './lib/store';
 
 const SETUP_COMPLETED_AT_KEY = 'awareness-claw-setup-completed-at';
@@ -330,6 +331,8 @@ export default function App() {
           {currentPage === 'settings' && <div className="h-full overflow-y-auto"><Settings /></div>}
         </main>
       </div>
+
+      <GlobalScanStatusBar />
     </div>
   );
 }
