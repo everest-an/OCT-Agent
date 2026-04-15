@@ -2,8 +2,9 @@ import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import {
   Search, RefreshCw, Loader2, AlertCircle, HardDrive, Cloud,
   Clock, Share2, SlidersHorizontal, Brain, Play, BookOpen, ArrowDownUp,
-  FolderOpen,
+  FolderOpen, Settings2,
 } from 'lucide-react';
+import { ScanSettingsDialog } from '../components/memory/ScanSettingsDialog';
 import { useI18n } from '../lib/i18n';
 import { useExternalNavigator } from '../lib/useExternalNavigator';
 import { useMemorySettings } from '../hooks/useMemorySettings';
@@ -116,6 +117,7 @@ export default function Memory() {
   const [graphSize, setGraphSize] = useState({ width: 600, height: 400 });
   const [wikiSelectedItem, setWikiSelectedItem] = useState<WikiSelectedItem>({ type: 'overview' });
   const [activeWorkspace, setActiveWorkspace] = useState<{ path: string | null; daemonProjectDir: string | null }>({ path: null, daemonProjectDir: null });
+  const [scanSettingsOpen, setScanSettingsOpen] = useState(false);
   const graphContainerRef = useRef<HTMLDivElement>(null);
   const autoStartAttemptedRef = useRef(false);
 
@@ -354,6 +356,15 @@ export default function Memory() {
               t={t}
             />
             <button
+              onClick={() => setScanSettingsOpen(true)}
+              title={t('scanSettings.open')}
+              aria-label={t('scanSettings.open')}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 rounded-lg transition-colors"
+            >
+              <Settings2 size={12} />
+              {t('scanSettings.open')}
+            </button>
+            <button
               onClick={handleRefresh}
               disabled={loading}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 rounded-lg transition-colors"
@@ -363,6 +374,18 @@ export default function Memory() {
             </button>
           </div>
         </div>
+        <ScanSettingsDialog
+          open={scanSettingsOpen}
+          onClose={() => setScanSettingsOpen(false)}
+          workspacePath={activeWorkspace.path || activeWorkspace.daemonProjectDir}
+          t={t}
+          onSaved={(_cfg, rescan) => {
+            if (rescan) {
+              void loadScanStatus();
+            }
+          }}
+        />
+
 
         <div className="flex flex-wrap gap-1.5">
           {memoryTabItems.map((tab) => {
