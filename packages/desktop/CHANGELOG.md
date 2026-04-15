@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.4] - 2026-04-16
+
+### Fixed
+- **Gateway WS scope fallback**: OpenClaw 4.14 write scopes rejected by Gateway 4.10 no longer cause infinite reconnect loop — gracefully falls back to read-only scopes, chat still works
+- **Models page: legacy custom model pollution**: duplicate model entries across refresh cycles eliminated; legacy custom IDs tracked separately from session-added models
+- **Models page: unwanted auto-save**: background endpoint validation no longer silently overrides user's intentional model selection
+- **Models: cross-vendor pollution**: provider affinity matching hardened, mixed-vendor models shown as opt-in only
+- **Windows uninstaller cleanup**: tray instances + OpenClaw/daemon residual processes now killed during uninstall, preventing `.openclaw` folder lock on reinstall
+
+### Added
+- **Setup wizard refactored**: monolithic Setup.tsx split into CloudAuthStep + WorkspaceStep components for maintainability
+- Setup step i18n translations
+- L1 contract guard: `verify-setup-steps.mjs`
+- L2 tests: CloudAuthStep, WorkspaceStep, SetupWizard flow, protocol whitelist
+- Dashboard model switcher labels with provider CTA
+- CLAUDE.md: 5-layer testing pyramid rules for AwarenessClaw
+
 ## [0.3.3] - 2026-04-14
 
 ### Fixed
