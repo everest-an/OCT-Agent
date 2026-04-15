@@ -155,6 +155,7 @@ export class GatewayClient extends EventEmitter {
     const origin = `http://${LOOPBACK_HOST}:${this.config.port}`;
 
     return new Promise((resolve, reject) => {
+      let handshakeSettled = false;
       try {
         this.ws = new WebSocket(url, { headers: { Origin: origin } });
       } catch (err) {
@@ -162,6 +163,8 @@ export class GatewayClient extends EventEmitter {
       }
 
       const connectTimeout = setTimeout(() => {
+        if (handshakeSettled) return;
+        handshakeSettled = true;
         this.ws?.close();
         reject(new Error('Gateway connection timed out'));
       }, 10000);
@@ -181,6 +184,8 @@ export class GatewayClient extends EventEmitter {
           if (msg.type === 'res') {
             const res = msg as RpcResponse;
             if (res.ok && res.payload?.type === 'hello-ok') {
+              if (handshakeSettled) return;
+              handshakeSettled = true;
               clearTimeout(connectTimeout);
               this.connected = true;
               this.connId = res.payload.server?.connId || '';
@@ -188,6 +193,8 @@ export class GatewayClient extends EventEmitter {
               this.setupListeners();
               resolve();
             } else {
+              if (handshakeSettled) return;
+              handshakeSettled = true;
               clearTimeout(connectTimeout);
               reject(new Error(res.error?.message || 'Gateway connect failed'));
             }
@@ -261,13 +268,24 @@ export class GatewayClient extends EventEmitter {
       });
 
       this.ws.on('error', (err) => {
+        if (handshakeSettled) return;
+        handshakeSettled = true;
         clearTimeout(connectTimeout);
         reject(err);
       });
 
-      this.ws.on('close', () => {
+      this.ws.on('close', (code: number, reason: Buffer) => {
         this.connected = false;
         this.emit('disconnected');
+        const reasonStr = reason?.toString?.() || '';
+        // During handshake, a close (e.g. 1008 "pairing required") should reject the promise
+        // so callers like ensureWriteScopes() can detect and fall back.
+        if (!handshakeSettled) {
+          handshakeSettled = true;
+          clearTimeout(connectTimeout);
+          reject(new Error(`Gateway closed during handshake: code=${code} reason=${reasonStr}`));
+          return;
+        }
         if (!this.destroyed) this.scheduleReconnect();
       });
     });
@@ -280,14 +298,38 @@ export class GatewayClient extends EventEmitter {
     return sa === sb;
   }
 
+  private writeScopesUnsupported = false;
+
   private async ensureWriteScopes(): Promise<void> {
+    // If a previous attempt proved the Gateway doesn't support write scopes
+    // (e.g. Gateway 4.10 with scope-upgrade → pairing-required), skip silently.
+    if (this.writeScopesUnsupported) return;
     if (this.scopeSetEquals(this.requestedScopes, GatewayClient.WRITE_SCOPES)) return;
 
     this.requestedScopes = [...GatewayClient.WRITE_SCOPES];
     this.connected = false;
     try { this.ws?.close(); } catch { /* best-effort */ }
     this.ws = null;
-    await this.connect();
+    try {
+      await this.connect();
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      // Gateway rejected scope upgrade (older Gateway that lacks admin/write scopes).
+      // Fall back to read-only scopes — chat.send still works under operator.read on
+      // Gateway versions that don't enforce per-method scope checks.
+      if (msg.includes('pairing') || msg.includes('scope') || msg.includes('1008') || msg.includes('closed during handshake')) {
+        console.warn('[gateway-ws] Write scope upgrade rejected, falling back to read-only scopes');
+        this.writeScopesUnsupported = true;
+        this.requestedScopes = [...GatewayClient.READ_SCOPES];
+        this.connected = false;
+        // ws may have been reassigned by the failed connect() attempt at runtime
+        try { (this.ws as WebSocket | null)?.close(); } catch { /* best-effort */ }
+        this.ws = null;
+        await this.connect();
+        return;
+      }
+      throw err;
+    }
   }
 
   private setupListeners() {
@@ -427,9 +469,9 @@ export class GatewayClient extends EventEmitter {
     return this.connected && this.ws?.readyState === WebSocket.OPEN;
   }
 
-  /** Returns true if the client already holds write (operator.admin/write) scopes. */
+  /** Returns true if the client already holds write scopes (or if the Gateway doesn't support them). */
   get hasWriteScopes(): boolean {
-    return this.scopeSetEquals(this.requestedScopes, GatewayClient.WRITE_SCOPES);
+    return this.writeScopesUnsupported || this.scopeSetEquals(this.requestedScopes, GatewayClient.WRITE_SCOPES);
   }
 
   /**
