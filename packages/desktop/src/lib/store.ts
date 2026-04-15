@@ -386,6 +386,10 @@ async function syncToOpenClaw(config: AppConfig, providers: ModelProviderDef[]) 
         input: Array.isArray(model.input) && model.input.length > 0 ? model.input : ['text'],
       }));
 
+    // Skip providers that have no API key configured — writing empty-key providers
+    // pollutes openclaw.json and confuses users (e.g. DeepSeek appearing without a key).
+    // Exception: ollama (local) doesn't need an API key.
+    if (!effectiveApiKey && providerKey !== 'ollama') continue;
     if (!effectiveBaseUrl && effectiveModels.length === 0 && !effectiveApiKey) continue;
 
     syncedProviders[providerKey] = {

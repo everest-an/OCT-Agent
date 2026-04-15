@@ -17,6 +17,13 @@ type EditableModel = {
   id: string;
   label: string;
   source: 'catalog' | 'detected' | 'custom';
+  ownedBy?: string;
+  providerHint?: string;
+};
+
+type DiscoveredModelBuckets = {
+  aligned: EditableModel[];
+  crossVendor: EditableModel[];
 };
 
 const DEFAULT_API_TYPE = 'openai-completions';
@@ -58,6 +65,10 @@ function tokenizeModelId(value: string): string[] {
     .filter((token) => token.length >= 3);
 }
 
+function getBuiltinProviderCatalog(providerKey: string): ModelProviderDef | undefined {
+  return MODEL_PROVIDERS.find((provider) => provider.key === providerKey);
+}
+
 function buildProviderAffinityTokens(provider: ModelProviderDef): Set<string> {
   const tokens = new Set<string>();
 
@@ -65,8 +76,15 @@ function buildProviderAffinityTokens(provider: ModelProviderDef): Set<string> {
     tokens.add(token);
   }
 
+  for (const token of tokenizeModelId(provider.name)) {
+    tokens.add(token);
+  }
+
   for (const model of provider.models) {
     for (const token of tokenizeModelId(model.id)) {
+      tokens.add(token);
+    }
+    for (const token of tokenizeModelId(model.label)) {
       tokens.add(token);
     }
   }
@@ -74,14 +92,60 @@ function buildProviderAffinityTokens(provider: ModelProviderDef): Set<string> {
   return tokens;
 }
 
-function filterRelevantDiscoveredModels(provider: ModelProviderDef | undefined, currentModels: EditableModel[], discoveredModels: EditableModel[]): EditableModel[] {
+function buildDiscoveryOwnershipTokens(model: EditableModel): Set<string> {
+  const tokens = new Set<string>();
+  for (const rawValue of [model.ownedBy, model.providerHint]) {
+    for (const token of tokenizeModelId(rawValue || '')) {
+      tokens.add(token);
+    }
+  }
+  return tokens;
+}
+
+function partitionDiscoveredModelsByAffinity(provider: ModelProviderDef | undefined, discoveredModels: EditableModel[]): DiscoveredModelBuckets {
   const chatLikeModels = discoveredModels.filter((model) => !NON_CHAT_MODEL_PATTERN.test(`${model.id} ${model.label}`));
   if (!provider) {
-    return chatLikeModels;
+    return {
+      aligned: chatLikeModels,
+      crossVendor: [],
+    };
   }
 
-  const affinityTokens = buildProviderAffinityTokens(provider);
-  const affinityMatches = chatLikeModels.filter((model) => {
+  const trustedProvider = getBuiltinProviderCatalog(provider.key);
+  if (!trustedProvider) {
+    return {
+      aligned: chatLikeModels,
+      crossVendor: [],
+    };
+  }
+
+  const affinityTokens = buildProviderAffinityTokens(trustedProvider);
+  const trustedCatalogIds = new Set(
+    trustedProvider.models.map((model) => model.id.trim().toLowerCase()).filter(Boolean),
+  );
+  if (affinityTokens.size === 0) {
+    return {
+      aligned: chatLikeModels,
+      crossVendor: [],
+    };
+  }
+
+  const aligned = chatLikeModels.filter((model) => {
+    const normalizedId = model.id.trim().toLowerCase();
+    if (trustedCatalogIds.has(normalizedId)) {
+      return true;
+    }
+
+    const ownershipTokens = buildDiscoveryOwnershipTokens(model);
+    if (ownershipTokens.size > 0) {
+      for (const token of ownershipTokens) {
+        if (affinityTokens.has(token)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
     const haystack = `${model.id} ${model.label}`.toLowerCase();
     for (const token of affinityTokens) {
       if (haystack.includes(token)) {
@@ -91,11 +155,10 @@ function filterRelevantDiscoveredModels(provider: ModelProviderDef | undefined, 
     return false;
   });
 
-  if (affinityMatches.length > 0) {
-    return affinityMatches;
-  }
-
-  return chatLikeModels;
+  return {
+    aligned,
+    crossVendor: chatLikeModels.filter((model) => !aligned.some((candidate) => candidate.id === model.id)),
+  };
 }
 
 function toStoredModels(models: EditableModel[]): ProviderStoredModel[] {
@@ -157,6 +220,7 @@ export default function Models() {
   const [discovering, setDiscovering] = useState(false);
   const [discoverState, setDiscoverState] = useState<'idle' | 'success' | 'error'>('idle');
   const [discoveredModelIds, setDiscoveredModelIds] = useState<Set<string>>(new Set());
+  const [crossVendorDiscoveredModelIds, setCrossVendorDiscoveredModelIds] = useState<Set<string>>(new Set());
   const [saveError, setSaveError] = useState('');
   const [savedState, setSavedState] = useState<'idle' | 'done'>('idle');
   const lastAutoDiscoverKeyRef = useRef('');
@@ -215,9 +279,13 @@ export default function Models() {
     || (!!baseUrlTrimmed && !currentProviderDefaultBaseUrl)
     || (!!baseUrlTrimmed && !!currentProviderDefaultBaseUrl && baseUrlTrimmed !== currentProviderDefaultBaseUrl.trim());
   const shouldAutoValidate = modalOpen && !!effectiveProviderKey && !!baseUrlTrimmed && (!needsKey || !!apiKey.trim());
+  const selectedModel = models.find((model) => model.id === selectedModelId);
   const selectedModelInCatalog = models.some((model) => model.id === selectedModelId);
   const selectedModelDiscovered = discoveredModelIds.has(selectedModelId);
+  const selectedModelCrossVendor = crossVendorDiscoveredModelIds.has(selectedModelId);
   const requiresStrictValidation = hasEndpointOverride;
+  const selectionNeedsReview = !!selectedModelId && discoverState === 'success' && !selectedModelInCatalog;
+  const hasCrossVendorDiscoveries = crossVendorDiscoveredModelIds.size > 0;
 
   useEffect(() => {
     if (customMode || !editingProviderKey) return;
@@ -241,6 +309,7 @@ export default function Models() {
     setCustomModelInput('');
     setDiscoverState('idle');
     setDiscoveredModelIds(new Set());
+    setCrossVendorDiscoveredModelIds(new Set());
     sessionCustomModelIdsRef.current = new Set();
   }, [allProviders, config, customMode, editingProviderKey]);
 
@@ -259,6 +328,7 @@ export default function Models() {
     setCustomModelInput('');
     setDiscoverState('idle');
     setDiscoveredModelIds(new Set());
+    setCrossVendorDiscoveredModelIds(new Set());
     legacyCustomModelIdsRef.current = new Set();
     sessionCustomModelIdsRef.current = new Set();
     setSavedState('idle');
@@ -278,6 +348,7 @@ export default function Models() {
     setCustomModelInput('');
     setDiscoverState('idle');
     setDiscoveredModelIds(new Set());
+    setCrossVendorDiscoveredModelIds(new Set());
     legacyCustomModelIdsRef.current = new Set();
     sessionCustomModelIdsRef.current = new Set();
     setSaveError('');
@@ -352,33 +423,46 @@ export default function Models() {
           id: String(model.id || '').trim(),
           label: String(model.name || model.id || '').trim(),
           source: 'detected' as const,
+          ...(typeof model.ownedBy === 'string' ? { ownedBy: String(model.ownedBy).trim() } : {}),
+          ...(typeof model.providerHint === 'string' ? { providerHint: String(model.providerHint).trim() } : {}),
         }));
-        const relevantDetectedModels = filterRelevantDiscoveredModels(editingProvider, models, detectedModels);
+        const { aligned, crossVendor } = partitionDiscoveredModelsByAffinity(editingProvider, detectedModels);
+        const builtinCatalogModels = (getBuiltinProviderCatalog(effectiveProviderKey)?.models || []).map((model) => ({
+          id: model.id,
+          label: model.label,
+          source: 'catalog' as const,
+        }));
+        const visibleDetectedModels = builtinCatalogModels.length > 0 ? aligned : [...aligned, ...crossVendor];
         const hardcodedCatalogModels = MODEL_PROVIDERS.find((provider) => provider.key === effectiveProviderKey)?.models || [];
         const providerCatalogModelIds = new Set(hardcodedCatalogModels.map((model) => model.id));
-        const filteredDetectedModels = relevantDetectedModels.filter(
+        const filteredDetectedModels = visibleDetectedModels.filter(
           (model) => !legacyCustomModelIdsRef.current.has(model.id)
             || sessionCustomModelIdsRef.current.has(model.id)
             || providerCatalogModelIds.has(model.id),
         );
+        const filteredCrossVendorModelIds = new Set(crossVendor.map((model) => model.id));
         const customModels = models.filter((model) => model.source === 'custom' && sessionCustomModelIdsRef.current.has(model.id));
-        const nextModels = mergeModels(filteredDetectedModels, customModels);
+        const nextModels = mergeModels(builtinCatalogModels, filteredDetectedModels, customModels);
         setModels(nextModels);
-        setDiscoveredModelIds(new Set(relevantDetectedModels.map((model) => model.id)));
-        if (!nextModels.some((model) => model.id === selectedModelId)) {
+        setDiscoveredModelIds(new Set(filteredDetectedModels.map((model) => model.id)));
+        setCrossVendorDiscoveredModelIds(filteredCrossVendorModelIds);
+        if (!selectedModelId && nextModels.length > 0) {
           setSelectedModelId(nextModels[0]?.id || '');
         }
-        setDiscoverState(nextModels.length > 0 ? 'success' : 'error');
-        if (nextModels.length > 0) {
+        const hasValidatedCatalog = filteredDetectedModels.length > 0 || filteredCrossVendorModelIds.size > 0;
+        setDiscoverState(hasValidatedCatalog ? 'success' : 'error');
+        if (hasValidatedCatalog) {
           lastAutoDiscoverKeyRef.current = discoverKey;
         }
       } else {
         setDiscoverState('error');
         setDiscoveredModelIds(new Set());
+        setCrossVendorDiscoveredModelIds(new Set());
       }
     } catch {
       setDiscoverState('error');
       setDiscoveredModelIds(new Set());
+      setCrossVendorDiscoveredModelIds(new Set());
     }
     setDiscovering(false);
   };
@@ -401,7 +485,9 @@ export default function Models() {
     if (customMode && !baseUrl.trim()) return;
 
     if (!selectedModelInCatalog) {
-      setSaveError(t('models.saveInvalidModel', 'Selected model is invalid. Please choose a model from the catalog.'));
+      setSaveError(selectionNeedsReview
+        ? t('models.saveSelectionRequiredAfterRefresh', 'Your previous model is no longer in the refreshed catalog. Choose a model explicitly before saving.')
+        : t('models.saveInvalidModel', 'Selected model is invalid. Please choose a model from the catalog.'));
       return;
     }
 
@@ -789,9 +875,24 @@ export default function Models() {
                         {t('models.discoverSuccess', 'Model list refreshed. Custom model IDs were kept.')}
                       </div>
                     )}
+                    {hasCrossVendorDiscoveries && (
+                      <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                        {t('models.discoverCrossVendor', 'This endpoint also returned models from other vendors. They stay visible for manual use, but AwarenessClaw will not switch to them automatically.')}
+                      </div>
+                    )}
+                    {selectionNeedsReview && (
+                      <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                        {t('models.discoverSelectionReview', 'Your previous selection is no longer in this refreshed catalog. Pick a model explicitly before saving.')}
+                      </div>
+                    )}
                     {discoverState === 'error' && (
                       <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
                         {t('models.discoverFailed', 'OpenClaw could not fetch models. Check the provider key, base URL, and API key.')}
+                      </div>
+                    )}
+                    {selectedModelCrossVendor && selectedModel?.source === 'detected' && (
+                      <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 px-3 py-2 text-xs text-sky-100">
+                        {t('models.selectedCrossVendor', 'This model comes from the endpoint\'s mixed vendor pool. Desktop keeps it opt-in and never auto-selects it for you.')}
                       </div>
                     )}
 
@@ -803,7 +904,15 @@ export default function Models() {
                         >
                           <button onClick={() => setSelectedModelId(model.id)} className="min-w-0 flex-1 text-left">
                             <div className="text-sm font-medium text-slate-100 truncate">{model.label}</div>
-                            <div className="mt-1 text-[10px] uppercase tracking-wide text-slate-500">{model.source}</div>
+                            <div className="mt-1 text-[10px] uppercase tracking-wide text-slate-500">
+                              {model.source === 'catalog'
+                                ? t('models.source.catalog', 'Built-in')
+                                : model.source === 'custom'
+                                  ? t('models.source.custom', 'Manual')
+                                  : crossVendorDiscoveredModelIds.has(model.id)
+                                    ? t('models.source.detectedExternal', 'Endpoint · other vendor')
+                                    : t('models.source.detected', 'Endpoint')}
+                            </div>
                           </button>
                           <button
                             onClick={() => removeModel(model.id)}

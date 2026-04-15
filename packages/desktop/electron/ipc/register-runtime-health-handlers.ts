@@ -46,7 +46,15 @@ function buildModelDiscoveryHeaders(providerKey: string, apiKey: string) {
   return headers;
 }
 
-function parseDiscoveredModels(payload: any): Array<{ id: string; name: string; reasoning?: boolean; contextWindow?: number; maxTokens?: number }> {
+function parseDiscoveredModels(payload: any): Array<{
+  id: string;
+  name: string;
+  reasoning?: boolean;
+  contextWindow?: number;
+  maxTokens?: number;
+  ownedBy?: string;
+  providerHint?: string;
+}> {
   const candidates = Array.isArray(payload?.data)
     ? payload.data
     : Array.isArray(payload?.models)
@@ -63,6 +71,14 @@ function parseDiscoveredModels(payload: any): Array<{ id: string; name: string; 
       ...(typeof item.reasoning === 'boolean' ? { reasoning: item.reasoning } : {}),
       ...(typeof item.context_window === 'number' ? { contextWindow: item.context_window } : typeof item.contextWindow === 'number' ? { contextWindow: item.contextWindow } : {}),
       ...(typeof item.max_output_tokens === 'number' ? { maxTokens: item.max_output_tokens } : typeof item.maxTokens === 'number' ? { maxTokens: item.maxTokens } : {}),
+      ...(typeof item.owned_by === 'string' ? { ownedBy: item.owned_by } : typeof item.ownedBy === 'string' ? { ownedBy: item.ownedBy } : {}),
+      ...(typeof item.provider === 'string'
+        ? { providerHint: item.provider }
+        : typeof item.vendor === 'string'
+          ? { providerHint: item.vendor }
+          : typeof item.publisher === 'string'
+            ? { providerHint: item.publisher }
+            : {}),
     }));
 }
 

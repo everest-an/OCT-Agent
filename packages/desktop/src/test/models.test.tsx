@@ -196,6 +196,96 @@ describe('Models Page', () => {
     expect(screen.queryByText('deepseek-v3', { selector: '.text-sm.font-medium.text-slate-100.truncate' })).not.toBeInTheDocument();
   });
 
+  it('does not auto-activate cross-vendor models returned by a mixed endpoint', async () => {
+    localStorage.setItem('awareness-claw-config', JSON.stringify({
+      language: 'en',
+      providerKey: 'qwen',
+      modelId: 'qwen-plus-latest',
+      providerProfiles: {
+        qwen: {
+          apiKey: 'qwen-key',
+          baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+          models: [{ id: 'qwen-plus-latest', label: 'Qwen Plus' }],
+        },
+      },
+    }));
+
+    const saveConfigMock = vi.fn().mockResolvedValue({ success: true });
+    const modelsDiscoverMock = vi.fn().mockResolvedValue({
+      success: true,
+      models: [{ id: 'vanchin/deepseek-v3', name: 'DeepSeek V3' }],
+    });
+
+    (window as any).electronAPI = {
+      ...(window as any).electronAPI,
+      saveConfig: saveConfigMock,
+      modelsReadProviders: () => Promise.resolve({ success: true, providers: [], primaryModel: '' }),
+      modelsDiscover: modelsDiscoverMock,
+    };
+
+    await act(async () => { render(<Models />); });
+    await waitAndClick(/Qwen/i);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Refresh from OpenClaw/i }));
+    });
+
+    await waitFor(() => {
+      expect(modelsDiscoverMock).toHaveBeenCalled();
+      expect(screen.getByText(/other vendors/i)).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('DeepSeek V3')).not.toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Save & Activate/i }));
+    });
+
+    await waitFor(() => {
+      expect(saveConfigMock).toHaveBeenCalled();
+    });
+
+    const stored = JSON.parse(localStorage.getItem('awareness-claw-config') || '{}');
+    expect(stored.providerKey).toBe('qwen');
+    expect(stored.modelId).toBe('qwen-plus-latest');
+    expect(stored.providerProfiles.qwen.models.some((model: { id: string }) => model.id === 'vanchin/deepseek-v3')).toBe(false);
+  });
+
+  it('accepts network-discovered models when the endpoint provides matching provider ownership metadata', async () => {
+    localStorage.setItem('awareness-claw-config', JSON.stringify({
+      language: 'en',
+      providerKey: 'qwen',
+      modelId: 'qwen-plus-latest',
+      providerProfiles: {
+        qwen: {
+          apiKey: 'qwen-key',
+          baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+          models: [{ id: 'qwen-plus-latest', label: 'Qwen Plus' }],
+        },
+      },
+    }));
+
+    (window as any).electronAPI = {
+      ...(window as any).electronAPI,
+      modelsReadProviders: () => Promise.resolve({ success: true, providers: [], primaryModel: '' }),
+      modelsDiscover: vi.fn().mockResolvedValue({
+        success: true,
+        models: [{ id: 'wan2.2-t2v-turbo', name: 'Wan 2.2 Turbo', ownedBy: 'qwen' }],
+      }),
+    };
+
+    await act(async () => { render(<Models />); });
+    await waitAndClick(/Qwen/i);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Refresh from OpenClaw/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Wan 2.2 Turbo')).toBeInTheDocument();
+    });
+  });
+
   it('updates the api type preset immediately for an existing provider', async () => {
     await act(async () => { render(<Models />); });
 

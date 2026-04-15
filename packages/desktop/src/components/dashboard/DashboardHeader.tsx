@@ -51,6 +51,7 @@ export function DashboardHeader({
   dashboardOpening: boolean;
 }) {
   const currentProvider = allProviders.find((provider) => provider.key === config.providerKey);
+  const currentModel = currentProvider?.models.find((model) => model.id === config.modelId);
 
   return (
     <div className="px-3 py-1.5 border-b border-slate-800/80 flex items-center gap-1.5 flex-shrink-0 h-10">
@@ -82,7 +83,7 @@ export function DashboardHeader({
           className="flex items-center gap-1 px-2 py-0.5 text-[11px] hover:bg-slate-800 rounded-md text-slate-500 transition-colors"
         >
           {currentProvider ? <ProviderIcon providerKey={currentProvider.key} size={11} /> : null}
-          {config.modelId?.split('/').pop() || t('chat.selectModel', 'Select model')}
+          {currentModel?.label || config.modelId || t('chat.selectModel', 'Select model')}
           <ChevronDown size={9} />
         </button>
         {showModelSelector && (
@@ -153,6 +154,17 @@ export function DashboardHeader({
                   </div>
                 );
               })}
+              {currentProvider && (
+                <button
+                  onClick={() => {
+                    onCloseModelSelector();
+                    onNavigateModels();
+                  }}
+                  className="w-full text-left px-4 py-2 text-[11px] text-sky-400 hover:bg-slate-800 transition-colors border-t border-slate-800"
+                >
+                  {t('chat.switchProviderInModels', 'Open Models to switch provider')}
+                </button>
+              )}
             </div>
           </>
         )}
