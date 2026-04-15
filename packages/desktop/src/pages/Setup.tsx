@@ -22,13 +22,16 @@ import { useI18n } from '../lib/i18n';
 import { DEFAULT_ONBOARDING_PERMISSION_PRESET, PERMISSION_PRESET_VALUES } from '../lib/permission-presets';
 import PasswordInput from '../components/PasswordInput';
 import ProviderIcon from '../components/ProviderIcon';
+import WorkspaceStep from '../components/setup/WorkspaceStep';
+import CloudAuthStep from '../components/setup/CloudAuthStep';
+import { FolderOpen } from 'lucide-react';
 import logoUrl from '../assets/logo.png';
 
 interface SetupProps {
   onComplete: () => void;
 }
 
-type Step = 'welcome' | 'installing' | 'model' | 'memory' | 'done';
+type Step = 'welcome' | 'installing' | 'model' | 'workspace' | 'memory' | 'cloudauth' | 'done';
 
 type ModelProvider = ModelProviderDef;
 const PROVIDERS = MODEL_PROVIDERS;
@@ -69,6 +72,12 @@ export default function SetupWizard({ onComplete }: SetupProps) {
 
   // Memory config
   const [memoryMode, setMemoryMode] = useState<'local' | 'cloud'>('local');
+
+  // Workspace + CloudAuth state
+  const [workspacePath, setWorkspacePath] = useState<string>('');
+  const [workspaceSkipped, setWorkspaceSkipped] = useState<boolean>(false);
+  const [cloudEmail, setCloudEmail] = useState<string>('');
+  const [cloudMemoryName, setCloudMemoryName] = useState<string>('');
 
   // Language toggle syncs with global i18n via updateConfig
 
@@ -260,7 +269,16 @@ export default function SetupWizard({ onComplete }: SetupProps) {
     setSkippedModelStep(false);
     setStep('model');
   };
+  const handleWorkspaceNext = (selectedPath: string) => {
+    setWorkspacePath(selectedPath);
+    setWorkspaceSkipped(false);
+    setStep('memory');
+  };
 
+  const handleWorkspaceSkip = () => {
+    setWorkspaceSkipped(true);
+    setStep('memory');
+  };
   const handleModelNext = async () => {
     if (!selectedProvider) return;
 
@@ -303,7 +321,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
       })),
     }, PROVIDERS);
     await syncConfig(PROVIDERS, next);
-    setStep('memory');
+    setStep('workspace');
   };
 
   const handleFinish = async () => {
@@ -348,14 +366,14 @@ export default function SetupWizard({ onComplete }: SetupProps) {
         </button>
       </div>
 
-      {/* Progress bar */}
+      {/* Progress bar — 7 steps */}
       <div className="px-8 pt-2">
         <div className="flex gap-2">
-          {['welcome', 'installing', 'model', 'memory', 'done'].map((s, i) => (
+          {(['welcome', 'installing', 'model', 'workspace', 'memory', 'cloudauth', 'done'] as Step[]).map((s, i) => (
             <div
               key={s}
               className={`h-1 flex-1 rounded-full transition-colors duration-500 ${
-                ['welcome', 'installing', 'model', 'memory', 'done'].indexOf(step) >= i
+                (['welcome', 'installing', 'model', 'workspace', 'memory', 'cloudauth', 'done'] as Step[]).indexOf(step) >= i
                   ? 'bg-brand-500'
                   : 'bg-slate-700'
               }`}
@@ -730,14 +748,14 @@ export default function SetupWizard({ onComplete }: SetupProps) {
 
               <div className="flex justify-between">
                 <button
-                  onClick={() => skippedModelStep ? setStep('installing') : setStep('model')}
+                  onClick={() => setStep('workspace')}
                   className="px-4 py-2 text-slate-400 hover:text-slate-200 flex items-center gap-1"
                 >
                   <ChevronLeft size={16} />
                   {t('setup.back')}
                 </button>
                 <button
-                  onClick={() => setStep('done')}
+                  onClick={() => memoryMode === 'cloud' ? setStep('cloudauth') : setStep('done')}
                   className="px-6 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
                 >
                   {t('setup.next')}
@@ -745,6 +763,33 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                 </button>
               </div>
             </div>
+          )}
+
+          {/* ===== WORKSPACE ===== */}
+          {step === 'workspace' && (
+            <WorkspaceStep
+              onNext={handleWorkspaceNext}
+              onBack={() => skippedModelStep ? setStep('installing') : setStep('model')}
+              onSkip={handleWorkspaceSkip}
+            />
+          )}
+
+          {/* ===== CLOUD AUTH ===== */}
+          {step === 'cloudauth' && (
+            <CloudAuthStep
+              onNext={(result) => {
+                if (result) {
+                  setCloudEmail(result.email || '');
+                  setCloudMemoryName(result.memoryName || result.memoryId || '');
+                }
+                setStep('done');
+              }}
+              onCancel={() => {
+                updateConfig({ memoryMode: 'local' });
+                setMemoryMode('local');
+                setStep('done');
+              }}
+            />
           )}
 
           {/* ===== DONE ===== */}
@@ -760,6 +805,46 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                 <p className="text-lg text-slate-400">
                   {t('setup.done.subtitle')}
                 </p>
+              </div>
+
+              {/* Setup summary checklist */}
+              <div className="space-y-2 max-w-sm mx-auto text-left">
+                <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50">
+                  <CheckCircle2 size={14} className="text-emerald-400 flex-shrink-0" />
+                  <span className="text-sm text-slate-400">
+                    <span className="text-slate-300 font-medium">{t('setup.done.summary.installed', 'Installed')}</span>
+                    {' — OpenClaw + Memory plugin + daemon'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50">
+                  <CheckCircle2 size={14} className="text-emerald-400 flex-shrink-0" />
+                  <span className="text-sm text-slate-400">
+                    <span className="text-slate-300 font-medium">{t('setup.done.summary.model', 'Model')}</span>
+                    {config?.providerKey && PROVIDERS.find((p) => p.key === config.providerKey)?.name
+                      ? ` — ${PROVIDERS.find((p) => p.key === config.providerKey)!.name}`
+                      : ''}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50">
+                  <FolderOpen size={14} className="text-sky-400 flex-shrink-0" />
+                  <span className="text-sm text-slate-400">
+                    <span className="text-slate-300 font-medium">{t('setup.done.summary.workspace', 'Workspace')}</span>
+                    {' — '}
+                    {workspaceSkipped || !workspacePath
+                      ? t('setup.done.summary.skipped', '~ (change in top-left picker)')
+                      : workspacePath}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50">
+                  <Cloud size={14} className={cloudEmail ? 'text-sky-400 flex-shrink-0' : 'text-slate-600 flex-shrink-0'} />
+                  <span className="text-sm text-slate-400">
+                    <span className="text-slate-300 font-medium">{t('setup.done.summary.cloud', 'Cloud sync')}</span>
+                    {' — '}
+                    {cloudEmail || cloudMemoryName
+                      ? [cloudEmail, cloudMemoryName].filter(Boolean).join(' · ')
+                      : t('setup.done.summary.local_only', 'Local-only')}
+                  </span>
+                </div>
               </div>
 
               <div className="space-y-3 text-sm text-slate-400 max-w-sm mx-auto text-left">

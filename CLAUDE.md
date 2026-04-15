@@ -1,5 +1,29 @@
 # AwarenessClaw 项目规则
 
+## 🛡️ 最高优先级：5 层测试金字塔（MANDATORY）
+
+**源**：主仓 `Awareness/CLAUDE.md` §最高优先级 + `AGENTS.md` 同款段。本仓库继承全局门禁，AwarenessClaw 桌面端的代码也必须遵守。
+
+**AwarenessClaw 落地要求**：
+- **L1 · Contract Guards**：`packages/desktop/src/` 里的 `fetch(...)` 调用，必须指向主仓 `backend/awareness/api/routes/` 已存在的端点或 local daemon 已有的路由；新端点前先问"后端有吗？"。
+- **L2 · Integration**：Vitest + `@testing-library/react` 组合——允许 mock 进程外部（backend HTTP、electron IPC 边界），禁止 mock 同文件内的 hook 和 util。
+- **L3 · Failure-Mode / Chaos**：每个外部调用（cloud backend HTTP / local daemon / file system / electron ipc）必须有 happy / 5xx / timeout 三组。工具：`packages/desktop/src/test/` 加 `*-chaos.test.tsx`。
+- **L4 · User Journey E2E（零 mock）**：用 Playwright 或 `electron` test 起真 app + 真 daemon，断言用户可见文字/图标/toast。不得用 `page.route` / 组件级 mock。位置：`packages/desktop/test/e2e/user-journeys/`（待建）。
+- **L5 · Mutation**：季度 Stryker 跑 `packages/desktop/src/pages/Memory.tsx` + `src/components/memory/*`。
+
+**Definition of Done（PR 合并）**：
+1. [ ] 新按钮 / 菜单 → 手动验证过点击链路
+2. [ ] 新 fetch → 目标端点在 main 仓已有
+3. [ ] 新 externals → 有 happy + 5xx + timeout 测试
+4. [ ] `npm test` 绿
+5. [ ] `npm run package:mac` 能 build 出 dmg（ship 前必验）
+6. [ ] CHANGELOG 写"用户看到什么变化"
+7. [ ] 本地启 app 亲手走过 happy path
+
+**详细版本**：`../CLAUDE.md` §最高优先级。冲突以主仓为准。
+
+---
+
 ## 📦 npm 包发布规则（`@awareness-sdk/claw` CLI 安装器）
 
 AwarenessClaw 目前向 npm 发布一个包：`@awareness-sdk/claw`（源码在 `packages/cli/`），用作 `npx @awareness-sdk/claw` 一键安装器。发布必须遵守以下规则：

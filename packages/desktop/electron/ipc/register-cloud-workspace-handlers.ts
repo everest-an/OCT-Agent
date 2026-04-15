@@ -10,6 +10,21 @@ export function registerCloudWorkspaceHandlers(deps: {
 }) {
   const daemonBase = 'http://127.0.0.1:37800/api/v1';
 
+  function parseDaemonResponse(res: http.IncomingMessage, raw: string) {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(raw || '{}');
+    } catch {
+      throw new Error('Invalid JSON from daemon');
+    }
+
+    if ((res.statusCode || 500) >= 400) {
+      throw new Error(parsed?.error || `Daemon request failed (${res.statusCode})`);
+    }
+
+    return parsed;
+  }
+
   function daemonPost(route: string, body: Record<string, any> = {}): Promise<any> {
     return new Promise((resolve, reject) => {
       const data = JSON.stringify(body);
@@ -21,7 +36,11 @@ export function registerCloudWorkspaceHandlers(deps: {
         let raw = '';
         res.on('data', (chunk: string) => { raw += chunk; });
         res.on('end', () => {
-          try { resolve(JSON.parse(raw)); } catch { reject(new Error('Invalid JSON from daemon')); }
+          try {
+            resolve(parseDaemonResponse(res, raw));
+          } catch (error) {
+            reject(error);
+          }
         });
       });
       req.on('error', reject);
@@ -37,7 +56,11 @@ export function registerCloudWorkspaceHandlers(deps: {
         let raw = '';
         res.on('data', (chunk: string) => { raw += chunk; });
         res.on('end', () => {
-          try { resolve(JSON.parse(raw)); } catch { reject(new Error('Invalid JSON from daemon')); }
+          try {
+            resolve(parseDaemonResponse(res, raw));
+          } catch (error) {
+            reject(error);
+          }
         });
       }).on('error', reject).on('timeout', function(this: any) { this.destroy(); reject(new Error('Timeout')); });
     });
@@ -82,6 +105,15 @@ export function registerCloudWorkspaceHandlers(deps: {
     try {
       const result = await daemonGet(`/cloud/memories?api_key=${encodeURIComponent(apiKey)}`);
       return { success: true, ...(Array.isArray(result) ? { memories: result } : result) };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('cloud:get-profile', async (_e, apiKey: string) => {
+    try {
+      const result = await daemonPost('/cloud/profile', { api_key: apiKey });
+      return { success: true, ...result };
     } catch (err: any) {
       return { success: false, error: err.message };
     }
