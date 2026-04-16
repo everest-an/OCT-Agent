@@ -90,4 +90,54 @@ describe('Agents page', () => {
     });
     expect(screen.queryByText(/^default$/i)).not.toBeInTheDocument();
   });
+
+  // 删除非默认 agent：confirm 对话框确认后调用 agentsDelete
+  it('deletes a non-default agent after confirm dialog', async () => {
+    const api = window.electronAPI as any;
+    api.agentsList = vi.fn().mockResolvedValue({
+      success: true,
+      agents: [
+        { id: 'main', name: 'Claw', emoji: '🦞', isDefault: true, bindings: [] },
+        { id: 'research', name: 'Research', emoji: '🧠', isDefault: false, bindings: [] },
+      ],
+    });
+    api.agentsDelete = vi.fn().mockResolvedValue({ success: true });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    await act(async () => { render(<Agents />); });
+    await waitFor(() => expect(screen.getByText('Research')).toBeInTheDocument());
+
+    // The delete button has title="Delete"
+    const deleteButton = screen.getByTitle('Delete');
+    expect(deleteButton).toBeTruthy();
+
+    await act(async () => { fireEvent.click(deleteButton); });
+
+    expect(window.confirm).toHaveBeenCalled();
+    expect(api.agentsDelete).toHaveBeenCalledWith('research');
+  });
+
+  // 空 agent 列表显示空状态文案
+  it('shows empty state when agent list is empty', async () => {
+    const api = window.electronAPI as any;
+    api.agentsList = vi.fn().mockResolvedValue({ success: true, agents: [] });
+
+    await act(async () => { render(<Agents />); });
+    await waitFor(() => {
+      // Agents page uses t('agents.empty') which defaults to empty state text
+      const container = document.querySelector('.text-slate-500.text-sm');
+      expect(container).toBeInTheDocument();
+    });
+  });
+
+  // 加载失败显示错误信息
+  it('shows error when loading agents fails', async () => {
+    const api = window.electronAPI as any;
+    api.agentsList = vi.fn().mockResolvedValue({ success: false, error: 'Connection refused' });
+
+    await act(async () => { render(<Agents />); });
+    await waitFor(() => {
+      expect(screen.getByText('Connection refused')).toBeInTheDocument();
+    });
+  });
 });

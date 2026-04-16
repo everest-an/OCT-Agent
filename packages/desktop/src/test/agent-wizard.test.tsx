@@ -133,4 +133,45 @@ describe('AgentWizard', () => {
     await act(async () => { render(<AgentWizard onComplete={vi.fn()} onCancel={vi.fn()} />); });
     expect(screen.getByText(/start a conversation/i)).toBeTruthy();
   });
+
+  // 空名称时 Create 按钮应被禁用
+  it('disables Create button when name is empty', async () => {
+    await act(async () => { render(<AgentWizard onComplete={vi.fn()} onCancel={vi.fn()} />); });
+    const createBtn = screen.getByTestId('agent-create-btn');
+    expect(createBtn).toBeDisabled();
+  });
+
+  // 超长名称（>64字符）应显示错误
+  it('shows error when name exceeds 64 characters', async () => {
+    await act(async () => { render(<AgentWizard onComplete={vi.fn()} onCancel={vi.fn()} />); });
+    const longName = 'A'.repeat(65);
+    await act(async () => {
+      fireEvent.change(screen.getByPlaceholderText(/Research/i), { target: { value: longName } });
+    });
+    await act(async () => { fireEvent.click(screen.getByTestId('agent-create-btn')); });
+
+    await waitFor(() => {
+      expect(screen.getByText(/max 64 characters/i)).toBeInTheDocument();
+    });
+  });
+
+  // Enter 键提交（当名称有效时）
+  it('submits on Enter key when name is valid', async () => {
+    const api = window.electronAPI as any;
+    api.agentsAdd = vi.fn().mockResolvedValue({ success: true, agentId: 'my-agent' });
+    api.agentsSetIdentity = vi.fn().mockResolvedValue({ success: true });
+    api.agentsWriteFile = vi.fn().mockResolvedValue({ success: true });
+
+    const onComplete = vi.fn();
+    await act(async () => { render(<AgentWizard onComplete={onComplete} onCancel={vi.fn()} />); });
+
+    const input = screen.getByPlaceholderText(/Research/i);
+    await act(async () => { fireEvent.change(input, { target: { value: 'MyAgent' } }); });
+    await act(async () => { fireEvent.keyDown(input, { key: 'Enter' }); });
+
+    await waitFor(() => {
+      expect(api.agentsAdd).toHaveBeenCalledWith('MyAgent', undefined, undefined);
+      expect(onComplete).toHaveBeenCalledWith('my-agent');
+    });
+  });
 });

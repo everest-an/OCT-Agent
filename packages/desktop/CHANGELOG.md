@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.5] - 2026-04-16
+
+### Fixed
+- **Agent identity update instant**: set-identity no longer spawns OpenClaw CLI (was 15-60s, froze the machine) — writes directly to `openclaw.json`, instant response
+- **Memory loading timeout**: loading spinner now auto-dismisses after 15s with a helpful message if the local daemon is slow to start
+- **Memory project isolation**: all daemon HTTP requests now include `X-Awareness-Project-Dir` header, ensuring memory is scoped to the active workspace
+
+### Added
+- L2/L3 tests: project isolation header injection + chaos scenarios
+- L2 tests: KanbanBoard, MissionCard, MissionDetail, TaskCreateModal components
+- L1 contract guard: `verify-project-header.mjs`
+
 ## [0.3.4] - 2026-04-16
 
 ### Fixed

@@ -1,10 +1,37 @@
 import http from 'http';
 
+// Per-request project isolation: set via setMemoryClientProjectDir()
+let _currentProjectDir: string | null = null;
+
+export function setMemoryClientProjectDir(dir: string | null): void {
+  _currentProjectDir = dir;
+}
+
+export function getMemoryClientProjectDir(): string | null {
+  return _currentProjectDir;
+}
+
+function buildHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...extra };
+  if (_currentProjectDir) {
+    headers['X-Awareness-Project-Dir'] = _currentProjectDir;
+  }
+  return headers;
+}
+
+function buildGetHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (_currentProjectDir) {
+    headers['X-Awareness-Project-Dir'] = _currentProjectDir;
+  }
+  return headers;
+}
+
 export function callMcp(toolName: string, args: Record<string, any>): Promise<any> {
   return new Promise((resolve) => {
     const req = http.request('http://127.0.0.1:37800/mcp', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildHeaders(),
       timeout: 15000,
     }, (res) => {
       let data = '';
@@ -29,7 +56,7 @@ export function callMcpStrict(toolName: string, args: Record<string, any>, timeo
   return new Promise((resolve, reject) => {
     const req = http.request('http://127.0.0.1:37800/mcp', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildHeaders(),
       timeout: timeoutMs,
     }, (res) => {
       let data = '';
@@ -93,7 +120,7 @@ export function fetchMemoryEvents(opts: MemoryEventQueryOptions): Promise<any> {
   }
 
   return new Promise((resolve) => {
-    const req = http.request(endpoint, { method: 'GET', timeout: 10000 }, (res) => {
+    const req = http.request(endpoint, { method: 'GET', headers: buildGetHeaders(), timeout: 10000 }, (res) => {
       let data = '';
       res.on('data', (chunk: Buffer) => { data += chunk; });
       res.on('end', () => {
@@ -115,7 +142,7 @@ export function fetchKnowledgeCards(opts: { category?: string; limit?: number } 
   const endpoint = `http://127.0.0.1:37800/api/v1/knowledge${qs ? `?${qs}` : ''}`;
 
   return new Promise((resolve) => {
-    const req = http.request(endpoint, { method: 'GET', timeout: 10000 }, (res) => {
+    const req = http.request(endpoint, { method: 'GET', headers: buildGetHeaders(), timeout: 10000 }, (res) => {
       let data = '';
       res.on('data', (chunk: Buffer) => { data += chunk; });
       res.on('end', () => {
@@ -132,7 +159,7 @@ export function fetchKnowledgeCards(opts: { category?: string; limit?: number } 
 export function fetchCardEvolution(cardId: string): Promise<any> {
   return new Promise((resolve) => {
     const req = http.request(`http://127.0.0.1:37800/api/v1/knowledge/${encodeURIComponent(cardId)}/evolution`, {
-      method: 'GET', timeout: 10000,
+      method: 'GET', headers: buildGetHeaders(), timeout: 10000,
     }, (res) => {
       let data = '';
       res.on('data', (chunk: Buffer) => { data += chunk; });

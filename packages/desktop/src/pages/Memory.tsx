@@ -182,10 +182,14 @@ export default function Memory() {
     };
   }, [activeTab]);
 
-  // Initial load
+  // Initial load with 15s timeout to prevent infinite loading spinner
   useEffect(() => {
     const init = async () => {
       setLoading(true);
+      const timeout = setTimeout(() => {
+        setLoading(false);
+        setError(t('memory.loadTimeout', 'Connection timed out. The local daemon may still be starting — try refreshing.'));
+      }, 15000);
       try {
         const connected = await checkHealth();
         if (connected) {
@@ -204,6 +208,7 @@ export default function Memory() {
           }
         }
       } finally {
+        clearTimeout(timeout);
         setLoading(false);
       }
     };

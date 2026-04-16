@@ -9,7 +9,7 @@ import https from 'https';
 import crypto from 'crypto';
 import { createDaemonWatchdog } from './daemon-watchdog';
 import { createDoctor } from './doctor';
-import { callMcpStrict } from './memory-client';
+import { callMcpStrict, setMemoryClientProjectDir } from './memory-client';
 import {
   checkDaemonHealth,
   clearAwarenessLocalNpxCache,
@@ -1690,6 +1690,10 @@ ipcMain.handle('workspace:set-active', async (_e: unknown, workspacePath: string
       ? workspacePath
       : path.join(HOME, '.openclaw');
     const switchResult = await switchDaemonWorkspace(daemonTarget);
+    // Sync memory client's project header so all subsequent requests are scoped
+    if (switchResult.ok) {
+      setMemoryClientProjectDir(daemonTarget);
+    }
     // Broadcast to all renderers so Memory.tsx can reload.
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('workspace:changed', {
@@ -2167,6 +2171,7 @@ app.whenReady().then(() => {
       const result = await switchDaemonWorkspace(target);
       if (result.ok) {
         console.log(`[startup] daemon workspace synced to: ${target}`);
+        setMemoryClientProjectDir(target);
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('workspace:changed', {
             path: persisted || null,

@@ -493,35 +493,39 @@ export function registerAgentHandlers(deps: {
         }
       }
 
-      // Same self-heal before another OpenClaw CLI invocation.
-      await ensureAwarenessPluginInstalledForAgentOps(deps, 'agents:set-identity');
-
-      const args = ['agents', 'set-identity', '--agent', agentId];
       const safeEmoji = normalizeAgentEmoji(emoji);
-      if (name) { args.push('--name', name); }
-      // Ignore non-emoji text in the emoji field so name updates still succeed.
-      if (safeEmoji) { args.push('--emoji', safeEmoji); }
-      if (avatar) { args.push('--avatar', avatar); }
-      if (theme) { args.push('--theme', theme); }
-      if (args.length <= 4) return { success: false, error: 'No changes' };
-      try {
-        await deps.runSpawnAsync('openclaw', args, 60000);
-      } catch (cliErr: any) {
-        const raw = cliErr?.message || String(cliErr || '');
-        if (/timed out|timeout/i.test(raw)) {
-          const fallback = applyAgentIdentityFallback(deps.home, agentId, {
-            name: name || undefined,
-            emoji: safeEmoji || undefined,
-            avatar: avatar || undefined,
-            theme: theme || undefined,
-          });
-          if (!fallback.success) {
-            return { success: false, error: `Set identity timed out and fallback failed: ${fallback.error || 'unknown error'}` };
-          }
-        } else {
-          throw cliErr;
-        }
+      if (!name && !safeEmoji && !avatar && !theme) {
+        return { success: false, error: 'No changes' };
       }
+
+      // Write directly to openclaw.json — instant, no CLI spawn needed.
+      // The old approach spawned `openclaw agents set-identity` which loads all
+      // plugins (15-60s), pegging the CPU and freezing the entire machine.
+      const result = applyAgentIdentityFallback(deps.home, agentId, {
+        name: name || undefined,
+        emoji: safeEmoji || undefined,
+        avatar: avatar || undefined,
+        theme: theme || undefined,
+      });
+      if (!result.success) {
+        return { success: false, error: result.error || 'Failed to update identity' };
+      }
+
+      // Also update IDENTITY.md in the agent workspace so file-based readers stay in sync.
+      try {
+        const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
+        const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        const entry = (cfg?.agents?.list || []).find((a: any) => a.id === agentId);
+        const agentDir = entry?.agentDir;
+        if (agentDir) {
+          const identityMdPath = path.join(agentDir, 'IDENTITY.md');
+          const identityContent = `---\nname: ${name || agentId}\nemoji: ${safeEmoji || ''}\n${avatar ? `avatar: ${avatar}\n` : ''}${theme ? `theme: ${theme}\n` : ''}---\n`;
+          fs.writeFileSync(identityMdPath, identityContent, 'utf-8');
+        }
+      } catch {
+        // Non-critical: IDENTITY.md update is best-effort
+      }
+
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message?.slice(0, 200) };

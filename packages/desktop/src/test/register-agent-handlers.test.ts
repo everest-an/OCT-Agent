@@ -522,4 +522,138 @@ describe('register-agent-handlers', () => {
     expect(finalConfig.agents.list[0].identity.name).toBe('Optic');
     expect(finalConfig.agents.list[0].identity.emoji).toBe('🧠');
   });
+
+  // agents:delete happy path — CLI 成功，清理 config 和目录
+  it('agents:delete happy path removes agent from config', async () => {
+    const home = '/mock/home';
+    const configPath = path.join(home, '.openclaw', 'openclaw.json');
+    let configRaw = JSON.stringify({
+      agents: {
+        list: [
+          { id: 'main' },
+          { id: 'research-agent' },
+        ],
+      },
+    });
+
+    existsSyncMock.mockImplementation((target: string) => {
+      if (target === configPath) return true;
+      // Workspace/agent directories don't exist (already cleaned by CLI)
+      return false;
+    });
+    readFileSyncMock.mockImplementation((target: string) => {
+      if (target === configPath) return configRaw;
+      throw new Error(`Unexpected read: ${target}`);
+    });
+    writeFileSyncMock.mockImplementation((target: string, content: string) => {
+      if (target === configPath) configRaw = String(content);
+    });
+
+    registerAgentHandlers({
+      home,
+      safeShellExecAsync: vi.fn().mockResolvedValue(null),
+      readShellOutputAsync: vi.fn().mockResolvedValue(null),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      runAsync: vi.fn().mockResolvedValue(''),
+      runSpawnAsync: vi.fn().mockResolvedValue('ok'),
+      runDoctorFix: vi.fn().mockResolvedValue({ success: true }),
+    });
+
+    const handlers = getHandlers();
+    const result = await handlers['agents:delete']({} as any, 'research-agent');
+    const finalConfig = JSON.parse(configRaw);
+
+    expect(result).toMatchObject({ success: true });
+    expect(finalConfig.agents.list.map((a: any) => a.id)).toEqual(['main']);
+  });
+
+  // agents:add happy path — CLI 成功返回 agentId
+  it('agents:add happy path creates agent via CLI', async () => {
+    const home = '/mock/home';
+    const configPath = path.join(home, '.openclaw', 'openclaw.json');
+
+    existsSyncMock.mockImplementation((target: string) => target === configPath);
+    readFileSyncMock.mockImplementation((target: string) => {
+      if (target === configPath) return JSON.stringify({ agents: { list: [{ id: 'main' }] } });
+      throw new Error(`Unexpected read: ${target}`);
+    });
+
+    const runSpawnAsync = vi.fn().mockResolvedValue('ok');
+
+    registerAgentHandlers({
+      home,
+      safeShellExecAsync: vi.fn().mockResolvedValue(null),
+      readShellOutputAsync: vi.fn().mockResolvedValue(null),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      runAsync: vi.fn().mockResolvedValue(''),
+      runSpawnAsync,
+      runDoctorFix: vi.fn().mockResolvedValue({ success: true }),
+    });
+
+    const handlers = getHandlers();
+    const result = await handlers['agents:add']({} as any, 'My Research Bot');
+
+    expect(result).toMatchObject({ success: true, agentId: 'my-research-bot' });
+    expect(runSpawnAsync).toHaveBeenCalledWith(
+      'openclaw',
+      expect.arrayContaining(['agents', 'add', 'my-research-bot']),
+      expect.any(Number),
+    );
+  });
+
+  // agents:read-file — 读取存在的文件返回内容
+  it('agents:read-file returns file content when file exists', async () => {
+    const home = '/mock/home';
+    const agentId = 'research';
+    const workspaceDir = path.join(home, '.openclaw', `workspace-${agentId}`);
+    const filePath = path.join(workspaceDir, 'SOUL.md');
+
+    existsSyncMock.mockImplementation((target: string) => target === filePath || target === workspaceDir);
+    readFileSyncMock.mockImplementation((target: string) => {
+      if (target === filePath) return '# Soul\nYou are a research assistant.';
+      throw new Error(`Unexpected read: ${target}`);
+    });
+
+    registerAgentHandlers({
+      home,
+      safeShellExecAsync: vi.fn().mockResolvedValue(null),
+      readShellOutputAsync: vi.fn().mockResolvedValue(null),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      runAsync: vi.fn().mockResolvedValue(''),
+      runSpawnAsync: vi.fn().mockResolvedValue(''),
+    });
+
+    const handlers = getHandlers();
+    const result = await handlers['agents:read-file']({} as any, agentId, 'SOUL.md');
+
+    expect(result).toMatchObject({ success: true });
+    expect(result.content).toContain('research assistant');
+  });
+
+  // agents:write-file — 写入文件并成功返回
+  it('agents:write-file writes content to workspace directories', async () => {
+    const home = '/mock/home';
+    const agentId = 'research';
+
+    existsSyncMock.mockReturnValue(false);
+
+    registerAgentHandlers({
+      home,
+      safeShellExecAsync: vi.fn().mockResolvedValue(null),
+      readShellOutputAsync: vi.fn().mockResolvedValue(null),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      runAsync: vi.fn().mockResolvedValue(''),
+      runSpawnAsync: vi.fn().mockResolvedValue(''),
+    });
+
+    const handlers = getHandlers();
+    const result = await handlers['agents:write-file']({} as any, agentId, 'SOUL.md', '# New Soul');
+
+    expect(result).toMatchObject({ success: true });
+    expect(writeFileSyncMock).toHaveBeenCalledWith(
+      expect.stringContaining('SOUL.md'),
+      '# New Soul',
+      'utf-8',
+    );
+  });
 });
