@@ -576,7 +576,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                                     })),
                                   }, PROVIDERS);
                                   void syncConfig(PROVIDERS, next);
-                                  setStep('memory');
+                                  setStep('workspace');
                                 }}
                                 className="text-xs text-slate-400 hover:text-slate-200 underline mt-1"
                               >

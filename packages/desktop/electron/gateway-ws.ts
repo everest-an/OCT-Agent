@@ -221,6 +221,11 @@ export class GatewayClient extends EventEmitter {
             },
             role: GatewayClient.ROLE,
             scopes: this.requestedScopes,
+            // NOTE: 'thinking-events' is not a recognized Gateway cap (only 'tool-events' is).
+            // Live thinking tokens are controlled by reasoningLevel='stream' on the session
+            // (via sessions.patch), not by a client cap declaration. Gateway broadcasts
+            // stream:"thinking" events unconditionally to all WS operator clients.
+            caps: ['thinking-events'],
           };
 
           // Add device identity if available and challenge nonce received

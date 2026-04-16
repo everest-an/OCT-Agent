@@ -15,7 +15,7 @@ function extractAssistantEventText(data: Record<string, unknown>): string | unde
 }
 
 export type NormalizedAgentEvent = {
-  stream: 'assistant' | 'tool' | 'lifecycle';
+  stream: 'assistant' | 'tool' | 'lifecycle' | 'thinking';
   phase?: string;
   runId?: unknown;
   sessionKey?: string;
@@ -28,6 +28,7 @@ export type NormalizedAgentEvent = {
   isError?: boolean;
   text?: string;
   thinking?: string;
+  delta?: string;
   raw?: unknown;
 };
 
@@ -89,6 +90,63 @@ export function normalizeAgentGatewayEvent(eventName: string, payload: any): Nor
         runId: payload?.runId,
         sessionKey,
         seq: payload?.seq,
+        raw: data,
+      };
+    }
+
+    // Gateway globally broadcasts stream:"item" events for tool progress (UI-friendly).
+    // These carry kind/title/status/toolCallId instead of the raw tool lifecycle fields.
+    if (payload.stream === 'item') {
+      const phase = data?.phase === 'start' ? 'start'
+        : data?.phase === 'end' ? 'result'
+        : 'update';
+      return {
+        stream: 'tool',
+        phase,
+        runId: payload?.runId,
+        sessionKey,
+        seq: payload?.seq,
+        toolCallId: data?.toolCallId || data?.itemId || '',
+        toolName: data?.name || data?.title || undefined,
+        args: data?.meta ? { command: data.meta } : undefined,
+        result: data?.summary || data?.error || undefined,
+        isError: data?.status === 'failed' || Boolean(data?.error),
+        raw: data,
+      };
+    }
+
+    // Gateway streams exec/bash tool output via stream:"command_output" events.
+    if (payload.stream === 'command_output') {
+      const phase = data?.phase === 'end' ? 'result' : 'update';
+      return {
+        stream: 'tool',
+        phase,
+        runId: payload?.runId,
+        sessionKey,
+        seq: payload?.seq,
+        toolCallId: data?.toolCallId || data?.itemId || '',
+        toolName: data?.name || 'exec',
+        partialResult: data?.output,
+        result: phase === 'result' ? (data?.output || `exit ${data?.exitCode ?? '?'}`) : undefined,
+        isError: data?.status === 'failed' || (data?.exitCode != null && data.exitCode !== 0),
+        raw: data,
+      };
+    }
+
+    // Live thinking token stream (reasoning='stream' on session)
+    if (payload.stream === 'thinking') {
+      const thinkingDelta = typeof data?.delta === 'string' ? data.delta
+        : typeof data?.text === 'string' ? data.text
+        : typeof payload?.delta === 'string' ? payload.delta
+        : typeof payload?.text === 'string' ? payload.text
+        : '';
+      return {
+        stream: 'thinking',
+        runId: payload?.runId,
+        sessionKey,
+        seq: payload?.seq,
+        delta: thinkingDelta,
+        text: thinkingDelta,
         raw: data,
       };
     }

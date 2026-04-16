@@ -1079,7 +1079,7 @@ describe('Dashboard (Chat)', () => {
     await act(async () => { render(<Dashboard onNavigate={onNavigate} />); });
 
     await act(async () => {
-      fireEvent.click(screen.getByText(/qwen-turbo-latest/i));
+      fireEvent.click(screen.getByText(/Qwen Turbo/i));
     });
 
     await act(async () => {
@@ -1110,7 +1110,7 @@ describe('Dashboard (Chat)', () => {
     await act(async () => { render(<Dashboard />); });
 
     await act(async () => {
-      fireEvent.click(screen.getByText(/qwen-turbo-latest/i));
+      fireEvent.click(screen.getByText(/Qwen Turbo/i));
     });
 
     await act(async () => {

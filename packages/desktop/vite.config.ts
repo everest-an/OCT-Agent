@@ -18,5 +18,6 @@ export default defineConfig({
     globals: true,
     setupFiles: ['src/test/setup.ts'],
     fileParallelism: false,
+    exclude: ['test/e2e/**', 'node_modules/**'],
   },
 });

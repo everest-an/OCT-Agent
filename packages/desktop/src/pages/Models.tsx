@@ -226,6 +226,15 @@ export default function Models() {
   const lastAutoDiscoverKeyRef = useRef('');
   const legacyCustomModelIdsRef = useRef<Set<string>>(new Set());
   const sessionCustomModelIdsRef = useRef<Set<string>>(new Set());
+  // Track the last provider key we initialized from, so allProviders reference-churn
+  // (e.g. useDynamicProviders re-hydration creating a new array with the same data)
+  // does NOT reset in-progress session additions.
+  const initializedForProviderKeyRef = useRef<string | null>(null);
+  // Always-current ref for models, so discoverModels (which may run from a stale
+  // auto-discover setTimeout closure) reads the latest models state rather than
+  // the one captured at the time the 500 ms timer was scheduled.
+  const modelsRef = useRef<EditableModel[]>(models);
+  modelsRef.current = models; // keep in sync with every render
 
   const activeProvider = allProviders.find((provider) => provider.key === config.providerKey);
   const activeModel = activeProvider?.models.find((model) => model.id === config.modelId);
@@ -298,19 +307,27 @@ export default function Models() {
     setApiType(draft.apiType);
     setNeedsKey(draft.needsKey);
     setApiKey(draft.apiKey);
-    setModels(draft.models);
-    legacyCustomModelIdsRef.current = new Set(
-      draft.models
-        .filter((model) => model.source === 'custom')
-        .map((model) => model.id),
-    );
-    setSelectedModelId(draft.selectedModelId);
     setShowAdvanced(!isKnownApiType(draft.apiType, allProviders));
-    setCustomModelInput('');
-    setDiscoverState('idle');
-    setDiscoveredModelIds(new Set());
-    setCrossVendorDiscoveredModelIds(new Set());
-    sessionCustomModelIdsRef.current = new Set();
+
+    // Only do a full reset (models + session refs) when the user first opens this
+    // provider, not on every re-render caused by allProviders reference-churn
+    // (e.g. useDynamicProviders completing its async hydration with the same data).
+    // This prevents in-progress manual model additions from being wiped out.
+    if (initializedForProviderKeyRef.current !== editingProviderKey) {
+      initializedForProviderKeyRef.current = editingProviderKey;
+      setModels(draft.models);
+      legacyCustomModelIdsRef.current = new Set(
+        draft.models
+          .filter((model) => model.source === 'custom')
+          .map((model) => model.id),
+      );
+      setSelectedModelId(draft.selectedModelId);
+      setCustomModelInput('');
+      setDiscoverState('idle');
+      setDiscoveredModelIds(new Set());
+      setCrossVendorDiscoveredModelIds(new Set());
+      sessionCustomModelIdsRef.current = new Set();
+    }
   }, [allProviders, config, customMode, editingProviderKey]);
 
   const beginCustomProvider = () => {
@@ -351,6 +368,7 @@ export default function Models() {
     setCrossVendorDiscoveredModelIds(new Set());
     legacyCustomModelIdsRef.current = new Set();
     sessionCustomModelIdsRef.current = new Set();
+    initializedForProviderKeyRef.current = null;
     setSaveError('');
   };
 
@@ -441,7 +459,9 @@ export default function Models() {
             || providerCatalogModelIds.has(model.id),
         );
         const filteredCrossVendorModelIds = new Set(crossVendor.map((model) => model.id));
-        const customModels = models.filter((model) => model.source === 'custom' && sessionCustomModelIdsRef.current.has(model.id));
+        // Use modelsRef (not the closure-captured `models`) so stale auto-discover
+        // timers don't overwrite models that were added after the timer was scheduled.
+        const customModels = modelsRef.current.filter((model) => model.source === 'custom' && sessionCustomModelIdsRef.current.has(model.id));
         const nextModels = mergeModels(builtinCatalogModels, filteredDetectedModels, customModels);
         setModels(nextModels);
         setDiscoveredModelIds(new Set(filteredDetectedModels.map((model) => model.id)));

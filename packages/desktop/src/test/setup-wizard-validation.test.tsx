@@ -71,6 +71,16 @@ function fillApiKey(key: string) {
   fireEvent.change(input, { target: { value: key } });
 }
 
+// Helper: navigate through workspace step (added between model and memory)
+async function skipWorkspaceStep() {
+  await waitFor(() => {
+    expect(screen.getByText(/choose your default project folder/i)).toBeInTheDocument();
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: /skip/i }));
+  });
+}
+
 async function advanceToDoneStep(overrides?: Partial<Record<string, Mock>>) {
   const context = await advanceToModelStep(overrides);
 
@@ -78,6 +88,15 @@ async function advanceToDoneStep(overrides?: Partial<Record<string, Mock>>) {
 
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: /next/i }));
+  });
+
+  // Workspace step was added between model and memory steps — skip it
+  await waitFor(() => {
+    expect(screen.getByText(/choose your default project folder/i)).toBeInTheDocument();
+  });
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: /skip/i }));
   });
 
   await waitFor(() => {
@@ -124,7 +143,10 @@ describe('Setup Wizard — API Key Validation', () => {
       });
     });
 
-    // Should advance to memory step
+    // Workspace step comes between model and memory
+    await skipWorkspaceStep();
+
+    // Should now be on memory step
     await waitFor(() => {
       expect(screen.getByText(/cross-device memory/i)).toBeInTheDocument();
     });
@@ -191,6 +213,9 @@ describe('Setup Wizard — API Key Validation', () => {
       fireEvent.click(screen.getByText(/continue anyway/i));
     });
 
+    // Workspace step comes between model and memory
+    await skipWorkspaceStep();
+
     // Should advance to memory step
     await waitFor(() => {
       expect(screen.getByText(/cross-device memory/i)).toBeInTheDocument();
@@ -211,6 +236,9 @@ describe('Setup Wizard — API Key Validation', () => {
 
     // modelsDiscover should NOT be called for local providers
     expect(api.modelsDiscover).not.toHaveBeenCalled();
+
+    // Workspace step comes between model and memory
+    await skipWorkspaceStep();
 
     // Should advance to memory step
     await waitFor(() => {
@@ -272,6 +300,9 @@ describe('Setup Wizard — API Key Validation', () => {
     await act(async () => {
       resolveDiscover!({ success: true, models: [{ id: 'gpt-4o', name: 'GPT-4o' }] });
     });
+
+    // Workspace step comes between model and memory
+    await skipWorkspaceStep();
 
     // Should advance to memory step
     await waitFor(() => {
