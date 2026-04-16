@@ -156,6 +156,74 @@ export function getMemoryCapturePolicy(homeDir: string): MemoryCapturePolicy {
   }
 }
 
+/**
+ * Fire-and-forget memory save — extracted so both Gateway and CLI fallback paths
+ * can call it. Returns void; errors are caught internally and surfaced via IPC.
+ */
+export function fireAndForgetMemorySave(params: {
+  message: string;
+  responseText: string;
+  send: (channel: string, payload: any) => void;
+  callMcpStrict: (toolName: string, args: Record<string, any>, timeoutMs?: number) => Promise<any>;
+  readMemoryCapturePolicy?: () => MemoryCapturePolicy;
+  homeDir: string;
+  skipIfUnverifiedFileOp?: boolean;
+}): void {
+  const { message, responseText, send, callMcpStrict, readMemoryCapturePolicy, homeDir, skipIfUnverifiedFileOp } = params;
+
+  if (!responseText || skipIfUnverifiedFileOp) return;
+
+  const memoryCapturePolicy = readMemoryCapturePolicy?.() || getMemoryCapturePolicy(homeDir);
+  const blockedSources = new Set(
+    (memoryCapturePolicy.blockedSources || []).map((item) => item.trim().toLowerCase()).filter(Boolean),
+  );
+  const shouldAutoCaptureDesktopMemory = memoryCapturePolicy.autoCapture !== false
+    && !blockedSources.has('desktop');
+
+  if (!shouldAutoCaptureDesktopMemory) return;
+
+  const memoryToolId = `memory-save-${Date.now()}`;
+  send('chat:status', {
+    type: 'tool_call',
+    tool: 'awareness_record',
+    toolStatus: 'saving',
+    toolId: memoryToolId,
+    detail: 'Save this turn to Awareness memory',
+  });
+
+  callMcpStrict('awareness_record', {
+    action: 'remember',
+    content: `Request: ${message}\nResult: ${responseText}`,
+    event_type: 'turn_brief',
+    source: 'desktop',
+  }).then((result) => {
+    const parsed = parseMcpTextPayload(result);
+    if (parsed?.error) {
+      throw new Error(parsed.error);
+    }
+    send('chat:status', {
+      type: 'tool_update',
+      toolId: memoryToolId,
+      toolStatus: 'completed',
+      detail: parsed?.filepath || 'Saved to Awareness memory',
+    });
+  }).catch((err) => {
+    console.warn('[chat] Memory record failed:', err.message);
+    try {
+      send('chat:status', {
+        type: 'tool_update',
+        toolId: memoryToolId,
+        toolStatus: 'failed',
+        detail: err.message,
+      });
+      send('chat:memory-warning', {
+        type: 'record-failed',
+        message: err.message,
+      });
+    } catch { /* window may be closed — safe to ignore */ }
+  });
+}
+
 export function buildWebCompatibilityRetryPrompt(originalRequest: string, blockedResponse: string): string {
   const targetUrl = extractFirstHttpUrl(originalRequest);
   const urlHint = targetUrl ? `Target public URL: ${targetUrl}` : '';

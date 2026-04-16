@@ -2004,4 +2004,278 @@ describe('registerChatHandlers', () => {
       }),
     );
   });
+
+  it('passes user reasoningDisplay preference directly to chatSend instead of defaulting to on', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: { role: 'assistant', content: 'done' },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    registerChatHandlers({
+      sendToRenderer: vi.fn(),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+
+    // When user selects 'stream', chatSend should receive 'stream' (not 'on')
+    await handlers['chat:send']({}, 'hello', 'test-session', { reasoningDisplay: 'stream' });
+    expect(ws.chatSend).toHaveBeenCalledWith(
+      'test-session',
+      expect.any(String),
+      expect.objectContaining({ reasoning: 'stream' }),
+    );
+  });
+
+  it('omits reasoning param when reasoningDisplay is off', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: { role: 'assistant', content: 'done' },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    registerChatHandlers({
+      sendToRenderer: vi.fn(),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    await handlers['chat:send']({}, 'hello', 'test-session', { reasoningDisplay: 'off' });
+
+    const chatSendOptions = ws.chatSend.mock.calls[0][2];
+    expect(chatSendOptions.reasoning).toBeUndefined();
+  });
+
+  it('forwards stream:thinking agent events as chat:thinking IPC messages', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        // Gateway sends stream:"thinking" events when reasoning='stream'
+        ws.emit('event:agent', {
+          stream: 'thinking',
+          delta: 'analyzing the codebase structure',
+          runId: 'run-5',
+          sessionKey: 'test-session',
+        });
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: { role: 'assistant', content: 'here is my analysis' },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    const sendToRenderer = vi.fn();
+
+    registerChatHandlers({
+      sendToRenderer,
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, 'hello', 'test-session', { reasoningDisplay: 'stream' });
+
+    expect(result).toMatchObject({ success: true, text: 'here is my analysis' });
+    expect(sendToRenderer).toHaveBeenCalledWith('chat:thinking', 'analyzing the codebase structure');
+    expect(sendToRenderer).toHaveBeenCalledWith('chat:status', { type: 'thinking' });
+  });
+
+  it('ignores stream:thinking events with empty delta/text', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        // Empty thinking event should be silently dropped
+        ws.emit('event:agent', {
+          stream: 'thinking',
+          delta: '',
+          runId: 'run-6',
+          sessionKey: 'test-session',
+        });
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: { role: 'assistant', content: 'done' },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    const sendToRenderer = vi.fn();
+
+    registerChatHandlers({
+      sendToRenderer,
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    await handlers['chat:send']({}, 'hello', 'test-session', {});
+
+    const thinkingCalls = sendToRenderer.mock.calls.filter(
+      ([channel]: [string]) => channel === 'chat:thinking',
+    );
+    expect(thinkingCalls).toHaveLength(0);
+  });
+
+  // --- L3: Chaos / Failure-mode tests for thinking stream ---
+
+  it('does not crash when stream:thinking payload has null data field', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        // Malformed thinking event with null data
+        ws.emit('event:agent', {
+          stream: 'thinking',
+          data: null,
+          runId: 'run-chaos-1',
+          sessionKey: 'test-session',
+        });
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: { role: 'assistant', content: 'survived chaos' },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    const sendToRenderer = vi.fn();
+    registerChatHandlers({
+      sendToRenderer,
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, 'hello', 'test-session', {});
+    // Should complete without throwing
+    expect(result).toMatchObject({ success: true, text: 'survived chaos' });
+  });
+
+  it('does not crash when event:agent payload is not an object', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        // Completely malformed payload — string instead of object
+        ws.emit('event:agent', 'not-an-object');
+        // Numeric payload
+        ws.emit('event:agent', 42);
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: { role: 'assistant', content: 'survived non-object' },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    const sendToRenderer = vi.fn();
+    registerChatHandlers({
+      sendToRenderer,
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, 'hello', 'test-session', {});
+    expect(result).toMatchObject({ success: true, text: 'survived non-object' });
+  });
+
+  it('handles rapid stream:thinking bursts without losing final assistant response', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        // Burst of 50 thinking deltas
+        for (let i = 0; i < 50; i++) {
+          ws.emit('event:agent', {
+            stream: 'thinking',
+            delta: `step ${i}`,
+            runId: 'run-burst',
+            sessionKey: 'test-session',
+          });
+        }
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: { role: 'assistant', content: 'burst complete' },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    const sendToRenderer = vi.fn();
+    registerChatHandlers({
+      sendToRenderer,
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, 'hello', 'test-session', {});
+
+    expect(result).toMatchObject({ success: true, text: 'burst complete' });
+    const thinkingCalls = sendToRenderer.mock.calls.filter(
+      ([channel]: [string]) => channel === 'chat:thinking',
+    );
+    expect(thinkingCalls.length).toBe(50);
+  });
 });

@@ -44,7 +44,7 @@ import {
   buildAwarenessInitCompatibilityRetryPrompt,
   shouldRetryAfterAwarenessInitFailure,
   tryBuildDesktopMemoryBootstrapSection,
-  getMemoryCapturePolicy,
+  fireAndForgetMemorySave,
   buildWebCompatibilityRetryPrompt,
 } from './awareness-memory-utils';
 import { chatSendViaCli, chatSendViaCliWithWebCompatibilityRetry, prepareCliFallbackWithDaemonRetry } from './chat-cli-executor';
@@ -406,6 +406,22 @@ export function registerChatHandlers(deps: {
     }
 
     const homeDir = os.homedir();
+
+    // Closure for CLI fallback paths to save memory (mirrors the Gateway path at ~line 1152).
+    // Fire-and-forget: never blocks the return to the user.
+    const saveMemoryForCliResult = (cliResult: any) => {
+      if (!cliResult?.success || !cliResult?.text) return;
+      fireAndForgetMemorySave({
+        message,
+        responseText: cliResult.text,
+        send,
+        callMcpStrict: deps.callMcpStrict,
+        readMemoryCapturePolicy: deps.readMemoryCapturePolicy,
+        homeDir,
+        skipIfUnverifiedFileOp: !!cliResult.unverifiedLocalFileOperation,
+      });
+    };
+
     const desktopDir = path.join(homeDir, 'Desktop');
     const documentsDir = path.join(homeDir, 'Documents');
     const downloadsDir = path.join(homeDir, 'Downloads');
@@ -562,9 +578,11 @@ ${message}`;
           deps,
         });
         maybeSelfHealGateway1006(retryResult, send, deps.runSpawn, deps.getEnhancedPath(), deps.startGatewayInUserSession, deps.runAsync);
+        saveMemoryForCliResult(retryResult);
         return withWorkspaceFallbackMeta(retryResult);
       }
       maybeSelfHealGateway1006(cliResult, send, deps.runSpawn, deps.getEnhancedPath(), deps.startGatewayInUserSession, deps.runAsync);
+      saveMemoryForCliResult(cliResult);
       return withWorkspaceFallbackMeta(cliResult);
       }
     }
@@ -721,7 +739,9 @@ ${message}`;
         if (!normalizedAgentEvent) return;
 
         const sessionKey = normalizedAgentEvent.sessionKey || '';
-        if (sessionKey && sessionKey !== sid) return;
+        // Gateway prepends "agent:main:" (or similar) to sessionKey, so use
+        // endsWith for matching — same logic as the event:chat handler.
+        if (sessionKey && sessionKey !== sid && !sessionKey.endsWith(sid)) return;
 
         if (normalizedAgentEvent.stream === 'tool') {
           sawToolBlocks = true;
@@ -798,6 +818,17 @@ ${message}`;
             lastThinkingText = assistantText;
             send('chat:status', { type: 'thinking' });
             send('chat:thinking', assistantText);
+          }
+          return;
+        }
+
+        // Live thinking token stream (emitted when reasoning='stream' on the session).
+        // Gateway broadcasts stream:"thinking" events unconditionally to WS operator clients.
+        if (normalizedAgentEvent.stream === 'thinking') {
+          const thinkingText = normalizedAgentEvent.delta || normalizedAgentEvent.text || '';
+          if (thinkingText) {
+            send('chat:thinking', thinkingText);
+            send('chat:status', { type: 'thinking' });
           }
           return;
         }
@@ -932,7 +963,10 @@ ${message}`;
       await ws.chatSend(sid, fullMessage, {
         thinking: requestedOptions.thinkingLevel && requestedOptions.thinkingLevel !== 'off' ? requestedOptions.thinkingLevel : undefined,
         verbose: 'full',
-        reasoning: requestedOptions.reasoningDisplay && requestedOptions.reasoningDisplay !== 'off' ? requestedOptions.reasoningDisplay : 'on',
+        // Pass user's reasoning preference directly. 'stream' enables live
+        // thinking token delivery via stream:"thinking" agent events; 'on'
+        // includes reasoning in the final response only; undefined/'off' disables.
+        reasoning: requestedOptions.reasoningDisplay && requestedOptions.reasoningDisplay !== 'off' ? requestedOptions.reasoningDisplay : undefined,
       });
 
       await chatDone;
@@ -1128,60 +1162,24 @@ ${message}`;
             deps,
           });
           maybeSelfHealGateway1006(cliRawRetryResult, send, deps.runSpawn, deps.getEnhancedPath(), deps.startGatewayInUserSession, deps.runAsync);
+          saveMemoryForCliResult(cliRawRetryResult);
           return withWorkspaceFallbackMeta(cliRawRetryResult);
         }
 
         maybeSelfHealGateway1006(cliRecoveryResult, send, deps.runSpawn, deps.getEnhancedPath(), deps.startGatewayInUserSession, deps.runAsync);
+        saveMemoryForCliResult(cliRecoveryResult);
         return withWorkspaceFallbackMeta(cliRecoveryResult);
       }
 
-      const memoryCapturePolicy = deps.readMemoryCapturePolicy?.() || getMemoryCapturePolicy(os.homedir());
-      const blockedSources = new Set(
-        (memoryCapturePolicy.blockedSources || []).map((item) => item.trim().toLowerCase()).filter(Boolean),
-      );
-      const shouldAutoCaptureDesktopMemory = memoryCapturePolicy.autoCapture !== false
-        && !blockedSources.has('desktop');
-
-      if (finalText && !shouldFlagUnverifiedLocalFileOperation && shouldAutoCaptureDesktopMemory) {
-        const memoryToolId = `memory-save-${Date.now()}`;
-        send('chat:status', {
-          type: 'tool_call',
-          tool: 'awareness_record',
-          toolStatus: 'saving',
-          toolId: memoryToolId,
-          detail: 'Save this turn to Awareness memory',
-        });
-
-        deps.callMcpStrict('awareness_record', {
-          action: 'remember',
-          content: `Request: ${message}\nResult: ${finalText}`,
-          event_type: 'turn_brief',
-          source: 'desktop',
-        }).then((result) => {
-          const parsed = parseMcpTextPayload(result);
-          if (parsed?.error) {
-            throw new Error(parsed.error);
-          }
-          send('chat:status', {
-            type: 'tool_update',
-            toolId: memoryToolId,
-            toolStatus: 'completed',
-            detail: parsed?.filepath || 'Saved to Awareness memory',
-          });
-        }).catch((err) => {
-          console.warn('[chat] Memory record failed:', err.message);
-          send('chat:status', {
-            type: 'tool_update',
-            toolId: memoryToolId,
-            toolStatus: 'failed',
-            detail: err.message,
-          });
-          send('chat:memory-warning', {
-            type: 'record-failed',
-            message: err.message,
-          });
-        });
-      }
+      fireAndForgetMemorySave({
+        message,
+        responseText: finalText,
+        send,
+        callMcpStrict: deps.callMcpStrict,
+        readMemoryCapturePolicy: deps.readMemoryCapturePolicy,
+        homeDir,
+        skipIfUnverifiedFileOp: !!shouldFlagUnverifiedLocalFileOperation,
+      });
 
       if (!finalText && pendingApprovalRequestId) {
         return withWorkspaceFallbackMeta({
@@ -1259,9 +1257,11 @@ ${message}`;
             deps,
           });
           maybeSelfHealGateway1006(retryResult, send, deps.runSpawn, deps.getEnhancedPath(), deps.startGatewayInUserSession, deps.runAsync);
+          saveMemoryForCliResult(retryResult);
           return withWorkspaceFallbackMeta(retryResult);
         }
         maybeSelfHealGateway1006(cliResult, send, deps.runSpawn, deps.getEnhancedPath(), deps.startGatewayInUserSession, deps.runAsync);
+        saveMemoryForCliResult(cliResult);
         return withWorkspaceFallbackMeta(cliResult);
       }
       return withWorkspaceFallbackMeta({ success: false, text: '', error: errorMsg, sessionId: sid });
