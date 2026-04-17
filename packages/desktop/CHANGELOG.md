@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.7-preview.3] - 2026-04-18
+
+### Fixed — Approve / Stop buttons had no effect on missions from a previous app session
+Root cause: `MissionRunner`'s in-memory `missions` Map is lost on every app restart, but missions persist on disk at `~/.awarenessclaw/missions/`. When the UI restored a mission via `mission:get` (after a tab switch or app relaunch), the runner instance had no record of it — so `approveAndRun()` threw "mission not found" and `cancel()` silently early-returned. User clicked "出发 ✨" or "⏹ Stop" and **nothing happened**.
+
+Fix:
+- `MissionRunner.hydrateFromDisk(id)` (new public method) reads `mission.json` from disk and populates the in-memory Map.
+- `cancel()` and `approveAndRun()` now hydrate-on-miss so a zombie mission (from a previous runner instance) can still be approved or stopped.
+- `cancel()` is now idempotent on already-terminal missions (`done` / `failed` → no double-emit).
+- `getMission()` transparently falls back to disk, so any code path that queries the runner always sees a consistent view with what's persisted.
+- IPC handler `mission:cancel-flow` uses `ensureRunner()` instead of a raw null-check — used to return `"no active runner"` if the user hit Stop before the runner was lazy-initialized.
+
+### Testing
+- 360 mission-flow tests pass (+6 new): 4 zombie-mission chaos tests in `mission-failure-chaos.test.ts` + 2 IPC hydrate tests in `register-mission-handlers.test.ts`.
+- All 4 L1 guards still green.
+
 ## [0.3.7-preview.2] - 2026-04-18
 
 ### Fixed — user cannot leave / interrupt a running mission

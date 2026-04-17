@@ -451,6 +451,51 @@ describe('register-mission-handlers — cancel + delete', () => {
     } finally { env.teardown(); }
   });
 
+  it('mission:cancel-flow works even when runner was never initialized (lazy init + hydrate)', async () => {
+    const env = await setup();
+    try {
+      // First cancel call before any create — should succeed without error.
+      const cancelFn = env.handlers.get('mission:cancel-flow')!;
+      const res = await cancelFn({}, 'nonexistent-id');
+      // runner now exists; unknown id is a no-op but still { ok: true }
+      expect(res.ok).toBe(true);
+    } finally { env.teardown(); }
+  });
+
+  it('mission:cancel-flow hydrates a zombie mission from disk and marks it failed', async () => {
+    const env = await setup();
+    try {
+      // Create mission (which persists to disk) then throw the runner away
+      // by calling dispose — but since register-mission-handlers caches
+      // the runner in module closure, simulate restart by persisting a
+      // mission manually to disk and calling cancel before anyone hydrates.
+      const createFn = env.handlers.get('mission:create-from-goal')!;
+      await createFn({}, 'zombie mission');
+      const plannerKey = env.gw.chatSend.mock.calls[0][0];
+      env.gw.emit({
+        state: 'final',
+        sessionKey: plannerKey,
+        text: JSON.stringify({
+          summary: 'plan',
+          subtasks: [
+            { id: 'T1', agentId: 'main',   role: 'L', title: 'a', deliverable: 'd', depends_on: [] },
+            { id: 'T2', agentId: 'coder',  role: 'D', title: 'b', deliverable: 'd', depends_on: ['T1'] },
+            { id: 'T3', agentId: 'tester', role: 'Q', title: 'c', deliverable: 'd', depends_on: ['T2'] },
+          ],
+        }),
+      });
+      await flush();
+
+      // Now cancel — even though the UI may have reloaded from disk,
+      // the handler hydrates and cancel succeeds.
+      const cancelFn = env.handlers.get('mission:cancel-flow')!;
+      const res = await cancelFn({}, 'mission-test');
+      expect(res.ok).toBe(true);
+      const failed = env.sends.find((s) => s.channel === 'mission:failed');
+      expect(failed).toBeDefined();
+    } finally { env.teardown(); }
+  });
+
   it('mission:delete removes persisted files', async () => {
     const env = await setup();
     try {

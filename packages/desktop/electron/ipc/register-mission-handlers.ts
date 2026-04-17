@@ -224,7 +224,9 @@ export function registerMissionHandlers(deps: MissionHandlerDeps): MissionHandle
 
   ipcMain.handle('mission:get', async (_e, missionId: string) => {
     if (!missionId) return null;
-    // Prefer the in-memory snapshot (fresher), fall back to disk.
+    // Prefer the runner's view (which now hydrates from disk on miss, so the
+    // in-memory Map stays in sync) and fall back to a direct file read if no
+    // runner has been created yet.
     if (runner) {
       const live = runner.getMission(missionId);
       if (live) return live;
@@ -234,9 +236,15 @@ export function registerMissionHandlers(deps: MissionHandlerDeps): MissionHandle
 
   ipcMain.handle('mission:cancel-flow', async (_e, missionId: string) => {
     if (!missionId) return { ok: false, error: 'missionId is required' };
-    if (!runner) return { ok: false, error: 'no active runner' };
-    await runner.cancel(missionId);
-    return { ok: true };
+    try {
+      // Ensure a runner exists — user may be cancelling a mission left over
+      // from a previous app session, which the runner will hydrate from disk.
+      const activeRunner = await ensureRunner();
+      await activeRunner.cancel(missionId);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: errMsg(err) };
+    }
   });
 
   ipcMain.handle('mission:delete', async (_e, missionId: string) => {

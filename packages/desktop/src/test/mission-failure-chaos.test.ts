@@ -454,3 +454,116 @@ describe('L3 chaos — cancellation', () => {
     await expect(runner.cancel('does-not-exist')).resolves.toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Zombie / hydrate behaviour — runner A creates mission, runner B cancels it
+// ---------------------------------------------------------------------------
+describe('L3 chaos — zombie mission hydrate', () => {
+  async function setupPausedOnDisk() {
+    const root = tmpRoot();
+    const { ws, emit, chatSends } = (() => {
+      const res = makeWs() as any;
+      const chatSends: any[] = [];
+      res.ws.chatSend = vi.fn(async (sk: string, text: string) => {
+        chatSends.push({ sk, text });
+        return { runId: `r-${chatSends.length}` };
+      });
+      res.chatSends = chatSends;
+      return res;
+    })();
+    const adapter = createGatewayAdapter(ws);
+    const runnerA = new MissionRunner(adapter, () => {}, {
+      root,
+      awaitApproval: true,  // leave at paused_awaiting_human
+      stepIdleTimeoutMs: 0,
+      clock: () => new Date('2026-04-17T10:00:00Z'),
+      idGen: () => 'zombie1',
+      maxPlannerRetries: 0,
+    });
+    await runnerA.createMission({
+      goal: 'zombie test',
+      agents: [{ id: 'main' }, { id: 'coder' }, { id: 'tester' }],
+    });
+    // planner final → mission moves to paused_awaiting_human
+    emit({
+      state: 'final',
+      sessionKey: `agent:main:main`,
+      text: JSON.stringify({
+        summary: 'plan',
+        subtasks: [
+          { id: 'T1', agentId: 'main', role: 'L', title: 'a', deliverable: 'd', depends_on: [] },
+          { id: 'T2', agentId: 'coder', role: 'D', title: 'b', deliverable: 'd', depends_on: ['T1'] },
+          { id: 'T3', agentId: 'tester', role: 'Q', title: 'c', deliverable: 'd', depends_on: ['T2'] },
+        ],
+      }),
+    });
+    await flush();
+    return { root, ws };
+  }
+
+  it('cancel() of zombie mission hydrates from disk + writes status=failed', async () => {
+    const { root } = await setupPausedOnDisk();
+
+    // Simulate app restart: brand-new runner instance, same root.
+    const { ws: ws2 } = makeWs();
+    const events: MissionEvent[] = [];
+    const runnerB = new MissionRunner(createGatewayAdapter(ws2), (e) => events.push(e), {
+      root, stepIdleTimeoutMs: 0,
+      clock: () => new Date('2026-04-17T10:00:00Z'),
+      idGen: () => 'zombie-b',
+    });
+    // Runner B doesn't know about zombie1 yet (Map empty)
+    expect(runnerB.getMission('zombie1')?.status).toBe('paused_awaiting_human');
+    // getMission should have hydrated
+    await runnerB.cancel('zombie1', 'user stopped');
+    // After cancel, the mission on disk should read failed
+    const m = runnerB.getMission('zombie1');
+    expect(m?.status).toBe('failed');
+    expect(events.some((e) => e.type === 'mission:failed')).toBe(true);
+  });
+
+  it('approveAndRun() of zombie mission hydrates + spawns worker', async () => {
+    const { root } = await setupPausedOnDisk();
+
+    const { ws: ws2 } = makeWs();
+    const events: MissionEvent[] = [];
+    const runnerB = new MissionRunner(createGatewayAdapter(ws2), (e) => events.push(e), {
+      root, stepIdleTimeoutMs: 0,
+      clock: () => new Date('2026-04-17T10:00:00Z'),
+      idGen: () => 'zombie-b',
+    });
+    // Runner B cold start — Map empty
+    await runnerB.approveAndRun('zombie1');
+    await flush();
+    // ws2.chatSend must have been called once to spawn T1 worker
+    expect((ws2.chatSend as any).mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(events.some((e) => e.type === 'step-started')).toBe(true);
+  });
+
+  it('cancel() on totally unknown mission id is still a no-op', async () => {
+    const { ws } = makeWs();
+    const runner = new MissionRunner(createGatewayAdapter(ws), () => {}, {
+      root: tmpRoot(), stepIdleTimeoutMs: 0,
+      clock: () => new Date('2026-04-17T10:00:00Z'),
+      idGen: () => 'nope',
+    });
+    await expect(runner.cancel('does-not-exist-anywhere')).resolves.toBeUndefined();
+  });
+
+  it('cancel() on already-terminal mission is idempotent (no double-fail)', async () => {
+    const { root } = await setupPausedOnDisk();
+    const { ws: ws2 } = makeWs();
+    const events: MissionEvent[] = [];
+    const runnerB = new MissionRunner(createGatewayAdapter(ws2), (e) => events.push(e), {
+      root, stepIdleTimeoutMs: 0,
+      clock: () => new Date('2026-04-17T10:00:00Z'),
+      idGen: () => 'zombie-b',
+    });
+    await runnerB.cancel('zombie1');
+    const failCount1 = events.filter((e) => e.type === 'mission:failed').length;
+    // Second cancel on already-failed mission should not emit another failed event
+    await runnerB.cancel('zombie1');
+    const failCount2 = events.filter((e) => e.type === 'mission:failed').length;
+    expect(failCount2).toBe(failCount1);
+  });
+});

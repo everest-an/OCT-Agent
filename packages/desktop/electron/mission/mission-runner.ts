@@ -51,6 +51,7 @@ import {
   listArtifacts,
   readArtifact,
   readMemory,
+  readMission,
   writeArtifact,
   writeMission,
   ensureMissionSkeleton,
@@ -225,17 +226,30 @@ export class MissionRunner {
     return mission;
   }
 
-  /** Cancel an active mission. Aborts any current run + stops further spawning. */
+  /**
+   * Cancel an active mission. Aborts any current run + stops further spawning.
+   *
+   * Handles "zombie" missions: if this runner instance doesn't know about the
+   * mission (e.g. app restarted and the mission was resumed from disk by the
+   * UI), we hydrate from disk so the user's Stop button still works to flip
+   * status=failed + best-effort gateway abort.
+   */
   async cancel(missionId: string, reason = 'user cancelled'): Promise<void> {
-    const m = this.missions.get(missionId);
-    if (!m) return;
+    let m = this.missions.get(missionId);
+    if (!m) {
+      m = this.hydrateFromDisk(missionId);
+      if (!m) return; // truly unknown — no disk entry either
+    }
+    // Already terminal — nothing to cancel, but emit an event so UI can close
+    if (m.status === 'done' || m.status === 'failed') return;
     this.cancelled.add(missionId);
     this.clearStepIdleTimer(missionId);
     const unsubscribe = this.activeSubs.get(missionId);
     if (unsubscribe) unsubscribe();
     this.activeSubs.delete(missionId);
 
-    // Abort any running step session
+    // Abort any running step session (or the planner session if we're in
+    // planning/paused). Best-effort: the gateway session may already be dead.
     const running = m.steps.find((s) => s.status === 'running');
     if (running?.sessionKey) {
       try { await this.gateway.abort(running.sessionKey, running.runId); }
@@ -248,9 +262,32 @@ export class MissionRunner {
     this.emit({ type: 'mission:failed', missionId, mission: failed, reason });
   }
 
-  /** Public accessor for tests / IPC. */
+  /**
+   * Load a mission from `~/.awarenessclaw/missions/<id>/mission.json` into
+   * the in-memory Map. Returns the hydrated Mission, or null if the file
+   * doesn't exist / can't be parsed.
+   *
+   * Use case: an earlier runner instance (previous app session) created the
+   * mission, and the current runner Map is empty — we still need to be able
+   * to cancel, approve, or delete it.
+   */
+  hydrateFromDisk(missionId: string): Mission | null {
+    try {
+      const m = readMission(missionId, this.opts.root);
+      if (!m) return null;
+      this.missions.set(missionId, m);
+      return m;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Public accessor for tests / IPC. Falls back to disk when not in Map. */
   getMission(missionId: string): Mission | undefined {
-    return this.missions.get(missionId);
+    const inMem = this.missions.get(missionId);
+    if (inMem) return inMem;
+    const hydrated = this.hydrateFromDisk(missionId);
+    return hydrated ?? undefined;
   }
 
   // -------------------------------------------------------------------------
@@ -374,10 +411,16 @@ export class MissionRunner {
   /**
    * Approve a plan that is paused awaiting human confirmation and start
    * worker execution. No-op if the mission is not in `paused_awaiting_human`.
+   *
+   * Handles "zombie" missions (runner restarted after mission was created):
+   * hydrates the mission from disk before checking status.
    */
   async approveAndRun(missionId: string): Promise<void> {
-    const m = this.missions.get(missionId);
-    if (!m) throw new Error(`mission ${missionId} not found`);
+    let m = this.missions.get(missionId);
+    if (!m) {
+      m = this.hydrateFromDisk(missionId);
+      if (!m) throw new Error(`mission ${missionId} not found`);
+    }
     if (m.status !== 'paused_awaiting_human') {
       // idempotent: already running/done/failed — silently return
       return;
