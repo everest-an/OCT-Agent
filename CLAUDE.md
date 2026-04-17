@@ -50,8 +50,31 @@ AwarenessClaw 目前走**手动下载升级**模式（没接 electron-updater）
 
 1. **bump `packages/desktop/package.json` 的 `version`**（semver，客户端用 `app.getVersion()` 与后端下发版本比较）。
 2. **更新 `packages/desktop/CHANGELOG.md`**（若无则创建）：`## [x.y.z] - YYYY-MM-DD` + Added/Changed/Fixed，作为后端 `AWARENESSCLAW_RELEASE_NOTES` 的内容来源。
-3. **打 DMG**：`cd packages/desktop && PYTHON_PATH=/usr/bin/python3 CSC_IDENTITY_AUTO_DISCOVERY=false npm run package:mac`。产物在 `release/AwarenessClaw-<version>-arm64.dmg`。
-4. **上传 DMG / 安装包到分发位置**（暂时为 `https://awareness.market/` 落地页，后续换 OSS/S3/GitHub Release）。
+3. **打签名 + 公证 DMG**：
+   ```bash
+   cd packages/desktop
+   PYTHON_PATH=/usr/bin/python3 \
+     CSC_IDENTITY_AUTO_DISCOVERY=true \
+     CSC_NAME="Beijing VGO Co;Ltd (5XNDF727Y6)" \
+     APPLE_KEYCHAIN_PROFILE="AwarenessClawNotary" \
+     npm run package:mac
+   ```
+   详见本文件下方"📦 macOS DMG 打包规则（签名 + 公证全流程）"章节。产物：`release/AwarenessClaw-<version>-arm64.dmg`。**未签名或未公证的 DMG 禁止分发**。
+4. **上传 DMG 到 GitHub Release**（这是分发源头，官网 `https://awareness.market/` 下载按钮最终跳到这里）：
+   ```bash
+   cp release/AwarenessClaw-<version>-arm64.dmg /tmp/AwarenessClaw.dmg
+   gh release upload v0.3.0 /tmp/AwarenessClaw.dmg \
+     --repo everest-an/AwarenessClaw-Download --clobber
+   rm /tmp/AwarenessClaw.dmg
+   # 验证
+   curl -sIL https://github.com/everest-an/AwarenessClaw-Download/releases/download/v0.3.0/AwarenessClaw.dmg \
+     | grep -iE 'content-length|last-modified'
+   ```
+   **关键约束**：
+   - Release tag 永远是 `v0.3.0`（不随版本号变化），asset 文件名永远是 `AwarenessClaw.dmg`（固定）。只替换里面的 asset，**绝不换 tag**。
+   - `everest-an/AwarenessClaw-Download` 是**只读分发仓库**，不放源码、不记录 release body changelog。用户看到的 "What's New" 由后端 `/api/v1/app/latest-version` 接口从服务器 `/opt/awareness/data/app-versions.json` 下发。
+   - `gh release upload --clobber` 需要 PAT 对该仓库有 **release write 权限**，不是普通 push。`edwin-hao-ai` 的默认 fine-grained PAT 没这个 scope，会 403。需要去 https://github.com/settings/personal-access-tokens 给 PAT 勾选 `everest-an/AwarenessClaw-Download` + `Contents: Read and write`，或者用 `everest-an` 账号 `gh auth login` 后再上传。
+   - Windows `.exe` 和 Linux `.AppImage` 未来也走同一个 release + 同样 `--clobber` 覆盖。
 5. **后端推送新版本号（热更新，无需重启容器）**：SSH 到服务器编辑 `/opt/awareness/data/app-versions.json`：
    ```bash
    ssh server 'cat > /opt/awareness/data/app-versions.json << '\''EOF'\''
