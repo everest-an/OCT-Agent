@@ -349,6 +349,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   missionCancelFlow: (missionId: string) => ipcRenderer.invoke('mission:cancel-flow', missionId),
   missionDelete: (missionId: string) => ipcRenderer.invoke('mission:delete', missionId),
   missionReadArtifact: (missionId: string, stepId: string) => ipcRenderer.invoke('mission:read-artifact', missionId, stepId),
+  missionSweepStale: () => ipcRenderer.invoke('mission:sweep-stale'),
   onMissionPlanning: (callback: (data: { missionId: string }) => void) => {
     const listener = (_e: any, data: any) => callback(data);
     ipcRenderer.on('mission:planning', listener);

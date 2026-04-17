@@ -91,6 +91,27 @@ export default function MissionFlowShell({
     }
   }, [state.stage]);
 
+  // On first mount only: sweep "zombie" missions left over from a previous
+  // app session. Mission status=running/planning/paused with a startedAt
+  // BEFORE this session's handler-registration time is flipped to `failed`.
+  // Prevents the history list from showing confusing "still running" cards
+  // whose runner instance is long dead.
+  useEffect(() => {
+    const api: any = typeof window !== 'undefined' ? (window as any).electronAPI : null;
+    if (!api?.missionSweepStale) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.missionSweepStale();
+        if (!cancelled && res?.swept > 0) {
+          // Refresh history list so the user sees the newly-failed zombies.
+          setHistoryRefresh((n) => n + 1);
+        }
+      } catch { /* silent — sweep is best-effort */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // Auto-backfill artifact body for every `done` step that doesn't already
   // have live stream text in the hook. Fires whenever the mission's step list
   // changes (including mount-restore and step-ended events).

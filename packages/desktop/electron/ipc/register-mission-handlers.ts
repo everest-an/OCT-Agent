@@ -59,6 +59,7 @@ import {
   readArtifact as readArtifactFile,
   deleteMission as deleteMissionFiles,
   getMissionDir,
+  writeMission,
 } from '../mission/file-layout';
 
 // ---------------------------------------------------------------------------
@@ -105,6 +106,7 @@ const IPC_INVOKE_CHANNELS = [
   'mission:cancel-flow',
   'mission:delete',
   'mission:read-artifact',
+  'mission:sweep-stale',
 ] as const;
 
 export const MISSION_IPC_INVOKE_CHANNELS = IPC_INVOKE_CHANNELS;
@@ -254,6 +256,62 @@ export function registerMissionHandlers(deps: MissionHandlerDeps): MissionHandle
       return { ok: true };
     } catch (err) {
       return { ok: false, error: errMsg(err) };
+    }
+  });
+
+  /**
+   * Sweep stuck "running" / "planning" missions from a previous app session.
+   *
+   * Policy: a mission is "stale" when ALL of:
+   *   - its `status` is `running` or `planning` (or `paused`, but NOT
+   *     `paused_awaiting_human` — we don't want to kill a plan the user
+   *     hasn't yet decided on)
+   *   - its `startedAt` timestamp is BEFORE this handler's registration time
+   *     (meaning it wasn't started in the current app session)
+   *   - `completedAt` is unset (not already terminal)
+   *
+   * Action: rewrite `mission.json` with status=`failed`, completedAt=now,
+   * lastEvent explaining it was interrupted. The UI's history list will then
+   * show it as failed instead of "still running".
+   *
+   * Called by `MissionFlowShell` on mount (once per session).
+   */
+  const handlerStartedAt = Date.now();
+  ipcMain.handle('mission:sweep-stale', async () => {
+    try {
+      const ids = listMissionIds(root);
+      let swept = 0;
+      const nowIso = new Date().toISOString();
+      for (const id of ids) {
+        const m = readMission(id, root);
+        if (!m) continue;
+        if (m.completedAt) continue;
+        if (m.status !== 'running' && m.status !== 'planning' && m.status !== 'paused') continue;
+        if (!m.startedAt) continue;
+        const startedTs = Date.parse(m.startedAt);
+        if (!Number.isFinite(startedTs)) continue;
+        // Guard against killing a live mission in the current session: only
+        // sweep when startedAt is older than this handler's registration.
+        if (startedTs >= handlerStartedAt) continue;
+
+        const swap = {
+          ...m,
+          status: 'failed' as const,
+          completedAt: nowIso,
+          lastEvent: {
+            at: nowIso,
+            type: 'sweep-stale',
+            payload: 'Mission was interrupted by an app restart and could not be resumed.',
+          },
+        };
+        try {
+          writeMission(swap, root);
+          swept++;
+        } catch { /* continue with next */ }
+      }
+      return { ok: true, swept };
+    } catch (err) {
+      return { ok: false, error: errMsg(err), swept: 0 };
     }
   });
 

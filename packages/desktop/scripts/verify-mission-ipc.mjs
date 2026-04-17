@@ -50,6 +50,7 @@ const INVOKE_CHANNELS = [
   'mission:cancel-flow',
   'mission:delete',
   'mission:read-artifact',
+  'mission:sweep-stale',
 ];
 const EVENT_CHANNELS = [
   'mission:planning',

@@ -353,6 +353,7 @@ export interface ElectronAPI {
   missionCancelFlow?: (missionId: string) => Promise<{ ok: boolean; error?: string }>;
   missionDelete?: (missionId: string) => Promise<{ ok: boolean; error?: string }>;
   missionReadArtifact?: (missionId: string, stepId: string) => Promise<{ ok: boolean; path?: string; body?: string; error?: string }>;
+  missionSweepStale?: () => Promise<{ ok: boolean; swept: number; error?: string }>;
   onMissionPlanning?: (callback: (data: { missionId: string }) => void) => (() => void) | undefined;
   onMissionPlannerDelta?: (callback: (data: { missionId: string; chunk: string }) => void) => (() => void) | undefined;
   onMissionPlanReady?: (callback: (data: { missionId: string; mission: MissionSnapshot }) => void) => (() => void) | undefined;

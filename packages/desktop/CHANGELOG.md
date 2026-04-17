@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.3.7-preview.5] - 2026-04-18
+
+### Added — startup sweep kills zombie running missions from a previous session
+If AwarenessClaw was force-quit or crashed while a mission was running, the on-disk `mission.json` stayed at `status=running` forever. Users returning to Team Tasks saw permanent "任务进行中" cards whose runner was long dead.
+
+New IPC `mission:sweep-stale` runs on MissionFlowShell mount (once per session):
+1. List every mission dir on disk
+2. Keep `done` / `failed` / `paused_awaiting_human` (user hasn't decided yet) untouched
+3. For `running` / `planning` / `paused` missions with `startedAt` **before** this session's handler registration time — flip to `failed`, write `completedAt=now`, add `lastEvent: { type: 'sweep-stale' }`
+4. Refresh the history list so the user sees the newly-failed zombies
+
+Safety:
+- **Never touches `paused_awaiting_human`** — user's pending plan decisions are sacred
+- Missions from THIS session are immune (startedAt >= handlerStartedAt)
+- Corrupt `mission.json` files are silently skipped (no crash)
+- Empty missions dir returns `swept: 0` cleanly
+- Idempotent (second sweep in same session returns 0)
+
+### Testing — 9 new L2 tests for sweep
+- Positive: old running / planning / paused missions flip to failed
+- Safety: paused_awaiting_human untouched, already-terminal untouched
+- Session boundary: current-session missions (startedAt >= handlerStartedAt) not swept
+- Edge: missions without startedAt skipped, corrupted mission.json doesn't crash, empty dir OK
+- Idempotency: second call returns 0
+
+Totals: 366 → 375 mission-flow tests. 4 L1 guards still green. Real Gateway E2E smoke re-run → 54s, mission:done ✓.
+
 ## [0.3.7-preview.4] - 2026-04-18
 
 ### Fixed — done steps showed "(No output captured)" after tab switch

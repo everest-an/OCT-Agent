@@ -511,6 +511,192 @@ describe('register-mission-handlers — cancel + delete', () => {
   });
 });
 
+describe('register-mission-handlers — mission:sweep-stale', () => {
+  // Helper: write a mission.json directly to disk without going through a runner
+  async function writeMissionToDisk(
+    env: Awaited<ReturnType<typeof setup>>,
+    id: string,
+    overrides: Partial<{ status: string; startedAt: string; completedAt: string }>,
+  ) {
+    const fs2 = await import('fs');
+    const path2 = await import('path');
+    const dir = path2.default.join(env.root, 'missions', id);
+    fs2.default.mkdirSync(dir, { recursive: true });
+    fs2.default.writeFileSync(
+      path2.default.join(dir, 'mission.json'),
+      JSON.stringify({
+        id,
+        version: 1,
+        goal: 'test mission',
+        status: 'running',
+        createdAt: '2020-01-01T00:00:00.000Z',
+        startedAt: '2020-01-01T00:00:00.000Z',  // far in the past by default
+        plannerAgentId: 'main',
+        steps: [
+          { id: 'T1', agentId: 'main', role: 'L', title: 'A', deliverable: 'd',
+            depends_on: [], status: 'running', attempts: 1 },
+        ],
+        ...overrides,
+      }),
+    );
+    return dir;
+  }
+
+  async function readMissionFromDisk(env: Awaited<ReturnType<typeof setup>>, id: string) {
+    const fs2 = await import('fs');
+    const path2 = await import('path');
+    const raw = fs2.default.readFileSync(
+      path2.default.join(env.root, 'missions', id, 'mission.json'),
+      'utf8',
+    );
+    return JSON.parse(raw);
+  }
+
+  it('flips an old running mission (startedAt before app start) to failed', async () => {
+    const env = await setup();
+    try {
+      await writeMissionToDisk(env, 'zombie-1', { status: 'running' });
+      const sweepFn = env.handlers.get('mission:sweep-stale')!;
+      const res = await sweepFn({});
+      expect(res.ok).toBe(true);
+      expect(res.swept).toBe(1);
+      const m = await readMissionFromDisk(env, 'zombie-1');
+      expect(m.status).toBe('failed');
+      expect(m.completedAt).toBeTruthy();
+      expect(m.lastEvent?.type).toBe('sweep-stale');
+    } finally { env.teardown(); }
+  });
+
+  it('also sweeps stale planning missions', async () => {
+    const env = await setup();
+    try {
+      await writeMissionToDisk(env, 'zombie-planning', { status: 'planning' });
+      const sweepFn = env.handlers.get('mission:sweep-stale')!;
+      const res = await sweepFn({});
+      expect(res.swept).toBe(1);
+      const m = await readMissionFromDisk(env, 'zombie-planning');
+      expect(m.status).toBe('failed');
+    } finally { env.teardown(); }
+  });
+
+  it('DOES NOT sweep paused_awaiting_human (user hasn\'t decided yet)', async () => {
+    const env = await setup();
+    try {
+      await writeMissionToDisk(env, 'pending-approval', { status: 'paused_awaiting_human' });
+      const sweepFn = env.handlers.get('mission:sweep-stale')!;
+      const res = await sweepFn({});
+      expect(res.swept).toBe(0);
+      const m = await readMissionFromDisk(env, 'pending-approval');
+      expect(m.status).toBe('paused_awaiting_human');  // unchanged
+    } finally { env.teardown(); }
+  });
+
+  it('DOES NOT sweep already-terminal missions (done/failed)', async () => {
+    const env = await setup();
+    try {
+      await writeMissionToDisk(env, 'already-done', {
+        status: 'done',
+        completedAt: '2020-01-01T01:00:00.000Z',
+      });
+      await writeMissionToDisk(env, 'already-failed', {
+        status: 'failed',
+        completedAt: '2020-01-01T01:00:00.000Z',
+      });
+      const sweepFn = env.handlers.get('mission:sweep-stale')!;
+      const res = await sweepFn({});
+      expect(res.swept).toBe(0);
+    } finally { env.teardown(); }
+  });
+
+  it('DOES NOT sweep a mission from the CURRENT session (startedAt >= handler time)', async () => {
+    const env = await setup();
+    try {
+      // Create a mission via the real flow (uses real time, which is ≥ handlerStartedAt)
+      const createFn = env.handlers.get('mission:create-from-goal')!;
+      await createFn({}, 'live mission');
+      const plannerKey = env.gw.chatSend.mock.calls[0][0];
+      env.gw.emit({
+        state: 'final',
+        sessionKey: plannerKey,
+        text: JSON.stringify({
+          summary: 'ok',
+          subtasks: [
+            { id: 'T1', agentId: 'main',   role: 'L', title: 'a', deliverable: 'd', depends_on: [] },
+            { id: 'T2', agentId: 'coder',  role: 'D', title: 'b', deliverable: 'd', depends_on: ['T1'] },
+            { id: 'T3', agentId: 'tester', role: 'Q', title: 'c', deliverable: 'd', depends_on: ['T2'] },
+          ],
+        }),
+      });
+      await flush();
+      // Manually set status=running + startedAt=now on disk so sweep MIGHT
+      // see it — but because startedAt >= handlerStartedAt, it should be kept.
+      const fs2 = await import('fs');
+      const path2 = await import('path');
+      const mpath = path2.default.join(env.root, 'missions', 'mission-test', 'mission.json');
+      const m = JSON.parse(fs2.default.readFileSync(mpath, 'utf8'));
+      m.status = 'running';
+      m.startedAt = new Date().toISOString();   // right now
+      delete m.completedAt;
+      fs2.default.writeFileSync(mpath, JSON.stringify(m));
+
+      const sweepFn = env.handlers.get('mission:sweep-stale')!;
+      const res = await sweepFn({});
+      expect(res.swept).toBe(0);
+      const reloaded = await readMissionFromDisk(env, 'mission-test');
+      expect(reloaded.status).toBe('running');
+    } finally { env.teardown(); }
+  });
+
+  it('skips missions without startedAt (defensive)', async () => {
+    const env = await setup();
+    try {
+      await writeMissionToDisk(env, 'no-started', { status: 'running', startedAt: '' as any });
+      const sweepFn = env.handlers.get('mission:sweep-stale')!;
+      const res = await sweepFn({});
+      expect(res.swept).toBe(0);
+    } finally { env.teardown(); }
+  });
+
+  it('skips corrupted mission.json without crashing', async () => {
+    const env = await setup();
+    try {
+      const fs2 = await import('fs');
+      const path2 = await import('path');
+      const dir = path2.default.join(env.root, 'missions', 'corrupt');
+      fs2.default.mkdirSync(dir, { recursive: true });
+      fs2.default.writeFileSync(path2.default.join(dir, 'mission.json'), '{not json');
+      await writeMissionToDisk(env, 'ok-stale', { status: 'running' });
+
+      const sweepFn = env.handlers.get('mission:sweep-stale')!;
+      const res = await sweepFn({});
+      // corrupt is skipped, ok-stale swept
+      expect(res.swept).toBe(1);
+    } finally { env.teardown(); }
+  });
+
+  it('handles empty missions dir (no error, returns swept:0)', async () => {
+    const env = await setup();
+    try {
+      const sweepFn = env.handlers.get('mission:sweep-stale')!;
+      const res = await sweepFn({});
+      expect(res.ok).toBe(true);
+      expect(res.swept).toBe(0);
+    } finally { env.teardown(); }
+  });
+
+  it('is idempotent — second call after sweep returns 0', async () => {
+    const env = await setup();
+    try {
+      await writeMissionToDisk(env, 'zz', { status: 'running' });
+      const sweepFn = env.handlers.get('mission:sweep-stale')!;
+      const first = await sweepFn({});
+      expect(first.swept).toBe(1);
+      const second = await sweepFn({});
+      expect(second.swept).toBe(0);
+    } finally { env.teardown(); }
+  });
+});
+
 describe('register-mission-handlers — event → IPC mapper', () => {
   it('missionEventToIpc maps every MissionEvent variant to the correct channel', async () => {
     vi.resetModules();
