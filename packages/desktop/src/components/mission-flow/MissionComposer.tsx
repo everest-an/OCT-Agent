@@ -27,6 +27,7 @@ export interface MissionComposerAgent {
   readonly name?: string;
   readonly emoji?: string;
   readonly role?: string;
+  readonly model?: string | null;
 }
 
 export interface MissionComposerProps {
@@ -45,6 +46,13 @@ export interface MissionComposerProps {
   readonly agents?: readonly MissionComposerAgent[];
   /** Callback for the "Manage agents" link when agents.length < 2. */
   readonly onManageAgents?: () => void;
+  /**
+   * Default model used by the Planner (read from openclaw.json /
+   * main agent's `model` config). Shown in the meta row so users see
+   * which model the team will run on. Not user-editable here — model
+   * selection is global Settings.
+   */
+  readonly defaultModel?: string | null;
 }
 
 export default function MissionComposer({
@@ -58,6 +66,7 @@ export default function MissionComposer({
   onClearWorkDir,
   agents,
   onManageAgents,
+  defaultModel,
 }: MissionComposerProps) {
   const tr = t ?? ((_k: string, fallback?: string) => fallback ?? _k);
   const [goal, setGoal] = useState(defaultValue ?? '');
@@ -143,7 +152,7 @@ export default function MissionComposer({
       )}
 
       {/* Workspace + team rows (optional; hidden when parent doesn't wire them) */}
-      {(onPickWorkDir || (agents && agents.length > 0)) && (
+      {(onPickWorkDir || (agents && agents.length > 0) || defaultModel) && (
         <div data-testid="mission-composer-meta" className="space-y-2">
           {onPickWorkDir && (
             <div className="flex items-center gap-2 text-[12px] text-slate-400">
@@ -202,6 +211,26 @@ export default function MissionComposer({
               </ul>
               <span className="text-[11px] text-slate-500">
                 {tr('missionFlow.composer.teamCount', 'total')} {agents.length}
+              </span>
+            </div>
+          )}
+
+          {defaultModel && (
+            <div
+              data-testid="mission-composer-model"
+              className="flex items-center gap-2 text-[12px] text-slate-400"
+            >
+              <span className="text-slate-500">
+                {tr('missionFlow.composer.modelLabel', '🤖 Model:')}
+              </span>
+              <span
+                className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-800/80 border border-slate-700/50 text-slate-200 font-mono text-[11px]"
+                title={defaultModel}
+              >
+                {defaultModel}
+              </span>
+              <span className="text-[11px] text-slate-500 italic">
+                {tr('missionFlow.composer.modelHint', '(shared with Chat — change in Settings)')}
               </span>
             </div>
           )}

@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, Loader2, Pencil, XCircle, PlayCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Loader2, Pencil, XCircle, PlayCircle } from 'lucide-react';
 import AgentAvatar from '../AgentAvatar';
 import type { MissionSnapshot } from '../../types/electron';
 import type { MissionFlowStage } from './useMissionFlow';
@@ -54,7 +54,12 @@ export default function PlanPreview({
       className="rounded-xl border border-slate-700/50 bg-slate-900/40 p-4 space-y-4"
     >
       {showPlanner && (
-        <PlannerStreamPanel plannerStream={plannerStream} t={tr} />
+        <PlannerStreamPanel
+          plannerStream={plannerStream}
+          busy={busy}
+          onCancel={onCancel}
+          t={tr}
+        />
       )}
 
       {showPreview && mission && (
@@ -90,8 +95,15 @@ export default function PlanPreview({
 
 function PlannerStreamPanel({
   plannerStream,
+  busy,
+  onCancel,
   t,
-}: { plannerStream: string; t: TranslateFunc }) {
+}: {
+  plannerStream: string;
+  busy?: boolean;
+  onCancel: () => void;
+  t: TranslateFunc;
+}) {
   const preRef = useRef<HTMLPreElement>(null);
   useEffect(() => {
     const el = preRef.current;
@@ -102,7 +114,18 @@ function PlannerStreamPanel({
     <div data-testid="plan-preview-planning" className="space-y-2">
       <header className="flex items-center gap-2 text-sm text-slate-200">
         <Loader2 size={16} className="animate-spin text-amber-400" />
-        <span>{t('missionFlow.planner.streaming', 'Planner is drafting your plan…')}</span>
+        <span className="flex-1">{t('missionFlow.planner.streaming', 'Planner is drafting your plan…')}</span>
+        <button
+          type="button"
+          data-testid="planner-cancel"
+          onClick={onCancel}
+          disabled={busy}
+          aria-label={t('missionFlow.planner.cancel', 'Cancel planning')}
+          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 disabled:opacity-50"
+        >
+          <ArrowLeft size={12} />
+          {t('missionFlow.planner.cancel', 'Cancel')}
+        </button>
       </header>
       <pre
         ref={preRef}

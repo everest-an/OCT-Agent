@@ -133,6 +133,7 @@ export function useMissionFlow(): { state: MissionFlowState; actions: MissionFlo
   }, []);
 
   const reset = useCallback(() => {
+    activeIdRef.current = null;
     setStage('idle');
     setMissionId(null);
     setMission(null);
@@ -157,7 +158,16 @@ export function useMissionFlow(): { state: MissionFlowState; actions: MissionFlo
       if (typeof off === 'function') offs.push(off);
     };
 
-    const isCurrent = (id: string) => activeIdRef.current != null && id === activeIdRef.current;
+    // Event-arrival race: main-process emits `planning` + first `planner-delta`
+    // BEFORE the create() IPC promise resolves in the renderer, so by the time
+    // events land here activeIdRef may still be null from the previous mission.
+    // Accept events when ref is null (no active mission to confuse with), or
+    // when ids match exactly. Between missions we always clear the ref to null
+    // before issuing a new create (see `create()`).
+    const isCurrent = (id: string) => {
+      const current = activeIdRef.current;
+      return current == null || id === current;
+    };
 
     safeOn(api.onMissionPlanning, (data: { missionId: string }) => {
       if (!isCurrent(data.missionId)) return;
@@ -247,12 +257,19 @@ export function useMissionFlow(): { state: MissionFlowState; actions: MissionFlo
     if (!api?.missionCreateFromGoal) {
       throw new Error('Mission Flow IPC not available in this build');
     }
+    // Clear state BEFORE the IPC round-trip so planning events from this new
+    // mission aren't mis-attributed to the previous one.
+    activeIdRef.current = null;
     resetStreams();
     setMission(null);
     setStage('planning');
     const result = await api.missionCreateFromGoal(goal, opts);
     const id: string = result?.missionId;
     if (!id) throw new Error('missionCreateFromGoal returned no id');
+    // IMPORTANT: update the ref synchronously (React setState is async and
+    // won't update activeIdRef until the next commit, by which time the
+    // main-process delta stream may already be firing events).
+    activeIdRef.current = id;
     setMissionId(id);
     return id;
   }, [resetStreams]);

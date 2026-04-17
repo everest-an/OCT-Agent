@@ -18,6 +18,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { Square } from 'lucide-react';
 import PlanPreview from './PlanPreview';
 import KanbanCardStream from './KanbanCardStream';
 import MissionComposer, { type MissionComposerAgent } from './MissionComposer';
@@ -38,6 +39,7 @@ export interface MissionFlowShellProps {
   readonly agents?: readonly MissionComposerAgent[];
   readonly onManageAgents?: () => void;
   readonly onReadArtifact?: (missionId: string, stepId: string) => void;
+  readonly defaultModel?: string | null;
 }
 
 export default function MissionFlowShell({
@@ -48,6 +50,7 @@ export default function MissionFlowShell({
   agents,
   onManageAgents,
   onReadArtifact,
+  defaultModel,
 }: MissionFlowShellProps) {
   const tr = t ?? ((_k: string, fallback?: string) => fallback ?? _k);
   const { state, actions } = useMissionFlow();
@@ -153,6 +156,7 @@ export default function MissionFlowShell({
           onClearWorkDir={onClearWorkDir}
           agents={agents}
           onManageAgents={onManageAgents}
+          defaultModel={defaultModel}
         />
       )}
 
@@ -173,18 +177,33 @@ export default function MissionFlowShell({
           aria-label={tr('missionFlow.kanban.title', 'Team Kanban')}
           className="space-y-2"
         >
-          <header className="flex items-center justify-between">
+          <header className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-medium text-slate-200">
               {tr('missionFlow.kanban.title', 'Team Kanban')}
             </h3>
-            <button
-              type="button"
-              onClick={handleReset}
-              data-testid="mission-flow-reset"
-              className="text-xs text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline"
-            >
-              {tr('missionFlow.kanban.newMission', 'New mission')}
-            </button>
+            <div className="flex items-center gap-2">
+              {state.stage === 'running' && (
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  disabled={busy}
+                  data-testid="mission-flow-stop"
+                  aria-label={tr('missionFlow.kanban.stop', 'Stop mission')}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs text-red-200 bg-red-900/30 hover:bg-red-900/50 border border-red-700/40 disabled:opacity-50"
+                >
+                  <Square size={12} fill="currentColor" />
+                  {tr('missionFlow.kanban.stop', 'Stop')}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleReset}
+                data-testid="mission-flow-reset"
+                className="text-xs text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline"
+              >
+                {tr('missionFlow.kanban.newMission', 'New mission')}
+              </button>
+            </div>
           </header>
           <div className="space-y-2">
             {state.mission.steps.map((step) => (

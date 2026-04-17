@@ -232,6 +232,37 @@ describe('PlanPreview — actions', () => {
     expect(onEditPlan).toHaveBeenCalledWith('{"summary":"edited","subtasks":[]}');
   });
 
+  it('planning stage shows a Cancel/return button that fires onCancel', () => {
+    const onCancel = vi.fn();
+    render(
+      <PlanPreview
+        stage="planning"
+        plannerStream="thinking tokens..."
+        mission={null}
+        onApprove={vi.fn()}
+        onCancel={onCancel}
+      />,
+    );
+    const btn = screen.getByTestId('planner-cancel');
+    expect(btn).toBeInTheDocument();
+    fireEvent.click(btn);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('planning Cancel button is disabled while busy', () => {
+    render(
+      <PlanPreview
+        stage="planning"
+        plannerStream=""
+        mission={null}
+        busy
+        onApprove={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('planner-cancel')).toBeDisabled();
+  });
+
   it('edit flow cancel edit does not emit onEditPlan', () => {
     const onEditPlan = vi.fn();
     render(

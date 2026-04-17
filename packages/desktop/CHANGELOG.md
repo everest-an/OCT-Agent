@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.7-preview.2] - 2026-04-18
+
+### Fixed — user cannot leave / interrupt a running mission
+- **Planning stage now has a Cancel / Return button**: the "思考中..." / "Thinking..." screen was a dead-end — no way to back out. Added `planner-cancel` button in the Planner-stream header that calls `actions.cancel()` + `actions.reset()` to abort the gateway run and return to the composer.
+- **Running stage now has a Stop button**: the Kanban header shows a red "⏹ Stop" button while the mission is running. Clicking it calls the Gateway's `chat.abort` on the active worker session and flips mission status to `failed`. The old "New mission" link still resets the UI without stopping the backend run (for users who want to start something else in parallel), but Stop is the right action to actually halt an agent.
+- **Planner streaming "Thinking…" never filled in**: root-caused to a React ref/state race — `useMissionFlow.isCurrent()` required `activeIdRef.current === id`, but `activeIdRef` only updates in an effect after the `setMissionId()` commit, so the first few `planner-delta` IPC events arrived before the ref was set and got dropped. Fix: clear the ref synchronously before creating, and set it synchronously right after the IPC resolves; `isCurrent` now also accepts events when the ref is still null.
+
+### Added — default model display in Composer
+- MissionComposer shows the Planner's default model (read from main agent's `model` config in openclaw.json) so users see "🤖 Model: qwen-turbo" before hitting "Let's go ✨". Model is not editable here — it's shared with the Chat page's default, changed in Settings.
+
+### Testing
+- Mission Flow tests: 354 → all green. New: planner-cancel button tests (2), Stop button visibility + cancel wire tests (3), defaultModel display tests (2).
+- All 4 L1 guards still green.
+
 ## [0.3.7-preview.1] - 2026-04-18
 
 ### Fixed — Team Tasks UI regressions (same-night hotfix)

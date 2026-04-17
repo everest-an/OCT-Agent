@@ -110,6 +110,56 @@ describe('MissionFlowShell', () => {
     expect(screen.getByTestId('kanban-card-T1-stream')).toHaveTextContent('live stream chunk');
   });
 
+  it('running stage has a Stop button that cancels + resets', async () => {
+    setState({
+      stage: 'running',
+      missionId: 'm1',
+      mission: {
+        id: 'm1', goal: 'x', status: 'running', steps: [
+          { id: 'T1', agentId: 'main', role: 'L', title: 'A', deliverable: 'd', depends_on: [], status: 'running', attempts: 0 },
+        ],
+      },
+      stepStream: { T1: 'running...' },
+    });
+    render(<MissionFlowShell />);
+    const stopBtn = screen.getByTestId('mission-flow-stop');
+    expect(stopBtn).toBeInTheDocument();
+    fireEvent.click(stopBtn);
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    expect(actionsMock.cancel).toHaveBeenCalled();
+    expect(actionsMock.reset).toHaveBeenCalled();
+  });
+
+  it('done stage does NOT show Stop button', () => {
+    setState({
+      stage: 'done',
+      missionId: 'm1',
+      mission: {
+        id: 'm1', goal: 'x', status: 'done', steps: [
+          { id: 'T1', agentId: 'main', role: 'L', title: 'A', deliverable: 'd', depends_on: [], status: 'done', attempts: 1 },
+        ],
+      },
+    });
+    render(<MissionFlowShell />);
+    expect(screen.queryByTestId('mission-flow-stop')).toBeNull();
+  });
+
+  it('failed stage does NOT show Stop button', () => {
+    setState({
+      stage: 'failed',
+      missionId: 'm1',
+      mission: {
+        id: 'm1', goal: 'x', status: 'failed', steps: [
+          { id: 'T1', agentId: 'main', role: 'L', title: 'A', deliverable: 'd', depends_on: [], status: 'failed', attempts: 1 },
+        ],
+      },
+      error: 'planner crash',
+    });
+    render(<MissionFlowShell />);
+    expect(screen.queryByTestId('mission-flow-stop')).toBeNull();
+  });
+
   it('new mission button calls reset', () => {
     setState({
       stage: 'done',

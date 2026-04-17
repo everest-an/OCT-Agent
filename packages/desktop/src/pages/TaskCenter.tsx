@@ -26,6 +26,7 @@ interface AgentInfo {
   id: string;
   name?: string;
   emoji?: string;
+  model?: string | null;
 }
 
 interface SetupStatus {
@@ -102,7 +103,12 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
     window.electronAPI?.agentsList?.().then((result: any) => {
       const list = result?.agents || (Array.isArray(result) ? result : []);
       if (list.length > 0) {
-        setAgents(list.map((a: any) => ({ id: a.id || 'main', name: a.name || a.id, emoji: a.emoji })));
+        setAgents(list.map((a: any) => ({
+          id: a.id || 'main',
+          name: a.name || a.id,
+          emoji: a.emoji,
+          model: a.model ?? null,
+        })));
       }
     }).catch(() => {});
   }, []);
@@ -356,8 +362,13 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
             setWorkDir('');
             localStorage.removeItem('awareness-claw-project-root');
           }}
-          agents={agents.map(a => ({ id: a.id, name: a.name, emoji: a.emoji }))}
+          agents={agents.map(a => ({ id: a.id, name: a.name, emoji: a.emoji, model: a.model }))}
           onManageAgents={() => onNavigate?.('agents')}
+          defaultModel={
+            agents.find(a => a.id === 'main')?.model
+              || agents.find(a => !!a.model)?.model
+              || null
+          }
         />
       </div>
     </div>

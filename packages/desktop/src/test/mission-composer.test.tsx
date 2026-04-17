@@ -145,8 +145,20 @@ describe('MissionComposer', () => {
     expect(screen.queryByTestId('mission-composer-agent-warn')).toBeNull();
   });
 
-  it('meta row hidden when no workDir picker and no agents', () => {
+  it('meta row hidden when no workDir picker and no agents and no model', () => {
     render(<MissionComposer onSubmit={vi.fn()} />);
     expect(screen.queryByTestId('mission-composer-meta')).toBeNull();
+  });
+
+  it('shows default model row when defaultModel is provided', () => {
+    render(<MissionComposer onSubmit={vi.fn()} defaultModel="qwen-turbo-2024" />);
+    const row = screen.getByTestId('mission-composer-model');
+    expect(row).toHaveTextContent('qwen-turbo-2024');
+    expect(row).toHaveTextContent(/Model/i);
+  });
+
+  it('hides model row when defaultModel is null/undefined', () => {
+    render(<MissionComposer onSubmit={vi.fn()} agents={[{ id: 'main' }, { id: 'coder' }]} />);
+    expect(screen.queryByTestId('mission-composer-model')).toBeNull();
   });
 });
