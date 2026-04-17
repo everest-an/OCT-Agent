@@ -492,3 +492,15 @@ openclaw plugins list | grep lobster
 - [OpenClaw Lobster 工作流引擎](https://docs.openclaw.ai/tools/lobster)
 - [OpenClaw Gateway Architecture](https://docs.openclaw.ai/concepts/architecture)
 - [AwarenessClaw Task Center 设计文档](../docs/prd/WORKFLOW_KANBAN_SPEC.md)
+
+## 八、See also · 持续执行的多 Agent 任务引擎（F-Team-Tasks）
+
+本指南描述**当前已实现**的多 Agent 协作能力（隔离、路由、Lobster 工作流）。
+
+2026-04-17 起，另起一条线设计**可持续执行的多 Agent 任务引擎**，目标是"给一个高层目标，多 agent 接力把任务完整做完，关 app / 崩溃都能恢复"。
+
+**设计文档**：[./features/team-tasks/](./features/team-tasks/README.md)
+
+这是对本指南描述能力的**执行层增强**，两条线并存：
+- 本指南：Agent 隔离 + 路由 + Lobster workflow（用户手动编排）
+- F-Team-Tasks：Mission Orchestrator + Context 接力 + 自动恢复（AI 自主编排）

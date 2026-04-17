@@ -43,6 +43,62 @@ export interface CronJobRecord {
   raw?: string;
 }
 
+// -----------------------------------------------------------------------------
+// Mission Flow (F-Team-Tasks)
+// -----------------------------------------------------------------------------
+
+export type MissionSnapshotStatus =
+  | 'planning'
+  | 'running'
+  | 'paused'
+  | 'paused_awaiting_human'
+  | 'done'
+  | 'failed';
+
+export type MissionSnapshotStepStatus =
+  | 'waiting'
+  | 'running'
+  | 'retrying'
+  | 'done'
+  | 'failed'
+  | 'skipped';
+
+export interface MissionSnapshotStep {
+  id: string;
+  agentId: string;
+  agentName?: string;
+  role: string;
+  title: string;
+  deliverable: string;
+  depends_on: readonly string[];
+  expectedDurationMinutes?: number;
+  model?: string;
+  status: MissionSnapshotStepStatus;
+  attempts: number;
+  sessionKey?: string;
+  runId?: string;
+  startedAt?: string;
+  completedAt?: string;
+  artifactPath?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface MissionSnapshot {
+  id: string;
+  version: 1;
+  goal: string;
+  status: MissionSnapshotStatus;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  plannerAgentId: string;
+  rootWorkDir?: string;
+  steps: readonly MissionSnapshotStep[];
+  currentStepId?: string;
+  lastEvent?: { at: string; type: string; stepId?: string; payload?: string };
+}
+
 export interface ElectronAPI {
   getPlatform: () => Promise<string>;
   openExternal: (url: string) => Promise<void>;
@@ -112,6 +168,12 @@ export interface ElectronAPI {
   openclawConfigRead?: (dotPath?: string) => Promise<{ success: boolean; value: unknown; error?: string }>;
   openclawConfigWrite?: (dotPath: string, value: unknown) => Promise<{ success: boolean; error?: string }>;
   openclawConfigSchema?: () => Promise<{ success: boolean; schema?: Record<string, unknown>; error?: string }>;
+  
+  // OpenClaw plugin fix
+  openclawFixPlugin?: () => Promise<{ success: boolean; message?: string; result?: string; error?: string }>;
+  openclawFixPluginDirect?: () => Promise<{ success: boolean; message?: string; result?: string; error?: string }>;
+  openclawAutoFixIfNeeded?: () => Promise<{ needsFix: boolean; fixed: boolean; message?: string; result?: string; error?: string }>;
+  
   agentsList?: () => Promise<{ success: boolean; agents?: Array<{ id: string; name?: string; emoji?: string; model?: string; bindings?: string[]; isDefault?: boolean; workspace?: string; routes?: string[] }>; error?: string }>;
   agentsAdd?: (name: string, model?: string, systemPrompt?: string) => Promise<{ success: boolean; error?: string }>;
   agentsDelete?: (id: string) => Promise<{ success: boolean; error?: string }>;
@@ -274,13 +336,33 @@ export interface ElectronAPI {
   workflowDelete?: (yamlPath: string) => Promise<{ success: boolean; error?: string }>;
   onTaskStatusUpdate?: (callback: (data: { event: string; runId: string; agentId: string; status: string; result: string; sessionKey: string }) => void) => (() => void) | undefined;
   onTaskSubagentLinked?: (callback: (data: { parentRunId: string; parentSessionKey: string; subagentSessionKey: string; subagentRunId: string }) => void) => (() => void) | undefined;
+  onTaskStreamDelta?: (callback: (data: { sessionKey: string; runId: string; chunk: string }) => void) => (() => void) | undefined;
   taskSendMessage?: (sessionKey: string, message: string) => Promise<{ success: boolean; error?: string }>;
 
-  // Mission (multi-agent workflow)
+  // Mission (multi-agent workflow — legacy orchestrator)
   missionStart?: (params: { missionId: string; goal: string; workDir?: string; agents: Array<{ id: string; name?: string; emoji?: string }> }) => Promise<{ success: boolean; sessionKey?: string; error?: string }>;
   missionListActive?: () => Promise<{ missionIds: string[] }>;
   missionCancel?: (missionId: string) => Promise<void>;
   onMissionProgress?: (callback: (data: any) => void) => (() => void) | undefined;
+
+  // Mission Flow (F-Team-Tasks Phase 4 — MissionRunner-based)
+  missionCreateFromGoal?: (goal: string, opts?: { workDir?: string; agents?: Array<{ id: string; name?: string; role?: string; emoji?: string }> }) => Promise<{ missionId: string }>;
+  missionApproveAndRun?: (missionId: string) => Promise<{ ok: boolean; error?: string }>;
+  missionList?: () => Promise<MissionSnapshot[]>;
+  missionGet?: (missionId: string) => Promise<MissionSnapshot | null>;
+  missionCancelFlow?: (missionId: string) => Promise<{ ok: boolean; error?: string }>;
+  missionDelete?: (missionId: string) => Promise<{ ok: boolean; error?: string }>;
+  missionReadArtifact?: (missionId: string, stepId: string) => Promise<{ ok: boolean; path?: string; body?: string; error?: string }>;
+  onMissionPlanning?: (callback: (data: { missionId: string }) => void) => (() => void) | undefined;
+  onMissionPlannerDelta?: (callback: (data: { missionId: string; chunk: string }) => void) => (() => void) | undefined;
+  onMissionPlanReady?: (callback: (data: { missionId: string; mission: MissionSnapshot }) => void) => (() => void) | undefined;
+  onMissionStepStarted?: (callback: (data: { missionId: string; stepId: string; sessionKey: string; runId: string }) => void) => (() => void) | undefined;
+  onMissionStepDelta?: (callback: (data: { missionId: string; stepId: string; chunk: string }) => void) => (() => void) | undefined;
+  onMissionStepTool?: (callback: (data: { missionId: string; stepId: string; toolName: string; status: string }) => void) => (() => void) | undefined;
+  onMissionStepEnded?: (callback: (data: { missionId: string; stepId: string; artifactPath: string }) => void) => (() => void) | undefined;
+  onMissionStepFailed?: (callback: (data: { missionId: string; stepId: string; errorCode: string; message: string }) => void) => (() => void) | undefined;
+  onMissionDone?: (callback: (data: { missionId: string; mission: MissionSnapshot }) => void) => (() => void) | undefined;
+  onMissionFailed?: (callback: (data: { missionId: string; mission: MissionSnapshot; reason: string }) => void) => (() => void) | undefined;
 
   // Active project workspace (shared between desktop chat and channel inbound hook)
   workspaceGetActive?: () => Promise<{ success: boolean; path?: string | null; error?: string }>;

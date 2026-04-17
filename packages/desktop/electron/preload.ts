@@ -317,6 +317,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('task:status-update', listener);
     return () => ipcRenderer.removeListener('task:status-update', listener);
   },
+  onTaskStreamDelta: (callback: (data: { sessionKey: string; runId: string; chunk: string }) => void) => {
+    const listener = (_e: any, data: any) => callback(data);
+    ipcRenderer.on('task:stream-delta', listener);
+    return () => ipcRenderer.removeListener('task:stream-delta', listener);
+  },
   onTaskSubagentLinked: (callback: (data: { parentRunId: string; parentSessionKey: string; subagentSessionKey: string; subagentRunId: string }) => void) => {
     const listener = (_e: any, data: any) => callback(data);
     ipcRenderer.on('task:subagent-linked', listener);
@@ -324,7 +329,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   taskSendMessage: (sessionKey: string, message: string) => ipcRenderer.invoke('task:send-message', sessionKey, message),
 
-  // Mission (multi-agent workflow)
+  // Mission (multi-agent workflow — legacy orchestrator, kept for backward compatibility)
   missionStart: (params: { missionId: string; goal: string; workDir?: string; agents: Array<{ id: string; name?: string; emoji?: string }> }) =>
     ipcRenderer.invoke('mission:start', params),
   missionListActive: () => ipcRenderer.invoke('mission:list-active'),
@@ -334,4 +339,69 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('mission:progress', listener);
     return () => ipcRenderer.removeListener('mission:progress', listener);
   },
+
+  // Mission Flow (F-Team-Tasks · Phase 4 · MissionRunner-based)
+  missionCreateFromGoal: (goal: string, opts?: { workDir?: string; agents?: Array<{ id: string; name?: string; role?: string; emoji?: string }> }) =>
+    ipcRenderer.invoke('mission:create-from-goal', goal, opts),
+  missionApproveAndRun: (missionId: string) => ipcRenderer.invoke('mission:approve-and-run', missionId),
+  missionList: () => ipcRenderer.invoke('mission:list'),
+  missionGet: (missionId: string) => ipcRenderer.invoke('mission:get', missionId),
+  missionCancelFlow: (missionId: string) => ipcRenderer.invoke('mission:cancel-flow', missionId),
+  missionDelete: (missionId: string) => ipcRenderer.invoke('mission:delete', missionId),
+  missionReadArtifact: (missionId: string, stepId: string) => ipcRenderer.invoke('mission:read-artifact', missionId, stepId),
+  onMissionPlanning: (callback: (data: { missionId: string }) => void) => {
+    const listener = (_e: any, data: any) => callback(data);
+    ipcRenderer.on('mission:planning', listener);
+    return () => ipcRenderer.removeListener('mission:planning', listener);
+  },
+  onMissionPlannerDelta: (callback: (data: { missionId: string; chunk: string }) => void) => {
+    const listener = (_e: any, data: any) => callback(data);
+    ipcRenderer.on('mission:planner-delta', listener);
+    return () => ipcRenderer.removeListener('mission:planner-delta', listener);
+  },
+  onMissionPlanReady: (callback: (data: { missionId: string; mission: any }) => void) => {
+    const listener = (_e: any, data: any) => callback(data);
+    ipcRenderer.on('mission:plan-ready', listener);
+    return () => ipcRenderer.removeListener('mission:plan-ready', listener);
+  },
+  onMissionStepStarted: (callback: (data: { missionId: string; stepId: string; sessionKey: string; runId: string }) => void) => {
+    const listener = (_e: any, data: any) => callback(data);
+    ipcRenderer.on('mission:step-started', listener);
+    return () => ipcRenderer.removeListener('mission:step-started', listener);
+  },
+  onMissionStepDelta: (callback: (data: { missionId: string; stepId: string; chunk: string }) => void) => {
+    const listener = (_e: any, data: any) => callback(data);
+    ipcRenderer.on('mission:step-delta', listener);
+    return () => ipcRenderer.removeListener('mission:step-delta', listener);
+  },
+  onMissionStepTool: (callback: (data: { missionId: string; stepId: string; toolName: string; status: string }) => void) => {
+    const listener = (_e: any, data: any) => callback(data);
+    ipcRenderer.on('mission:step-tool', listener);
+    return () => ipcRenderer.removeListener('mission:step-tool', listener);
+  },
+  onMissionStepEnded: (callback: (data: { missionId: string; stepId: string; artifactPath: string }) => void) => {
+    const listener = (_e: any, data: any) => callback(data);
+    ipcRenderer.on('mission:step-ended', listener);
+    return () => ipcRenderer.removeListener('mission:step-ended', listener);
+  },
+  onMissionStepFailed: (callback: (data: { missionId: string; stepId: string; errorCode: string; message: string }) => void) => {
+    const listener = (_e: any, data: any) => callback(data);
+    ipcRenderer.on('mission:step-failed', listener);
+    return () => ipcRenderer.removeListener('mission:step-failed', listener);
+  },
+  onMissionDone: (callback: (data: { missionId: string; mission: any }) => void) => {
+    const listener = (_e: any, data: any) => callback(data);
+    ipcRenderer.on('mission:done', listener);
+    return () => ipcRenderer.removeListener('mission:done', listener);
+  },
+  onMissionFailed: (callback: (data: { missionId: string; mission: any; reason: string }) => void) => {
+    const listener = (_e: any, data: any) => callback(data);
+    ipcRenderer.on('mission:failed', listener);
+    return () => ipcRenderer.removeListener('mission:failed', listener);
+  },
+
+  // OpenClaw plugin fix
+  openclawFixPlugin: () => ipcRenderer.invoke('openclaw:fix-plugin'),
+  openclawFixPluginDirect: () => ipcRenderer.invoke('openclaw:fix-plugin-direct'),
+  openclawAutoFixIfNeeded: () => ipcRenderer.invoke('openclaw:auto-fix-if-needed'), // 确保这一行存在
 });

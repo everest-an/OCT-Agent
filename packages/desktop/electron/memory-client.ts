@@ -29,6 +29,26 @@ function buildGetHeaders(): Record<string, string> {
 
 export function callMcp(toolName: string, args: Record<string, any>): Promise<any> {
   return new Promise((resolve) => {
+    // Validate args to prevent Ajv schema validation errors
+    if (args && typeof args !== 'object') {
+      console.error(`callMcp: Invalid args for tool ${toolName}`, args);
+      resolve({ error: `Invalid arguments: expected object, got ${typeof args}` });
+      return;
+    }
+    
+    // Ensure args is a plain object without special constructors that might cause schema validation issues
+    let validatedArgs = args;
+    if (args !== null && typeof args === 'object') {
+      try {
+        // Deep clone to remove any prototype pollution or special objects
+        validatedArgs = JSON.parse(JSON.stringify(args));
+      } catch (e) {
+        console.error(`callMcp: Error cloning args for tool ${toolName}`, e);
+        resolve({ error: `Invalid arguments: ${e.message}` });
+        return;
+      }
+    }
+    
     const req = http.request('http://127.0.0.1:37800/mcp', {
       method: 'POST',
       headers: buildHeaders(),
@@ -37,8 +57,23 @@ export function callMcp(toolName: string, args: Record<string, any>): Promise<an
       let data = '';
       res.on('data', (chunk: Buffer) => { data += chunk; });
       res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch { resolve({ error: 'Invalid JSON' }); }
+        try { 
+          const result = JSON.parse(data);
+          
+          // Check if result contains Ajv validation error
+          if (result.error && typeof result.error === 'string' && 
+              (result.error.includes('schema must be object or boolean'))) {
+            console.error(`callMcp: Schema validation error for tool ${toolName}:`, result.error);
+            resolve({ 
+              error: 'Schema validation error. This may indicate a protocol mismatch between desktop client and local daemon.', 
+              original_error: result.error 
+            });
+          } else {
+            resolve(result); 
+          }
+        } catch { 
+          resolve({ error: 'Invalid JSON response from daemon' }); 
+        }
       });
     });
     req.on('error', (err) => resolve({ error: String(err) }));
@@ -46,7 +81,7 @@ export function callMcp(toolName: string, args: Record<string, any>): Promise<an
     req.write(JSON.stringify({
       jsonrpc: '2.0', id: Date.now(),
       method: 'tools/call',
-      params: { name: toolName, arguments: args },
+      params: { name: toolName, arguments: validatedArgs },
     }));
     req.end();
   });
@@ -54,6 +89,27 @@ export function callMcp(toolName: string, args: Record<string, any>): Promise<an
 
 export function callMcpStrict(toolName: string, args: Record<string, any>, timeoutMs = 15000): Promise<any> {
   return new Promise((resolve, reject) => {
+    // Validate args to prevent Ajv schema validation errors
+    if (args && typeof args !== 'object') {
+      const errorMsg = `callMcpStrict: Invalid args for tool ${toolName}`;
+      console.error(errorMsg, args);
+      reject(new Error(`Invalid arguments: expected object, got ${typeof args}`));
+      return;
+    }
+    
+    // Ensure args is a plain object without special constructors that might cause schema validation issues
+    let validatedArgs = args;
+    if (args !== null && typeof args === 'object') {
+      try {
+        // Deep clone to remove any prototype pollution or special objects
+        validatedArgs = JSON.parse(JSON.stringify(args));
+      } catch (e) {
+        console.error(`callMcpStrict: Error cloning args for tool ${toolName}`, e);
+        reject(new Error(`Invalid arguments: ${e.message}`));
+        return;
+      }
+    }
+    
     const req = http.request('http://127.0.0.1:37800/mcp', {
       method: 'POST',
       headers: buildHeaders(),
@@ -65,7 +121,14 @@ export function callMcpStrict(toolName: string, args: Record<string, any>, timeo
         try {
           const result = JSON.parse(data);
           if (result?.error) {
-            reject(new Error(typeof result.error === 'string' ? result.error : JSON.stringify(result.error)));
+            // Check if it's an Ajv validation error
+            const errorMessage = typeof result.error === 'string' ? result.error : JSON.stringify(result.error);
+            if (errorMessage.includes('schema must be object or boolean')) {
+              console.error(`callMcpStrict: Schema validation error for tool ${toolName}:`, result.error);
+              reject(new Error('Schema validation error. This may indicate a protocol mismatch between desktop client and local daemon.'));
+            } else {
+              reject(new Error(typeof result.error === 'string' ? result.error : JSON.stringify(result.error)));
+            }
           } else {
             resolve(result);
           }
@@ -79,7 +142,7 @@ export function callMcpStrict(toolName: string, args: Record<string, any>, timeo
     req.write(JSON.stringify({
       jsonrpc: '2.0', id: Date.now(),
       method: 'tools/call',
-      params: { name: toolName, arguments: args },
+      params: { name: toolName, arguments: validatedArgs },
     }));
     req.end();
   });
@@ -109,6 +172,8 @@ export function fetchMemoryEvents(opts: MemoryEventQueryOptions): Promise<any> {
     const params = new URLSearchParams({ q: search, limit: String(limit) });
     if (typeFilter) params.set('type', typeFilter);
     if (agentRoleFilter) params.set('agent_role', agentRoleFilter);
+    if (sourceFilter) params.set('source', sourceFilter);
+    if (sourceExclude) params.set('source_exclude', sourceExclude);
     endpoint = `http://127.0.0.1:37800/api/v1/memories/search?${params.toString()}`;
   } else {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });

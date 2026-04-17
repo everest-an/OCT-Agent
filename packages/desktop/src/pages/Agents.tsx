@@ -4,6 +4,7 @@ import { useI18n } from '../lib/i18n';
 import { useAppConfig } from '../lib/store';
 import AgentWizard from '../components/AgentWizard';
 import AgentAvatar from '../components/AgentAvatar';
+import AgentEmojiPicker from '../components/AgentEmojiPicker';
 
 interface AgentInfo {
   id: string;
@@ -319,6 +320,11 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
                   {/* Inline identity edit */}
                   {editingId === agent.id && (
                     <div className="space-y-2 pl-11 pt-2 border-t border-slate-700/30">
+                      <AgentEmojiPicker
+                        value={editEmoji}
+                        onChange={setEditEmoji}
+                        size="sm"
+                      />
                       <div className="flex items-center gap-2">
                         <input value={editEmoji} onChange={(e) => setEditEmoji(e.target.value)} placeholder={t('agents.emojiOptional', 'Optional')}
                           className="w-10 px-1 py-1 bg-slate-900 border border-slate-600 rounded text-center text-sm" maxLength={4} />

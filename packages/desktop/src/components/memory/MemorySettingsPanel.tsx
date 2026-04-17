@@ -1,4 +1,4 @@
-import { Cloud, ExternalLink, HardDrive, MessageSquare, Shield, SlidersHorizontal, Trash2, Wrench } from 'lucide-react';
+import { Cloud, ExternalLink, HardDrive, MessageSquare, Shield, SlidersHorizontal, Trash2, Wrench, WrenchIcon } from 'lucide-react';
 import ChannelIcon from '../ChannelIcon';
 import { SettingsToggle } from '../settings/SettingsPrimitives';
 
@@ -15,6 +15,7 @@ export function MemorySettingsPanel({
   onCloudDisconnect,
   onToggleSource,
   onClearAll,
+  onFixPlugin, // 新增修复函数
 }: {
   t: TFunction;
   config: Record<string, any>;
@@ -26,6 +27,7 @@ export function MemorySettingsPanel({
   onCloudDisconnect: () => void;
   onToggleSource: (id: string, nextAllowed: boolean) => void;
   onClearAll: () => void;
+  onFixPlugin?: () => void; // 新增修复函数类型定义
 }) {
   const sourceItems = [
     { id: 'desktop', label: t('settings.privacy.desktop', 'Desktop Chat'), icon: <MessageSquare size={14} className="text-slate-300" /> },
@@ -208,13 +210,26 @@ export function MemorySettingsPanel({
               {t('memory.settings.dangerZone.desc', 'Delete local knowledge cards only when you want to reset this machine’s durable memory state.')}
             </p>
           </div>
-          <button
-            onClick={onClearAll}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-red-300 bg-white px-3 py-2 text-xs font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-500/30 dark:bg-transparent dark:text-red-200 dark:hover:bg-red-600/10"
-          >
-            <Trash2 size={12} />
-            {t('settings.privacy.clearAll', 'Delete All Knowledge Cards')}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={onClearAll}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-red-300 bg-white px-3 py-2 text-xs font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-500/30 dark:bg-transparent dark:text-red-200 dark:hover:bg-red-600/10"
+            >
+              <Trash2 size={12} />
+              {t('settings.privacy.clearAll', 'Delete All Knowledge Cards')}
+            </button>
+            
+            {/* 添加修复插件按钮 */}
+            {onFixPlugin && (
+              <button
+                onClick={onFixPlugin}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-200 dark:hover:bg-amber-600/20"
+              >
+                <WrenchIcon size={12} />
+                {t('memory.settings.fixPlugin', 'Fix OpenClaw Plugin')}
+              </button>
+            )}
+          </div>
         </div>
       </section>
     </div>

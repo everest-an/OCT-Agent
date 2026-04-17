@@ -154,6 +154,45 @@ export function useMemorySettings() {
     }
   }, []);
 
+  const fixOpenClawPlugin = useCallback(async () => {
+    try {
+      const result = await api?.openclawFixPlugin?.();
+      if (result?.success) {
+        alert(result.message || 'OpenClaw plugin fixed successfully!');
+        return true;
+      } else {
+        alert(result?.message || result?.error || 'Failed to fix OpenClaw plugin.');
+        return false;
+      }
+    } catch (error: any) {
+      console.error('Error fixing OpenClaw plugin:', error);
+      alert(`Failed to fix OpenClaw plugin: ${error.message}`);
+      return false;
+    }
+  }, [api]);
+
+  const autoFixOpenClawIfNeeded = useCallback(async () => {
+    try {
+      const result = await api?.openclawAutoFixIfNeeded?.();
+      
+      if (result?.needsFix) {
+        if (result.fixed) {
+          console.log('OpenClaw auto-fix successful:', result.message);
+          return { fixed: true, message: result.message };
+        } else {
+          console.error('OpenClaw auto-fix failed:', result.message);
+          return { fixed: false, message: result.message };
+        }
+      } else {
+        // No issues detected
+        return { fixed: false, message: result?.message };
+      }
+    } catch (error: any) {
+      console.error('Error during OpenClaw auto-fix check:', error);
+      return { fixed: false, message: `Auto-fix check failed: ${error.message}` };
+    }
+  }, [api]);
+
   return {
     config,
     cloudMode,
@@ -173,5 +212,7 @@ export function useMemorySettings() {
     setRecallLimit,
     setBlockedSourceAllowed,
     clearAllMemories,
+    fixOpenClawPlugin,
+    autoFixOpenClawIfNeeded, // 添加自动修复功能
   };
 }

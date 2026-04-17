@@ -21,6 +21,7 @@ import {
 import type { Mission, MissionStep } from '../lib/mission-store';
 import MissionCard from '../components/task-center/MissionCard';
 import MissionDetail from '../components/task-center/MissionDetail';
+import MissionFlowShell from '../components/mission-flow/MissionFlowShell';
 
 interface AgentInfo {
   id: string;
@@ -313,6 +314,12 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6 space-y-5">
+        {/* Mission Flow (F-Team-Tasks Phase 4 — beta) */}
+        <MissionFlowShell
+          t={t}
+          defaultWorkDir={workDir || undefined}
+        />
+
         {/* Setup banner */}
         {needsSetup && (
           <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-700/30">

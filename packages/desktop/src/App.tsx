@@ -191,6 +191,31 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
+  // Global auto-fix check on app start
+  useEffect(() => {
+    const checkAndFixOnStartup = async () => {
+      if (!window.electronAPI?.openclawAutoFixIfNeeded) {
+        return;
+      }
+
+      try {
+        // Wait a bit before running the check to not interfere with initial startup
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        const result = await window.electronAPI.openclawAutoFixIfNeeded();
+        
+        if (result?.needsFix && result?.fixed) {
+          console.log('Global auto-fix applied:', result.message);
+          // Optionally show a toast notification about the fix
+        }
+      } catch (error) {
+        console.error('Global auto-fix check failed:', error);
+      }
+    };
+
+    checkAndFixOnStartup();
+  }, []);
+
   useEffect(() => {
     if (setupComplete !== true) {
       setRuntimeReady(setupComplete === false ? true : null);

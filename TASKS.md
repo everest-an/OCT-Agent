@@ -767,3 +767,31 @@ await runOpenClawCommand('channels login --channel xxx', {
 - ✅ 启动时清理孤儿
 - ⚠️ 其他命令仍然 raw spawn,但单点触发居多,用户密集操作时才会爆炸
 - 💡 短期 workaround:如果用户报告卡顿,先教他们重启 app(会清理孤儿)
+
+---
+
+## P2 — Team Tasks: 可持续执行的多 Agent 任务引擎（2026-04-17 立项）
+
+> **核心诉求**：给一个高层目标（"做博客系统"），多个 agent 接力使用 OpenClaw 完整能力把任务从头跑到尾，关 app / agent 崩溃都能恢复。
+>
+> **完整设计文档**：[docs/features/team-tasks/](docs/features/team-tasks/README.md)
+>
+> **当前 Stage**：S1 未开工
+
+### 为什么要做
+当前 Mission / Task Center 只是 UI 脚手架：
+- step 间无 context 传递（step1 看不到 step0 做了什么）
+- 15 分钟 idle timeout 杀长任务
+- 关 app 即死，无 resume
+- 没接 Awareness memory
+
+详见 [docs/features/team-tasks/00-PROBLEM.md](docs/features/team-tasks/00-PROBLEM.md)
+
+### 分阶段
+- [ ] **S1** · Planner + Context 接力 + 文件持久化（3-4 天）
+- [ ] **S2** · Runner daemon 化 + Resume（3 天）
+- [ ] **S3** · 三级重试 + Awareness memory 注入（2 天）
+- [ ] **S4** · Checkpoint + 人类介入 + 并行（5-7 天）
+
+### 下一个动作
+调研 OpenClaw 多任务最佳实践（web search），简化小白用户 UI 入口 → 再动手写代码。见 [docs/features/team-tasks/05-TASKS.md](docs/features/team-tasks/05-TASKS.md) 的 `S1-T0` / `S1-T1`。

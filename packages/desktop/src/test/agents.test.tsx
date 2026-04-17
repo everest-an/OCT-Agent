@@ -140,4 +140,62 @@ describe('Agents page', () => {
       expect(screen.getByText('Connection refused')).toBeInTheDocument();
     });
   });
+
+  // 编辑 identity 时暴露 emoji grid（之前只有手敲 input，用户换 emoji 很困难）
+  it('shows AgentEmojiPicker grid when editing an agent identity', async () => {
+    const api = window.electronAPI as any;
+    api.agentsList = vi.fn().mockResolvedValue({
+      success: true,
+      agents: [
+        { id: 'main', name: 'Claw', emoji: '🦞', isDefault: true, bindings: [] },
+      ],
+    });
+
+    await act(async () => { render(<Agents />); });
+    await waitFor(() => expect(screen.getByText('Claw')).toBeInTheDocument());
+
+    const editBtn = screen.getByTitle('Edit identity');
+    await act(async () => { fireEvent.click(editBtn); });
+
+    // Grid should expose every preset emoji as a clickable button (🧠, 🚀, 🦞 etc.).
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '🧠' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '🚀' })).toBeInTheDocument();
+    });
+
+    // Current emoji (🦞) should be aria-pressed=true inside the grid.
+    const lobster = screen.getByRole('button', { name: '🦞', pressed: true });
+    expect(lobster).toBeTruthy();
+  });
+
+  it('syncs edit-identity state when user clicks a grid emoji', async () => {
+    const api = window.electronAPI as any;
+    api.agentsList = vi.fn().mockResolvedValue({
+      success: true,
+      agents: [
+        { id: 'main', name: 'Claw', emoji: '🦞', isDefault: true, bindings: [] },
+      ],
+    });
+    api.agentsSetIdentity = vi.fn().mockResolvedValue({ success: true });
+
+    await act(async () => { render(<Agents />); });
+    await waitFor(() => expect(screen.getByText('Claw')).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByTitle('Edit identity')); });
+
+    // Click the brain emoji in the grid → parent state updates → Save calls IPC with 🧠.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '🧠' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('Save'));
+    });
+
+    expect(api.agentsSetIdentity).toHaveBeenCalledWith(
+      'main',
+      expect.any(String), // name — unchanged Claw (editName was primed from agent.name)
+      '🧠',
+      expect.any(String), // avatar
+      expect.any(String), // theme
+    );
+  });
 });

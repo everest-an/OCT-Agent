@@ -12,7 +12,9 @@
     "build:cli": "cd packages/cli && npm run build",
     "package:win": "cd packages/desktop && npm run package:win",
     "package:mac": "cd packages/desktop && npm run package:mac",
-    "package:linux": "cd packages/desktop && npm run package:linux"
+    "package:linux": "cd packages/desktop && npm run package:linux",
+    "fix-openclaw": "node scripts/fix-openclaw-plugin.js",
+    "postinstall": "node scripts/fix-openclaw-plugin.js"
   },
   "engines": {
     "node": ">=22.0.0"

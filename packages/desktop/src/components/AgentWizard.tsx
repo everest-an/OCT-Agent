@@ -16,6 +16,7 @@ import {
   Sparkles, Bot, Loader2, X, MessageSquare,
 } from 'lucide-react';
 import AgentAvatar from './AgentAvatar';
+import AgentEmojiPicker, { DEFAULT_AGENT_EMOJI } from './AgentEmojiPicker';
 import { useI18n } from '../lib/i18n';
 
 interface AgentWizardProps {
@@ -24,14 +25,6 @@ interface AgentWizardProps {
 }
 
 const TOTAL_STEPS = 1;
-
-const AGENT_EMOJIS = [
-  '🤖', '🧠', '🔬', '🎯', '📊', '💡', '🛡️', '🚀',
-  '📝', '🔧', '🎨', '📚', '🐾', '💼', '⚡', '🌙',
-  '🔥', '🐚', '🏠', '🦞', '👨‍💻', '🧪', '📡', '🎭',
-];
-
-const DEFAULT_AGENT_EMOJI = AGENT_EMOJIS[0];
 
 function buildIdentityMarkdown(name: string, emoji?: string): string {
   const normalizedEmoji = emoji?.trim() || '';
@@ -211,27 +204,11 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
                 />
               </div>
 
-              <div>
-                <p className="text-[11px] text-slate-500 mb-2">{t('agentWizard.step1.pickEmoji', 'Pick an icon:')}</p>
-                <div className="grid grid-cols-8 gap-1.5">
-                  {AGENT_EMOJIS.map(emoji => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      onClick={() => setAgentEmoji(emoji)}
-                      className={`w-9 h-9 rounded-lg text-lg flex items-center justify-center transition-all ${
-                        agentEmoji === emoji
-                          ? 'bg-brand-500/20 ring-2 ring-brand-500 scale-110'
-                          : 'bg-slate-800/50 hover:bg-slate-700/70'
-                      }`}
-                      aria-label={emoji}
-                      title={emoji}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <AgentEmojiPicker
+                value={agentEmoji}
+                onChange={setAgentEmoji}
+                label={t('agentWizard.step1.pickEmoji', 'Pick an icon:')}
+              />
 
               {/* Bootstrap hint */}
               <div className="flex items-start gap-2 p-3 bg-amber-600/5 border border-amber-600/15 rounded-xl">

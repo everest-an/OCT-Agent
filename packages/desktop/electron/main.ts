@@ -9,7 +9,7 @@ import https from 'https';
 import crypto from 'crypto';
 import { createDaemonWatchdog } from './daemon-watchdog';
 import { createDoctor } from './doctor';
-import { callMcpStrict, setMemoryClientProjectDir } from './memory-client';
+import { callMcp, callMcpStrict, setMemoryClientProjectDir } from './memory-client';
 import {
   checkDaemonHealth,
   clearAwarenessLocalNpxCache,
@@ -40,6 +40,7 @@ import { registerCloudWorkspaceHandlers } from './ipc/register-cloud-workspace-h
 import { registerConfigIoHandlers } from './ipc/register-config-io-handlers';
 import { registerCronHandlers } from './ipc/register-cron-handlers';
 import { registerWorkflowHandlers } from './ipc/register-workflow-handlers';
+import { registerMissionHandlers } from './ipc/register-mission-handlers';
 import { registerFileDialogHandlers } from './ipc/register-file-dialog-handlers';
 import { registerGatewayHandlers } from './ipc/register-gateway-handlers';
 import { registerMemoryHandlers } from './ipc/register-memory-handlers';
@@ -1884,6 +1885,12 @@ registerWorkflowHandlers({
   runSpawnAsync,
   getGatewayWs,
   getMainWindow: () => mainWindow,
+});
+registerMissionHandlers({
+  home: HOME,
+  getGatewayWs: async () => getGatewayWs(),
+  getMainWindow: () => mainWindow,
+  callMcp,
 });
 registerGatewayHandlers({
   readShellOutputAsync,

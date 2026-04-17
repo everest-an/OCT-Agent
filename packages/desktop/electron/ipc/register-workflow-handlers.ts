@@ -248,7 +248,52 @@ function attachSubagentListener(deps: WorkflowHandlerDeps) {
       }
     });
 
-    // 2. Chat completion events (state=final/error/aborted)
+    // Streaming delta batching: Gateway may emit tokens at 30+ Hz, which overwhelms
+    // IPC + React render. Buffer per-session and flush every 200ms to the renderer.
+    // See docs/features/team-tasks/03-ACCEPTANCE.md L3.12 (token-bomb throttle).
+    const deltaBuffers = new Map<string, { chunk: string; runId: string; timer: NodeJS.Timeout | null }>();
+    const DELTA_FLUSH_MS = 200;
+
+    const flushDelta = (sessionKey: string) => {
+      const win = deps.getMainWindow();
+      const buf = deltaBuffers.get(sessionKey);
+      if (!buf) return;
+      if (buf.timer) { clearTimeout(buf.timer); buf.timer = null; }
+      if (!buf.chunk) return;
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('task:stream-delta', {
+          sessionKey,
+          runId: buf.runId,
+          chunk: buf.chunk,
+        });
+      }
+      buf.chunk = '';
+    };
+
+    // Extract delta text from a chat payload. OpenClaw Gateway delta formats vary;
+    // we try the common shapes defensively so we do not silently drop tokens.
+    const extractDeltaText = (payload: any): string => {
+      if (!payload) return '';
+      // Shape A: payload.delta = "...text..."
+      if (typeof payload.delta === 'string') return payload.delta;
+      // Shape B: payload.delta = { content: "..." } or { text: "..." }
+      if (payload.delta && typeof payload.delta === 'object') {
+        if (typeof payload.delta.content === 'string') return payload.delta.content;
+        if (typeof payload.delta.text === 'string') return payload.delta.text;
+      }
+      // Shape C: payload.message.content = [{ type:'text', text:'...' }]
+      const content = payload?.message?.content;
+      if (Array.isArray(content)) {
+        return content
+          .filter((c: any) => c?.type === 'text' && typeof c.text === 'string')
+          .map((c: any) => c.text)
+          .join('');
+      }
+      if (typeof content === 'string') return content;
+      return '';
+    };
+
+    // 2. Chat completion events (state=delta/final/error/aborted)
     //    CRITICAL: Only process sub-agent chat events. Main agent's chat:final
     //    for the spawn command must NOT mark the task as completed.
     ws.on('event:chat', (payload: any) => {
@@ -257,16 +302,39 @@ function attachSubagentListener(deps: WorkflowHandlerDeps) {
 
       const sessionKey: string = payload?.sessionKey || '';
 
-      // Only process sub-agent chat completions
+      // Only process sub-agent chat events
       if (!isSubagentSession(sessionKey)) return;
 
       const state: string = payload?.state || '';
+
+      // Streaming path: buffer delta tokens and flush on a 200ms timer.
+      if (state === 'delta') {
+        const chunk = extractDeltaText(payload);
+        if (!chunk) return;
+        let buf = deltaBuffers.get(sessionKey);
+        if (!buf) {
+          buf = { chunk: '', runId: payload?.runId || '', timer: null };
+          deltaBuffers.set(sessionKey, buf);
+        }
+        buf.chunk += chunk;
+        if (payload?.runId) buf.runId = payload.runId;
+        if (!buf.timer) {
+          buf.timer = setTimeout(() => flushDelta(sessionKey), DELTA_FLUSH_MS);
+        }
+        return;
+      }
+
+      // Terminal path: flush any pending delta FIRST so the renderer sees the tail
+      // of the stream before the status-update terminal event.
       let taskEvent: string | null = null;
       if (state === 'final') taskEvent = 'completed';
       else if (state === 'error') taskEvent = 'failed';
       else if (state === 'aborted') taskEvent = 'failed';
 
       if (!taskEvent) return;
+
+      flushDelta(sessionKey);
+      deltaBuffers.delete(sessionKey);
 
       // Extract result text from chat final message
       const message = payload?.message;

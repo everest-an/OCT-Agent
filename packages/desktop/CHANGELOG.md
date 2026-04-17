@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+### Added — Team Tasks Mission Flow (F-Team-Tasks · Phase 4 + 5)
+- **"Team Tasks" gets a big goal box**: describe a goal in plain words ("Build me a TODO app with React and localStorage"), the team plans the steps, you click **Let's go ✨**, each sub-agent runs and streams its thinking live into a kanban card. No command line, no JSON, no clicking around 5 menus.
+- **Plan preview gate**: before any sub-agent runs, you see the plan (agents, roles, expected minutes). Click **Edit plan** to tweak the raw JSON for power users. Click **Cancel** to throw it away. Nothing runs until you approve.
+- **Streaming everywhere**: the planner's output + each worker's tokens stream into the UI as they arrive. No more "stare at a spinner for 3 minutes" UX.
+- **One reset button**: "New mission" wipes the board and opens the composer for the next idea — no menu diving.
+- **Friendly error text**: timeouts, agent crashes, permission denials all map to plain-language messages ("An agent stopped responding. Try again or rephrase your goal") instead of raw error codes.
+- **Full en/zh i18n**: every new string in Simplified Chinese too.
+
+### Testing — L1 through L5 pyramid delivered
+- **319 tests** covering the whole Mission Flow (up from 189): 18 new test files for IPC handlers, React components, the `useMissionFlow` hook, 22 chaos scenarios (malformed payloads, idle-timeout auto-abort, burst 2000 deltas < 2s, awareness daemon offline, planner JSON with cycles / forbidden fields / < 3 subtasks, etc.), and end-to-end integration across `file-layout` + `plan-schema` + `planner-prompt` + `mission-runner` + `streaming-bridge` + `awareness-bridge`.
+- **3 new L1 contract guards** (`npm run verify:mission-all`): IPC channel parity between main/preload/renderer, streaming `chunk` field end-to-end, planner-example JSON validates against the plan-schema validator.
+- **3 Playwright-style L4 E2E specs** (zero-mock, real Gateway + real LLM): happy path, approval gate, cancel flow. Run with `npm run build && node --test test/e2e/user-journeys/mission-*.test.mjs`.
+- **Stryker mutation config** in `stryker.mission.conf.mjs`, 80 %-mutation-score hard gate on the four core correctness files (plan-schema, streaming-bridge, mission-runner, awareness-bridge); quarterly cadence.
+
 ## [0.3.6] - 2026-04-17
 
 ### Fixed — memory daemon restart loop
