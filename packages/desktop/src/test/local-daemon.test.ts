@@ -27,9 +27,9 @@ function createChild(outcome: 'spawn' | 'error', errorCode = 'ENOENT') {
 
 describe('startLocalDaemonDetached', () => {
   it('uses the bundled npm CLI first on Windows', async () => {
-    const calls: Array<{ cmd: string; args: string[] }> = [];
-    const runSpawn = vi.fn((cmd: string, args: string[]) => {
-      calls.push({ cmd, args });
+    const calls: Array<{ cmd: string; args: string[]; opts?: Record<string, unknown> }> = [];
+    const runSpawn = vi.fn((cmd: string, args: string[], opts?: Record<string, unknown>) => {
+      calls.push({ cmd, args, opts });
       return createChild('spawn');
     });
 
@@ -46,6 +46,7 @@ describe('startLocalDaemonDetached', () => {
       expect(calls[0]?.cmd).toBe('node');
       expect(calls[0]?.args[0]).toBe('C:/npm/bin/npx-cli.js');
       expect(calls[0]?.args).toContain('@awareness-sdk/local@latest');
+      expect(calls[0]?.opts?.windowsHide).toBe(true);
       return;
     }
 
@@ -54,9 +55,9 @@ describe('startLocalDaemonDetached', () => {
   });
 
   it('falls back to cmd.exe npx on Windows when bundled npm CLI is unavailable', async () => {
-    const calls: Array<{ cmd: string; args: string[] }> = [];
-    const runSpawn = vi.fn((cmd: string, args: string[]) => {
-      calls.push({ cmd, args });
+    const calls: Array<{ cmd: string; args: string[]; opts?: Record<string, unknown> }> = [];
+    const runSpawn = vi.fn((cmd: string, args: string[], opts?: Record<string, unknown>) => {
+      calls.push({ cmd, args, opts });
       return createChild('spawn');
     });
 
@@ -72,6 +73,7 @@ describe('startLocalDaemonDetached', () => {
       expect(calls).toHaveLength(1);
       expect(calls[0]?.cmd).toBe('cmd.exe');
       expect(calls[0]?.args.slice(0, 3)).toEqual(['/d', '/c', 'npx']);
+      expect(calls[0]?.opts?.windowsHide).toBe(true);
       return;
     }
 
