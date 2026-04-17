@@ -429,6 +429,17 @@ export function registerAppRuntimeHandlers(deps: {
           progress('openclaw:gateway-restart', 'skipped');
         }
 
+        // Refresh .desktop-bak so the config guardian won't revert legitimate
+        // schema changes that the new OpenClaw version introduced during upgrade.
+        // Without this, restoreConfigFromBackupIfNeeded() would see "config shrunk
+        // vs old backup" and restore the pre-upgrade config, breaking the new version.
+        try {
+          const cfgPath = path.join(deps.home, '.openclaw', 'openclaw.json');
+          if (fs.existsSync(cfgPath)) {
+            fs.copyFileSync(cfgPath, cfgPath + '.desktop-bak');
+          }
+        } catch { /* best effort */ }
+
         progress('complete', 'done');
         return { success: true, version: newSemver, previousVersion: preSemver };
       } else if (component === 'plugin') {

@@ -99,12 +99,12 @@ export function safeWriteJsonFile(
 }
 
 /**
- * Restore openclaw.json from the desktop backup if the current file appears
- * corrupted (too small compared to the backup).  Returns the restored config
- * object, or null if no restoration was needed/possible.
+ * Recover desktop-specific fields that OpenClaw's Gateway may have stripped
+ * from openclaw.json.  Instead of blindly restoring the entire backup (which
+ * would revert legitimate schema changes after an OpenClaw upgrade), we
+ * **merge** missing top-level keys from the backup into the current config.
  *
- * Called after Gateway startup to recover from OpenClaw's config normalization
- * that strips desktop-specific fields.
+ * Returns the merged config object, or null if no merge was needed/possible.
  */
 export function restoreConfigFromBackupIfNeeded(
   configPath: string,
@@ -117,22 +117,47 @@ export function restoreConfigFromBackupIfNeeded(
     const currentSize = fs.statSync(configPath).size;
     const bakSize = fs.statSync(bakPath).size;
 
-    // Only restore if backup is significantly larger than current file
-    // AND the current file is suspiciously small.
+    // Only act if backup is significantly larger than current file.
     if (bakSize > 0 && currentSize > 0 && currentSize / bakSize < minSizeRatio) {
+      const currentContent = readJsonFileWithBom<Record<string, any>>(configPath);
       const bakContent = readJsonFileWithBom<Record<string, any>>(bakPath);
-      // Validate backup is a valid object with expected structure.
-      if (bakContent && typeof bakContent === 'object' && !Array.isArray(bakContent)) {
+      if (!bakContent || typeof bakContent !== 'object' || Array.isArray(bakContent)) return null;
+      if (!currentContent || typeof currentContent !== 'object' || Array.isArray(currentContent)) return null;
+
+      // Merge strategy: for each top-level key in the backup that is missing
+      // or empty in the current config, copy it over.  Keys that already exist
+      // in the current config are LEFT UNTOUCHED — this preserves any schema
+      // changes that a newer OpenClaw version introduced.
+      let merged = false;
+      for (const key of Object.keys(bakContent)) {
+        if (!(key in currentContent) || currentContent[key] === undefined) {
+          currentContent[key] = bakContent[key];
+          merged = true;
+        } else if (
+          // Deep-merge one level for objects: restore missing sub-keys.
+          // This handles e.g. plugins.installs being stripped but plugins.entries kept.
+          typeof bakContent[key] === 'object' && bakContent[key] !== null && !Array.isArray(bakContent[key]) &&
+          typeof currentContent[key] === 'object' && currentContent[key] !== null && !Array.isArray(currentContent[key])
+        ) {
+          for (const subKey of Object.keys(bakContent[key])) {
+            if (!(subKey in currentContent[key]) || currentContent[key][subKey] === undefined) {
+              currentContent[key][subKey] = bakContent[key][subKey];
+              merged = true;
+            }
+          }
+        }
+      }
+
+      if (merged) {
         console.log(
-          `[config-guard] Restoring config from backup: current=${currentSize}B, backup=${bakSize}B`,
+          `[config-guard] Merged missing fields from backup: current=${currentSize}B, backup=${bakSize}B`,
         );
-        // Write backup content back to config (use direct write since we already validated size).
-        fs.writeFileSync(configPath, JSON.stringify(bakContent, null, 2), 'utf8');
-        return bakContent;
+        fs.writeFileSync(configPath, JSON.stringify(currentContent, null, 2), 'utf8');
+        return currentContent;
       }
     }
   } catch (err) {
-    console.warn('[config-guard] Backup restoration failed:', err);
+    console.warn('[config-guard] Backup merge failed:', err);
   }
 
   return null;
