@@ -15,6 +15,9 @@ import { parseJsonShellOutput } from '../openclaw-shell-output';
 let _schemaCacheVersion: string | null = null;
 let _schemaCache: Record<string, any> | null = null;
 let _schemaInflightPromise: Promise<Record<string, any> | null> | null = null;
+const OPENCLAW_VERSION_CACHE_TTL_MS = 30_000;
+let _openclawVersionCachedAt = 0;
+let _openclawVersionCachedValue = 'unknown';
 
 function getConfigPath(home: string) {
   return path.join(home, '.openclaw', 'openclaw.json');
@@ -50,6 +53,19 @@ export function registerOpenClawConfigHandlers(deps: {
   readShellOutputAsync?: (cmd: string, timeoutMs?: number) => Promise<string | null>;
   mergeOpenClawConfig?: (existing: Record<string, any>, incoming: Record<string, any>) => Record<string, any>;
 }) {
+  async function getOpenclawVersionCached() {
+    const cacheFresh = (Date.now() - _openclawVersionCachedAt) < OPENCLAW_VERSION_CACHE_TTL_MS;
+    if (cacheFresh && _openclawVersionCachedValue) {
+      return _openclawVersionCachedValue;
+    }
+
+    const versionRaw = await deps.safeShellExecAsync?.('openclaw --version 2>&1', 8000);
+    const version = (versionRaw || '').match(/(\d+\.\d+\.\d+)/)?.[1] ?? versionRaw ?? 'unknown';
+    _openclawVersionCachedValue = version;
+    _openclawVersionCachedAt = Date.now();
+    return version;
+  }
+
   ipcMain.handle('plugins:list', async () => {
     try {
       const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
@@ -228,8 +244,7 @@ export function registerOpenClawConfigHandlers(deps: {
   ipcMain.handle('openclaw-config:schema', async () => {
     try {
       // Detect current openclaw version for cache invalidation.
-      const versionRaw = await deps.safeShellExecAsync?.('openclaw --version 2>&1', 8000);
-      const version = (versionRaw || '').match(/(\d+\.\d+\.\d+)/)?.[1] ?? versionRaw ?? 'unknown';
+      const version = await getOpenclawVersionCached();
 
       // Return cached schema if the version hasn't changed.
       if (_schemaCache && _schemaCacheVersion === version) {
@@ -250,8 +265,7 @@ export function registerOpenClawConfigHandlers(deps: {
   // before the user opens Settings → Web & Browser.
   async function prefetchSchema() {
     try {
-      const versionRaw = await deps.safeShellExecAsync?.('openclaw --version 2>&1', 8000);
-      const version = (versionRaw || '').match(/(\d+\.\d+\.\d+)/)?.[1] ?? versionRaw ?? 'unknown';
+      const version = await getOpenclawVersionCached();
       if (_schemaCache && _schemaCacheVersion === version) return;
       await fetchSchemaFromCli(version);
     } catch {}

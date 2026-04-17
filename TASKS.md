@@ -22,7 +22,7 @@
 
 ### P1 回归修复（2026-04-11 记录）
 
-- [ ] **Qwen 模型污染（未修复，根因已确认，2026-04-15）**：当前问题不是“单机环境异常”，而是产品链路缺陷；当上游 OpenAI-compatible `/models` 返回混合模型池（例如 `vanchin/deepseek-*`、`MiniMax/*` 与 `qwen*` 同时出现）时，桌面端模型发现流程会在缺少 provider-model 一致性校验的情况下把不属于 qwen 家族的模型写入 `models.providers.qwen.models`，并在 silent discover/autoActivateFirst 场景自动落盘，导致 `agents.defaults.model.primary` 被污染或在后续运行中被错误回写。该问题会表现为“Qwen key 正确但界面/实际路由显示 DeepSeek”；同版本同 API key 在不同机器是否复现，取决于是否触发自动发现写回、当时 `/models` 返回顺序、以及本地历史配置状态，不影响根因归属。**风险判断：常规客户在使用混合模型池接口并触发自动发现写回时同样会遇到，非必现但具备普遍触发可能。** 影响面：`Models.tsx` 的 discover + autoActivateFirst + persistProviderSelection + syncConfig 链路，以及运行时 `openclaw.json` 持久化一致性。验收标准：保存前强制 provider-model 校验（qwen 仅允许 `qwen|wan|qwq` 前缀）、禁用 silent 自动首项落盘、发现混合池时仅提示不写盘，并补充回归测试覆盖“混合返回不污染配置”。
+- [x] **Qwen 模型污染（已修复 2026-04-15）**：桌面端模型发现流程改为“可信 provider catalog + 网络发现补充”的混合校验。对于内置 provider，端点返回的混厂模型不再进入可保存目录，也不会再在 silent discover / refresh 后污染当前主模型；如果上游 `/models` 提供 `owned_by/provider/vendor` 等归属元数据，Desktop 会优先用这些网络字段放行同 provider 的新增模型。这样既避免写死 `qwen|wan|qwq` 前缀白名单，又保持与 OpenClaw 官方 provider catalog 思路一致。相关回归测试已覆盖“混合返回不污染配置”和“网络元数据放行合法新模型”。
 - [ ] **Signal 重复加载路径清理**：`plugins.load.paths` 同时存在 `~/.awareness-claw/openclaw-runtime/.../signal`（桌面端捆绑旧 runtime）与 `~/.npm-global/.../signal`（当前 OpenClaw stock）两条路径，导致重复加载并发生覆盖；需从 `plugins.load.paths` 移除旧的 `~/.awareness-claw` Signal 路径，仅保留当前 runtime/stock 来源。
 - [ ] **WhatsApp 全局旧插件卸载**：OpenClaw 2026.4.10 stock 已内置 `whatsapp`，但 `~/.openclaw/extensions/whatsapp` 仍存在独立安装的 `@openclaw/whatsapp@2026.2.9`（旧），会覆盖 stock；需卸载该旧 global whatsapp 扩展并验证 stock 插件生效。
 
@@ -139,6 +139,7 @@
 - [x] **安装向导循环重置修复**：启动时运行时健康检查区分 setup-blocking 与 runtime-blocking；仅 Node/OpenClaw/插件未就绪才触发 `needsSetup`，daemon 暂时不可用仅保留运行时告警，不再把已完成安装的用户强制打回 Setup（2026-04-05）
 - [x] **Windows Gateway fallback 重复拉起/黑窗修复**：主进程和 Doctor 不再通过 `start ... openclaw gateway run --force` 拉起临时 Gateway；改为隐藏窗口的 detached 直启，并增加短冷却去重，避免出现多个 `cmd /K openclaw gateway run --force` 窗口（2026-04-05）
 - [x] **Windows CLI fallback `spawn npx ENOENT` 兜底修复**：聊天链路在 daemon 未就绪时不再硬跑 CLI（返回友好等待提示）；主进程 daemon 预热新增前台 bootstrap 深修复（含缓存清理与更长等待窗口）；通道连通性检测避免使用 `openclaw status --deep` 触发插件侧自动拉起崩溃（2026-04-05）
+- [x] **Windows 启动闪窗修复（三源收敛）**：daemon watchdog 无限重试改为连续失败 5 次后停止（避免每 60s spawn cmd.exe 闪窗）；Gateway WS pre-warm 检测到 pairing-required 立即终止（不再 12×重试 spawn 24+ openclaw 进程）；gatewayHasStackSize 改为条件重置（gateway.cmd 已 patch 则信任上次状态，避免每次启动多余 stop+restart）（2026-04-15）
 
 ---
 

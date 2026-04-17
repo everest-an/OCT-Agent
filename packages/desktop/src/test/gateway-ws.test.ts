@@ -112,4 +112,23 @@ describe('GatewayClient', () => {
     await expect(connectPromise).resolves.toBeUndefined();
     expect(client.isConnected).toBe(true);
   });
+
+  it('downgrades sessions.patch to a no-op after Gateway denies operator.write', async () => {
+    const client = new GatewayClient();
+    const rpcSpy = vi.spyOn(client, 'rpc').mockRejectedValue(new Error('missing scope: operator.write'));
+
+    (client as any).requestedScopes = ['operator.admin', 'operator.write', 'operator.read'];
+
+    const result = await client.sessionPatch('session-1', { model: 'openai/gpt-4o' });
+
+    expect(result).toEqual({ skipped: true, reason: 'write-scopes-unavailable' });
+    expect(rpcSpy).toHaveBeenCalledWith('sessions.patch', { key: 'session-1', model: 'openai/gpt-4o' }, 10000);
+    expect((client as any).writeScopesUnsupported).toBe(true);
+    expect((client as any).requestedScopes).toEqual(['operator.read']);
+
+    rpcSpy.mockReset();
+    const second = await client.sessionPatch('session-1', { verboseLevel: 'full' });
+    expect(second).toEqual({ skipped: true, reason: 'write-scopes-unavailable' });
+    expect(rpcSpy).not.toHaveBeenCalled();
+  });
 });

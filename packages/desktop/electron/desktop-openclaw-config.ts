@@ -24,6 +24,113 @@ const DESKTOP_BROWSER_WEB_ALLOWED_TOOLS = ['browser', 'web_search', 'web_fetch']
 const DESKTOP_REQUIRED_PLUGINS = ['openclaw-memory', 'browser'];
 const DESKTOP_DEFAULT_WEB_SEARCH_PROVIDER = 'duckduckgo';
 const DESKTOP_LEGACY_INVALID_WEB_SEARCH_PROVIDER = 'browser';
+const LEGACY_WINDOWS_SAFE_MODE_HOOK_NAME = 'awareness-workspace-inject';
+const LEGACY_WINDOWS_SAFE_MODE_TOOL_DENYLIST = new Set([
+  'browser',
+  'web_search',
+  'web_fetch',
+  'sessions_spawn',
+  'agents_list',
+]);
+const LEGACY_WINDOWS_SAFE_MODE_PLUGIN_DENYLIST = new Set([
+  'browser',
+  'openclaw-memory',
+  'memory-core',
+  'memory-lancedb',
+]);
+
+export function shouldUseLegacyWindowsOpenClawSafeMode(
+  platform: string,
+  version: string | null | undefined,
+) {
+  const normalizedVersion = typeof version === 'string'
+    ? (version.match(/(\d+\.\d+\.\d+)/)?.[1] || version)
+    : '';
+  return platform === 'win32' && normalizedVersion === '2026.4.10';
+}
+
+export function stripLegacyWindowsOpenClawRiskyConfig(config: Record<string, any>) {
+  if (config.browser) {
+    delete config.browser;
+  }
+
+  if (config.session?.dmScope !== undefined) {
+    delete config.session.dmScope;
+    if (Object.keys(config.session).length === 0) {
+      delete config.session;
+    }
+  }
+
+  if (config.tools) {
+    if (config.tools.web) {
+      delete config.tools.web;
+    }
+    if (config.tools.agentToAgent) {
+      delete config.tools.agentToAgent;
+    }
+    if (Array.isArray(config.tools.alsoAllow)) {
+      config.tools.alsoAllow = config.tools.alsoAllow.filter(
+        (tool: string) => !LEGACY_WINDOWS_SAFE_MODE_TOOL_DENYLIST.has(tool),
+      );
+      if (config.tools.alsoAllow.length === 0) {
+        delete config.tools.alsoAllow;
+      }
+    }
+  }
+
+  if (config.plugins) {
+    if (config.plugins.entries && typeof config.plugins.entries === 'object') {
+      for (const pluginId of LEGACY_WINDOWS_SAFE_MODE_PLUGIN_DENYLIST) {
+        delete config.plugins.entries[pluginId];
+      }
+      if (Object.keys(config.plugins.entries).length === 0) {
+        delete config.plugins.entries;
+      }
+    }
+    const normalizedAllow = normalizePluginAllow(config.plugins.allow);
+    if (normalizedAllow) {
+      config.plugins.allow = normalizedAllow.filter((pluginId) => !LEGACY_WINDOWS_SAFE_MODE_PLUGIN_DENYLIST.has(pluginId));
+      if (config.plugins.allow.length === 0) {
+        delete config.plugins.allow;
+      }
+    }
+    if (config.plugins.slots?.memory) {
+      delete config.plugins.slots.memory;
+      if (Object.keys(config.plugins.slots).length === 0) {
+        delete config.plugins.slots;
+      }
+    }
+  }
+
+  if (config.hooks?.internal?.entries?.[LEGACY_WINDOWS_SAFE_MODE_HOOK_NAME]) {
+    delete config.hooks.internal.entries[LEGACY_WINDOWS_SAFE_MODE_HOOK_NAME];
+    if (Object.keys(config.hooks.internal.entries).length === 0) {
+      delete config.hooks.internal.entries;
+    }
+    if (Object.keys(config.hooks.internal).every((key) => key === 'enabled')) {
+      delete config.hooks.internal.enabled;
+    }
+    if (Object.keys(config.hooks.internal).length === 0) {
+      delete config.hooks.internal;
+    }
+    if (Object.keys(config.hooks).length === 0) {
+      delete config.hooks;
+    }
+  }
+
+  if (config.agents?.defaults?.subagents) {
+    delete config.agents.defaults.subagents;
+  }
+
+  if (Array.isArray(config.agents?.list)) {
+    for (const agent of config.agents.list) {
+      if (!agent || typeof agent !== 'object') continue;
+      if (agent.agentDir !== undefined) delete agent.agentDir;
+      if (agent.workspace !== undefined) delete agent.workspace;
+      if (agent.subagents !== undefined) delete agent.subagents;
+    }
+  }
+}
 
 function isPlainObject(value: unknown): value is Record<string, any> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -45,6 +152,10 @@ function deepMergePlainObjects(target: Record<string, any>, source: Record<strin
 
 function hasAwarenessPluginInstalled(homedir: string) {
   return fs.existsSync(path.join(homedir, '.openclaw', 'extensions', 'openclaw-memory', 'package.json'));
+}
+
+function hasWeixinPluginInstalled(homedir: string) {
+  return fs.existsSync(path.join(homedir, '.openclaw', 'extensions', 'openclaw-weixin', 'package.json'));
 }
 
 export function ensureDesktopDefaultToolPermissions(config: Record<string, any>) {
@@ -209,6 +320,25 @@ export function sanitizeDesktopAwarenessPluginConfig(config: Record<string, any>
     delete config.plugins.entries['memory-awareness'];
   }
 
+  if (!hasWeixinPluginInstalled(homedir)) {
+    if (config.channels?.['openclaw-weixin']) {
+      delete config.channels['openclaw-weixin'];
+      if (Object.keys(config.channels).length === 0) delete config.channels;
+    }
+    if (Array.isArray(config.bindings)) {
+      config.bindings = config.bindings.filter((binding: any) => binding?.match?.channel !== 'openclaw-weixin');
+      if (config.bindings.length === 0) delete config.bindings;
+    }
+    if (config.plugins.entries?.['openclaw-weixin']) {
+      delete config.plugins.entries['openclaw-weixin'];
+    }
+    if (Array.isArray(config.plugins.allow)) {
+      config.plugins.allow = config.plugins.allow.filter((pluginId: string) => (
+        pluginId !== 'openclaw-weixin' && pluginId !== '@tencent-weixin/openclaw-weixin'
+      ));
+    }
+  }
+
   // Workaround for OpenClaw upstream bug: `memory-lancedb` schema requires
   // `config.embedding` even when the entry is `enabled: false`, so an empty
   // or stub entry crashes `openclaw doctor` and blocks the runtime. We don't
@@ -244,6 +374,10 @@ export function sanitizeDesktopAwarenessPluginConfig(config: Record<string, any>
   const awarenessConfig = config.plugins.entries?.['openclaw-memory']?.config;
   if (awarenessConfig?.localUrl === 'http://localhost:37800') {
     awarenessConfig.localUrl = 'http://127.0.0.1:37800';
+  }
+
+  if (!hasAwarenessPluginInstalled(homedir) && config.plugins.entries?.['openclaw-memory']) {
+    delete config.plugins.entries['openclaw-memory'];
   }
 
   if (Array.isArray(config.plugins.allow)) {

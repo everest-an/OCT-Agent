@@ -138,6 +138,7 @@ export async function startLocalDaemonDetached(options: {
       stdio: 'ignore',
       cwd: homedir,
       env,
+      windowsHide: true,
     });
 
     const handleError = (err: any) => reject(err);
