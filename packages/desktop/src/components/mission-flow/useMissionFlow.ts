@@ -19,7 +19,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { MissionSnapshot } from '../../types/electron';
+import type { MissionSnapshot, MissionSnapshotStatus } from '../../types/electron';
 
 export type MissionFlowStage =
   | 'idle'
@@ -28,6 +28,27 @@ export type MissionFlowStage =
   | 'running'
   | 'done'
   | 'failed';
+
+const LS_ACTIVE_KEY = 'awareness-mission-active-id';
+
+function stageForStatus(status: MissionSnapshotStatus): MissionFlowStage {
+  switch (status) {
+    case 'planning': return 'planning';
+    case 'paused_awaiting_human': return 'preview';
+    case 'paused': return 'preview';
+    case 'running': return 'running';
+    case 'done': return 'done';
+    case 'failed': return 'failed';
+    default: return 'idle';
+  }
+}
+
+function safeLocalStorage() {
+  try {
+    if (typeof window === 'undefined') return null;
+    return window.localStorage;
+  } catch { return null; }
+}
 
 export interface MissionFlowState {
   readonly stage: MissionFlowStage;
@@ -47,6 +68,8 @@ export interface MissionFlowActions {
   cancel(missionId?: string): Promise<void>;
   clear(): void;
   reset(): void;
+  /** Open an existing persisted mission (used by the history list). */
+  reopen(missionId: string): Promise<void>;
 }
 
 export function useMissionFlow(): { state: MissionFlowState; actions: MissionFlowActions } {
@@ -61,6 +84,47 @@ export function useMissionFlow(): { state: MissionFlowState; actions: MissionFlo
 
   // Keep a ref in sync so event handlers can filter without re-subscribing.
   useEffect(() => { activeIdRef.current = missionId; }, [missionId]);
+
+  // ---- Persist activeMissionId across tab-remount / app-restart ----
+  // Skip the first run so we don't clobber a pre-existing key before the
+  // restore effect has a chance to read it (restore effect runs AFTER this
+  // one due to source-order registration).
+  const persistPrimed = useRef(false);
+  useEffect(() => {
+    if (!persistPrimed.current) {
+      persistPrimed.current = true;
+      return;
+    }
+    const ls = safeLocalStorage();
+    if (!ls) return;
+    if (missionId) ls.setItem(LS_ACTIVE_KEY, missionId);
+    else ls.removeItem(LS_ACTIVE_KEY);
+  }, [missionId]);
+
+  // ---- Mount: restore last active mission from disk if any ----
+  useEffect(() => {
+    const ls = safeLocalStorage();
+    const savedId = ls?.getItem(LS_ACTIVE_KEY);
+    if (!savedId) return;
+    const api: any = typeof window !== 'undefined' ? (window as any).electronAPI : null;
+    if (!api?.missionGet) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const m: MissionSnapshot | null = await api.missionGet(savedId);
+        if (cancelled || !m) {
+          if (ls && !m) ls.removeItem(LS_ACTIVE_KEY);
+          return;
+        }
+        setMissionId(m.id);
+        setMission(m);
+        setStage(stageForStatus(m.status));
+      } catch {
+        // Best-effort restore; ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const resetStreams = useCallback(() => {
     setPlannerStream('');
@@ -211,9 +275,21 @@ export function useMissionFlow(): { state: MissionFlowState; actions: MissionFlo
     await api.missionCancelFlow(target);
   }, [missionId]);
 
+  const reopen = useCallback<MissionFlowActions['reopen']>(async (id) => {
+    if (!id) return;
+    const api: any = (window as any).electronAPI;
+    if (!api?.missionGet) throw new Error('IPC not available');
+    const m: MissionSnapshot | null = await api.missionGet(id);
+    if (!m) throw new Error('mission not found');
+    resetStreams();
+    setMissionId(m.id);
+    setMission(m);
+    setStage(stageForStatus(m.status));
+  }, [resetStreams]);
+
   return {
     state: { stage, missionId, mission, plannerStream, stepStream, error },
-    actions: { create, approve, cancel, clear, reset },
+    actions: { create, approve, cancel, clear, reset, reopen },
   };
 }
 

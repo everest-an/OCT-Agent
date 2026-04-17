@@ -1,49 +1,88 @@
 /**
- * MissionFlowShell — the complete Mission Flow surface (input + preview +
- * kanban) glued together via the useMissionFlow hook. Designed to be embedded
- * into the Dashboard or TaskCenter without further state management.
+ * MissionFlowShell — the complete Mission Flow surface.
  *
- * Stages:
- *   idle                → MissionComposer visible, rest hidden
- *   planning            → composer hidden, PlanPreview shows streaming tokens
- *   preview             → composer hidden, PlanPreview shows approve/cancel
- *   running/done/failed → composer hidden, PlanPreview shows summary,
- *                         KanbanCardStream list shows each step
+ * Layout (top → bottom):
+ *   [MissionComposer]  workDir picker + team preview + big goal box
+ *   [PlanPreview]      planning stream / preview / running/done/failed summary
+ *   [Kanban cards]     one KanbanCardStream per mission step (during/after run)
+ *   [History list]     all persisted missions from ~/.awarenessclaw/missions/
  *
- * The "New mission" button resets the state so the user can start another.
+ * Each block is controlled by `useMissionFlow.state.stage`:
+ *   idle                 → composer visible, history visible
+ *   planning / preview   → composer hidden, preview panel live
+ *   running / done / ...→ preview shows summary, kanban expanded
+ *
+ * Tab-remount resilience: `useMissionFlow` restores `activeMissionId` from
+ * localStorage on mount, so the kanban re-appears after the user switches
+ * sidebar tabs and returns.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import PlanPreview from './PlanPreview';
 import KanbanCardStream from './KanbanCardStream';
-import MissionComposer from './MissionComposer';
+import MissionComposer, { type MissionComposerAgent } from './MissionComposer';
+import MissionHistoryList from './MissionHistoryList';
 import { useMissionFlow } from './useMissionFlow';
+import { friendlyErrorMessage } from './friendly-errors';
 import type { TranslateFunc } from '../../lib/i18n';
 
 export interface MissionFlowShellProps {
   readonly t?: TranslateFunc;
-  readonly defaultWorkDir?: string;
+  /**
+   * Initial work directory (e.g. from localStorage). Parent handles the
+   * native folder picker and feeds the updated path back via onWorkDirChange.
+   */
+  readonly workDir?: string;
+  readonly onPickWorkDir?: () => void | Promise<void>;
+  readonly onClearWorkDir?: () => void;
+  readonly agents?: readonly MissionComposerAgent[];
+  readonly onManageAgents?: () => void;
   readonly onReadArtifact?: (missionId: string, stepId: string) => void;
 }
 
 export default function MissionFlowShell({
   t,
-  defaultWorkDir,
+  workDir,
+  onPickWorkDir,
+  onClearWorkDir,
+  agents,
+  onManageAgents,
   onReadArtifact,
 }: MissionFlowShellProps) {
   const tr = t ?? ((_k: string, fallback?: string) => fallback ?? _k);
   const { state, actions } = useMissionFlow();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
+  const [historyRefresh, setHistoryRefresh] = useState(0);
+
+  // Auto-expand the running step so the user sees live streaming.
+  useEffect(() => {
+    if (!state.mission) return;
+    const running = state.mission.steps.find((s) => s.status === 'running');
+    if (running) {
+      setExpanded((prev) => prev[running.id] ? prev : { ...prev, [running.id]: true });
+    }
+  }, [state.mission]);
+
+  // Refresh history list whenever a mission finishes or is cleared.
+  useEffect(() => {
+    if (state.stage === 'done' || state.stage === 'failed' || state.stage === 'idle') {
+      setHistoryRefresh((n) => n + 1);
+    }
+  }, [state.stage]);
 
   const handleCreate = useCallback(async (goal: string) => {
     setBusy(true);
     try {
-      await actions.create(goal, defaultWorkDir ? { workDir: defaultWorkDir } : undefined);
+      await actions.create(goal, {
+        workDir: workDir || undefined,
+        agents: agents?.map((a) => ({ id: a.id, name: a.name, role: a.role, emoji: a.emoji })),
+      });
+      setHistoryRefresh((n) => n + 1);
     } finally {
       setBusy(false);
     }
-  }, [actions, defaultWorkDir]);
+  }, [actions, workDir, agents]);
 
   const handleApprove = useCallback(async () => {
     setBusy(true);
@@ -59,17 +98,48 @@ export default function MissionFlowShell({
     try {
       await actions.cancel();
       actions.reset();
+      setHistoryRefresh((n) => n + 1);
     } finally {
       setBusy(false);
     }
   }, [actions]);
+
+  const handleReset = useCallback(() => {
+    actions.reset();
+    setHistoryRefresh((n) => n + 1);
+  }, [actions]);
+
+  const handleReopen = useCallback(async (id: string) => {
+    try {
+      await actions.reopen(id);
+    } catch {
+      // swallow — user can hit again or check logs
+    }
+  }, [actions]);
+
+  const handleDelete = useCallback(async (id: string) => {
+    const api: any = typeof window !== 'undefined' ? (window as any).electronAPI : null;
+    if (!api?.missionDelete) return;
+    try {
+      await api.missionDelete(id);
+      if (state.missionId === id) actions.reset();
+      setHistoryRefresh((n) => n + 1);
+    } catch { /* ignore */ }
+  }, [actions, state.missionId]);
 
   const toggle = (stepId: string) => {
     setExpanded((m) => ({ ...m, [stepId]: !m[stepId] }));
   };
 
   const composerVisible = state.stage === 'idle';
-  const kanbanVisible = (state.stage === 'running' || state.stage === 'done' || state.stage === 'failed') && state.mission != null;
+  const kanbanVisible =
+    (state.stage === 'running' || state.stage === 'done' || state.stage === 'failed') &&
+    state.mission != null;
+  const historyVisible = state.stage === 'idle';
+
+  const friendlyError = state.error
+    ? friendlyErrorMessage({ raw: state.error }, tr)
+    : null;
 
   return (
     <div data-testid="mission-flow-shell" className="space-y-4">
@@ -78,6 +148,11 @@ export default function MissionFlowShell({
           busy={busy}
           onSubmit={handleCreate}
           t={tr}
+          workDir={workDir}
+          onPickWorkDir={onPickWorkDir}
+          onClearWorkDir={onClearWorkDir}
+          agents={agents}
+          onManageAgents={onManageAgents}
         />
       )}
 
@@ -85,7 +160,7 @@ export default function MissionFlowShell({
         stage={state.stage}
         plannerStream={state.plannerStream}
         mission={state.mission}
-        error={state.error}
+        error={friendlyError}
         busy={busy}
         onApprove={handleApprove}
         onCancel={handleCancel}
@@ -104,7 +179,7 @@ export default function MissionFlowShell({
             </h3>
             <button
               type="button"
-              onClick={actions.reset}
+              onClick={handleReset}
               data-testid="mission-flow-reset"
               className="text-xs text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline"
             >
@@ -129,6 +204,15 @@ export default function MissionFlowShell({
             ))}
           </div>
         </section>
+      )}
+
+      {historyVisible && (
+        <MissionHistoryList
+          t={tr}
+          refreshKey={historyRefresh}
+          onReopen={handleReopen}
+          onDelete={handleDelete}
+        />
       )}
     </div>
   );

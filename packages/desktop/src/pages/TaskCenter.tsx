@@ -10,7 +10,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { AlertCircle, Bot, FolderOpen, Loader2, Send, Sparkles, Zap } from 'lucide-react';
+import { AlertCircle, Bot, Loader2, Sparkles, Zap } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import {
   loadMissions,
@@ -19,7 +19,6 @@ import {
   removeMission,
 } from '../lib/mission-store';
 import type { Mission, MissionStep } from '../lib/mission-store';
-import MissionCard from '../components/task-center/MissionCard';
 import MissionDetail from '../components/task-center/MissionDetail';
 import MissionFlowShell from '../components/mission-flow/MissionFlowShell';
 
@@ -314,12 +313,6 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6 space-y-5">
-        {/* Mission Flow (F-Team-Tasks Phase 4 — beta) */}
-        <MissionFlowShell
-          t={t}
-          defaultWorkDir={workDir || undefined}
-        />
-
         {/* Setup banner */}
         {needsSetup && (
           <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-700/30">
@@ -354,71 +347,18 @@ export default function TaskCenter({ onNavigate }: { onNavigate?: (page: Page) =
           </div>
         )}
 
-        {/* Goal input */}
-        <div className="rounded-xl bg-slate-800/30 border border-slate-700/30 p-4">
-          <div className="flex gap-2">
-            <textarea
-              value={goalInput}
-              onChange={e => setGoalInput(e.target.value)}
-              placeholder={t('taskCenter.goalPlaceholder', 'What do you want your team to do?')}
-              rows={2}
-              className="flex-1 rounded-lg bg-slate-900/50 border border-slate-700/50 px-3 py-2.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500/30 resize-none"
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleStartMission(goalInput); } }}
-              disabled={creating || needsSetup}
-            />
-            <button onClick={() => handleStartMission(goalInput)} disabled={!goalInput.trim() || creating || needsSetup}
-              className="self-end px-4 py-2.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50 transition-colors flex items-center gap-1.5">
-              {creating ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-            </button>
-          </div>
-
-          {/* Workspace selector */}
-          <div className="flex items-center gap-2 mt-2.5">
-            <button onClick={handlePickWorkDir}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-700/30 hover:bg-slate-700/50 text-[11px] text-slate-400 hover:text-slate-300 transition-colors border border-slate-700/40">
-              <FolderOpen size={12} />
-              {workDirName || t('taskCenter.pickWorkDir', 'Select workspace')}
-            </button>
-            {workDir && (
-              <button onClick={() => { setWorkDir(''); localStorage.removeItem('awareness-claw-project-root'); }} className="text-[10px] text-slate-600 hover:text-slate-400">✕</button>
-            )}
-          </div>
-        </div>
-
-        {/* Active missions */}
-        {activeMissions.length > 0 && (
-          <div>
-            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">{t('taskCenter.active', 'Active')}</h3>
-            <div className="space-y-2">
-              {activeMissions.map(m => (
-                <MissionCard key={m.id} mission={m} onClick={() => setSelectedMissionId(m.id)} t={t} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Completed missions */}
-        {completedMissions.length > 0 && (
-          <div>
-            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">{t('taskCenter.completed', 'Completed')}</h3>
-            <div className="space-y-2">
-              {completedMissions.map(m => (
-                <MissionCard key={m.id} mission={m} onClick={() => setSelectedMissionId(m.id)} t={t} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Empty state */}
-        {missions.length === 0 && !needsSetup && (
-          <div className="flex items-center justify-center py-16">
-            <div className="text-center space-y-3 max-w-xs">
-              <Sparkles size={32} className="text-sky-400/40 mx-auto" />
-              <p className="text-sm text-slate-400">{t('taskCenter.emptyWelcome', 'Describe what you need and your AI team will handle it')}</p>
-              <p className="text-xs text-slate-600">{t('taskCenter.emptyHint', 'Try: "Review my code for security issues"')}</p>
-            </div>
-          </div>
-        )}
+        {/* Mission Flow (F-Team-Tasks Phase 4) — primary team task surface */}
+        <MissionFlowShell
+          t={t}
+          workDir={workDir || undefined}
+          onPickWorkDir={handlePickWorkDir}
+          onClearWorkDir={() => {
+            setWorkDir('');
+            localStorage.removeItem('awareness-claw-project-root');
+          }}
+          agents={agents.map(a => ({ id: a.id, name: a.name, emoji: a.emoji }))}
+          onManageAgents={() => onNavigate?.('agents')}
+        />
       </div>
     </div>
   );

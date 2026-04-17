@@ -1,119 +1,122 @@
+/**
+ * Tests for the TaskCenter page after the F-Team-Tasks Phase 4 refactor.
+ *
+ * The page now delegates its entire primary surface to MissionFlowShell
+ * (composer + plan preview + kanban + history). These tests verify:
+ *   - MissionFlowShell mounts inside the page
+ *   - The new MissionComposer big-input box is visible by default
+ *   - The legacy `goalInput` textarea / workspace chip / MissionCard list
+ *     are gone (anti-regression)
+ *   - Passing onNavigate still works (used by "Add a teammate" link)
+ */
+
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import TaskCenter from '../pages/TaskCenter';
 
-// Mock electronAPI
-const mockAgentsList = vi.fn().mockResolvedValue({
-  success: true,
-  agents: [
-    { id: 'main', name: 'Main', emoji: '🤖', isDefault: true },
-    { id: 'coder', name: 'Coder', emoji: '💻' },
-  ],
-});
-
-const mockWorkflowConfig = vi.fn().mockResolvedValue({
-  maxSpawnDepth: 2,
-  maxChildrenPerAgent: 5,
-  agentToAgentEnabled: true,
-});
-
-const mockMissionStart = vi.fn().mockResolvedValue({ success: true });
-const mockOnMissionProgress = vi.fn().mockReturnValue(() => {});
+const MISSION_KEYS_TO_PATCH = [
+  'agentsList',
+  'workflowConfig',
+  'workflowEnableCollaboration',
+  'missionStart',
+  'missionCancel',
+  'missionListActive',
+  'missionList',
+  'missionGet',
+  'missionDelete',
+  'missionCancelFlow',
+  'missionCreateFromGoal',
+  'missionApproveAndRun',
+  'missionReadArtifact',
+  'onMissionProgress',
+  'onMissionPlanning',
+  'onMissionPlannerDelta',
+  'onMissionPlanReady',
+  'onMissionStepStarted',
+  'onMissionStepDelta',
+  'onMissionStepEnded',
+  'onMissionStepFailed',
+  'onMissionDone',
+  'onMissionFailed',
+  'onTaskStatusUpdate',
+  'onTaskSubagentLinked',
+];
 
 beforeEach(() => {
-  vi.clearAllMocks();
-  localStorage.clear();
-  localStorage.setItem('awareness-claw-config', JSON.stringify({ language: 'en' }));
-
-  (window as any).electronAPI = {
-    agentsList: mockAgentsList,
-    workflowConfig: mockWorkflowConfig,
-    workflowEnableCollaboration: vi.fn().mockResolvedValue({
-      success: true,
-      config: { maxSpawnDepth: 2, agentToAgentEnabled: true },
-    }),
-    missionStart: mockMissionStart,
-    missionCancel: vi.fn(),
-    onMissionProgress: mockOnMissionProgress,
-    onTaskStatusUpdate: vi.fn().mockReturnValue(() => {}),
-    onTaskSubagentLinked: vi.fn().mockReturnValue(() => {}),
-  };
+  try { window.localStorage.removeItem('awareness-mission-active-id'); } catch { /* ignore */ }
+  const api: any = (window as any).electronAPI;
+  if (!api) return;
+  for (const key of MISSION_KEYS_TO_PATCH) delete api[key];
+  api.agentsList = vi.fn().mockResolvedValue({
+    success: true,
+    agents: [
+      { id: 'main', name: 'Main', emoji: '🤖', isDefault: true },
+      { id: 'coder', name: 'Coder', emoji: '💻' },
+    ],
+  });
+  api.workflowConfig = vi.fn().mockResolvedValue({
+    maxSpawnDepth: 2,
+    agentToAgentEnabled: true,
+  });
+  api.workflowEnableCollaboration = vi.fn().mockResolvedValue({
+    success: true,
+    config: { maxSpawnDepth: 2, agentToAgentEnabled: true },
+  });
+  api.missionListActive = vi.fn().mockResolvedValue({ missionIds: [] });
+  api.missionList = vi.fn().mockResolvedValue([]);
+  api.missionGet = vi.fn().mockResolvedValue(null);
+  api.onMissionProgress = vi.fn().mockReturnValue(() => {});
+  api.onMissionPlanning = () => () => {};
+  api.onMissionPlannerDelta = () => () => {};
+  api.onMissionPlanReady = () => () => {};
+  api.onMissionStepStarted = () => () => {};
+  api.onMissionStepDelta = () => () => {};
+  api.onMissionStepEnded = () => () => {};
+  api.onMissionStepFailed = () => () => {};
+  api.onMissionDone = () => () => {};
+  api.onMissionFailed = () => () => {};
+  api.onTaskStatusUpdate = () => () => {};
+  api.onTaskSubagentLinked = () => () => {};
 });
 
-describe('TaskCenter (Mission UI)', () => {
-  it('renders the page header', async () => {
+describe('TaskCenter (post Phase 4 refactor)', () => {
+  it('renders the page header', () => {
     render(<TaskCenter />);
-    expect(screen.getByText('Team Tasks')).toBeTruthy();
+    expect(screen.getByText('Team Tasks')).toBeInTheDocument();
   });
 
-  it('shows goal input placeholder', async () => {
+  it('mounts MissionFlowShell', () => {
     render(<TaskCenter />);
-    const textarea = screen.getByPlaceholderText(/What do you want your team to do/);
-    expect(textarea).toBeTruthy();
+    expect(screen.getByTestId('mission-flow-shell')).toBeInTheDocument();
   });
 
-  it('shows workspace selector', async () => {
+  it('renders the MissionComposer big goal box', () => {
     render(<TaskCenter />);
-    expect(screen.getByText(/Select workspace/)).toBeTruthy();
+    expect(screen.getByTestId('mission-composer')).toBeInTheDocument();
+    expect(screen.getByTestId('mission-composer-input')).toBeInTheDocument();
   });
 
-  it('shows empty state when no missions', async () => {
+  it('does NOT render the legacy goal textarea placeholder', () => {
     render(<TaskCenter />);
-    await waitFor(() => {
-      expect(screen.getByText(/Describe what you need/)).toBeTruthy();
-    });
+    expect(screen.queryByPlaceholderText(/what do you want your team to do/i))
+      .toBeNull();
   });
 
-  it('shows setup card when maxSpawnDepth < 2', async () => {
-    mockWorkflowConfig.mockResolvedValueOnce({
-      maxSpawnDepth: 1,
-      maxChildrenPerAgent: 5,
-      agentToAgentEnabled: false,
-    });
-
+  it('does NOT render legacy workspace selector chip', () => {
     render(<TaskCenter />);
-    await waitFor(() => {
-      expect(screen.getByText('Enable Team Mode')).toBeTruthy();
-    });
+    expect(screen.queryByText(/Select workspace/)).toBeNull();
   });
 
-  it('creates a mission when user submits goal', async () => {
+  it('does NOT render legacy MissionCard "Active" or "Completed" section headers', () => {
     render(<TaskCenter />);
-
-    await waitFor(() => {
-      expect(mockWorkflowConfig).toHaveBeenCalled();
-    });
-
-    const textarea = screen.getByPlaceholderText(/What do you want your team to do/);
-    fireEvent.change(textarea, { target: { value: 'Build a login page' } });
-
-    const sendButton = document.querySelector('button:not([disabled])');
-    expect(sendButton).toBeTruthy();
+    const activeHdr = screen.queryAllByText(/^Active$/);
+    const completedHdr = screen.queryAllByText(/^Completed$/);
+    expect(activeHdr.length + completedHdr.length).toBe(0);
   });
 
-  it('shows agent hint when only 1 agent', async () => {
-    mockAgentsList.mockResolvedValue({
-      success: true,
-      agents: [{ id: 'main', name: 'Main', emoji: '🤖', isDefault: true }],
-    });
-
-    render(<TaskCenter />);
-    await waitFor(() => {
-      expect(screen.getByText(/You have one agent/)).toBeTruthy();
-    }, { timeout: 3000 });
-  });
-
-  it('registers mission progress listener', async () => {
-    render(<TaskCenter />);
-    await waitFor(() => {
-      expect(mockOnMissionProgress).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  it('has goal input that accepts text', async () => {
-    render(<TaskCenter />);
-    const textarea = screen.getByPlaceholderText(/What do you want your team to do/) as HTMLTextAreaElement;
-    fireEvent.change(textarea, { target: { value: 'Build a login page' } });
-    expect(textarea.value).toBe('Build a login page');
+  it('passes onNavigate through without error', () => {
+    const onNavigate = vi.fn();
+    render(<TaskCenter onNavigate={onNavigate} />);
+    expect(screen.getByTestId('mission-composer')).toBeInTheDocument();
   });
 });

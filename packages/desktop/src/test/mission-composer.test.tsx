@@ -78,4 +78,75 @@ describe('MissionComposer', () => {
     expect(ta.value).toBe('prefilled goal');
     expect(ta.placeholder).toBe('custom placeholder');
   });
+
+  it('workDir picker button fires onPickWorkDir', () => {
+    const onPickWorkDir = vi.fn();
+    render(<MissionComposer onSubmit={vi.fn()} onPickWorkDir={onPickWorkDir} />);
+    const btn = screen.getByTestId('mission-composer-pick-workdir');
+    fireEvent.click(btn);
+    expect(onPickWorkDir).toHaveBeenCalledTimes(1);
+  });
+
+  it('workDir chip shows the folder basename + clear button', () => {
+    const onClearWorkDir = vi.fn();
+    render(
+      <MissionComposer
+        onSubmit={vi.fn()}
+        workDir="/Users/me/Projects/todo-app"
+        onPickWorkDir={vi.fn()}
+        onClearWorkDir={onClearWorkDir}
+      />,
+    );
+    expect(screen.getByTestId('mission-composer-pick-workdir')).toHaveTextContent('todo-app');
+    fireEvent.click(screen.getByTestId('mission-composer-clear-workdir'));
+    expect(onClearWorkDir).toHaveBeenCalled();
+  });
+
+  it('team preview renders agent chips', () => {
+    render(
+      <MissionComposer
+        onSubmit={vi.fn()}
+        agents={[
+          { id: 'main', name: 'Main', emoji: '🧠' },
+          { id: 'coder', name: 'Coder', emoji: '💻' },
+          { id: 'tester', name: 'Tester', emoji: '🧪' },
+        ]}
+      />,
+    );
+    const team = screen.getByTestId('mission-composer-team');
+    expect(team.querySelectorAll('li').length).toBe(3);
+    expect(team).toHaveTextContent('Main');
+    expect(team).toHaveTextContent('Coder');
+    expect(team).toHaveTextContent('Tester');
+  });
+
+  it('agent<2 warning appears + triggers onManageAgents', () => {
+    const onManageAgents = vi.fn();
+    render(
+      <MissionComposer
+        onSubmit={vi.fn()}
+        agents={[{ id: 'main', name: 'Main' }]}
+        onManageAgents={onManageAgents}
+      />,
+    );
+    expect(screen.getByTestId('mission-composer-agent-warn')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /add a teammate/i }));
+    expect(onManageAgents).toHaveBeenCalled();
+  });
+
+  it('agent<2 warning hidden when 2+ agents', () => {
+    render(
+      <MissionComposer
+        onSubmit={vi.fn()}
+        agents={[{ id: 'main' }, { id: 'coder' }]}
+        onManageAgents={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId('mission-composer-agent-warn')).toBeNull();
+  });
+
+  it('meta row hidden when no workDir picker and no agents', () => {
+    render(<MissionComposer onSubmit={vi.fn()} />);
+    expect(screen.queryByTestId('mission-composer-meta')).toBeNull();
+  });
 });

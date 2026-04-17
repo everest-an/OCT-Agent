@@ -83,7 +83,7 @@ describe('MissionFlowShell', () => {
       missionId: 'm1',
       mission: {
         id: 'm1', goal: 'x', status: 'running', steps: [
-          { id: 'T1', agentId: 'main', role: 'L', title: 'Do thing', deliverable: 'd', depends_on: [], status: 'running', attempts: 0 },
+          { id: 'T1', agentId: 'main', role: 'L', title: 'Do thing', deliverable: 'd', depends_on: [], status: 'waiting', attempts: 0 },
         ],
       },
       stepStream: { T1: 'hello' },
@@ -91,8 +91,23 @@ describe('MissionFlowShell', () => {
     render(<MissionFlowShell />);
     expect(screen.getByTestId('mission-kanban')).toBeInTheDocument();
     expect(screen.getByTestId('kanban-card-T1')).toBeInTheDocument();
-    // stream hidden until expanded
+    // waiting step is not auto-expanded
     expect(screen.queryByTestId('kanban-card-T1-stream')).toBeNull();
+  });
+
+  it('running step is auto-expanded so streaming is visible without a click', () => {
+    setState({
+      stage: 'running',
+      missionId: 'm1',
+      mission: {
+        id: 'm1', goal: 'x', status: 'running', steps: [
+          { id: 'T1', agentId: 'main', role: 'L', title: 'Live', deliverable: 'd', depends_on: [], status: 'running', attempts: 0 },
+        ],
+      },
+      stepStream: { T1: 'live stream chunk' },
+    });
+    render(<MissionFlowShell />);
+    expect(screen.getByTestId('kanban-card-T1-stream')).toHaveTextContent('live stream chunk');
   });
 
   it('new mission button calls reset', () => {
@@ -131,16 +146,33 @@ describe('MissionFlowShell', () => {
     });
     fireEvent.click(screen.getByTestId('mission-composer-submit'));
     await Promise.resolve();
-    expect(actionsMock.create).toHaveBeenCalledWith('make a slide deck', undefined);
+    expect(actionsMock.create).toHaveBeenCalledWith(
+      'make a slide deck',
+      expect.objectContaining({ workDir: undefined }),
+    );
   });
 
-  it('passes defaultWorkDir through to actions.create', async () => {
-    render(<MissionFlowShell defaultWorkDir="/tmp/proj" />);
+  it('passes workDir + agents through to actions.create', async () => {
+    render(
+      <MissionFlowShell
+        workDir="/tmp/proj"
+        agents={[{ id: 'main', name: 'Main' }, { id: 'coder', name: 'Coder' }]}
+      />,
+    );
     fireEvent.change(screen.getByTestId('mission-composer-input'), {
       target: { value: 'analyze csv data' },
     });
     fireEvent.click(screen.getByTestId('mission-composer-submit'));
     await Promise.resolve();
-    expect(actionsMock.create).toHaveBeenCalledWith('analyze csv data', { workDir: '/tmp/proj' });
+    expect(actionsMock.create).toHaveBeenCalledWith(
+      'analyze csv data',
+      expect.objectContaining({
+        workDir: '/tmp/proj',
+        agents: expect.arrayContaining([
+          expect.objectContaining({ id: 'main' }),
+          expect.objectContaining({ id: 'coder' }),
+        ]),
+      }),
+    );
   });
 });

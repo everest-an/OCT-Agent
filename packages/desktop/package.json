@@ -1,6 +1,6 @@
 {
   "name": "awareness-claw-desktop",
-  "version": "0.3.6",
+  "version": "0.3.7-preview.1",
   "description": "AwarenessClaw Desktop — Visual AI agent manager with persistent memory",
   "author": "edwin-hao-ai",
   "main": "dist-electron/main.js",
@@ -16,7 +16,8 @@
     "verify:mission-ipc": "node scripts/verify-mission-ipc.mjs",
     "verify:mission-streaming": "node scripts/verify-streaming-contract.mjs",
     "verify:plan-schema": "node scripts/verify-plan-schema.mjs",
-    "verify:mission-all": "node scripts/verify-mission-ipc.mjs && node scripts/verify-streaming-contract.mjs && node scripts/verify-plan-schema.mjs",
+    "verify:mission-all": "node scripts/verify-mission-ipc.mjs && node scripts/verify-streaming-contract.mjs && node scripts/verify-plan-schema.mjs && node scripts/verify-no-legacy-goalinput.mjs",
+    "verify:no-legacy-goalinput": "node scripts/verify-no-legacy-goalinput.mjs",
     "test:mutation:mission": "stryker run stryker.mission.conf.mjs",
     "preview": "vite preview",
     "package:mac": "npm run build && electron-builder --mac",

@@ -136,9 +136,7 @@ describe('mission-streaming-integration — end-to-end UI updates', () => {
       fire('step-delta', { missionId: 'mi', stepId: 'T1', chunk: 'world' });
     });
 
-    // Card exists; expand it
-    const toggleBtn = screen.getByRole('button', { name: /expand step/i });
-    fireEvent.click(toggleBtn);
+    // Running step is auto-expanded — streaming visible without any user click
     expect(screen.getByTestId('kanban-card-T1-stream'))
       .toHaveTextContent('hello world');
   });

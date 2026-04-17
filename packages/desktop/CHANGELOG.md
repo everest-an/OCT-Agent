@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.7-preview.1] - 2026-04-18
+
+### Fixed — Team Tasks UI regressions (same-night hotfix)
+- **Two input boxes on the Team Tasks page**: the legacy `goalInput` textarea + workspace chip + MissionCard lists are gone. The new `MissionComposer` (big "What would you like your team to do today?" box) is now the only goal input. New L1 guard `verify:no-legacy-goalinput` prevents regression.
+- **Kanban + mission state lost on tab switch**: `useMissionFlow` now persists `activeMissionId` to localStorage and restores the whole stage (plan / running / done) on remount via `mission:get`. Switch to Memory tab and back — your live kanban is still there.
+- **Past missions were invisible**: new `MissionHistoryList` component reads `mission:list` and shows every persisted mission from `~/.awarenessclaw/missions/` under the composer. Click a card to re-open (jumps to the right stage automatically); hover + click trash to delete.
+- **Planner routed every subtask to `main`**: `buildPlannerPrompt` now includes a `<RoutingRules>` section that explicitly forbids routing every subtask to the same agent when 2+ agents are available, and tells the LLM to match agent role → subtask type. Single-agent teams relax the rule but still ask for varied roles (Designer / Developer / Tester) across subtasks.
+- **Agent count < 2 warning**: `MissionComposer` shows a yellow banner + "➕ Add a teammate" link when only one agent exists. Link jumps to the Agents page via `onNavigate('agents')`. Soft warning — doesn't block submitting.
+- **Pre-existing `parsed.errors` TS narrowing bug** (blocked `npm run build`): fixed with explicit `parsed.ok === false` guard in `mission-runner.ts`.
+
+### Added — MissionComposer workspace + team preview
+- Composer now shows the working-directory chip with basename + × clear, and the current team as agent avatar chips with a total count. Work dir chip opens a native folder picker on the main process.
+
+### Testing
+- Mission Flow tests: 319 → 361 (+42). New files: `mission-history-list.test.tsx` (9), expanded `mission-composer.test.tsx` (+6 workdir/team/warn tests), expanded `use-mission-flow.test.tsx` (+6 restore/reopen tests), expanded `mission-planner-prompt.test.ts` (+5 multi-agent tests).
+- L1 guards: 3 → 4. New `verify-no-legacy-goalinput.mjs`. `npm run verify:mission-all` runs all four.
+- Legacy `src/test/mission-integration.test.tsx` removed (tested the UI path that no longer exists; new `mission-integration.test.ts` covers the replacement MissionFlow path).
+
 ## [Unreleased]
 
 ### Added — Team Tasks Mission Flow (F-Team-Tasks · Phase 4 + 5)

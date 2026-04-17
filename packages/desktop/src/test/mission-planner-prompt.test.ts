@@ -245,3 +245,44 @@ describe('planner-prompt · output instruction', () => {
     expect(prompt).toMatch(/No prose before or after/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Multi-agent routing rules (new: prevents "all subtasks → main" bug)
+// ---------------------------------------------------------------------------
+
+describe('planner-prompt · multi-agent routing', () => {
+  const MULTI_AGENTS = [
+    { id: 'main', name: 'Main', role: 'Generalist' },
+    { id: 'coder', name: 'Coder', role: 'Developer' },
+    { id: 'tester', name: 'Tester', role: 'QA' },
+  ];
+
+  it('includes a RoutingRules section', () => {
+    const p = buildPlannerPrompt({ goal: 'x', agents: MULTI_AGENTS });
+    expect(p).toContain('<RoutingRules>');
+    expect(p).toContain('</RoutingRules>');
+  });
+
+  it('explicitly forbids routing everything to the same agent', () => {
+    const p = buildPlannerPrompt({ goal: 'x', agents: MULTI_AGENTS });
+    expect(p).toMatch(/DO NOT route every subtask to the same agent/i);
+    expect(p).toMatch(/not all to "main"/i);
+  });
+
+  it('encourages distributing across different agents when 2+ are available', () => {
+    const p = buildPlannerPrompt({ goal: 'x', agents: MULTI_AGENTS });
+    expect(p).toMatch(/distribute subtasks across DIFFERENT agents/i);
+  });
+
+  it('lists actual agent count and ids so the LLM can reference them', () => {
+    const p = buildPlannerPrompt({ goal: 'x', agents: MULTI_AGENTS });
+    expect(p).toContain('3 agent(s)');
+    expect(p).toContain('main, coder, tester');
+  });
+
+  it('single-agent prompt relaxes the rule but still asks for varied roles', () => {
+    const p = buildPlannerPrompt({ goal: 'x', agents: [{ id: 'main', name: 'Main' }] });
+    expect(p).toContain('1 agent(s)');
+    expect(p).toMatch(/If only one agent is available.*vary the roles/is);
+  });
+});

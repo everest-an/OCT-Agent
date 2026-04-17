@@ -12,8 +12,22 @@
  */
 
 import { type FormEvent, type KeyboardEvent, useState } from 'react';
-import { Loader2, Sparkles } from 'lucide-react';
+import { AlertTriangle, FolderOpen, Loader2, Sparkles, X } from 'lucide-react';
+import AgentAvatar from '../AgentAvatar';
 import type { TranslateFunc } from '../../lib/i18n';
+
+function workDirShortName(abs: string): string {
+  if (!abs) return '';
+  const segs = abs.split(/[\\/]/).filter(Boolean);
+  return segs.length === 0 ? abs : segs[segs.length - 1];
+}
+
+export interface MissionComposerAgent {
+  readonly id: string;
+  readonly name?: string;
+  readonly emoji?: string;
+  readonly role?: string;
+}
 
 export interface MissionComposerProps {
   readonly busy?: boolean;
@@ -21,6 +35,16 @@ export interface MissionComposerProps {
   readonly t?: TranslateFunc;
   readonly placeholder?: string;
   readonly defaultValue?: string;
+  /** Currently-selected working directory (optional). */
+  readonly workDir?: string;
+  /** Callback when user clicks "pick workspace" — parent opens native dialog. */
+  readonly onPickWorkDir?: () => void;
+  /** Callback when user clicks the × on the workspace chip. */
+  readonly onClearWorkDir?: () => void;
+  /** Agents available to the Planner. When < 2, a yellow warning is shown. */
+  readonly agents?: readonly MissionComposerAgent[];
+  /** Callback for the "Manage agents" link when agents.length < 2. */
+  readonly onManageAgents?: () => void;
 }
 
 export default function MissionComposer({
@@ -29,6 +53,11 @@ export default function MissionComposer({
   t,
   placeholder,
   defaultValue,
+  workDir,
+  onPickWorkDir,
+  onClearWorkDir,
+  agents,
+  onManageAgents,
 }: MissionComposerProps) {
   const tr = t ?? ((_k: string, fallback?: string) => fallback ?? _k);
   const [goal, setGoal] = useState(defaultValue ?? '');
@@ -111,6 +140,94 @@ export default function MissionComposer({
         <p data-testid="mission-composer-error" className="text-xs text-amber-300">
           {localError}
         </p>
+      )}
+
+      {/* Workspace + team rows (optional; hidden when parent doesn't wire them) */}
+      {(onPickWorkDir || (agents && agents.length > 0)) && (
+        <div data-testid="mission-composer-meta" className="space-y-2">
+          {onPickWorkDir && (
+            <div className="flex items-center gap-2 text-[12px] text-slate-400">
+              <span className="text-slate-500">
+                {tr('missionFlow.composer.workDirLabel', '📁 Work dir:')}
+              </span>
+              <button
+                type="button"
+                data-testid="mission-composer-pick-workdir"
+                onClick={onPickWorkDir}
+                disabled={busy}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/80 hover:bg-slate-700 border border-slate-700/60 text-slate-200 disabled:opacity-50"
+              >
+                <FolderOpen size={12} />
+                {workDir ? workDirShortName(workDir) : tr('missionFlow.composer.pickWorkDir', 'Choose folder')}
+              </button>
+              {workDir && onClearWorkDir && (
+                <button
+                  type="button"
+                  data-testid="mission-composer-clear-workdir"
+                  onClick={onClearWorkDir}
+                  aria-label={tr('missionFlow.composer.clearWorkDir', 'Clear workspace')}
+                  className="text-slate-500 hover:text-slate-300"
+                >
+                  <X size={12} />
+                </button>
+              )}
+              {!workDir && (
+                <span className="text-[11px] text-slate-500 italic">
+                  {tr('missionFlow.composer.noWorkDir', '(optional — agents will ask if they need one)')}
+                </span>
+              )}
+            </div>
+          )}
+
+          {agents && agents.length > 0 && (
+            <div className="flex items-center gap-2 text-[12px] text-slate-400 flex-wrap">
+              <span className="text-slate-500">
+                {tr('missionFlow.composer.teamLabel', '👥 Team:')}
+              </span>
+              <ul data-testid="mission-composer-team" className="flex items-center gap-1.5 flex-wrap">
+                {agents.map((a) => (
+                  <li
+                    key={a.id}
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-slate-800/80 border border-slate-700/50"
+                    title={a.role ? `${a.name || a.id} · ${a.role}` : (a.name || a.id)}
+                  >
+                    <AgentAvatar
+                      name={a.name || a.id}
+                      emoji={a.emoji || ''}
+                      size={14}
+                    />
+                    <span className="text-[11px] text-slate-300">{a.name || a.id}</span>
+                  </li>
+                ))}
+              </ul>
+              <span className="text-[11px] text-slate-500">
+                {tr('missionFlow.composer.teamCount', 'total')} {agents.length}
+              </span>
+            </div>
+          )}
+
+          {agents && agents.length < 2 && onManageAgents && (
+            <div
+              data-testid="mission-composer-agent-warn"
+              className="flex items-start gap-2 rounded-md border border-amber-600/30 bg-amber-900/15 px-2.5 py-1.5 text-[12px] text-amber-200"
+            >
+              <AlertTriangle size={14} className="mt-0.5 flex-shrink-0 text-amber-400" />
+              <div className="flex-1">
+                <p>{tr(
+                  'missionFlow.composer.soloAgentWarning',
+                  'Only one agent on your team — the plan will still run, but it works better with more team members.',
+                )}</p>
+                <button
+                  type="button"
+                  onClick={onManageAgents}
+                  className="mt-1 inline-flex items-center gap-1 text-amber-300 hover:text-amber-100 underline-offset-2 hover:underline"
+                >
+                  {tr('missionFlow.composer.addAgent', '➕ Add a teammate')}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       <div className="flex items-center justify-between">

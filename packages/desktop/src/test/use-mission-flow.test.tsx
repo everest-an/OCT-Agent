@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { useMissionFlow } from '../components/mission-flow/useMissionFlow';
 
 type Cb = (data: any) => void;
@@ -24,6 +24,7 @@ const MISSION_KEYS = [
   'missionCreateFromGoal',
   'missionApproveAndRun',
   'missionCancelFlow',
+  'missionGet',
 ] as const;
 
 function installFakeApi() {
@@ -285,5 +286,76 @@ describe('useMissionFlow — state machine', () => {
     // no installFakeApi here
     const { result } = renderHook(() => useMissionFlow());
     await expect(result.current.actions.create('x')).rejects.toThrow(/IPC/i);
+  });
+});
+
+describe('useMissionFlow — persistence + restore', () => {
+  beforeEach(() => {
+    try { window.localStorage.removeItem('awareness-mission-active-id'); } catch { /* ignore */ }
+  });
+
+  it('stores activeMissionId to localStorage after create', async () => {
+    installFakeApi();
+    const { result } = renderHook(() => useMissionFlow());
+    await act(async () => { await result.current.actions.create('make a site'); });
+    expect(window.localStorage.getItem('awareness-mission-active-id')).toBe('m-make');
+  });
+
+  it('clears localStorage on reset', async () => {
+    installFakeApi();
+    const { result } = renderHook(() => useMissionFlow());
+    await act(async () => { await result.current.actions.create('clear me'); });
+    act(() => { result.current.actions.reset(); });
+    expect(window.localStorage.getItem('awareness-mission-active-id')).toBeNull();
+  });
+
+  it('mount auto-restores from localStorage + mission:get', async () => {
+    const { api } = installFakeApi();
+    (api.missionGet as any) = vi.fn(async () => ({
+      id: 'm-saved', version: 1, goal: 'resumed mission',
+      status: 'running',
+      createdAt: '2026-04-17T10:00:00Z',
+      plannerAgentId: 'main',
+      steps: [
+        { id: 'T1', agentId: 'main', role: 'L', title: 'A', deliverable: 'd', depends_on: [], status: 'running', attempts: 1 },
+      ],
+    }));
+    window.localStorage.setItem('awareness-mission-active-id', 'm-saved');
+    const { result } = renderHook(() => useMissionFlow());
+    await waitFor(() => expect(result.current.state.missionId).toBe('m-saved'));
+    expect(result.current.state.stage).toBe('running');
+    expect(result.current.state.mission?.goal).toBe('resumed mission');
+  });
+
+  it('mount restore clears localStorage if mission:get returns null', async () => {
+    const { api } = installFakeApi();
+    (api.missionGet as any) = vi.fn(async () => null);
+    window.localStorage.setItem('awareness-mission-active-id', 'm-dead');
+    renderHook(() => useMissionFlow());
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    expect(window.localStorage.getItem('awareness-mission-active-id')).toBeNull();
+  });
+
+  it('reopen() flips stage to match mission.status', async () => {
+    const { api } = installFakeApi();
+    (api.missionGet as any) = vi.fn(async () => ({
+      id: 'm-open', version: 1, goal: 'reopened', status: 'done',
+      createdAt: '2026-04-17T10:00:00Z', plannerAgentId: 'main',
+      steps: [
+        { id: 'T1', agentId: 'main', role: 'L', title: 'A', deliverable: 'd', depends_on: [], status: 'done', attempts: 1 },
+      ],
+    }));
+    const { result } = renderHook(() => useMissionFlow());
+    await act(async () => { await result.current.actions.reopen('m-open'); });
+    expect(result.current.state.stage).toBe('done');
+    expect(result.current.state.missionId).toBe('m-open');
+  });
+
+  it('reopen() throws when mission:get returns null', async () => {
+    const { api } = installFakeApi();
+    (api.missionGet as any) = vi.fn(async () => null);
+    const { result } = renderHook(() => useMissionFlow());
+    await expect(result.current.actions.reopen('nope')).rejects.toThrow(/not found/i);
   });
 });
