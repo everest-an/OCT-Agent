@@ -7,6 +7,7 @@ import {
   normalizePluginAllow,
   writeDesktopExecApprovalDefaults,
 } from './openclaw-config';
+import { readJsonFileWithBom, safeWriteJsonFile } from './json-file';
 
 const REDACTED_VALUE = '__REDACTED__';
 export const DESKTOP_LEGACY_BROWSER_WEB_MIGRATION_ID = 'desktop-legacy-browser-web-defaults-v3-2026-04-04';
@@ -150,7 +151,7 @@ function deepMergePlainObjects(target: Record<string, any>, source: Record<strin
   return merged;
 }
 
-function hasAwarenessPluginInstalled(homedir: string) {
+export function hasAwarenessPluginInstalled(homedir: string) {
   return fs.existsSync(path.join(homedir, '.openclaw', 'extensions', 'openclaw-memory', 'package.json'));
 }
 
@@ -418,7 +419,7 @@ export function persistDesktopAwarenessPluginConfig(
 
   applyDesktopAwarenessPluginConfig(config, options);
   sanitizeDesktopAwarenessPluginConfig(config, homedir);
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  safeWriteJsonFile(configPath, config);
   writeDesktopExecApprovalDefaults(homedir);
 }
 

@@ -8,6 +8,7 @@ import {
 } from '../app-update-check';
 import { enableDaemonAutostart, disableDaemonAutostart, isDaemonAutostartEnabled } from '../daemon-autostart';
 import { patchGatewayCmdStackSize } from '../openclaw-config';
+import { safeWriteJsonFile } from '../json-file';
 
 const OPENCLAW_INSTALL_TIMEOUT_MS = 300000;
 
@@ -459,7 +460,7 @@ export function registerAppRuntimeHandlers(deps: {
                 installs['openclaw-memory'].resolvedVersion = newVer;
                 installs['openclaw-memory'].resolvedSpec = `@awareness-sdk/openclaw-memory@${newVer}`;
                 installs['openclaw-memory'].installedAt = new Date().toISOString();
-                fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+                safeWriteJsonFile(configPath, config);
               }
             }
           } catch {}

@@ -29,6 +29,7 @@ import {
   checkLaunchAgentPath, fixLaunchAgentPath,
   checkGatewayRunning, fixGatewayStart,
   checkPluginInstalled, fixPluginInstall,
+  checkPluginSpawnHandler, fixPluginSpawnHandler,
   checkDaemonRunning, fixDaemonStart,
   checkConfigPermissions, fixConfigPermissions,
   checkNpmPrefixWritable,
@@ -56,6 +57,7 @@ const CHECK_REGISTRY: Record<string, { check: (ctx: any) => Promise<CheckResult>
   'gateway-running': { check: checkGatewayRunning, fix: fixGatewayStart },
   'web-dns-compat': { check: checkWebDnsCompatibility },
   'plugin-installed': { check: checkPluginInstalled, fix: fixPluginInstall },
+  'plugin-spawn-handler': { check: checkPluginSpawnHandler, fix: fixPluginSpawnHandler },
   'channel-compatibility': { check: checkChannelCompatibility, fix: fixChannelCompatibility },
   'daemon-running': { check: checkDaemonRunning, fix: fixDaemonStart },
   'channel-bindings': { check: checkChannelBindings, fix: fixChannelBindings },
@@ -66,7 +68,7 @@ const CHECK_REGISTRY: Record<string, { check: (ctx: any) => Promise<CheckResult>
 
 const CHECK_ORDER = [
   'node-installed', 'openclaw-installed', 'openclaw-command-health', 'openclaw-version', 'openclaw-conflicts',
-  'launchagent-path', 'gateway-running', 'plugin-installed', 'daemon-running',
+  'launchagent-path', 'gateway-running', 'plugin-installed', 'plugin-spawn-handler', 'daemon-running',
   'web-dns-compat',
   'channel-compatibility',
   'channel-bindings', 'config-permissions', 'npm-prefix-writable',

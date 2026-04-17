@@ -1,6 +1,10 @@
 # Changelog
 
-## [0.3.6] - 2026-04-17
+## [0.3.6] - 2026-04-18
+
+### Fixed — Gateway crash prevention (auto-patch)
+- **Plugin spawn error handler auto-fix**: Doctor now detects and automatically patches the `openclaw-memory` plugin when it lacks error handlers on spawn calls. Without this fix, `spawn("npx", ...)` throws uncaught ENOENT on Windows scheduled tasks (where PATH doesn't include npx), crashing the entire Gateway with "OpenClaw could not start the local helper runtime". The auto-fix adds `child.on("error", () => {});` before `child.unref();` — Gateway stays stable even if the daemon spawn fails.
+- **New Doctor check `plugin-spawn-handler`**: runs after `plugin-installed`, checks for vulnerable `child.unref()` without preceding error handler, auto-fixable via Settings → Health → Fix All.
 
 ### Fixed — memory daemon restart loop
 - **Daemon watchdog no longer crashes into EADDRINUSE forever**: if `/healthz` fails but port 37800 is still held by a dead daemon (the socket outlives the crashed process), the watchdog now runs `lsof -ti :37800` / `netstat -ano` first, kills orphans, then respawns. After repeated failures (corrupt npx cache, etc.) it backs off exponentially (60 s → 30 min cap) instead of burning CPU.

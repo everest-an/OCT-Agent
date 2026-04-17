@@ -200,7 +200,7 @@ describe('installWorkspaceInjectHook', () => {
     writeOpenClawJson(home, { meta: { version: '1' } });
     installWorkspaceInjectHook(home);
     const backups = fs.readdirSync(path.join(home, '.openclaw'))
-      .filter((f) => f.startsWith('openclaw.json.bak.hook-'));
+      .filter((f) => f.startsWith('openclaw.json.desktop-bak') || f.startsWith('openclaw.json.bak.hook-'));
     expect(backups.length).toBeGreaterThan(0);
   });
 });

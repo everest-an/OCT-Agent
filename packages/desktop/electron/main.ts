@@ -63,6 +63,7 @@ import {
   applyDesktopAwarenessPluginConfig,
   DESKTOP_LEGACY_BROWSER_WEB_MIGRATION_ID,
   forceEnableDesktopBrowserAndWebCapabilities,
+  hasAwarenessPluginInstalled,
   mergeDesktopOpenClawConfig,
   needsDesktopLegacyBrowserWebMigration,
   persistDesktopAwarenessPluginConfig,
@@ -72,7 +73,7 @@ import {
   stripLegacyWindowsOpenClawRiskyConfig,
   stripRedactedValues,
 } from './desktop-openclaw-config';
-import { readJsonFileWithBom } from './json-file';
+import { readJsonFileWithBom, restoreConfigFromBackupIfNeeded, safeWriteJsonFile } from './json-file';
 
 const DESKTOP_LEGACY_HOST_EXEC_MIGRATION_ID = 'desktop-legacy-host-exec-defaults-2026-04-04';
 
@@ -313,11 +314,18 @@ function repairOpenClawConfigFile() {
         bind: current.gateway?.bind || 'loopback',
         port: Number(current.gateway?.port) || 18789,
       };
-      fs.writeFileSync(configPath, JSON.stringify(current, null, 2));
+      safeWriteJsonFile(configPath, current, { skipSizeCheck: true });
       return;
     }
 
     sanitizeAwarenessPluginConfig(current);
+
+    // If awareness-memory plugin is installed but config entry is missing or
+    // disabled (e.g. after OpenClaw upgrade, config migration, or safe-mode
+    // strip), re-apply it so memory doesn't silently break.
+    if (hasAwarenessPluginInstalled(HOME) && !current.plugins?.entries?.['openclaw-memory']?.enabled) {
+      applyAwarenessPluginConfig(current, { enableSlot: true });
+    }
 
     // Ensure multi-agent collaboration is enabled by default.
     // Users should not need to manually enable this from the Workflow page.
@@ -349,7 +357,7 @@ function repairOpenClawConfigFile() {
       }
     }
 
-    fs.writeFileSync(configPath, JSON.stringify(current, null, 2));
+    safeWriteJsonFile(configPath, current);
 
     if (shouldMarkLegacyMigration) {
       nextRuntimePreferences = markRuntimeMigrationCompleted(
@@ -894,11 +902,24 @@ async function startGatewayInUserSession(send?: (ch: string, data: any) => void)
 
   // Wait up to 90 seconds for Gateway to become ready (plugin loading takes 30-60s on Windows).
   // Use fast HTTP probe instead of CLI snapshot to avoid double plugin-load delay.
+  let consecutivePortClosed = 0;
   for (let i = 0; i < 45; i++) {
     await sleep(2000);
     send?.('chat:status', { type: 'gateway', message: `Waiting for Gateway to load plugins... (${i * 2}s)` });
     // Fast pre-filter: skip HTTP probe when port isn't listening yet (~10ms check)
-    if (!(await tcpProbeGatewayPort())) continue;
+    if (!(await tcpProbeGatewayPort())) {
+      consecutivePortClosed++;
+      // If port has been closed for 20+ seconds after we spawned, the process
+      // likely crashed during plugin loading.  Bail early instead of waiting
+      // the full 90 s, so the caller can attempt a different recovery strategy.
+      if (consecutivePortClosed >= 10 && !launchRecently) {
+        console.warn('[gateway] Port closed for 20s after spawn — Gateway likely crashed during plugin load');
+        send?.('chat:status', { type: 'gateway', message: 'Gateway process exited unexpectedly, retrying...' });
+        break;
+      }
+      continue;
+    }
+    consecutivePortClosed = 0;
     // HTTP probe: Gateway returns 200 on / once HTTP server is ready
     if (await httpProbeGateway()) {
       // Double-check after brief delay to ensure it's stable
@@ -1122,7 +1143,24 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
     if (await httpProbe()) return { ok: true };
 
     emit('Starting Gateway in your Windows session...');
-    const fallback = await startGatewayInUserSession(send);
+    let fallback = await startGatewayInUserSession(send);
+    if (!fallback.ok) {
+      // First attempt may fail if OpenClaw crashed during plugin load (e.g.
+      // awareness-memory plugin error, AJV stack overflow).  Wait briefly for
+      // the crashed process to fully exit, then retry once.  This handles the
+      // common "Gateway starts loading → plugin exception → process exits
+      // before port is bound" scenario that leaves the user stuck.
+      console.warn('[gateway] First user-session attempt failed, retrying after cleanup...');
+      try {
+        const killed = await killZombieGatewayProcesses();
+        if (killed.length > 0) {
+          console.log(`[gateway] Cleaned up ${killed.length} orphan(s) before retry`);
+        }
+      } catch { /* best-effort */ }
+      await sleep(3000);
+      emit('Retrying Gateway startup...');
+      fallback = await startGatewayInUserSession(send);
+    }
     if (fallback.ok) {
       // Gateway is running — but if the scheduled task is missing, the user
       // won't have a gateway after reboot (they'd need to open the app every
@@ -2406,6 +2444,28 @@ app.whenReady().then(async () => {
       if (result && result.ok && mainWindow?.webContents) {
         mainWindow.webContents.send('gateway:status-update', { running: true });
       }
+
+      // CONFIG GUARDIAN: After Gateway starts, OpenClaw may overwrite openclaw.json
+      // and strip desktop-specific fields (awareness-memory plugin, multi-agent,
+      // tool permissions, etc.).  Wait a few seconds for the dust to settle, then
+      // check if the config shrunk and re-apply desktop defaults if needed.
+      if (result && result.ok) {
+        setTimeout(() => {
+          try {
+            const guardConfigPath = path.join(HOME, '.openclaw', 'openclaw.json');
+            const restored = restoreConfigFromBackupIfNeeded(guardConfigPath);
+            if (restored) {
+              console.log('[config-guard] Config restored after Gateway startup — re-applying desktop defaults');
+            }
+            // Always re-apply desktop defaults after Gateway startup,
+            // because OpenClaw may have normalized away our additions.
+            repairOpenClawConfigFile();
+          } catch (err: any) {
+            console.warn('[config-guard] Post-gateway config repair failed (non-fatal):', err?.message || err);
+          }
+        }, 8000);
+      }
+
       for (let attempt = 0; attempt < 12; attempt++) {
         try {
           if (await tcpProbeGatewayPort()) {

@@ -9,6 +9,7 @@ import {
   migrateLegacyChannelConfig,
   patchGatewayCmdStackSize,
 } from '../openclaw-config';
+import { safeWriteJsonFile } from '../json-file';
 import {
   isIgnorablePluginInstallError,
   resolveChannelPluginInstallSpec,
@@ -114,7 +115,7 @@ export function registerChannelSetupHandlers(deps: {
           if (!isPlainRecord(cfg.plugins.entries)) cfg.plugins.entries = {};
           if (!isPlainRecord(cfg.plugins.entries['openclaw-weixin'])) cfg.plugins.entries['openclaw-weixin'] = {};
           cfg.plugins.entries['openclaw-weixin'].allowUnsigned = true;
-          fs.writeFileSync(OPENCLAW_CONFIG_PATH, JSON.stringify(cfg, null, 2));
+          safeWriteJsonFile(OPENCLAW_CONFIG_PATH, cfg);
         }
       } catch { /* non-fatal — install itself succeeded */ }
 

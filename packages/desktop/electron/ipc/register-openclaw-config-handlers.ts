@@ -8,6 +8,7 @@ import {
   type ExecApprovalAsk,
   type ExecApprovalSecurity,
 } from '../openclaw-config';
+import { safeWriteJsonFile, readJsonFileWithBom } from '../json-file';
 import { parseJsonShellOutput } from '../openclaw-shell-output';
 
 // In-process schema cache — keyed by openclaw version string so an upgrade auto-invalidates.
@@ -26,7 +27,7 @@ function getConfigPath(home: string) {
 function readConfig(home: string) {
   const configPath = getConfigPath(home);
   try {
-    return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    return readJsonFileWithBom(configPath);
   } catch {
     return {};
   }
@@ -34,8 +35,7 @@ function readConfig(home: string) {
 
 function writeConfig(home: string, config: Record<string, any>) {
   const configPath = getConfigPath(home);
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  safeWriteJsonFile(configPath, config);
 }
 
 function getByPath(value: any, dotPath?: string) {

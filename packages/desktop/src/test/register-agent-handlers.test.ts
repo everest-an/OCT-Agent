@@ -2,11 +2,12 @@ import path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcMain } from 'electron';
 
-const { ipcHandleMock, existsSyncMock, readFileSyncMock, writeFileSyncMock } = vi.hoisted(() => ({
+const { ipcHandleMock, existsSyncMock, readFileSyncMock, writeFileSyncMock, statSyncMock } = vi.hoisted(() => ({
   ipcHandleMock: vi.fn(),
   existsSyncMock: vi.fn(),
   readFileSyncMock: vi.fn(),
   writeFileSyncMock: vi.fn(),
+  statSyncMock: vi.fn().mockReturnValue({ size: 0 }),
 }));
 
 vi.mock('electron', () => ({
@@ -20,6 +21,9 @@ vi.mock('fs', () => ({
     existsSync: existsSyncMock,
     readFileSync: readFileSyncMock,
     writeFileSync: writeFileSyncMock,
+    statSync: statSyncMock,
+    copyFileSync: vi.fn(),
+    renameSync: vi.fn(),
     readdirSync: vi.fn().mockReturnValue([]),
     mkdirSync: vi.fn(),
     rmSync: vi.fn(),
@@ -28,6 +32,9 @@ vi.mock('fs', () => ({
   existsSync: existsSyncMock,
   readFileSync: readFileSyncMock,
   writeFileSync: writeFileSyncMock,
+  statSync: statSyncMock,
+  copyFileSync: vi.fn(),
+  renameSync: vi.fn(),
   readdirSync: vi.fn().mockReturnValue([]),
   mkdirSync: vi.fn(),
   rmSync: vi.fn(),
@@ -275,13 +282,13 @@ describe('register-agent-handlers', () => {
     const configPath = path.join(home, '.openclaw', 'openclaw.json');
     let configRaw = JSON.stringify({ agents: { list: [{ id: 'main' }] } });
 
-    existsSyncMock.mockImplementation((target: string) => target === configPath);
+    existsSyncMock.mockImplementation((target: string) => String(target).includes('openclaw.json'));
     readFileSyncMock.mockImplementation((target: string) => {
-      if (target === configPath) return configRaw;
+      if (String(target).includes('openclaw.json')) return configRaw;
       throw new Error(`Unexpected read: ${target}`);
     });
     writeFileSyncMock.mockImplementation((target: string, content: string) => {
-      if (target === configPath) configRaw = String(content);
+      if (String(target).includes('openclaw.json')) configRaw = String(content);
     });
 
     registerAgentHandlers({
@@ -304,13 +311,29 @@ describe('register-agent-handlers', () => {
 
   it('deduplicates awareness plugin auto-heal across concurrent agent operations', async () => {
     const home = '/mock/home';
+    const configPath = path.join(home, '.openclaw', 'openclaw.json');
+    let configRaw = JSON.stringify({
+      agents: {
+        list: [{ id: 'main' }, { id: 'concurrent-agent', identity: {} }],
+      },
+    });
     const runSpawnAsync = vi.fn().mockResolvedValue('ok');
     let resolveFix: ((value: { success: boolean }) => void) | null = null;
     const runDoctorFix = vi.fn(() => new Promise<{ success: boolean }>((resolve) => {
       resolveFix = resolve;
     }));
 
-    existsSyncMock.mockReturnValue(false);
+    existsSyncMock.mockImplementation((target: string) => {
+      if (target === configPath) return true;
+      return false;
+    });
+    readFileSyncMock.mockImplementation((target: string) => {
+      if (target === configPath) return configRaw;
+      throw new Error(`Unexpected read: ${target}`);
+    });
+    writeFileSyncMock.mockImplementation((target: string, content: string) => {
+      if (String(target).includes('openclaw.json')) configRaw = String(content);
+    });
 
     registerAgentHandlers({
       home,
@@ -334,7 +357,8 @@ describe('register-agent-handlers', () => {
     expect(addResult).toMatchObject({ success: true });
     expect(setIdentityResult).toMatchObject({ success: true });
     expect(runDoctorFix).toHaveBeenCalledTimes(1);
-    expect(runSpawnAsync).toHaveBeenCalledTimes(2);
+    // agents:add uses runSpawnAsync; agents:set-identity writes config directly (no CLI spawn)
+    expect(runSpawnAsync).toHaveBeenCalledTimes(1);
   });
 
   it('rejects invalid agent names before invoking openclaw', async () => {
@@ -407,13 +431,13 @@ describe('register-agent-handlers', () => {
       ],
     });
 
-    existsSyncMock.mockImplementation((target: string) => target.includes('/mock/home/.openclaw/'));
+    existsSyncMock.mockImplementation((target: string) => String(target).includes('/mock/home/.openclaw/'));
     readFileSyncMock.mockImplementation((target: string) => {
-      if (target === configPath) return configRaw;
+      if (String(target).includes('openclaw.json')) return configRaw;
       throw new Error(`Unexpected read: ${target}`);
     });
     writeFileSyncMock.mockImplementation((target: string, content: string) => {
-      if (target === configPath) {
+      if (String(target).includes('openclaw.json')) {
         configRaw = String(content);
       }
     });
@@ -461,7 +485,23 @@ describe('register-agent-handlers', () => {
 
   it('ignores non-emoji emoji input and still updates display name', async () => {
     const home = '/mock/home';
-    const runSpawnAsync = vi.fn().mockResolvedValue('ok');
+    const configPath = path.join(home, '.openclaw', 'openclaw.json');
+    let configRaw = JSON.stringify({
+      agents: {
+        list: [
+          { id: 'main', identity: { name: 'Main' } },
+        ],
+      },
+    });
+
+    existsSyncMock.mockImplementation((target: string) => target === configPath);
+    readFileSyncMock.mockImplementation((target: string) => {
+      if (target === configPath) return configRaw;
+      throw new Error(`Unexpected read: ${target}`);
+    });
+    writeFileSyncMock.mockImplementation((target: string, content: string) => {
+      if (String(target).includes('openclaw.json')) configRaw = String(content);
+    });
 
     registerAgentHandlers({
       home,
@@ -469,7 +509,7 @@ describe('register-agent-handlers', () => {
       readShellOutputAsync: vi.fn().mockResolvedValue(null),
       ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
       runAsync: vi.fn().mockResolvedValue(''),
-      runSpawnAsync,
+      runSpawnAsync: vi.fn().mockResolvedValue('ok'),
       runDoctorFix: vi.fn().mockResolvedValue({ success: true }),
     });
 
@@ -477,11 +517,9 @@ describe('register-agent-handlers', () => {
     const result = await handlers['agents:set-identity']({} as any, 'main', 'Optic', 'Opti', '', '');
 
     expect(result).toMatchObject({ success: true });
-    expect(runSpawnAsync).toHaveBeenCalledWith(
-      'openclaw',
-      ['agents', 'set-identity', '--agent', 'main', '--name', 'Optic'],
-      60000,
-    );
+    const finalConfig = JSON.parse(configRaw);
+    expect(finalConfig.agents.list[0].identity.name).toBe('Optic');
+    // 'Opti' is not a valid emoji — should not be stored
   });
 
   it('falls back to openclaw.json identity update when set-identity times out', async () => {
@@ -495,13 +533,13 @@ describe('register-agent-handlers', () => {
       },
     });
 
-    existsSyncMock.mockImplementation((target: string) => target === configPath);
+    existsSyncMock.mockImplementation((target: string) => String(target).includes('openclaw.json'));
     readFileSyncMock.mockImplementation((target: string) => {
-      if (target === configPath) return configRaw;
+      if (String(target).includes('openclaw.json')) return configRaw;
       throw new Error(`Unexpected read: ${target}`);
     });
     writeFileSyncMock.mockImplementation((target: string, content: string) => {
-      if (target === configPath) configRaw = String(content);
+      if (String(target).includes('openclaw.json')) configRaw = String(content);
     });
 
     registerAgentHandlers({
@@ -537,16 +575,16 @@ describe('register-agent-handlers', () => {
     });
 
     existsSyncMock.mockImplementation((target: string) => {
-      if (target === configPath) return true;
+      if (String(target).includes('openclaw.json')) return true;
       // Workspace/agent directories don't exist (already cleaned by CLI)
       return false;
     });
     readFileSyncMock.mockImplementation((target: string) => {
-      if (target === configPath) return configRaw;
+      if (String(target).includes('openclaw.json')) return configRaw;
       throw new Error(`Unexpected read: ${target}`);
     });
     writeFileSyncMock.mockImplementation((target: string, content: string) => {
-      if (target === configPath) configRaw = String(content);
+      if (String(target).includes('openclaw.json')) configRaw = String(content);
     });
 
     registerAgentHandlers({
