@@ -17,7 +17,7 @@ import {
   ensureChannelRuntimeDeps,
 } from './channel-plugin-spec';
 import { clearChannelStatusCache } from './register-channel-list-handlers';
-import { acquireChannelLoginLock, dedupedChannelsList, killStaleChannelLogins } from '../openclaw-process-guard';
+import { acquireChannelLoginLock, clearChannelsListCache, dedupedChannelsList, killStaleChannelLogins } from '../openclaw-process-guard';
 import { ensureDefaultChannelBinding } from '../bindings-manager';
 
 export function registerChannelSetupHandlers(deps: {
@@ -520,6 +520,7 @@ export function registerChannelSetupHandlers(deps: {
 
     for (let index = 0; index < attempts.length; index += 1) {
       sendStatus(`channels.status.confirming::${label}`);
+      clearChannelsListCache();
       const output = await dedupedChannelsList(deps.readShellOutputAsync, attempts[index]);
       if (isChannelLinked(output, openclawId)) {
         return true;
