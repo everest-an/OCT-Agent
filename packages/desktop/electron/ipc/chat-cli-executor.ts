@@ -133,7 +133,7 @@ export async function chatSendViaCli(
       : (() => {
           const enhancedPath = deps.getEnhancedPath();
           return process.platform === 'win32'
-            ? spawnChatProcess(deps.wrapWindowsCommand(commandWithMode), [], { cwd, shell: 'cmd.exe', env: { ...process.env, PATH: enhancedPath, NO_COLOR: '1', FORCE_COLOR: '0' } })
+            ? spawnChatProcess(deps.wrapWindowsCommand(commandWithMode), [], { cwd, shell: 'cmd.exe', windowsHide: true, env: { ...process.env, PATH: enhancedPath, NO_COLOR: '1', FORCE_COLOR: '0' } })
             : spawnChatProcess('/bin/bash', ['--norc', '--noprofile', '-c', `export PATH="${enhancedPath}"; ${commandWithMode}`], { cwd, env: { ...process.env, PATH: enhancedPath } });
         })();
 

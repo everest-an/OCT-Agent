@@ -56,12 +56,31 @@ function makeDedup<T>() {
 // ---------- channels list dedup ----------
 
 const channelsListDedup = makeDedup<string | null>();
+const CHANNELS_LIST_CACHE_TTL_MS = 10_000;
+let channelsListCachedAt = 0;
+let channelsListCachedOutput: string | null = null;
+
+export function clearChannelsListCache() {
+  channelsListCachedAt = 0;
+  channelsListCachedOutput = null;
+}
 
 export function dedupedChannelsList(
   reader: (cmd: string, timeoutMs: number) => Promise<string | null>,
   timeoutMs = 20000,
 ): Promise<string | null> {
-  return channelsListDedup(() => reader('openclaw channels list 2>&1', timeoutMs));
+  const cacheFresh = channelsListCachedOutput !== null
+    && (Date.now() - channelsListCachedAt) < CHANNELS_LIST_CACHE_TTL_MS;
+  if (cacheFresh) return Promise.resolve(channelsListCachedOutput);
+
+  return channelsListDedup(async () => {
+    const output = await reader('openclaw channels list 2>&1', timeoutMs);
+    if (output !== null) {
+      channelsListCachedOutput = output;
+      channelsListCachedAt = Date.now();
+    }
+    return output;
+  });
 }
 
 // ---------- channels add --help dedup ----------

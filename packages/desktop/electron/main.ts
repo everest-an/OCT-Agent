@@ -64,14 +64,17 @@ import {
   applyDesktopAwarenessPluginConfig,
   DESKTOP_LEGACY_BROWSER_WEB_MIGRATION_ID,
   forceEnableDesktopBrowserAndWebCapabilities,
+  hasAwarenessPluginInstalled,
   mergeDesktopOpenClawConfig,
   needsDesktopLegacyBrowserWebMigration,
   persistDesktopAwarenessPluginConfig,
   redactSensitiveValues,
   sanitizeDesktopAwarenessPluginConfig,
+  shouldUseLegacyWindowsOpenClawSafeMode,
+  stripLegacyWindowsOpenClawRiskyConfig,
   stripRedactedValues,
 } from './desktop-openclaw-config';
-import { readJsonFileWithBom } from './json-file';
+import { readJsonFileWithBom, restoreConfigFromBackupIfNeeded, safeWriteJsonFile } from './json-file';
 
 const DESKTOP_LEGACY_HOST_EXEC_MIGRATION_ID = 'desktop-legacy-host-exec-defaults-2026-04-04';
 
@@ -86,6 +89,7 @@ let gatewayRepairPromise: Promise<{ ok: boolean; error?: string }> | null = null
 let gatewayUserSessionLastLaunchAt = 0;
 let openclawInstallInProgress = false;
 let upgradeInProgress = false;
+let legacyWindowsOpenClawSafeMode = false;
 
 const GATEWAY_USER_SESSION_RELAUNCH_COOLDOWN_MS = 15000;
 const DAEMON_FOREGROUND_BOOTSTRAP_TIMEOUT_MS = 240000;
@@ -221,10 +225,16 @@ function sleep(ms: number) {
 
 const applyAwarenessPluginConfig = (config: Record<string, any>, options?: { enableSlot?: boolean }) => {
   applyDesktopAwarenessPluginConfig(config, options);
+  if (legacyWindowsOpenClawSafeMode) {
+    stripLegacyWindowsOpenClawRiskyConfig(config);
+  }
 };
 
 const sanitizeAwarenessPluginConfig = (config: Record<string, any>) => {
   sanitizeDesktopAwarenessPluginConfig(config, HOME);
+  if (legacyWindowsOpenClawSafeMode) {
+    stripLegacyWindowsOpenClawRiskyConfig(config);
+  }
 };
 
 const persistAwarenessPluginConfig = (options?: { enableSlot?: boolean }) => {
@@ -232,7 +242,11 @@ const persistAwarenessPluginConfig = (options?: { enableSlot?: boolean }) => {
 };
 
 const mergeOpenClawConfig = (existing: Record<string, any>, incoming: Record<string, any>) => {
-  return mergeDesktopOpenClawConfig(existing, incoming, HOME);
+  const merged = mergeDesktopOpenClawConfig(existing, incoming, HOME);
+  if (legacyWindowsOpenClawSafeMode) {
+    stripLegacyWindowsOpenClawRiskyConfig(merged);
+  }
+  return merged;
 };
 
 function computeSha256(filePath: string) {
@@ -293,7 +307,26 @@ function repairOpenClawConfigFile() {
       writeDesktopExecApprovalDefaults(HOME);
     }
 
+    if (legacyWindowsOpenClawSafeMode) {
+      stripLegacyWindowsOpenClawRiskyConfig(current);
+      current.gateway = {
+        ...(current.gateway || {}),
+        mode: current.gateway?.mode || 'local',
+        bind: current.gateway?.bind || 'loopback',
+        port: Number(current.gateway?.port) || 18789,
+      };
+      safeWriteJsonFile(configPath, current, { skipSizeCheck: true });
+      return;
+    }
+
     sanitizeAwarenessPluginConfig(current);
+
+    // If awareness-memory plugin is installed but config entry is missing or
+    // disabled (e.g. after OpenClaw upgrade, config migration, or safe-mode
+    // strip), re-apply it so memory doesn't silently break.
+    if (hasAwarenessPluginInstalled(HOME) && !current.plugins?.entries?.['openclaw-memory']?.enabled) {
+      applyAwarenessPluginConfig(current, { enableSlot: true });
+    }
 
     // Ensure multi-agent collaboration is enabled by default.
     // Users should not need to manually enable this from the Workflow page.
@@ -325,7 +358,7 @@ function repairOpenClawConfigFile() {
       }
     }
 
-    fs.writeFileSync(configPath, JSON.stringify(current, null, 2));
+    safeWriteJsonFile(configPath, current);
 
     if (shouldMarkLegacyMigration) {
       nextRuntimePreferences = markRuntimeMigrationCompleted(
@@ -563,13 +596,13 @@ async function getRunningGatewayVersion(): Promise<string | null> {
     // but `pgrep -lf` surfaces OPENCLAW_SERVICE_VERSION from the service
     // process name line for free. Try pgrep first, fall back to ps eww for
     // Linux / non-LaunchAgent cases.
-    const pgrepOut = await readShellOutputAsync('pgrep -lf "openclaw" 2>/dev/null || true', 5000);
+    const pgrepOut = (await readShellOutputAsync('pgrep -lf "openclaw" 2>/dev/null || true', 5000)) || '';
     for (const line of pgrepOut.split(/\r?\n/)) {
       if (!line.startsWith(`${pid} `)) continue;
       const m = line.match(/OPENCLAW_SERVICE_VERSION=(\d+\.\d+\.\d+)/);
       if (m) return m[1];
     }
-    const psOut = await readShellOutputAsync(`ps eww -p ${pid} 2>/dev/null || true`, 5000);
+    const psOut = (await readShellOutputAsync(`ps eww -p ${pid} 2>/dev/null || true`, 5000)) || '';
     const m2 = psOut.match(/OPENCLAW_SERVICE_VERSION=(\d+\.\d+\.\d+)/);
     return m2 ? m2[1] : null;
   } catch {
@@ -647,6 +680,23 @@ async function maybeRepairGatewayVersionMismatch(
   } catch (err: any) {
     console.warn('[gateway] Version mismatch repair failed:', err?.message || err);
     return { repaired: false, cliVersion, gatewayVersion };
+  }
+}
+
+async function refreshLegacyWindowsOpenClawSafeMode(): Promise<void> {
+  if (process.platform !== 'win32') {
+    legacyWindowsOpenClawSafeMode = false;
+    return;
+  }
+  try {
+    const versionRaw = await safeShellExecAsync('openclaw --version', 8000);
+    const version = extractSemver(versionRaw);
+    legacyWindowsOpenClawSafeMode = shouldUseLegacyWindowsOpenClawSafeMode(process.platform, version);
+    if (legacyWindowsOpenClawSafeMode) {
+      console.warn('[compat] Enabled Windows OpenClaw 2026.4.10 safe mode: skipping startup hook/heal/browser-web mutations');
+    }
+  } catch {
+    legacyWindowsOpenClawSafeMode = false;
   }
 }
 
@@ -839,23 +889,49 @@ async function startGatewayInUserSession(send?: (ch: string, data: any) => void)
     return { ok: false, error: err?.message || 'Could not launch the temporary Gateway process.' };
   }
 
-  for (let i = 0; i < 20; i++) {
-    await sleep(1000);
-    // Fast pre-filter: skip the expensive CLI snapshot (15s plugin load) when
-    // the port is clearly not listening yet.  tcpProbeGatewayPort is ~10ms.
-    if (!(await tcpProbeGatewayPort())) continue;
-    const snapshot = await readGatewayStatusSnapshot();
-    if (isGatewaySnapshotHealthy(snapshot)) {
-      await sleep(1200);
-      const confirmedSnapshot = await readGatewayStatusSnapshot();
-      if (!isGatewaySnapshotHealthy(confirmedSnapshot)) {
-        continue;
+  // Fast HTTP probe for Gateway readiness — avoids the 15-30s CLI plugin load penalty.
+  // Gateway serves / with 200 once HTTP server is up and ready for WebSocket connections.
+  const httpProbeGateway = (): Promise<boolean> => new Promise((resolve) => {
+    const port = getGatewayPort();
+    const req = http.get(`http://127.0.0.1:${port}/`, { timeout: 2000 }, (res) => {
+      res.resume();
+      resolve(res.statusCode === 200);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+  });
+
+  // Wait up to 90 seconds for Gateway to become ready (plugin loading takes 30-60s on Windows).
+  // Use fast HTTP probe instead of CLI snapshot to avoid double plugin-load delay.
+  let consecutivePortClosed = 0;
+  for (let i = 0; i < 45; i++) {
+    await sleep(2000);
+    send?.('chat:status', { type: 'gateway', message: `Waiting for Gateway to load plugins... (${i * 2}s)` });
+    // Fast pre-filter: skip HTTP probe when port isn't listening yet (~10ms check)
+    if (!(await tcpProbeGatewayPort())) {
+      consecutivePortClosed++;
+      // If port has been closed for 20+ seconds after we spawned, the process
+      // likely crashed during plugin loading.  Bail early instead of waiting
+      // the full 90 s, so the caller can attempt a different recovery strategy.
+      if (consecutivePortClosed >= 10 && !launchRecently) {
+        console.warn('[gateway] Port closed for 20s after spawn — Gateway likely crashed during plugin load');
+        send?.('chat:status', { type: 'gateway', message: 'Gateway process exited unexpectedly, retrying...' });
+        break;
       }
-      if (process.platform === 'win32') {
-        writeRuntimePreferences({ ...readRuntimePreferences(), preferUserSessionGateway: true, gatewayHasStackSize: true });
+      continue;
+    }
+    consecutivePortClosed = 0;
+    // HTTP probe: Gateway returns 200 on / once HTTP server is ready
+    if (await httpProbeGateway()) {
+      // Double-check after brief delay to ensure it's stable
+      await sleep(1500);
+      if (await httpProbeGateway()) {
+        if (process.platform === 'win32') {
+          writeRuntimePreferences({ ...readRuntimePreferences(), preferUserSessionGateway: true, gatewayHasStackSize: true });
+        }
+        send?.('chat:status', { type: 'gateway', message: 'Gateway started in app session' });
+        return { ok: true };
       }
-      send?.('chat:status', { type: 'gateway', message: 'Gateway started in app session' });
-      return { ok: true };
     }
   }
 
@@ -867,6 +943,89 @@ async function startGatewayInUserSession(send?: (ch: string, data: any) => void)
     ok: false,
     error: 'AwarenessClaw could not start the local Gateway automatically. Please check Settings → Gateway and try again.',
   };
+}
+
+/**
+ * Detect and repair missing OpenClaw node host service on Windows.
+ *
+ * When `openclaw node status` returns `Runtime: unknown`, it means the node
+ * host runtime binary is missing. This can happen when:
+ * 1. OpenClaw was freshly installed but `openclaw node install` was never run
+ * 2. The scheduled task was deleted or corrupted
+ *
+ * The node host is required for certain local execution features. Without it,
+ * some OpenClaw operations may fail with "local helper runtime" errors.
+ *
+ * This function attempts to auto-repair by running `openclaw node install`,
+ * which requires administrator privileges on Windows (creates a scheduled task).
+ * If that fails, we try starting a foreground node host process.
+ */
+async function ensureNodeHostReady(send?: (ch: string, data: any) => void): Promise<{ ok: boolean; repaired: boolean }> {
+  // Only check on Windows where this issue is most common
+  if (process.platform !== 'win32') {
+    return { ok: true, repaired: false };
+  }
+
+  try {
+    const statusOutput = await readShellOutputAsync('openclaw node status 2>&1', 20000);
+
+    // Check if Runtime is unknown (indicates missing runtime binary)
+    if (!statusOutput || !statusOutput.includes('Runtime: unknown')) {
+      // Runtime is known (working) or status check failed for other reasons
+      return { ok: true, repaired: false };
+    }
+
+    console.warn('[node-host] Detected Runtime: unknown — attempting auto-repair');
+    send?.('chat:status', { type: 'gateway', message: 'Installing local helper runtime...' });
+
+    // Try to install the node host service (requires admin on Windows)
+    try {
+      await runAsync('openclaw node install 2>&1', 45000);
+      console.log('[node-host] Node host service installed successfully');
+
+      // Start the service after install
+      try {
+        await runAsync('schtasks /Run /TN "OpenClaw Node" 2>&1', 15000);
+        console.log('[node-host] Node host service started');
+      } catch (startErr: any) {
+        console.warn('[node-host] Could not start scheduled task:', startErr?.message);
+      }
+
+      return { ok: true, repaired: true };
+    } catch (installErr: any) {
+      const errMsg = installErr?.message || '';
+      console.warn('[node-host] Node host install failed:', errMsg);
+
+      // If permission was denied, try running in foreground mode
+      if (/access|denied|permission|administrator|拒绝/i.test(errMsg)) {
+        send?.('chat:status', { type: 'gateway', message: 'Starting helper runtime in app session...' });
+
+        try {
+          // Start node host in background (fire-and-forget)
+          const child = runSpawn('openclaw', ['node', 'run'], {
+            cwd: HOME,
+            detached: true,
+            windowsHide: true,
+            stdio: 'ignore',
+          });
+          child.unref();
+          console.log('[node-host] Started node host in foreground mode');
+
+          // Wait briefly for it to initialize
+          await sleep(5000);
+          return { ok: true, repaired: true };
+        } catch (fgErr: any) {
+          console.warn('[node-host] Foreground node host also failed:', fgErr?.message);
+        }
+      }
+
+      // Install failed, but don't block Gateway startup
+      return { ok: false, repaired: false };
+    }
+  } catch (err: any) {
+    console.warn('[node-host] Status check failed:', err?.message);
+    return { ok: true, repaired: false }; // Don't block on status check failure
+  }
 }
 
 async function startGatewayWithRepair(send?: (ch: string, data: any) => void): Promise<{ ok: boolean; error?: string }> {
@@ -882,6 +1041,15 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
     'Local Gateway is running, but this device needs local authorization. Please open Settings → Gateway and approve local access, then retry.';
 
   repairOpenClawConfigFile();
+
+  // Windows: ensure node host is ready before Gateway startup.
+  // This fixes "local helper runtime" errors on fresh installations.
+  if (process.platform === 'win32') {
+    const nodeHostResult = await ensureNodeHostReady(send);
+    if (nodeHostResult.repaired) {
+      console.log('[gateway] Node host was repaired before Gateway startup');
+    }
+  }
 
   // Fast path: HTTP probe avoids the 15-30s CLI plugin preload when the
   // gateway is already up. OpenClaw loads all plugins on every CLI call.
@@ -922,9 +1090,23 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
     if (await httpProbe()) return { ok: true };
   }
 
-  // Slow fallback: CLI check handles non-default ports and older installs.
-  const statusOutput = await readShellOutputAsync('openclaw gateway status 2>&1', 15000);
-  if (isGatewayRunningOutput(statusOutput)) return { ok: true };
+  // WORKAROUND: OpenClaw 2026.4.14 introduced a Windows regression where
+  // `openclaw gateway status` hangs indefinitely during CLI runtime/plugin
+  // loading (GitHub issues #67114, #67035, #66885). Bypass CLI status check
+  // on Windows entirely and use extended HTTP probe retries instead.
+  let statusOutput: string | null = null;
+  if (process.platform !== 'win32') {
+    // Non-Windows: CLI check handles non-default ports and older installs.
+    statusOutput = await readShellOutputAsync('openclaw gateway status 2>&1', 15000);
+    if (isGatewayRunningOutput(statusOutput)) return { ok: true };
+  } else {
+    // Windows: extra HTTP probes to compensate for skipped CLI check.
+    // Gateway plugin loading can take 15-30s; probe every 3s up to 5 times.
+    for (let i = 0; i < 5; i++) {
+      await sleep(3000);
+      if (await httpProbe()) return { ok: true };
+    }
+  }
 
   const emit = (message: string) => send?.('chat:status', { type: 'gateway', message });
 
@@ -962,7 +1144,24 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
     if (await httpProbe()) return { ok: true };
 
     emit('Starting Gateway in your Windows session...');
-    const fallback = await startGatewayInUserSession(send);
+    let fallback = await startGatewayInUserSession(send);
+    if (!fallback.ok) {
+      // First attempt may fail if OpenClaw crashed during plugin load (e.g.
+      // awareness-memory plugin error, AJV stack overflow).  Wait briefly for
+      // the crashed process to fully exit, then retry once.  This handles the
+      // common "Gateway starts loading → plugin exception → process exits
+      // before port is bound" scenario that leaves the user stuck.
+      console.warn('[gateway] First user-session attempt failed, retrying after cleanup...');
+      try {
+        const killed = await killZombieGatewayProcesses();
+        if (killed.length > 0) {
+          console.log(`[gateway] Cleaned up ${killed.length} orphan(s) before retry`);
+        }
+      } catch { /* best-effort */ }
+      await sleep(3000);
+      emit('Retrying Gateway startup...');
+      fallback = await startGatewayInUserSession(send);
+    }
     if (fallback.ok) {
       // Gateway is running — but if the scheduled task is missing, the user
       // won't have a gateway after reboot (they'd need to open the app every
@@ -1082,12 +1281,15 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
 
   // Last-chance classification: distinguish auth-gated running Gateway from a
   // true startup failure so UI does not report a misleading "not running" state.
-  const finalStatusOutput = await readShellOutputAsync('openclaw gateway status 2>&1', 15000);
-  if (isAuthGatedGatewayStatus(finalStatusOutput)) {
-    return {
-      ok: false,
-      error: authGatedGatewayMessage,
-    };
+  // WORKAROUND: Skip CLI check on Windows due to OpenClaw 2026.4.14 regression.
+  if (process.platform !== 'win32') {
+    const finalStatusOutput = await readShellOutputAsync('openclaw gateway status 2>&1', 15000);
+    if (isAuthGatedGatewayStatus(finalStatusOutput)) {
+      return {
+        ok: false,
+        error: authGatedGatewayMessage,
+      };
+    }
   }
 
   return {
@@ -1251,35 +1453,44 @@ async function prepareGatewayForChat(): Promise<{ ok: boolean; error?: string }>
         type: 'gateway',
         message: 'Connecting to local Gateway...',
       });
-      try {
-        // getGatewayWs internally handles concurrent callers via gatewayWsConnectPromise
-        // mutex, has a 10s connect timeout, and pre-warms write scopes. Once this
-        // succeeds, gatewayWsClient.isConnected stays true for the lifetime of the
-        // process — every subsequent chat hits the fast path above with no delay.
-        await getGatewayWs();
-        if (gatewayWsClient?.isConnected) {
-          return { ok: true };
+
+      // Retry WS connection up to 3 times with 3s delays. Gateway may need time
+      // to finish plugin loading after TCP listener is up (handshake timeout).
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          // getGatewayWs internally handles concurrent callers via gatewayWsConnectPromise
+          // mutex, has a 10s connect timeout, and pre-warms write scopes. Once this
+          // succeeds, gatewayWsClient.isConnected stays true for the lifetime of the
+          // process — every subsequent chat hits the fast path above with no delay.
+          await getGatewayWs();
+          if (gatewayWsClient?.isConnected) {
+            return { ok: true };
+          }
+        } catch (err: any) {
+          const detail = err?.message || String(err || '');
+          if (isAuthGatedGatewayError(detail)) {
+            return {
+              ok: false,
+              error: 'Local Gateway requires one-time device authorization before desktop chat can use Gateway mode.',
+            };
+          }
+          // WS connect failed despite the port being open. This usually means
+          // Gateway is mid-startup and not yet accepting protocol-level connects
+          // (handshake races plugin loader — see openclaw#46256).
+          console.warn(`[chat] Gateway WS connect attempt ${attempt + 1}/3 failed:`, detail);
+          if (attempt < 2) {
+            send('chat:status', {
+              type: 'gateway',
+              message: `Gateway is loading plugins... Retrying connection (${attempt + 2}/3)`,
+            });
+            await sleep(3000);
+          }
         }
-      } catch (err: any) {
-        const detail = err?.message || String(err || '');
-        if (isAuthGatedGatewayError(detail)) {
-          return {
-            ok: false,
-            error: 'Local Gateway requires one-time device authorization before desktop chat can use Gateway mode.',
-          };
-        }
-        // WS connect failed despite the port being open. This usually means
-        // Gateway is mid-startup and not yet accepting protocol-level connects
-        // (handshake races plugin loader — see openclaw#46256). Fall through to
-        // CLI fallback so the user still gets an answer, and kick a background
-        // repair so the next message will likely hit the fast path.
-        console.warn('[chat] Gateway WS connect failed despite open port:', detail);
       }
     }
 
-    // Gateway is not reachable via TCP, or the WS handshake failed. Trigger a
-    // background repair (idempotent — no-op if one is already running) and tell
-    // the chat path to use CLI fallback for this single message.
+    // Gateway is not reachable via TCP, or all WS handshake attempts failed.
+    // Trigger a background repair and use CLI fallback for this message.
     startGatewayRepairInBackground(send);
 
     return {
@@ -2092,7 +2303,9 @@ async function autoReconnectChannelWorkers(): Promise<void> {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await refreshLegacyWindowsOpenClawSafeMode();
+
   // Deploy internal hook for awareness memory backup (idempotent, version-gated)
   ensureInternalHook(HOME);
 
@@ -2109,15 +2322,17 @@ app.whenReady().then(() => {
   // (no workspace / agentDir). This is the default agent that every channel binding
   // routes to. If main is broken, channels accept messages but never produce replies
   // because the routing target has no workspace and gets dropped from `agents list`.
-  try {
-    const heal = healMainAgentIfNeeded(HOME);
-    if (heal.status === 'healed') {
-      console.log(`[main-heal] healed main agent: added ${heal.changes?.join(', ')}`);
-    } else if (heal.status === 'error') {
-      console.warn('[main-heal] error:', heal.error);
+  if (!legacyWindowsOpenClawSafeMode) {
+    try {
+      const heal = healMainAgentIfNeeded(HOME);
+      if (heal.status === 'healed') {
+        console.log(`[main-heal] healed main agent: added ${heal.changes?.join(', ')}`);
+      } else if (heal.status === 'error') {
+        console.warn('[main-heal] error:', heal.error);
+      }
+    } catch (err) {
+      console.warn('[main-heal] unexpected error:', err);
     }
-  } catch (err) {
-    console.warn('[main-heal] unexpected error:', err);
   }
 
   // Redirect orphan bindings (user deleted an agent that was previously the inbound
@@ -2136,15 +2351,17 @@ app.whenReady().then(() => {
   // Install the workspace-injection hook so channel inbound messages get the same
   // "[Project working directory: …]" prefix the desktop chat uses. Idempotent — only
   // writes if the hook script body or config entry is missing/changed.
-  try {
-    const hookResult = installWorkspaceInjectHook(HOME);
-    if (hookResult.status === 'deployed') {
-      console.log(`[workspace-hook] deployed: ${hookResult.changes?.join(', ')}`);
-    } else if (hookResult.status === 'error') {
-      console.warn('[workspace-hook] error:', hookResult.error);
+  if (!legacyWindowsOpenClawSafeMode) {
+    try {
+      const hookResult = installWorkspaceInjectHook(HOME);
+      if (hookResult.status === 'deployed') {
+        console.log(`[workspace-hook] deployed: ${hookResult.changes?.join(', ')}`);
+      } else if (hookResult.status === 'error') {
+        console.warn('[workspace-hook] error:', hookResult.error);
+      }
+    } catch (err) {
+      console.warn('[workspace-hook] unexpected error:', err);
     }
-  } catch (err) {
-    console.warn('[workspace-hook] unexpected error:', err);
   }
 
   // Ensure config has required gateway defaults before anything tries to start
@@ -2234,6 +2451,28 @@ app.whenReady().then(() => {
       if (result && result.ok && mainWindow?.webContents) {
         mainWindow.webContents.send('gateway:status-update', { running: true });
       }
+
+      // CONFIG GUARDIAN: After Gateway starts, OpenClaw may overwrite openclaw.json
+      // and strip desktop-specific fields (awareness-memory plugin, multi-agent,
+      // tool permissions, etc.).  Wait a few seconds for the dust to settle, then
+      // check if the config shrunk and re-apply desktop defaults if needed.
+      if (result && result.ok) {
+        setTimeout(() => {
+          try {
+            const guardConfigPath = path.join(HOME, '.openclaw', 'openclaw.json');
+            const restored = restoreConfigFromBackupIfNeeded(guardConfigPath);
+            if (restored) {
+              console.log('[config-guard] Config restored after Gateway startup — re-applying desktop defaults');
+            }
+            // Always re-apply desktop defaults after Gateway startup,
+            // because OpenClaw may have normalized away our additions.
+            repairOpenClawConfigFile();
+          } catch (err: any) {
+            console.warn('[config-guard] Post-gateway config repair failed (non-fatal):', err?.message || err);
+          }
+        }, 8000);
+      }
+
       for (let attempt = 0; attempt < 12; attempt++) {
         try {
           if (await tcpProbeGatewayPort()) {

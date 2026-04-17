@@ -9,6 +9,7 @@ import {
   migrateLegacyChannelConfig,
   patchGatewayCmdStackSize,
 } from '../openclaw-config';
+import { safeWriteJsonFile } from '../json-file';
 import {
   isIgnorablePluginInstallError,
   resolveChannelPluginInstallSpec,
@@ -17,7 +18,7 @@ import {
   ensureChannelRuntimeDeps,
 } from './channel-plugin-spec';
 import { clearChannelStatusCache } from './register-channel-list-handlers';
-import { acquireChannelLoginLock, dedupedChannelsList, killStaleChannelLogins } from '../openclaw-process-guard';
+import { acquireChannelLoginLock, clearChannelsListCache, dedupedChannelsList, killStaleChannelLogins } from '../openclaw-process-guard';
 import { ensureDefaultChannelBinding } from '../bindings-manager';
 
 export function registerChannelSetupHandlers(deps: {
@@ -114,7 +115,7 @@ export function registerChannelSetupHandlers(deps: {
           if (!isPlainRecord(cfg.plugins.entries)) cfg.plugins.entries = {};
           if (!isPlainRecord(cfg.plugins.entries['openclaw-weixin'])) cfg.plugins.entries['openclaw-weixin'] = {};
           cfg.plugins.entries['openclaw-weixin'].allowUnsigned = true;
-          fs.writeFileSync(OPENCLAW_CONFIG_PATH, JSON.stringify(cfg, null, 2));
+          safeWriteJsonFile(OPENCLAW_CONFIG_PATH, cfg);
         }
       } catch { /* non-fatal — install itself succeeded */ }
 
@@ -520,6 +521,7 @@ export function registerChannelSetupHandlers(deps: {
 
     for (let index = 0; index < attempts.length; index += 1) {
       sendStatus(`channels.status.confirming::${label}`);
+      clearChannelsListCache();
       const output = await dedupedChannelsList(deps.readShellOutputAsync, attempts[index]);
       if (isChannelLinked(output, openclawId)) {
         return true;

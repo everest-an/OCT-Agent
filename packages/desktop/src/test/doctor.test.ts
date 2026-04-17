@@ -1011,3 +1011,104 @@ describe('doctor — sequential execution', () => {
     } finally { fs.rmSync(home, { recursive: true, force: true }); }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Plugin spawn handler tests — prevents Gateway crash from ENOENT
+// ---------------------------------------------------------------------------
+
+describe('doctor — plugin-spawn-handler', () => {
+  afterEach(() => { vi.restoreAllMocks(); invalidateCtxCache(); });
+
+  it('skips check when plugin is not installed', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-'));
+    try {
+      const { doctor } = createDoctorWithMocks(home);
+      const report = await doctor.runChecks(['plugin-spawn-handler']);
+      expect(report.checks[0]).toMatchObject({ id: 'plugin-spawn-handler', status: 'skipped' });
+    } finally { fs.rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('fails check when plugin has vulnerable spawn pattern (child.unref without error handler)', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-'));
+    try {
+      const pluginDir = path.join(home, '.openclaw', 'extensions', 'openclaw-memory', 'dist');
+      fs.mkdirSync(pluginDir, { recursive: true });
+      // Simulate vulnerable plugin code
+      fs.writeFileSync(path.join(pluginDir, 'index.js'), `
+        const child = spawn("npx", ["-y", "@awareness-sdk/local", "start"]);
+        child.unref();
+      `);
+
+      const { doctor } = createDoctorWithMocks(home);
+      const report = await doctor.runChecks(['plugin-spawn-handler']);
+      expect(report.checks[0]).toMatchObject({
+        id: 'plugin-spawn-handler',
+        status: 'fail',
+        fixable: 'auto',
+      });
+      expect(report.checks[0].message).toContain('missing spawn error handler');
+    } finally { fs.rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('passes check when plugin has error handler before unref', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-'));
+    try {
+      const pluginDir = path.join(home, '.openclaw', 'extensions', 'openclaw-memory', 'dist');
+      fs.mkdirSync(pluginDir, { recursive: true });
+      // Simulate fixed plugin code
+      fs.writeFileSync(path.join(pluginDir, 'index.js'), `
+        const child = spawn("npx", ["-y", "@awareness-sdk/local", "start"]);
+        child.on("error", () => {});
+        child.unref();
+      `);
+
+      const { doctor } = createDoctorWithMocks(home);
+      const report = await doctor.runChecks(['plugin-spawn-handler']);
+      expect(report.checks[0]).toMatchObject({
+        id: 'plugin-spawn-handler',
+        status: 'pass',
+      });
+    } finally { fs.rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('fixes vulnerable plugin by adding error handler', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-'));
+    try {
+      const pluginDir = path.join(home, '.openclaw', 'extensions', 'openclaw-memory', 'dist');
+      fs.mkdirSync(pluginDir, { recursive: true });
+      const pluginPath = path.join(pluginDir, 'index.js');
+      // Simulate vulnerable plugin code
+      fs.writeFileSync(pluginPath, `
+        const child = spawn("npx", ["-y", "@awareness-sdk/local", "start"]);
+        child.unref();
+      `);
+
+      const { doctor } = createDoctorWithMocks(home);
+      const result = await doctor.runFix('plugin-spawn-handler');
+      expect(result).toMatchObject({ success: true });
+
+      // Verify the fix was applied
+      const fixedContent = fs.readFileSync(pluginPath, 'utf-8');
+      expect(fixedContent).toContain('child.on("error", () => {});');
+      expect(fixedContent).toContain('child.unref();');
+    } finally { fs.rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it('reports already fixed when error handler exists', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-'));
+    try {
+      const pluginDir = path.join(home, '.openclaw', 'extensions', 'openclaw-memory', 'dist');
+      fs.mkdirSync(pluginDir, { recursive: true });
+      // Already fixed
+      fs.writeFileSync(path.join(pluginDir, 'index.js'), `
+        const child = spawn("npx", ["-y", "@awareness-sdk/local", "start"]);
+        child.on("error", () => {});
+        child.unref();
+      `);
+
+      const { doctor } = createDoctorWithMocks(home);
+      const result = await doctor.runFix('plugin-spawn-handler');
+      expect(result).toMatchObject({ success: true, message: 'Already fixed' });
+    } finally { fs.rmSync(home, { recursive: true, force: true }); }
+  });
+});

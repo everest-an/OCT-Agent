@@ -8,6 +8,7 @@ import {
 } from '../app-update-check';
 import { enableDaemonAutostart, disableDaemonAutostart, isDaemonAutostartEnabled } from '../daemon-autostart';
 import { patchGatewayCmdStackSize } from '../openclaw-config';
+import { safeWriteJsonFile } from '../json-file';
 
 const OPENCLAW_INSTALL_TIMEOUT_MS = 300000;
 
@@ -428,6 +429,17 @@ export function registerAppRuntimeHandlers(deps: {
           progress('openclaw:gateway-restart', 'skipped');
         }
 
+        // Refresh .desktop-bak so the config guardian won't revert legitimate
+        // schema changes that the new OpenClaw version introduced during upgrade.
+        // Without this, restoreConfigFromBackupIfNeeded() would see "config shrunk
+        // vs old backup" and restore the pre-upgrade config, breaking the new version.
+        try {
+          const cfgPath = path.join(deps.home, '.openclaw', 'openclaw.json');
+          if (fs.existsSync(cfgPath)) {
+            fs.copyFileSync(cfgPath, cfgPath + '.desktop-bak');
+          }
+        } catch { /* best effort */ }
+
         progress('complete', 'done');
         return { success: true, version: newSemver, previousVersion: preSemver };
       } else if (component === 'plugin') {
@@ -459,7 +471,7 @@ export function registerAppRuntimeHandlers(deps: {
                 installs['openclaw-memory'].resolvedVersion = newVer;
                 installs['openclaw-memory'].resolvedSpec = `@awareness-sdk/openclaw-memory@${newVer}`;
                 installs['openclaw-memory'].installedAt = new Date().toISOString();
-                fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+                safeWriteJsonFile(configPath, config);
               }
             }
           } catch {}

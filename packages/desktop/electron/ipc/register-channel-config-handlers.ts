@@ -9,6 +9,7 @@ import {
   migrateLegacyChannelConfig,
   patchGatewayCmdStackSize,
 } from '../openclaw-config';
+import { safeWriteJsonFile } from '../json-file';
 import {
   isIgnorablePluginInstallError,
   resolveChannelPluginInstallSpec,
@@ -414,7 +415,7 @@ function sanitizeLegacyChannelConfigInFile(home: string, openclawId?: string): b
     changed = hardenWhatsAppDmPolicy(existing) || changed;
     if (!changed) return false;
 
-    fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
+    safeWriteJsonFile(configPath, existing);
     return true;
   } catch {
     return false;
@@ -799,7 +800,7 @@ export function registerChannelConfigHandlers(deps: {
         existing.channels[safeOpenclawId] = applyStoredChannelConfig(channelDef, existing.channels[safeOpenclawId], config);
         existing.channels[safeOpenclawId].enabled = true;
         normalizeTelegramConfigInFile(existing);
-        fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
+        safeWriteJsonFile(configPath, existing);
       } else {
         const cliFlags = channelDef ? deps.buildCLIFlags(channelDef, configForCli) : '';
         const addCmd = `openclaw channels add --channel ${safeOpenclawId} ${cliFlags} 2>&1`;
@@ -840,7 +841,7 @@ export function registerChannelConfigHandlers(deps: {
           const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
           const existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
           normalizeTelegramConfigInFile(existing);
-          fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
+          safeWriteJsonFile(configPath, existing);
         } catch {}
       }
 
@@ -857,7 +858,7 @@ export function registerChannelConfigHandlers(deps: {
             if (!isPlainRecord(existing.channels[safeOpenclawId])) existing.channels[safeOpenclawId] = {};
             if (!existing.channels[safeOpenclawId].enabled) {
               existing.channels[safeOpenclawId].enabled = true;
-              fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
+              safeWriteJsonFile(configPath, existing);
             }
           }
         } catch { /* non-fatal */ }
@@ -1038,7 +1039,7 @@ export function registerChannelConfigHandlers(deps: {
         const key = existing.channels?.[openclawId] ? openclawId : channelId;
         if (existing.channels?.[key]) {
           existing.channels[key].enabled = false;
-          fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
+          safeWriteJsonFile(configPath, existing);
         }
       } catch { /* config file may not exist */ }
 
@@ -1113,7 +1114,7 @@ export function registerChannelConfigHandlers(deps: {
           changed = true;
         }
         if (changed) {
-          fs.writeFileSync(configPath, JSON.stringify(existing, null, 2));
+          safeWriteJsonFile(configPath, existing);
         }
       } catch { /* config file may not exist */ }
 

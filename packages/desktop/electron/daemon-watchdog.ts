@@ -67,6 +67,9 @@ export function createDaemonWatchdog(options: {
   let watchdogTimeout: ReturnType<typeof setTimeout> | null = null;
   let daemonEverConnected = false;
   let consecutiveFailures = 0;
+  // After this many consecutive failures, stop retrying to avoid an infinite
+  // restart loop on Windows when the daemon/runtime is terminally broken.
+  const MAX_CONSECUTIVE_FAILURES = 5;
 
   function scheduleNext(delay: number) {
     if (watchdogTimeout) return;
@@ -83,7 +86,15 @@ export function createDaemonWatchdog(options: {
         return;
       }
       consecutiveFailures++;
-      console.log(`[watchdog] daemon not responding (fail ${consecutiveFailures}), attempting restart...`);
+      if (consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
+        if (consecutiveFailures === MAX_CONSECUTIVE_FAILURES + 1) {
+          console.warn(`[watchdog] Daemon failed ${MAX_CONSECUTIVE_FAILURES} consecutive times, suspending restart attempts. Will resume if daemon recovers.`);
+        }
+        scheduleNext(MAX_INTERVAL_MS);
+        return;
+      }
+
+      console.log(`[watchdog] daemon not responding (fail ${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}), attempting restart...`);
 
       // Kill any orphan holding the daemon port before respawn.
       const orphanPids = findPidsOnPort(DAEMON_PORT);
@@ -111,7 +122,6 @@ export function createDaemonWatchdog(options: {
       }
     } catch (err) {
       console.error('[watchdog] restart attempt threw:', err);
-      consecutiveFailures++;
     }
 
     // Exponential backoff after repeated failures so a terminally broken

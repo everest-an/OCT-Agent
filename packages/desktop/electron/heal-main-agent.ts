@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 
 import { redirectOrphanBindings } from './bindings-manager';
+import { readJsonFileWithBom, safeWriteJsonFile } from './json-file';
 
 /**
  * Self-heal the OpenClaw `main` agent if it has degraded into a "skeleton" entry
@@ -62,14 +63,12 @@ export function healMainAgentIfNeeded(home: string = os.homedir()): HealMainAgen
 
   if (changes.length === 0) return { status: 'ok' };
 
-  // Persist a backup ONCE per heal so we can undo if anything goes wrong.
+  // Persist with safe write (includes backup + size-drop protection).
   try {
-    const backupPath = `${configPath}.bak.heal-${Date.now()}`;
-    fs.writeFileSync(backupPath, raw, 'utf8');
-  } catch { /* best-effort backup */ }
-
-  try {
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+    const result = safeWriteJsonFile(configPath, config);
+    if (!result.written) {
+      return { status: 'error', error: `safe write rejected: ${result.reason}` };
+    }
   } catch (err: any) {
     return { status: 'error', error: `write failed: ${err.message?.slice(0, 120)}` };
   }

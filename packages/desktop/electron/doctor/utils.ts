@@ -1,8 +1,7 @@
-// Shared utilities used across multiple doctor check files.
-
 import fs from 'fs';
 import path from 'path';
 import { normalizePluginAllow, GATEWAY_DEFAULTS, writeDesktopExecApprovalDefaults } from '../openclaw-config';
+import { safeWriteJsonFile } from '../json-file';
 
 export const OPENCLAW_INSTALL_TIMEOUT_MS = 300000;
 export const WEB_DNS_CANARY_DOMAINS = ['example.com', 'openclaw.ai'];
@@ -58,6 +57,6 @@ export function persistAwarenessPluginConfig(homedir: string) {
     if (config.plugins.allow.length === 0) delete config.plugins.allow;
   }
 
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  safeWriteJsonFile(configPath, config);
   writeDesktopExecApprovalDefaults(homedir);
 }

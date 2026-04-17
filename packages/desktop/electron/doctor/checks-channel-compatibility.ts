@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { CheckResult, FixResult, Ctx } from './types';
 import { normalizePluginAllow } from '../openclaw-config';
-import { readJsonFileWithBom } from '../json-file';
+import { readJsonFileWithBom, safeWriteJsonFile } from '../json-file';
 
 type ManualCompatibilityIssue = {
   severity: 'warn' | 'fail';
@@ -314,7 +314,7 @@ export async function fixChannelCompatibility(ctx: Ctx): Promise<FixResult> {
     delete config.plugins;
   }
 
-  fs.writeFileSync(ctx.configPath, JSON.stringify(config, null, 2), 'utf8');
+  safeWriteJsonFile(ctx.configPath, config);
 
   const repaired: string[] = [];
   if (plan.missingAllow.length > 0) repaired.push(`restored allowlist for ${plan.missingAllow.join(', ')}`);

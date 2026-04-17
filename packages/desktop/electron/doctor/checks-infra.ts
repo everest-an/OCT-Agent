@@ -186,7 +186,21 @@ export async function checkGatewayRunning(ctx: Ctx): Promise<CheckResult> {
     return { id: 'gateway-running', label: 'Gateway', status: 'pass', message: 'Running', fixable: 'none' };
   }
 
-  // Fallback: try CLI only if HTTP probe failed (Gateway may be on non-default port)
+  // WORKAROUND: OpenClaw 2026.4.14 introduced a Windows regression where
+  // `openclaw gateway status` hangs indefinitely (GitHub issues #67114, #67035).
+  // Skip CLI check on Windows and use extended HTTP probe retries instead.
+  if (ctx.deps.platform === 'win32') {
+    // Extra HTTP probes for Windows: gateway plugin loading can take 15-30s.
+    for (let i = 0; i < 4; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      if (await httpProbe()) {
+        return { id: 'gateway-running', label: 'Gateway', status: 'pass', message: 'Running', fixable: 'none' };
+      }
+    }
+    return { id: 'gateway-running', label: 'Gateway', status: 'fail', message: 'Gateway is not running', fixable: 'auto', fixDescription: 'Start the Gateway' };
+  }
+
+  // Non-Windows: try CLI only if HTTP probe failed (Gateway may be on non-default port)
   const output = await ctx.deps.shellExec('openclaw gateway status 2>&1', 15000);
   if (isGatewayRunningOutput(output)) {
     return { id: 'gateway-running', label: 'Gateway', status: 'pass', message: 'Running', fixable: 'none' };
@@ -441,4 +455,82 @@ export async function checkWebDnsCompatibility(_ctx: Ctx): Promise<CheckResult> 
     message: 'Public DNS resolution looks normal',
     fixable: 'none',
   };
+}
+
+// --- Plugin spawn error handler fix (prevents Gateway crash from ENOENT) ---
+
+/**
+ * Check if the openclaw-memory plugin has proper error handling for spawn calls.
+ * Without this, `spawn("npx", ...)` throws uncaught ENOENT on Windows scheduled tasks
+ * where PATH doesn't include npx, crashing the entire Gateway.
+ */
+export async function checkPluginSpawnHandler(ctx: Ctx): Promise<CheckResult> {
+  const pluginIndexPath = path.join(ctx.deps.homedir, '.openclaw', 'extensions', 'openclaw-memory', 'dist', 'index.js');
+  
+  if (!fs.existsSync(pluginIndexPath)) {
+    return { id: 'plugin-spawn-handler', label: 'Plugin error handler', status: 'skipped', message: 'Plugin not installed', fixable: 'none' };
+  }
+
+  try {
+    const content = fs.readFileSync(pluginIndexPath, 'utf-8');
+    
+    // Check if there's a spawn call followed by unref() without error handler
+    // The vulnerable pattern is: child.unref() without child.on("error", ...) before it
+    // The fix pattern is: child.on("error", ...); child.unref();
+    
+    // Look for the daemon auto-start spawn pattern
+    const hasVulnerablePattern = content.includes('child.unref()') && 
+                                  !content.includes('child.on("error"') &&
+                                  !content.includes("child.on('error'");
+    
+    if (hasVulnerablePattern) {
+      return {
+        id: 'plugin-spawn-handler',
+        label: 'Plugin error handler',
+        status: 'fail',
+        message: 'Plugin missing spawn error handler (can crash Gateway)',
+        fixable: 'auto',
+        fixDescription: 'Add error handler to prevent Gateway crash'
+      };
+    }
+
+    return { id: 'plugin-spawn-handler', label: 'Plugin error handler', status: 'pass', message: 'Error handler present', fixable: 'none' };
+  } catch (err: any) {
+    return { id: 'plugin-spawn-handler', label: 'Plugin error handler', status: 'warn', message: `Could not check: ${err.message?.slice(0, 100)}`, fixable: 'none' };
+  }
+}
+
+export async function fixPluginSpawnHandler(ctx: Ctx): Promise<FixResult> {
+  const pluginIndexPath = path.join(ctx.deps.homedir, '.openclaw', 'extensions', 'openclaw-memory', 'dist', 'index.js');
+  
+  if (!fs.existsSync(pluginIndexPath)) {
+    return { id: 'plugin-spawn-handler', success: false, message: 'Plugin not installed' };
+  }
+
+  try {
+    let content = fs.readFileSync(pluginIndexPath, 'utf-8');
+    
+    // Pattern 1: child.unref(); without preceding error handler
+    // Replace with: child.on("error", () => {}); child.unref();
+    const vulnerablePattern = /(\bchild\.unref\s*\(\s*\)\s*;)/g;
+    
+    // Check if already fixed
+    if (content.includes('child.on("error"') || content.includes("child.on('error'")) {
+      return { id: 'plugin-spawn-handler', success: true, message: 'Already fixed' };
+    }
+    
+    // Apply fix: add error handler before each unref()
+    const fixedContent = content.replace(vulnerablePattern, 'child.on("error", () => {}); $1');
+    
+    if (fixedContent === content) {
+      return { id: 'plugin-spawn-handler', success: false, message: 'Could not locate vulnerable pattern' };
+    }
+    
+    // Write the fixed content
+    fs.writeFileSync(pluginIndexPath, fixedContent, 'utf-8');
+    
+    return { id: 'plugin-spawn-handler', success: true, message: 'Added spawn error handler to prevent Gateway crash' };
+  } catch (err: any) {
+    return { id: 'plugin-spawn-handler', success: false, message: err.message?.slice(0, 200) || 'Failed to patch plugin' };
+  }
 }

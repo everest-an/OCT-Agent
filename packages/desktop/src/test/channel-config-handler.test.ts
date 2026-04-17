@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
+import { clearChannelsListCache } from '../../electron/openclaw-process-guard';
 
 const { handleMock } = vi.hoisted(() => ({
   handleMock: vi.fn(),
@@ -46,6 +47,7 @@ function getRegisteredTestHandler() {
 describe('registerChannelConfigHandlers', () => {
   beforeEach(() => {
     handleMock.mockReset();
+    clearChannelsListCache();
   });
 
   it('treats timed-out channel add as recoverable when channel already appears in list', async () => {

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { safeWriteJsonFile } from './json-file';
 
 /**
  * Deploy and register the AwarenessClaw "active workspace" hook into the OpenClaw
@@ -158,11 +159,10 @@ export function installWorkspaceInjectHook(home: string = os.homedir()): Install
     config.hooks.internal.entries[HOOK_NAME] = desiredEntry;
     changes.push('config-entry');
     try {
-      // Backup once per change so a misconfig is recoverable.
-      fs.writeFileSync(`${configPath}.bak.hook-${Date.now()}`, raw, 'utf8');
-    } catch { /* best-effort */ }
-    try {
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+      const result = safeWriteJsonFile(configPath, config);
+      if (!result.written) {
+        return { status: 'error', error: `safe write rejected: ${result.reason}` };
+      }
     } catch (err: any) {
       return { status: 'error', error: `write config failed: ${err.message?.slice(0, 120)}` };
     }

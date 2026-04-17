@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { readJsonFileWithBom, safeWriteJsonFile } from './json-file';
 
 /**
  * Channel-level default inbound-agent routing for AwarenessClaw.
@@ -65,12 +66,8 @@ function readConfig(home: string): ConfigShape | null {
 function writeConfig(home: string, config: ConfigShape): boolean {
   const p = configPath(home);
   try {
-    const raw = fs.readFileSync(p, 'utf8');
-    fs.writeFileSync(`${p}.bak.bindings-${Date.now()}`, raw, 'utf8');
-  } catch { /* best-effort backup */ }
-  try {
-    fs.writeFileSync(p, JSON.stringify(config, null, 2), 'utf8');
-    return true;
+    const result = safeWriteJsonFile(p, config as Record<string, any>);
+    return result.written;
   } catch {
     return false;
   }

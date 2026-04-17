@@ -135,6 +135,8 @@ function classifyProviderError(rawError: string, state: string): string {
   return 'unknown';
 }
 
+const DESKTOP_DIRECT_CHAT_MODE_INSTRUCTION = '[Desktop chat mode] This turn came from AwarenessClaw\'s direct desktop chat UI. Treat it as a normal one-to-one user conversation, not as a heartbeat poll, cron/background check, or group/channel thread. Respond directly to the user\'s actual request. Do not output HEARTBEAT_OK unless the incoming message explicitly is a heartbeat/system health-check prompt asking for that exact acknowledgement. Do not apply group-chat silence rules to this desktop chat turn.';
+
 function maybeSelfHealGateway1006(
   result: any,
   send: (channel: string, payload: any) => void,
@@ -428,6 +430,8 @@ export function registerChatHandlers(deps: {
     const hostOsLabel = getHostOsLabel(process.platform);
     const hostApprovals = getExecApprovalSettings(homeDir, requestedOptions.agentId || 'main');
     fullMessage = `[Local machine context] You are running inside the AwarenessClaw Desktop app on the user's own computer. When the user asks about local files or folders on this machine, do not answer with a generic safety/privacy refusal. Use the available tools (especially exec/read/write/edit when appropriate) to inspect or modify the local filesystem if the request is allowed by the current host approval policy. Common ${hostOsLabel} folders for this user are: home=${homeDir}, desktop=${desktopDir}, documents=${documentsDir}, downloads=${downloadsDir}. If the user says "桌面", "desktop", or "我的桌面", resolve that to ${desktopDir}. If the user asks what files are there, inspect the directory first and report the actual result. For any local filesystem claim, do not guess. Never claim a file or folder change succeeded unless a tool result confirms it. After creating, editing, renaming, or deleting files/folders, run a follow-up verification step (for example list the directory, read the file, or stat the target) and include that verification in your reply. If a tool call is blocked, denied, or fails, say that plainly instead of pretending the action finished.
+
+  ${DESKTOP_DIRECT_CHAT_MODE_INSTRUCTION}
 
   [Current host exec approvals] security=${hostApprovals.security}, ask=${hostApprovals.ask}, askFallback=${hostApprovals.askFallback}, autoAllowSkills=${hostApprovals.autoAllowSkills ? 'on' : 'off'}. This current host approval state is authoritative for this turn. If earlier conversation turns claimed local filesystem access was blocked by allowlist/privacy rules, do not blindly repeat that claim. Re-evaluate the request against the current approval state above and use tools when allowed.
 

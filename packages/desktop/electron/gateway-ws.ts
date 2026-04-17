@@ -303,6 +303,16 @@ export class GatewayClient extends EventEmitter {
     return sa === sb;
   }
 
+  private downgradeToReadOnlyScopes() {
+    this.writeScopesUnsupported = true;
+    this.requestedScopes = [...GatewayClient.READ_SCOPES];
+  }
+
+  private isMissingWriteScopeError(err: unknown): boolean {
+    const message = String((err as any)?.message || err || '').toLowerCase();
+    return message.includes('missing scope') && message.includes('operator.write');
+  }
+
   private writeScopesUnsupported = false;
 
   private async ensureWriteScopes(): Promise<void> {
@@ -324,8 +334,7 @@ export class GatewayClient extends EventEmitter {
       // Gateway versions that don't enforce per-method scope checks.
       if (msg.includes('pairing') || msg.includes('scope') || msg.includes('1008') || msg.includes('closed during handshake')) {
         console.warn('[gateway-ws] Write scope upgrade rejected, falling back to read-only scopes');
-        this.writeScopesUnsupported = true;
-        this.requestedScopes = [...GatewayClient.READ_SCOPES];
+        this.downgradeToReadOnlyScopes();
         this.connected = false;
         // ws may have been reassigned by the failed connect() attempt at runtime
         try { (this.ws as WebSocket | null)?.close(); } catch { /* best-effort */ }
@@ -402,7 +411,20 @@ export class GatewayClient extends EventEmitter {
   /** Patch session-level settings (e.g. reasoningLevel, verboseLevel). */
   async sessionPatch(sessionKey: string, patch: Record<string, any>): Promise<any> {
     await this.ensureWriteScopes();
-    return this.rpc('sessions.patch', { key: sessionKey, ...patch }, 10000);
+    if (this.writeScopesUnsupported) {
+      return { skipped: true, reason: 'write-scopes-unavailable' };
+    }
+
+    try {
+      return await this.rpc('sessions.patch', { key: sessionKey, ...patch }, 10000);
+    } catch (err) {
+      if (this.isMissingWriteScopeError(err)) {
+        console.warn('[gateway-ws] sessions.patch denied by Gateway scope policy, downgrading to read-only mode');
+        this.downgradeToReadOnlyScopes();
+        return { skipped: true, reason: 'write-scopes-unavailable' };
+      }
+      throw err;
+    }
   }
 
   /** Send a chat message (non-blocking — Gateway queues if agent is busy). */

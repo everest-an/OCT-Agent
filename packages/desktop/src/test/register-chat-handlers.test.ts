@@ -208,7 +208,7 @@ describe('registerChatHandlers', () => {
     expect(ws.sessionPatch).toHaveBeenCalledWith('test-session', { model: 'openai/gpt-4o' });
     expect(ws.chatSend).toHaveBeenCalledWith(
       'test-session',
-      expect.any(String),
+      expect.stringContaining('Treat it as a normal one-to-one user conversation'),
       expect.not.objectContaining({ model: expect.anything() }),
     );
   });
@@ -338,12 +338,14 @@ describe('registerChatHandlers', () => {
     if (process.platform === 'win32') {
       expect(wrapWindowsCommand).toHaveBeenCalledWith(expect.stringContaining(`[Project working directory: ${escapedWorkspaceDir}]`));
       expect(wrapWindowsCommand).toHaveBeenCalledWith(expect.stringContaining('Do not treat this folder as the agent\'s home workspace'));
+      expect(wrapWindowsCommand).toHaveBeenCalledWith(expect.stringContaining('Do not output HEARTBEAT_OK unless the incoming message explicitly is a heartbeat'));
     } else {
       // spawnChatProcess('/bin/bash', ['--norc', '--noprofile', '-c', 'export PATH=...; openclaw ...'], { cwd })
       const spawnCall = spawnMock.mock.calls[0];
       const allArgs = JSON.stringify(spawnCall);
       expect(allArgs).toContain('[Project working directory:');
       expect(allArgs).toContain('Do not treat this folder as the agent');
+      expect(allArgs).toContain('Do not output HEARTBEAT_OK unless the incoming message explicitly is a heartbeat');
     }
   });
 

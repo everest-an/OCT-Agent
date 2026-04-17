@@ -407,6 +407,121 @@ export function createShellUtils(options: { home: string; app: any }) {
     return rewritten;
   }
 
+  function parseSimpleShellWords(input: string): string[] {
+    const words: string[] = [];
+    const re = /"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|(\S+)/g;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(input)) !== null) {
+      const quotedDouble = match[1];
+      const quotedSingle = match[2];
+      const bare = match[3];
+      if (quotedDouble !== undefined) {
+        words.push(quotedDouble.replace(/\\"/g, '"'));
+      } else if (quotedSingle !== undefined) {
+        words.push(quotedSingle.replace(/\\'/g, "'"));
+      } else if (bare !== undefined) {
+        words.push(bare);
+      }
+    }
+    return words;
+  }
+
+  function extractDirectOpenClawArgs(command: string): string[] | null {
+    let normalized = command.trim();
+    if (!normalized) return null;
+
+    // Strip common stdout/stderr merge redirections used in this codebase.
+    normalized = normalized.replace(/\s+2>\s*&1\s*$/i, '').trim();
+    normalized = normalized.replace(/\s+2>\s*nul\s*$/i, '').trim();
+    normalized = normalized.replace(/\s+1>\s*nul\s*$/i, '').trim();
+
+    // Only rewrite truly simple `openclaw ...` commands; anything with shell
+    // control operators must stay in the shell path.
+    if (!/^openclaw(\s|$)/i.test(normalized)) return null;
+    if (/[|;&<>`]/.test(normalized)) return null;
+
+    const words = parseSimpleShellWords(normalized);
+    if (words.length === 0) return null;
+    if (words[0].toLowerCase() !== 'openclaw') return null;
+    return words.slice(1);
+  }
+
+  function runOpenClawDirectAsync(
+    command: string,
+    timeoutMs: number,
+    onLine?: (line: string, stream: 'stdout' | 'stderr') => void,
+  ): Promise<string | null> {
+    const openclawArgs = extractDirectOpenClawArgs(command);
+    if (!openclawArgs) return Promise.resolve(null);
+
+    return new Promise((resolve) => {
+      const child = runSpawn('openclaw', openclawArgs, { stdio: 'pipe' });
+      let stdout = '';
+      let stderr = '';
+      let stdoutBuf = '';
+      let stderrBuf = '';
+      let settled = false;
+
+      const finish = (result: string | null) => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
+
+      let timer = setTimeout(() => {
+        try { child.kill(); } catch {}
+        finish((stdout + stderr).trim() || null);
+      }, timeoutMs);
+
+      const resetTimer = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          try { child.kill(); } catch {}
+          finish((stdout + stderr).trim() || null);
+        }, timeoutMs);
+      };
+
+      const emitLines = (buffer: string, stream: 'stdout' | 'stderr'): string => {
+        if (!onLine) return buffer;
+        const lines = buffer.split('\n');
+        const trailing = lines.pop() || '';
+        for (const line of lines) {
+          if (line.trim()) onLine(line, stream);
+        }
+        return trailing;
+      };
+
+      child.stdout?.on('data', (d: Buffer) => {
+        const text = d.toString();
+        stdout += text;
+        stdoutBuf += text;
+        stdoutBuf = emitLines(stdoutBuf, 'stdout');
+        resetTimer();
+      });
+      child.stderr?.on('data', (d: Buffer) => {
+        const text = d.toString();
+        stderr += text;
+        stderrBuf += text;
+        stderrBuf = emitLines(stderrBuf, 'stderr');
+        resetTimer();
+      });
+      child.on('close', () => {
+        clearTimeout(timer);
+        if (onLine) {
+          const out = stdoutBuf.trim();
+          const err = stderrBuf.trim();
+          if (out) onLine(out, 'stdout');
+          if (err) onLine(err, 'stderr');
+        }
+        finish((stdout + stderr).trim() || null);
+      });
+      child.on('error', () => {
+        clearTimeout(timer);
+        finish((stdout + stderr).trim() || null);
+      });
+    });
+  }
+
   function safeShellExec(cmd: string, timeoutMs = 5000): string | null {
     return rawShellExecSync(rewriteOpenClawShellCommand(cmd, buildOpenClawShellFallbackSync()), timeoutMs);
   }
@@ -416,6 +531,10 @@ export function createShellUtils(options: { home: string; app: any }) {
   }
 
   function readShellOutputAsync(cmd: string, timeoutMs = 5000): Promise<string | null> {
+    const directOpenclaw = extractDirectOpenClawArgs(cmd);
+    if (directOpenclaw) {
+      return runOpenClawDirectAsync(cmd, timeoutMs);
+    }
     return new Promise(resolve => {
       const enhancedPath = getEnhancedPath();
       buildOpenClawShellFallbackAsync().then((fallback) => {
@@ -619,6 +738,10 @@ export function createShellUtils(options: { home: string; app: any }) {
    * Use runSpawnAsync instead to prevent shell injection.
    */
   function runAsync(cmd: string, timeoutMs = 180000): Promise<string> {
+    const directOpenclaw = extractDirectOpenClawArgs(cmd);
+    if (directOpenclaw) {
+      return runOpenClawDirectAsync(cmd, timeoutMs).then((output) => output ?? '');
+    }
     return new Promise((resolve, reject) => {
       const enhancedPath = getEnhancedPath();
       const rewriteNpx = (command: string) => {
@@ -673,6 +796,10 @@ export function createShellUtils(options: { home: string; app: any }) {
     timeoutMs: number,
     onLine: (line: string, stream: 'stdout' | 'stderr') => void,
   ): Promise<string> {
+    const directOpenclaw = extractDirectOpenClawArgs(cmd);
+    if (directOpenclaw) {
+      return runOpenClawDirectAsync(cmd, timeoutMs, onLine).then((output) => output ?? '');
+    }
     return new Promise((resolve, reject) => {
       const enhancedPath = getEnhancedPath();
       const rewriteNpx = (command: string) => {

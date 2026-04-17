@@ -15,6 +15,7 @@
  */
 import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
 import fs from 'fs';
+import { clearChannelsListCache } from '../../electron/openclaw-process-guard';
 
 const { handleMock } = vi.hoisted(() => ({
   handleMock: vi.fn(),
@@ -173,6 +174,7 @@ describe('Channel E2E flow — channel:save pipeline', () => {
 
   beforeEach(() => {
     handleMock.mockReset();
+    clearChannelsListCache();
   });
 
   // ── Telegram: token-based, CLI save strategy ──

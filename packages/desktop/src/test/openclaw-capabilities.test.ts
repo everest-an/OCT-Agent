@@ -4,6 +4,9 @@ import {
   forceEnableDesktopBrowserAndWebCapabilities,
   mergeDesktopOpenClawConfig,
   needsDesktopLegacyBrowserWebMigration,
+  sanitizeDesktopAwarenessPluginConfig,
+  shouldUseLegacyWindowsOpenClawSafeMode,
+  stripLegacyWindowsOpenClawRiskyConfig,
 } from '../../electron/desktop-openclaw-config';
 
 describe('openclaw capability schema helpers', () => {
@@ -258,5 +261,122 @@ describe('desktop openclaw config merge', () => {
         },
       },
     })).toBe(true);
+  });
+
+  it('removes stale WeChat channel references when plugin is not installed', () => {
+    const config: Record<string, any> = {
+      channels: {
+        'openclaw-weixin': {
+          enabled: true,
+          appId: 'demo',
+        },
+      },
+      bindings: [
+        { type: 'route', agentId: 'main', match: { channel: 'openclaw-weixin' } },
+        { type: 'route', agentId: 'main', match: { channel: 'telegram' } },
+      ],
+      plugins: {
+        allow: ['openclaw-memory', 'openclaw-weixin', '@tencent-weixin/openclaw-weixin'],
+        entries: {
+          'openclaw-memory': {
+            enabled: true,
+            config: {
+              memoryId: 'stale',
+            },
+          },
+          'openclaw-weixin': { enabled: true },
+        },
+        slots: {
+          memory: 'openclaw-memory',
+        },
+      },
+    };
+
+    sanitizeDesktopAwarenessPluginConfig(config, '/tmp/awareness-desktop-test');
+
+    expect(config.channels).toBeUndefined();
+    expect(config.bindings).toEqual([
+      { type: 'route', agentId: 'main', match: { channel: 'telegram' } },
+    ]);
+    expect(config.plugins.allow).toEqual(expect.arrayContaining(['browser']));
+    expect(config.plugins.allow).not.toContain('openclaw-memory');
+    expect(config.plugins.allow).not.toContain('openclaw-weixin');
+    expect(config.plugins.allow).not.toContain('@tencent-weixin/openclaw-weixin');
+    expect(config.plugins.entries['openclaw-memory']).toBeUndefined();
+    expect(config.plugins.entries['openclaw-weixin']).toBeUndefined();
+    expect(config.plugins.slots?.memory).toBeUndefined();
+  });
+
+  it('detects Windows OpenClaw 2026.4.10 as legacy safe-mode target', () => {
+    expect(shouldUseLegacyWindowsOpenClawSafeMode('win32', '2026.4.10')).toBe(true);
+    expect(shouldUseLegacyWindowsOpenClawSafeMode('win32', 'OpenClaw 2026.4.10 (44e5b62)')).toBe(true);
+    expect(shouldUseLegacyWindowsOpenClawSafeMode('darwin', '2026.4.10')).toBe(false);
+    expect(shouldUseLegacyWindowsOpenClawSafeMode('win32', '2026.4.14')).toBe(false);
+  });
+
+  it('strips startup config fields that are unsafe in Windows legacy safe mode', () => {
+    const config: Record<string, any> = {
+      browser: { enabled: true },
+      session: { dmScope: 'per-channel-peer' },
+      hooks: {
+        internal: {
+          enabled: true,
+          entries: {
+            'awareness-workspace-inject': {
+              enabled: true,
+              path: 'C:/Users/admin/.openclaw/hooks/awareness-workspace-inject/index.cjs',
+            },
+          },
+        },
+      },
+      tools: {
+        profile: 'coding',
+        alsoAllow: ['exec', 'browser', 'web_search', 'sessions_spawn', 'awareness_recall'],
+        web: {
+          search: { enabled: true, provider: 'duckduckgo' },
+        },
+        agentToAgent: { enabled: true, allow: ['*'] },
+      },
+      plugins: {
+        allow: ['qwen', 'browser', 'openclaw-memory', 'memory-core'],
+        slots: { memory: 'openclaw-memory' },
+        entries: {
+          browser: { enabled: true },
+          'openclaw-memory': { enabled: true },
+          'memory-core': { enabled: false },
+        },
+      },
+      agents: {
+        defaults: {
+          model: { primary: 'qwen/qwen-turbo-latest' },
+          thinkingDefault: 'low',
+          subagents: { maxSpawnDepth: 2 },
+        },
+        list: [
+          {
+            id: 'main',
+            agentDir: 'C:/Users/admin/.openclaw/agents/main/agent',
+            workspace: 'C:/Users/admin/.openclaw/workspace-main',
+            subagents: { allowAgents: ['*'] },
+          },
+        ],
+      },
+    };
+
+    stripLegacyWindowsOpenClawRiskyConfig(config);
+
+    expect(config.browser).toBeUndefined();
+    expect(config.session).toBeUndefined();
+    expect(config.hooks).toBeUndefined();
+    expect(config.tools.alsoAllow).toEqual(['exec', 'awareness_recall']);
+    expect(config.tools.web).toBeUndefined();
+    expect(config.tools.agentToAgent).toBeUndefined();
+    expect(config.plugins.allow).toEqual(['qwen']);
+    expect(config.plugins.entries).toBeUndefined();
+    expect(config.plugins.slots).toBeUndefined();
+    expect(config.agents.defaults.subagents).toBeUndefined();
+    expect(config.agents.list[0].agentDir).toBeUndefined();
+    expect(config.agents.list[0].workspace).toBeUndefined();
+    expect(config.agents.list[0].subagents).toBeUndefined();
   });
 });

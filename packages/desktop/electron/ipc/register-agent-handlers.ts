@@ -3,6 +3,7 @@ import path from 'path';
 import { ipcMain } from 'electron';
 import { parseJsonShellOutput } from '../openclaw-shell-output';
 import { redirectOrphanBindings } from '../bindings-manager';
+import { safeWriteJsonFile } from '../json-file';
 
 const DEFAULT_AGENT_IDS = new Set(['main', 'default']);
 const PREFERRED_MARKDOWN_ORDER = [
@@ -433,7 +434,7 @@ export function registerAgentHandlers(deps: {
         const entry = list.find((a) => a?.id === slug);
         if (entry && entry.workspace === wsDir) {
           delete entry.workspace;
-          fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+          safeWriteJsonFile(cfgPath, cfg);
         }
       } catch {
         // Non-fatal: sanitize on next app start will catch it.
@@ -637,7 +638,7 @@ function removeAgentFromConfigAndHealBindings(home: string, deletedAgentId: stri
     if (removed) {
       cfg.agents = cfg.agents || {};
       cfg.agents.list = nextList;
-      fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), 'utf-8');
+      safeWriteJsonFile(configPath, cfg);
     }
 
     const known = new Set<string>(nextList.map((a) => String(a?.id || '')).filter(Boolean));
@@ -676,7 +677,7 @@ function addAgentToConfigFallback(
     list.push(nextEntry);
     cfg.agents.list = list;
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), 'utf-8');
+    safeWriteJsonFile(configPath, cfg);
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err?.message || 'Failed to update openclaw.json' };
@@ -707,7 +708,7 @@ function applyAgentIdentityFallback(
     if (identity.avatar) entry.identity.avatar = identity.avatar;
     if (identity.theme) entry.identity.theme = identity.theme;
 
-    fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), 'utf-8');
+    safeWriteJsonFile(configPath, cfg);
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err?.message || 'Failed to update identity in config' };
