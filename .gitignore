@@ -5,6 +5,10 @@ release/
 .next/
 out/
 build/
+# Exception: code-signing entitlements must be tracked so the signed
+# DMG pipeline is reproducible on CI / other machines.
+!packages/desktop/build/
+!packages/desktop/build/entitlements.mac.plist
 *.log
 .DS_Store
 Thumbs.db

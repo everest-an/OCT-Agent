@@ -108,6 +108,8 @@ export default function Memory() {
     cloudMemories, setCloudAuthStep, openCloudAuth, closeCloudAuth, startCloudAuth,
     selectCloudMemory, disconnectCloud, selectMemoryMode, toggleMemoryOption,
     setRecallLimit, setBlockedSourceAllowed, clearAllMemories,
+    autoFixOpenClawIfNeeded,
+    fixOpenClawPlugin,
   } = useMemorySettings();
 
   const [activeTab, setActiveTab] = useState<TabView>('overview');
@@ -118,10 +120,60 @@ export default function Memory() {
   const [wikiSelectedItem, setWikiSelectedItem] = useState<WikiSelectedItem>({ type: 'overview' });
   const [activeWorkspace, setActiveWorkspace] = useState<{ path: string | null; daemonProjectDir: string | null }>({ path: null, daemonProjectDir: null });
   const [scanSettingsOpen, setScanSettingsOpen] = useState(false);
+  const [showAutoFixNotification, setShowAutoFixNotification] = useState(false);
+  const [autoFixMessage, setAutoFixMessage] = useState('');
+  const [autoFixSurface, setAutoFixSurface] = useState<string>('unknown');
   const graphContainerRef = useRef<HTMLDivElement>(null);
   const autoStartAttemptedRef = useRef(false);
+  // Add a ref to track whether auto-fix has already been performed
+  const autoFixAttemptedRef = useRef(false);
 
   const api = window.electronAPI as any;
+
+  // Auto-detect and fix OpenClaw plugin issues on first mount only
+  useEffect(() => {
+    const checkAndFixPlugin = async () => {
+      // Skip if we've already attempted the fix
+      if (autoFixAttemptedRef.current) {
+        return;
+      }
+      
+      // Mark that we've attempted the fix to prevent re-running
+      autoFixAttemptedRef.current = true;
+      
+      try {
+        setShowAutoFixNotification(true);
+        setAutoFixSurface('checking');
+        setAutoFixMessage(t('memory.autoFix.checking', 'Checking memory system health...'));
+
+        const result: any = await autoFixOpenClawIfNeeded();
+
+        setAutoFixSurface(result?.surface || 'unknown');
+        setAutoFixMessage(result?.message || '');
+
+        // Healthy surface: hide toast quickly. Broken surface: keep visible
+        // longer so user can actually read it.
+        const hideDelay = result?.surface === 'healthy' ? 1500 : 6000;
+        setTimeout(() => {
+          setShowAutoFixNotification(false);
+        }, hideDelay);
+      } catch (error) {
+        console.error('Error during auto-fix check:', error);
+        setAutoFixSurface('unknown');
+        setAutoFixMessage(t('memory.autoFix.error', 'Error checking for issues'));
+
+        setTimeout(() => {
+          setShowAutoFixNotification(false);
+        }, 3000);
+      }
+    };
+
+    const timer = setTimeout(() => {
+      checkAndFixPlugin();
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, []); // Empty dependency array ensures this only runs on first mount
 
   // Stable no-op callbacks (Self-Improvement removed)
   const noop = useRef(async () => {}).current;
@@ -340,6 +392,16 @@ export default function Memory() {
 
   return (
     <div className="h-full flex flex-col">
+      {/* Auto-fix Notification */}
+      {showAutoFixNotification && (
+        <div className="absolute top-4 right-4 z-50 animate-in fade-in slide-in-from-top-4 duration-300">
+          <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 border border-slate-700 shadow-lg text-sm text-slate-200">
+            <Loader2 size={14} className="animate-spin text-brand-400" />
+            <span>{autoFixMessage}</span>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="px-6 py-4 border-b border-slate-800">
         <div className="flex items-center justify-between mb-3">
@@ -635,6 +697,7 @@ export default function Memory() {
                       t('settings.privacy.clearFailed', 'Failed to clear memories. Is the daemon running?'),
                     );
                   }}
+                  onFixPlugin={fixOpenClawPlugin} // 添加修复功能
                 />
               </div>
             )}
@@ -662,6 +725,47 @@ export default function Memory() {
           void startCloudAuth();
         }}
       />
+
+      {/* Auto-fix notification overlay */}
+      {showAutoFixNotification && (
+        <div className="fixed bottom-4 right-4 z-50">
+          <div
+            className={
+              'px-4 py-3 rounded-lg shadow-lg flex items-start max-w-md text-white ' +
+              (autoFixSurface === 'healthy'
+                ? 'bg-emerald-600'
+                : autoFixSurface === 'memory_daemon'
+                  ? 'bg-amber-600'
+                  : autoFixSurface === 'openclaw_plugin' || autoFixSurface === 'openclaw_gateway'
+                    ? 'bg-blue-600'
+                    : 'bg-slate-600')
+            }
+          >
+            <div className="flex-1">
+              <div className="font-medium text-sm">
+                {autoFixSurface === 'healthy'
+                  ? 'Memory system healthy'
+                  : autoFixSurface === 'memory_daemon'
+                    ? 'Memory daemon offline'
+                    : autoFixSurface === 'openclaw_plugin'
+                      ? 'OpenClaw plugin check'
+                      : autoFixSurface === 'openclaw_gateway'
+                        ? 'OpenClaw gateway check'
+                        : autoFixSurface === 'checking'
+                          ? 'Checking…'
+                          : 'Memory system notice'}
+              </div>
+              <div className="text-xs opacity-90 mt-1">{autoFixMessage}</div>
+            </div>
+            <button
+              onClick={() => setShowAutoFixNotification(false)}
+              className="ml-2 opacity-70 hover:opacity-100"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

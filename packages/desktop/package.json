@@ -1,6 +1,6 @@
 {
   "name": "awareness-claw-desktop",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "AwarenessClaw Desktop — Visual AI agent manager with persistent memory",
   "author": "edwin-hao-ai",
   "main": "dist-electron/main.js",
@@ -10,11 +10,14 @@
     "build": "npx -p typescript tsc -p tsconfig.electron.json && vite build",
     "build:package": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --dir",
     "test": "vitest run",
+    "test:project-isolation": "vitest run src/test/memory-project-isolation.test.ts",
     "test:watch": "vitest",
+    "verify:project-header": "node scripts/verify-project-header.mjs",
     "preview": "vite preview",
     "package:mac": "npm run build && electron-builder --mac",
     "package:win": "npm run build && electron-builder --win",
-    "package:linux": "npm run build && electron-builder --linux"
+    "package:linux": "npm run build && electron-builder --linux",
+    "fix-openclaw": "node ../../scripts/fix-openclaw-plugin.js"
   },
   "dependencies": {
     "@types/ws": "^8.18.1",
@@ -73,7 +76,11 @@
         "zip"
       ],
       "category": "public.app-category.productivity",
-      "icon": "resources/icon.icns"
+      "icon": "resources/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "dmg": {
       "window": {

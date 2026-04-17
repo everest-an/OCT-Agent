@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.6] - 2026-04-17
+
+### Fixed — memory daemon restart loop
+- **Daemon watchdog no longer crashes into EADDRINUSE forever**: if `/healthz` fails but port 37800 is still held by a dead daemon (the socket outlives the crashed process), the watchdog now runs `lsof -ti :37800` / `netstat -ano` first, kills orphans, then respawns. After repeated failures (corrupt npx cache, etc.) it backs off exponentially (60 s → 30 min cap) instead of burning CPU.
+- **Auto-fix toast no longer lies about OpenClaw**: the "Checking for OpenClaw plugin issues..." notification fired for every memory problem, even when OpenClaw was healthy and the Awareness local daemon was the real failure. Now triages memory-daemon health first and surfaces distinct UI states (`memory_daemon` / `openclaw_plugin` / `openclaw_gateway` / `healthy`) with color-coded toasts that hide quickly when nothing is wrong.
+
+### Security / Distribution
+- **Signed DMG**: builds are now code-signed with Developer ID Application (Beijing VGO Co;Ltd, Team 5XNDF727Y6). Users no longer see the "app is damaged" red warning on download. (Notarization pending Apple ID app-specific password; users will still see a one-time "macOS cannot verify" prompt until notarization is wired up.)
+- **Hardened runtime + entitlements**: `build/entitlements.mac.plist` grants only what Electron + openclaw child processes actually need (JIT, unsigned-executable-memory for V8, library-validation-disable for the daemon spawn, network client/server, user-selected file read/write).
+
+### Paired with @awareness-sdk/local@0.7.2
+The daemon regression that produced "no such column: local_id" log flood and broken memory UI is fixed in `@awareness-sdk/local@0.7.2`. AwarenessClaw 0.3.6 watchdog auto-upgrades users to that daemon version on next start; old `index.db` files heal themselves via idempotent migration on first open.
+
 ## [0.3.5] - 2026-04-16
 
 ### Fixed

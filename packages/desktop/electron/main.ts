@@ -47,6 +47,7 @@ import { registerOpenClawConfigHandlers } from './ipc/register-openclaw-config-h
 import { registerRuntimeHealthHandlers } from './ipc/register-runtime-health-handlers';
 import { registerSetupHandlers } from './ipc/register-setup-handlers';
 import { registerSkillHandlers } from './ipc/register-skill-handlers';
+import { registerFixOpenClawHandlers } from './ipc/register-fix-openclaw-handlers'; // 新增修复处理程序
 import { ensureInternalHook } from './internal-hook';
 import {
   hasCompletedRuntimeMigration,
@@ -1893,6 +1894,11 @@ registerGatewayHandlers({
 });
 registerMemoryHandlers();
 registerFileDialogHandlers();
+registerFixOpenClawHandlers({
+  safeShellExecAsync,
+  homedir: HOME,
+  getLocalDaemonHealth,
+});
 const { prefetchSchema } = registerOpenClawConfigHandlers({
   home: HOME,
   safeShellExecAsync,
