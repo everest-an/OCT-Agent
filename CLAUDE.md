@@ -77,24 +77,119 @@ AwarenessClaw 目前走**手动下载升级**模式（没接 electron-updater）
 
 **防回归**：`src/test/app-update-check.test.ts`（vitest）覆盖 semver 比较、`shouldShowDesktopUpdate`、`fetchLatestDesktopVersion` mock 路径；后端 `backend/tests/test_app_version_endpoint.py`（pytest）覆盖环境变量 override、mandatory 布尔解析、未知 app fallback。修改发布/升级相关代码前后必须跑这两个测试。
 
-## 📦 macOS DMG 打包规则（避免每次重复探索）
+## 📦 macOS DMG 打包规则（签名 + 公证全流程）
 
-在 `packages/desktop/` 目录下打 DMG：
+**目标**：产出用户双击即开、零警告的 DMG。**非签名的 DMG 不得分发**，签名但未公证的 DMG 只能作为内部测试版。
+
+### 前置条件（一次性设置）
+
+**1. Keychain 里的签名证书**（Beijing VGO Co;Ltd，Team `5XNDF727Y6`，已配置）：
+```bash
+security find-identity -v -p codesigning
+# 应该看到：
+#   "Developer ID Application: Beijing VGO Co;Ltd (5XNDF727Y6)"
+#   "Developer ID Installer: Beijing VGO Co;Ltd (5XNDF727Y6)"
+```
+若丢失，从 Xcode → Settings → Accounts 重新下载，或从 Apple Developer Portal 重新签发。
+
+**2. Notarization 凭证（存 keychain，用 profile name `AwarenessClawNotary`）**：
+```bash
+# 先去 appleid.apple.com → App-Specific Passwords 生成一个（格式 xxxx-xxxx-xxxx-xxxx）
+xcrun notarytool store-credentials "AwarenessClawNotary" \
+  --apple-id "120298858@qq.com" \
+  --team-id "5XNDF727Y6" \
+  --password "<app-specific-password>"
+```
+**绝不**把 app-specific password 写进代码、commit、.env、文档。只存 keychain。
+
+若第一次 `store-credentials` 返回 `HTTP 403: A required agreement is missing`，说明团队的 Apple Developer Program License Agreement 过期了：
+- 登录 https://developer.apple.com/account
+- **Agreements, Tax, and Banking** → 签字续签
+- 等 5-10 分钟传播后重试 `store-credentials`
+
+**3. Entitlements 文件** `packages/desktop/build/entitlements.mac.plist`（已在 repo，不得删）：
+hardened runtime + JIT + network client/server + user-selected file r/w。没有它签名会失败或 app 跑不起来。
+
+### 打 DMG 的标准命令（签名 + 公证一次到位）
+
+在 `packages/desktop/` 目录下：
 
 ```bash
-PYTHON_PATH=/usr/bin/python3 CSC_IDENTITY_AUTO_DISCOVERY=false npm run package:mac
+PYTHON_PATH=/usr/bin/python3 \
+CSC_IDENTITY_AUTO_DISCOVERY=true \
+CSC_NAME="Beijing VGO Co;Ltd (5XNDF727Y6)" \
+APPLE_KEYCHAIN_PROFILE="AwarenessClawNotary" \
+npm run package:mac
 ```
 
-**关键参数说明**：
-- `PYTHON_PATH=/usr/bin/python3` — **必须**用系统自带 Python，不要让 `dmg-builder` 默认 `which python3` 拿到 Homebrew Python 3.13。Brew Python 3.13 下 `dmgbuild/core.py` 依赖的 `biplist`/`pyobjc` 导入失败，spawn 会抛 `ENOENT` 误导错误（实际上 python 二进制存在）。
-- `CSC_IDENTITY_AUTO_DISCOVERY=false` — 跳过 macOS code signing（试用包不需要签名/公证）。
-- 仅打 DMG 可用 `npx electron-builder --mac dmg`（跳过 zip 步骤，更快）。
+**电脑没有 Notary profile 时**（例如同事第一次打包，或协议过期还没续签），**改用临时命令跑签名但不公证**：
+```bash
+PYTHON_PATH=/usr/bin/python3 \
+CSC_IDENTITY_AUTO_DISCOVERY=true \
+CSC_NAME="Beijing VGO Co;Ltd (5XNDF727Y6)" \
+npx electron-builder --mac
+```
+产物只能内部测试，不得上传分发位置。
 
-**输出**：`packages/desktop/release/AwarenessClaw-<version>-arm64.dmg`（约 100 MB）
+### 关键参数说明
 
-**踩坑记录**：
-- 错误信息 `Exit code: ENOENT. spawn /opt/homebrew/Cellar/python@3.13/.../python3: ENOENT` 的真实原因不是路径不存在，而是 dmgbuild 的 Python 依赖在 Brew Python 3.13 下加载失败。`/usr/bin/python3` 自带 pyobjc，不会有这个问题。
-- 不要试图在 Brew Python 3.13 里 `pip install biplist pyobjc`——`biplist` 已弃用，且 PEP 668 会拦截。直接走系统 Python 最省事。
+- `PYTHON_PATH=/usr/bin/python3` — **必须**用系统自带 Python，不要让 `dmg-builder` 走 Homebrew Python 3.13（`biplist`/`pyobjc` 在 Brew 3.13 下导入失败，`spawn` 抛 `ENOENT` 误导错误）。
+- `CSC_IDENTITY_AUTO_DISCOVERY=true` — 让 electron-builder 从 keychain 选证书。
+- `CSC_NAME="Beijing VGO Co;Ltd (5XNDF727Y6)"` — **只能是 "团队名 (TeamID)" 格式**，**不要**加 `"Developer ID Application: "` 前缀，否则 electron-builder 报错 `Please remove prefix "Developer ID Application:"`。
+- `APPLE_KEYCHAIN_PROFILE="AwarenessClawNotary"` — 触发自动公证，走 `xcrun notarytool`。
+- 仅打 DMG 可用 `npx electron-builder --mac dmg`（跳过 zip 步骤，更快，但发布版建议保留 zip 用作 auto-updater）。
+- `hardenedRuntime: true` + `entitlementsInherit` 在 `package.json` 的 `build.mac` 里，改 `package.json` 时不得删。
+
+### 输出 & 验证
+
+**产物**：`packages/desktop/release/AwarenessClaw-<version>-arm64.dmg`（约 100 MB）+ `.zip`。
+
+**签名验证**（必跑）：
+```bash
+codesign -dv --verbose=2 release/mac-arm64/AwarenessClaw.app
+# 期望看到：
+#   Authority=Developer ID Application: Beijing VGO Co;Ltd (5XNDF727Y6)
+#   Authority=Developer ID Certification Authority
+#   Authority=Apple Root CA
+#   Runtime Version=14.0.0
+#   flags=0x10000(runtime)   ← hardened runtime 启用
+#   TeamIdentifier=5XNDF727Y6
+```
+
+**公证验证**（有 notary profile 时）：
+```bash
+spctl -a -vvv -t install release/mac-arm64/AwarenessClaw.app
+# 期望：accepted, source=Notarized Developer ID
+# 若出现 rejected + "Unnotarized Developer ID" → 公证没做，不能分发
+```
+
+**Staple ticket**（确认公证结果嵌入本地 app/DMG，离线也能验证）：
+```bash
+xcrun stapler validate release/AwarenessClaw-<version>-arm64.dmg
+# 期望：The validate action worked!
+```
+如果 electron-builder 公证成功但 DMG 上没 staple，手动补：
+```bash
+xcrun stapler staple release/AwarenessClaw-<version>-arm64.dmg
+```
+
+### 签名 / 公证 / 裸奔三档用户体验对比
+
+| 状态 | 双击 DMG 后用户看到 | 允许分发？ |
+|---|---|---|
+| 完全未签名 | 红色"文件已损坏，应移到废纸篓"。只能靠 `⚠️ 首次打开必读 .command` 里的 `xattr -rd com.apple.quarantine` 绕过 | ❌ 禁止 |
+| **签名但未公证**（0.3.6 状态） | 弹"macOS 无法验证 *AwarenessClaw* 不含恶意软件"，按钮"移至废纸篓/取消"，需去"系统设置→隐私与安全性"点"仍要打开" | ⚠️ 仅限内部测试 |
+| 签名 + 公证 | 双击即开，零警告 | ✅ 可发布 |
+
+### 踩坑记录
+
+- `ENOENT. spawn /opt/homebrew/Cellar/python@3.13/.../python3` — 真正原因是 Brew Python 3.13 下 `biplist`/`pyobjc` 加载失败。`/usr/bin/python3` 自带 pyobjc，用它就对了。
+- 不要试图在 Brew Python 3.13 里 `pip install biplist pyobjc` — `biplist` 已弃用，PEP 668 会拦截。
+- `CSC_NAME` 不能带 `"Developer ID Application: "` 前缀，electron-builder 会抛 `Please remove prefix "Developer ID Application:"`。只保留 `"团队名 (TeamID)"`。
+- `xcrun notarytool store-credentials` 返回 `HTTP 403 A required agreement is missing` — 团队 Developer Program License Agreement 过期。**只能账户持有人本人**登录 developer.apple.com → Agreements 续签，没法代办。
+- 公证失败时 electron-builder 会打印 `skipped macOS notarization  reason=...`，**不会**让打包失败。必须用 `spctl` / `xcrun stapler validate` 兜底检查，不然会不知不觉发出一个未公证版本。
+- 公证请求要几分钟到十几分钟，Apple 网络慢时更久。打包命令会阻塞等，不要 Ctrl+C。
+- App-specific password 一旦泄漏立即在 appleid.apple.com 撤销。每台开发机都要独立 `store-credentials`，不共享明文密码。
 
 ## ⚠️ Web Search 验证规则（必须遵守）
 
