@@ -170,6 +170,62 @@ describe('KanbanCardStream — expand toggling', () => {
   });
 });
 
+describe('KanbanCardStream — running wait indicator', () => {
+  it('does not show wait banner within the first 10s', () => {
+    const startedAt = new Date(Date.now() - 5_000).toISOString();
+    setup({
+      expanded: true,
+      step: buildStep({ status: 'running', startedAt }),
+      streamText: '',
+    });
+    // Elapsed ~5s; wait banner should NOT be visible
+    expect(screen.queryByTestId('kanban-card-T1-wait')).toBeNull();
+  });
+
+  it('shows wait banner after ~10s with streamText empty', async () => {
+    const startedAt = new Date(Date.now() - 15_000).toISOString();
+    setup({
+      expanded: true,
+      step: buildStep({ status: 'running', startedAt }),
+      streamText: '',
+    });
+    // Elapsed ~15s; wait banner should appear
+    expect(await screen.findByTestId('kanban-card-T1-wait')).toBeInTheDocument();
+    expect(screen.getByTestId('kanban-card-T1-wait').textContent).toMatch(/warming|思考|15/i);
+  });
+
+  it('does NOT show wait banner if stream already has text', () => {
+    const startedAt = new Date(Date.now() - 30_000).toISOString();
+    setup({
+      expanded: true,
+      step: buildStep({ status: 'running', startedAt }),
+      streamText: 'some tokens arrived',
+    });
+    expect(screen.queryByTestId('kanban-card-T1-wait')).toBeNull();
+  });
+
+  it('shows elapsed time in status pill after 3s', async () => {
+    const startedAt = new Date(Date.now() - 8_000).toISOString();
+    setup({
+      expanded: false,
+      step: buildStep({ status: 'running', startedAt }),
+    });
+    const pill = await screen.findByTestId('kanban-card-T1-status');
+    // 8s elapsed → pill should show "· 8s"
+    expect(pill.textContent).toMatch(/\d+s/);
+  });
+
+  it('does NOT tick elapsed time for done steps', () => {
+    setup({
+      expanded: false,
+      step: buildStep({ status: 'done', startedAt: new Date(Date.now() - 60_000).toISOString() }),
+    });
+    const pill = screen.getByTestId('kanban-card-T1-status');
+    // No "Xs" fragment for done steps
+    expect(pill.textContent).not.toMatch(/· \d+s/);
+  });
+});
+
 describe('KanbanCardStream — scroll auto-stick detection', () => {
   it('scroll callback does not crash on any scroll position', () => {
     setup({ expanded: true, step: buildStep({ status: 'running' }), streamText: 'long stream' });

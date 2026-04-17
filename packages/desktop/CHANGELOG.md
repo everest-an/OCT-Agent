@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.3.7-preview.4] - 2026-04-18
+
+### Fixed — done steps showed "(No output captured)" after tab switch
+`useMissionFlow.stepStream` lives in React state, so when a user returned to a completed mission the live token buffer was gone and the Kanban card placeholder said "(No output captured)" — even though the artifact file on disk had the full markdown.
+Fix: `MissionFlowShell` now auto-fetches the artifact body via `mission:read-artifact` for every `done` step whose live buffer is empty, strips the YAML frontmatter header, and displays the real content. Fetch is lazy (skipped if a live buffer already has text) and cached per mission.
+
+### Added — "Agent is thinking" wait indicator
+When an agent is running but hasn't streamed its first token yet, the card used to just say "正在启动..." with no timer — users couldn't tell if the agent was dead or just slow. New behaviour:
+- Status pill now shows elapsed time after 3s (e.g. `进行中 · 32s`).
+- After 10s with empty stream, a soft wait banner appears under the `<pre>`.
+- After 60s the banner escalates to "大任务可能需要几分钟".
+Backend idle timeout (15 min) still fires if truly stuck.
+
+### Added — real E2E smoke script
+`scripts/e2e-mission-smoke.mjs` connects to the running OpenClaw Gateway + real LLM and runs a 3-step micro-mission end-to-end. Verified on this dev box:
+- 55s mission round-trip, 25 planner-delta + 85 step-delta events, `mission:done` ✓.
+- Artifacts written to disk (~1.5KB each), MEMORY.md accumulated.
+- Confirms the streaming / IPC pipeline is sound end-to-end with real infrastructure.
+
+Run: `npm run build && node scripts/e2e-mission-smoke.mjs`
+
+### Testing
+- 366 mission-flow tests pass (+6 new): 5 wait-indicator tests in `kanban-card-stream.test.tsx`, 1 backfill-artifact test in `mission-flow-shell.test.tsx`.
+- All 4 L1 guards still green.
+
 ## [0.3.7-preview.3] - 2026-04-18
 
 ### Fixed — Approve / Stop buttons had no effect on missions from a previous app session

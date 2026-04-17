@@ -19,6 +19,18 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Square } from 'lucide-react';
+
+/**
+ * Strip the YAML frontmatter header (`--- ... ---`) from artifact markdown.
+ * The raw artifact body includes stepId/agentId/createdAt metadata that is
+ * noise for the user who just wants to see the agent's output.
+ */
+function stripFrontmatter(body: string): string {
+  if (!body) return '';
+  const m = body.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/);
+  return m ? body.slice(m[0].length).trim() : body;
+}
+
 import PlanPreview from './PlanPreview';
 import KanbanCardStream from './KanbanCardStream';
 import MissionComposer, { type MissionComposerAgent } from './MissionComposer';
@@ -57,6 +69,11 @@ export default function MissionFlowShell({
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [historyRefresh, setHistoryRefresh] = useState(0);
+  // Back-fill bodies for `done` steps: artifact markdown read back from disk
+  // so users returning to a completed mission don't see "(No output captured)".
+  const [doneArtifacts, setDoneArtifacts] = useState<Record<string, string>>({});
+  // Track which step × mission we've already fetched so we don't spam IPC.
+  const [fetched, setFetched] = useState<Set<string>>(new Set());
 
   // Auto-expand the running step so the user sees live streaming.
   useEffect(() => {
@@ -73,6 +90,44 @@ export default function MissionFlowShell({
       setHistoryRefresh((n) => n + 1);
     }
   }, [state.stage]);
+
+  // Auto-backfill artifact body for every `done` step that doesn't already
+  // have live stream text in the hook. Fires whenever the mission's step list
+  // changes (including mount-restore and step-ended events).
+  useEffect(() => {
+    const mission = state.mission;
+    if (!mission) return;
+    const api: any = typeof window !== 'undefined' ? (window as any).electronAPI : null;
+    if (!api?.missionReadArtifact) return;
+
+    for (const step of mission.steps) {
+      if (step.status !== 'done') continue;
+      if (state.stepStream[step.id]) continue;               // live buffer wins
+      if (doneArtifacts[step.id]) continue;                  // already fetched
+      const key = `${mission.id}::${step.id}`;
+      if (fetched.has(key)) continue;
+      // Mark as fetching so subsequent renders don't double-dispatch.
+      setFetched((prev) => {
+        const next = new Set(prev);
+        next.add(key);
+        return next;
+      });
+      (async () => {
+        try {
+          const res = await api.missionReadArtifact(mission.id, step.id);
+          if (res?.ok && typeof res.body === 'string') {
+            setDoneArtifacts((prev) => ({ ...prev, [step.id]: stripFrontmatter(res.body) }));
+          }
+        } catch { /* silent — UI just keeps placeholder */ }
+      })();
+    }
+  }, [state.mission, state.stepStream, doneArtifacts, fetched]);
+
+  // Reset artifact cache when switching mission.
+  useEffect(() => {
+    setDoneArtifacts({});
+    setFetched(new Set());
+  }, [state.missionId]);
 
   const handleCreate = useCallback(async (goal: string) => {
     setBusy(true);
@@ -210,7 +265,11 @@ export default function MissionFlowShell({
               <KanbanCardStream
                 key={step.id}
                 step={step}
-                streamText={state.stepStream[step.id] ?? ''}
+                streamText={
+                  state.stepStream[step.id]
+                  || (step.status === 'done' ? doneArtifacts[step.id] : undefined)
+                  || ''
+                }
                 expanded={!!expanded[step.id]}
                 onToggleExpand={() => toggle(step.id)}
                 onReadArtifact={

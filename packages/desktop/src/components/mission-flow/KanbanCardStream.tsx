@@ -18,6 +18,14 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+
+function formatElapsedSec(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return '';
+  if (sec < 60) return `${Math.floor(sec)}s`;
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}m ${s}s`;
+}
 import {
   CheckCircle2,
   ChevronDown,
@@ -64,6 +72,21 @@ export default function KanbanCardStream({
 
   const preRef = useRef<HTMLPreElement>(null);
   const [autoStick, setAutoStick] = useState(true);
+
+  // Elapsed-time ticker for running/retrying steps with no stream yet, so the
+  // user can see the wait is progressing (not dead).
+  const [elapsedSec, setElapsedSec] = useState(0);
+  useEffect(() => {
+    if (step.status !== 'running' && step.status !== 'retrying') {
+      setElapsedSec(0);
+      return;
+    }
+    const startedAt = step.startedAt ? Date.parse(step.startedAt) : Date.now();
+    const tick = () => setElapsedSec((Date.now() - startedAt) / 1000);
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [step.status, step.startedAt]);
 
   // Keep the stream pinned to the bottom unless the user scrolled up.
   useEffect(() => {
@@ -114,6 +137,9 @@ export default function KanbanCardStream({
         >
           <Icon size={11} className={step.status === 'running' || step.status === 'retrying' ? 'animate-spin' : ''} />
           {tr(`missionFlow.status.${step.status}`, pillInfo.label)}
+          {(step.status === 'running' || step.status === 'retrying') && elapsedSec > 3 && (
+            <span className="ml-0.5 text-slate-400 font-normal">· {formatElapsedSec(elapsedSec)}</span>
+          )}
         </span>
 
         {expanded ? (
@@ -151,11 +177,28 @@ export default function KanbanCardStream({
           >
             {streamText && streamText.length > 0
               ? streamText
-              : placeholderFor(step.status, tr)}
+              : placeholderFor(step.status, tr, elapsedSec)}
             {step.status === 'running' && (
               <span aria-hidden className="inline-block w-1.5 h-3 ml-0.5 align-middle bg-sky-300 animate-pulse" />
             )}
           </pre>
+
+          {step.status === 'running' && !streamText && elapsedSec > 10 && (
+            <div
+              data-testid={`kanban-card-${step.id}-wait`}
+              className="px-3 py-1.5 border-t border-slate-700/30 bg-slate-900/40 text-[11px] text-slate-400"
+            >
+              {elapsedSec > 60
+                ? tr(
+                    'missionFlow.kanban.waitLong',
+                    `⏳ Agent still thinking · ${formatElapsedSec(elapsedSec)} elapsed · large tasks may take a few minutes`,
+                  ).replace('{elapsed}', formatElapsedSec(elapsedSec))
+                : tr(
+                    'missionFlow.kanban.waitShort',
+                    `⏳ Agent is warming up · ${formatElapsedSec(elapsedSec)} elapsed`,
+                  ).replace('{elapsed}', formatElapsedSec(elapsedSec))}
+            </div>
+          )}
 
           {step.status === 'failed' && step.errorMessage && (
             <div
@@ -194,9 +237,15 @@ export default function KanbanCardStream({
 // helpers
 // ---------------------------------------------------------------------------
 
-function placeholderFor(status: MissionSnapshotStepStatus, t: TranslateFunc): string {
+function placeholderFor(status: MissionSnapshotStepStatus, t: TranslateFunc, elapsedSec = 0): string {
   if (status === 'waiting') return t('missionFlow.kanban.waiting', 'Waiting for previous step…');
-  if (status === 'running') return t('missionFlow.kanban.starting', 'Starting…');
+  if (status === 'running') {
+    if (elapsedSec > 10) {
+      // Once we've waited >10s without a token, show a more reassuring message.
+      return t('missionFlow.kanban.warming', 'Agent is working on it — first tokens will appear here…');
+    }
+    return t('missionFlow.kanban.starting', 'Starting…');
+  }
   if (status === 'done') return t('missionFlow.kanban.noOutput', '(No output captured)');
   if (status === 'failed') return '';
   if (status === 'retrying') return t('missionFlow.kanban.retrying', 'Retrying…');

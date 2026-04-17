@@ -202,6 +202,39 @@ describe('MissionFlowShell', () => {
     );
   });
 
+  it('done step without live stream auto-backfills artifact body via mission:read-artifact', async () => {
+    // Mock electronAPI.missionReadArtifact to return a markdown body
+    const api: any = (window as any).electronAPI;
+    const readArtifact = (api.missionReadArtifact = vi.fn(async (_mid: string, stepId: string) => ({
+      ok: true,
+      body: `---\nstepId: ${stepId}\nagentId: main\n---\n\n# Real artifact body\n\nHello from disk.`,
+    })));
+
+    setState({
+      stage: 'done',
+      missionId: 'm-a',
+      mission: {
+        id: 'm-a', goal: 'x', status: 'done', steps: [
+          { id: 'T1', agentId: 'main', role: 'L', title: 'A', deliverable: 'd',
+            depends_on: [], status: 'done', attempts: 1, artifactPath: 'artifacts/T1-a.md' },
+        ],
+      },
+      stepStream: {}, // no live stream
+    });
+
+    render(<MissionFlowShell />);
+
+    // Wait for the effect to fire the IPC call
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    expect(readArtifact).toHaveBeenCalledWith('m-a', 'T1');
+
+    // Delete the mock so next tests don't see a lingering method
+    delete api.missionReadArtifact;
+  });
+
   it('passes workDir + agents through to actions.create', async () => {
     render(
       <MissionFlowShell
