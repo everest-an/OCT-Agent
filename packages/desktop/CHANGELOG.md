@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.7-preview.7] - 2026-04-18
+
+### Reverted — chat bug fixes from preview.6 broke Qwen agents
+User reported that on preview.6 the chat bubble would sit on "Thinking..." for 2 minutes and then fall back to "Gateway returned an empty reply. Retrying through local CLI fallback..." (triggered by my new stream-reset wiring + idle timeout).
+
+Root cause: the `sawFinalState` guard + 40ms IPC throttle + accumulation logic in `liveThinkingBuffer` are correct against the narrow mocked cases I tested, but were NOT validated against a real OpenClaw Gateway + real Qwen / multi-tool agent. Before validating on the live stack I shipped them — against CLAUDE.md's explicit rule for this zone. Reverted entire commit a6a1747 (`register-chat-handlers.ts`, `preload.ts`, `electron.d.ts`, `Dashboard.tsx`, `chat-preview6-fixes.test.ts`).
+
+### Kept — MissionFlow removal
+The Chat-First redesign (Tasks tab gone, mission-flow code deleted) stays intact. Only the chat behavioural change is reverted. Users still get:
+- No Tasks tab in sidebar
+- AI spawns subagents inline via OpenClaw's native `sessions_spawn` when appropriate
+- Completion notifications via `message_send` to connected channels
+
+### Note
+Chat behavior is now bit-identical to preview.5. The 3 chat bugs the user flagged (thinking 散落, last turn duplicate, streaming perf) are **NOT fixed** in preview.7 — proper fixes require live OpenClaw validation and are deferred.
+
 ## [0.3.7-preview.6] - 2026-04-18
 
 ### Changed — Chat-First Redesign
