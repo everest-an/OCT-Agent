@@ -43,61 +43,8 @@ export interface CronJobRecord {
   raw?: string;
 }
 
-// -----------------------------------------------------------------------------
-// Mission Flow (F-Team-Tasks)
-// -----------------------------------------------------------------------------
-
-export type MissionSnapshotStatus =
-  | 'planning'
-  | 'running'
-  | 'paused'
-  | 'paused_awaiting_human'
-  | 'done'
-  | 'failed';
-
-export type MissionSnapshotStepStatus =
-  | 'waiting'
-  | 'running'
-  | 'retrying'
-  | 'done'
-  | 'failed'
-  | 'skipped';
-
-export interface MissionSnapshotStep {
-  id: string;
-  agentId: string;
-  agentName?: string;
-  role: string;
-  title: string;
-  deliverable: string;
-  depends_on: readonly string[];
-  expectedDurationMinutes?: number;
-  model?: string;
-  status: MissionSnapshotStepStatus;
-  attempts: number;
-  sessionKey?: string;
-  runId?: string;
-  startedAt?: string;
-  completedAt?: string;
-  artifactPath?: string;
-  errorCode?: string;
-  errorMessage?: string;
-}
-
-export interface MissionSnapshot {
-  id: string;
-  version: 1;
-  goal: string;
-  status: MissionSnapshotStatus;
-  createdAt: string;
-  startedAt?: string;
-  completedAt?: string;
-  plannerAgentId: string;
-  rootWorkDir?: string;
-  steps: readonly MissionSnapshotStep[];
-  currentStepId?: string;
-  lastEvent?: { at: string; type: string; stepId?: string; payload?: string };
-}
+// preview.6: Mission Flow types removed — AI spawns subagents inline in chat
+// via OpenClaw's native sessions_spawn (no separate mission/workflow surface).
 
 export interface ElectronAPI {
   getPlatform: () => Promise<string>;
@@ -340,31 +287,8 @@ export interface ElectronAPI {
   onTaskStreamDelta?: (callback: (data: { sessionKey: string; runId: string; chunk: string }) => void) => (() => void) | undefined;
   taskSendMessage?: (sessionKey: string, message: string) => Promise<{ success: boolean; error?: string }>;
 
-  // Mission (multi-agent workflow — legacy orchestrator)
-  missionStart?: (params: { missionId: string; goal: string; workDir?: string; agents: Array<{ id: string; name?: string; emoji?: string }> }) => Promise<{ success: boolean; sessionKey?: string; error?: string }>;
-  missionListActive?: () => Promise<{ missionIds: string[] }>;
-  missionCancel?: (missionId: string) => Promise<void>;
-  onMissionProgress?: (callback: (data: any) => void) => (() => void) | undefined;
-
-  // Mission Flow (F-Team-Tasks Phase 4 — MissionRunner-based)
-  missionCreateFromGoal?: (goal: string, opts?: { workDir?: string; agents?: Array<{ id: string; name?: string; role?: string; emoji?: string }> }) => Promise<{ missionId: string }>;
-  missionApproveAndRun?: (missionId: string) => Promise<{ ok: boolean; error?: string }>;
-  missionList?: () => Promise<MissionSnapshot[]>;
-  missionGet?: (missionId: string) => Promise<MissionSnapshot | null>;
-  missionCancelFlow?: (missionId: string) => Promise<{ ok: boolean; error?: string }>;
-  missionDelete?: (missionId: string) => Promise<{ ok: boolean; error?: string }>;
-  missionReadArtifact?: (missionId: string, stepId: string) => Promise<{ ok: boolean; path?: string; body?: string; error?: string }>;
-  missionSweepStale?: () => Promise<{ ok: boolean; swept: number; error?: string }>;
-  onMissionPlanning?: (callback: (data: { missionId: string }) => void) => (() => void) | undefined;
-  onMissionPlannerDelta?: (callback: (data: { missionId: string; chunk: string }) => void) => (() => void) | undefined;
-  onMissionPlanReady?: (callback: (data: { missionId: string; mission: MissionSnapshot }) => void) => (() => void) | undefined;
-  onMissionStepStarted?: (callback: (data: { missionId: string; stepId: string; sessionKey: string; runId: string }) => void) => (() => void) | undefined;
-  onMissionStepDelta?: (callback: (data: { missionId: string; stepId: string; chunk: string }) => void) => (() => void) | undefined;
-  onMissionStepTool?: (callback: (data: { missionId: string; stepId: string; toolName: string; status: string }) => void) => (() => void) | undefined;
-  onMissionStepEnded?: (callback: (data: { missionId: string; stepId: string; artifactPath: string }) => void) => (() => void) | undefined;
-  onMissionStepFailed?: (callback: (data: { missionId: string; stepId: string; errorCode: string; message: string }) => void) => (() => void) | undefined;
-  onMissionDone?: (callback: (data: { missionId: string; mission: MissionSnapshot }) => void) => (() => void) | undefined;
-  onMissionFailed?: (callback: (data: { missionId: string; mission: MissionSnapshot; reason: string }) => void) => (() => void) | undefined;
+  // preview.6: Mission Flow + legacy Workflow APIs removed. AI auto-spawns
+  // subagents inline in chat via OpenClaw's native sessions_spawn tool.
 
   // Active project workspace (shared between desktop chat and channel inbound hook)
   workspaceGetActive?: () => Promise<{ success: boolean; path?: string | null; error?: string }>;

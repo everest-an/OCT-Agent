@@ -39,8 +39,9 @@ import { registerChatHandlers } from './ipc/register-chat-handlers';
 import { registerCloudWorkspaceHandlers } from './ipc/register-cloud-workspace-handlers';
 import { registerConfigIoHandlers } from './ipc/register-config-io-handlers';
 import { registerCronHandlers } from './ipc/register-cron-handlers';
-import { registerWorkflowHandlers } from './ipc/register-workflow-handlers';
-import { registerMissionHandlers } from './ipc/register-mission-handlers';
+// preview.6: Mission Flow and legacy Workflow handlers removed — users now
+// interact only via Chat; AI auto-spawns subagents via OpenClaw's native
+// sessions_spawn tool. See docs/features/team-tasks/08-CHAT-FIRST-REDESIGN.md
 import { registerFileDialogHandlers } from './ipc/register-file-dialog-handlers';
 import { registerGatewayHandlers } from './ipc/register-gateway-handlers';
 import { registerMemoryHandlers } from './ipc/register-memory-handlers';
@@ -2089,20 +2090,8 @@ registerCronHandlers({
   readShellOutputAsync,
   runSpawnAsync,
 });
-registerWorkflowHandlers({
-  home: HOME,
-  safeShellExecAsync,
-  runAsync,
-  runSpawnAsync,
-  getGatewayWs,
-  getMainWindow: () => mainWindow,
-});
-registerMissionHandlers({
-  home: HOME,
-  getGatewayWs: async () => getGatewayWs(),
-  getMainWindow: () => mainWindow,
-  callMcp,
-});
+// preview.6: Mission Flow + legacy workflow handlers removed — users only see
+// Chat; AI spawns subagents inline via OpenClaw's native sessions_spawn.
 registerGatewayHandlers({
   readShellOutputAsync,
   runAsync,

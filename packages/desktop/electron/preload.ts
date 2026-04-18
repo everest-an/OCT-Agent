@@ -334,77 +334,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   taskSendMessage: (sessionKey: string, message: string) => ipcRenderer.invoke('task:send-message', sessionKey, message),
 
-  // Mission (multi-agent workflow — legacy orchestrator, kept for backward compatibility)
-  missionStart: (params: { missionId: string; goal: string; workDir?: string; agents: Array<{ id: string; name?: string; emoji?: string }> }) =>
-    ipcRenderer.invoke('mission:start', params),
-  missionListActive: () => ipcRenderer.invoke('mission:list-active'),
-  missionCancel: (missionId: string) => ipcRenderer.invoke('mission:cancel', missionId),
-  onMissionProgress: (callback: (data: any) => void) => {
-    const listener = (_e: any, data: any) => callback(data);
-    ipcRenderer.on('mission:progress', listener);
-    return () => ipcRenderer.removeListener('mission:progress', listener);
-  },
-
-  // Mission Flow (F-Team-Tasks · Phase 4 · MissionRunner-based)
-  missionCreateFromGoal: (goal: string, opts?: { workDir?: string; agents?: Array<{ id: string; name?: string; role?: string; emoji?: string }> }) =>
-    ipcRenderer.invoke('mission:create-from-goal', goal, opts),
-  missionApproveAndRun: (missionId: string) => ipcRenderer.invoke('mission:approve-and-run', missionId),
-  missionList: () => ipcRenderer.invoke('mission:list'),
-  missionGet: (missionId: string) => ipcRenderer.invoke('mission:get', missionId),
-  missionCancelFlow: (missionId: string) => ipcRenderer.invoke('mission:cancel-flow', missionId),
-  missionDelete: (missionId: string) => ipcRenderer.invoke('mission:delete', missionId),
-  missionReadArtifact: (missionId: string, stepId: string) => ipcRenderer.invoke('mission:read-artifact', missionId, stepId),
-  missionSweepStale: () => ipcRenderer.invoke('mission:sweep-stale'),
-  onMissionPlanning: (callback: (data: { missionId: string }) => void) => {
-    const listener = (_e: any, data: any) => callback(data);
-    ipcRenderer.on('mission:planning', listener);
-    return () => ipcRenderer.removeListener('mission:planning', listener);
-  },
-  onMissionPlannerDelta: (callback: (data: { missionId: string; chunk: string }) => void) => {
-    const listener = (_e: any, data: any) => callback(data);
-    ipcRenderer.on('mission:planner-delta', listener);
-    return () => ipcRenderer.removeListener('mission:planner-delta', listener);
-  },
-  onMissionPlanReady: (callback: (data: { missionId: string; mission: any }) => void) => {
-    const listener = (_e: any, data: any) => callback(data);
-    ipcRenderer.on('mission:plan-ready', listener);
-    return () => ipcRenderer.removeListener('mission:plan-ready', listener);
-  },
-  onMissionStepStarted: (callback: (data: { missionId: string; stepId: string; sessionKey: string; runId: string }) => void) => {
-    const listener = (_e: any, data: any) => callback(data);
-    ipcRenderer.on('mission:step-started', listener);
-    return () => ipcRenderer.removeListener('mission:step-started', listener);
-  },
-  onMissionStepDelta: (callback: (data: { missionId: string; stepId: string; chunk: string }) => void) => {
-    const listener = (_e: any, data: any) => callback(data);
-    ipcRenderer.on('mission:step-delta', listener);
-    return () => ipcRenderer.removeListener('mission:step-delta', listener);
-  },
-  onMissionStepTool: (callback: (data: { missionId: string; stepId: string; toolName: string; status: string }) => void) => {
-    const listener = (_e: any, data: any) => callback(data);
-    ipcRenderer.on('mission:step-tool', listener);
-    return () => ipcRenderer.removeListener('mission:step-tool', listener);
-  },
-  onMissionStepEnded: (callback: (data: { missionId: string; stepId: string; artifactPath: string }) => void) => {
-    const listener = (_e: any, data: any) => callback(data);
-    ipcRenderer.on('mission:step-ended', listener);
-    return () => ipcRenderer.removeListener('mission:step-ended', listener);
-  },
-  onMissionStepFailed: (callback: (data: { missionId: string; stepId: string; errorCode: string; message: string }) => void) => {
-    const listener = (_e: any, data: any) => callback(data);
-    ipcRenderer.on('mission:step-failed', listener);
-    return () => ipcRenderer.removeListener('mission:step-failed', listener);
-  },
-  onMissionDone: (callback: (data: { missionId: string; mission: any }) => void) => {
-    const listener = (_e: any, data: any) => callback(data);
-    ipcRenderer.on('mission:done', listener);
-    return () => ipcRenderer.removeListener('mission:done', listener);
-  },
-  onMissionFailed: (callback: (data: { missionId: string; mission: any; reason: string }) => void) => {
-    const listener = (_e: any, data: any) => callback(data);
-    ipcRenderer.on('mission:failed', listener);
-    return () => ipcRenderer.removeListener('mission:failed', listener);
-  },
+  // preview.6: Mission Flow (independent kanban tab) and legacy Workflow
+  // handlers were removed. AI auto-spawns subagents inline in chat via
+  // OpenClaw's native sessions_spawn tool — no dedicated mission APIs needed.
 
   // OpenClaw plugin fix
   openclawFixPlugin: () => ipcRenderer.invoke('openclaw:fix-plugin'),
