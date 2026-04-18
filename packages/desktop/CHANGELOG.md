@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.3.7-preview.6] - 2026-04-18
+
+### Changed — Chat-First Redesign
+**User-visible:** The "Tasks" tab in the left sidebar is gone. There is now no dedicated Mission / Plan / Kanban screen. Everything happens inside Chat.
+
+Why: User mandate — "This product is for normal users. Simpler is better. Chat is the only entry." When AI judges a request needs subtasks, it now uses OpenClaw's native `sessions_spawn` tool and renders the subagent activity inline in the same chat bubble (the existing `ChatTracePanel` was already good for this — no new UI). For long-running tasks, AI uses OpenClaw's native `message_send` to push a completion notification to whichever channel you've already connected (Telegram / WhatsApp / WeChat / Signal).
+
+No new concepts for the user. No toggle. No "background task" wording. You just chat.
+
+### Fixed — 3 chat bugs user flagged before sleep
+The `ChatTracePanel`, `thinking`, `tool_use`, and `content_blocks` rendering paths were declared 禁区 (user had just finished fixing them) and are **completely untouched**. Fixes are thin wrappers around those paths:
+
+1. **Thinking 散落 / fragmented reasoning** — Live `stream:"thinking"` deltas now accumulate in a buffer on the main side. OpenClaw 2026.x always emits these as incremental tokens, so the renderer's single-state `onChatThinking` handler now always sees the complete reasoning instead of only the latest fragment.
+2. **最后一轮重复输出 / duplicate last turn** — Two independent guards:
+   - Duplicate `state:"final"` frame guard (Gateway occasionally double-fires final; the second pass previously re-emitted tool + text events).
+   - New `chat:stream-reset` signal before CLI fallback (awareness_init compat / VPN+DNS compat / empty-reply recovery). Renderer clears partial Gateway bytes so the CLI retry re-streams cleanly instead of concatenating fragments.
+3. **Streaming perf** — 40ms IPC throttle on `chat:stream` (20 per-token deltas now collapse to a handful of batched sends) + extracted a memoized `<StreamingMarkdownBlock />` so ReactMarkdown re-parses only when content changes. Re-renders during a long response drop from O(tokens) to O(chunks/40ms).
+
+### Removed — Mission Flow subsystem (~78 files)
+- Sidebar "Tasks" tab + TaskCenter page
+- `electron/mission/` (mission-runner, streaming-bridge, planner-prompt, plan-schema, worker-prompt, file-layout, awareness-bridge, types)
+- `electron/ipc/register-mission-handlers.ts` + `register-workflow-handlers.ts` (+ their window.api.* surface)
+- `src/components/mission-flow/*` (MissionFlowShell, MissionComposer, PlanPreview, KanbanCardStream, MissionHistoryList, useMissionFlow, friendly-errors)
+- `src/components/task-center/*` (MissionCard, MissionDetail, TaskCreateModal, TaskDetailPanel, KanbanBoard, KanbanCard, WorkflowList, WorkflowRunner)
+- `src/lib/mission-store.ts`
+- 28 mission-/task-/workflow-/kanban- test files
+- `scripts/verify-mission-*.mjs`, `scripts/e2e-mission-smoke.mjs`, `stryker.mission.conf.mjs`
+- ~90 i18n keys in en + zh (nav.taskCenter, taskCenter.*, missionFlow.*, mission.*, step.*, kanban.*, workflow.*, taskCreate.*, taskCard.*)
+- Main bundle: 1036KB → 1020KB (-15KB)
+
+### Added — L1 guard
+`scripts/verify-chat.mjs` replaces the 4 old `verify-mission-*` scripts. Guards:
+- Sidebar / App.tsx have no `taskCenter` / `TaskCenter` references
+- main.ts has no `registerMissionHandlers` / `registerWorkflowHandlers`
+- preload.ts + electron.d.ts expose no `mission*` APIs
+- The 3 chat bug fixes stay wired (`liveThinkingBuffer`, `sawFinalState` guard, `sendStreamChunkThrottled`, `flushPendingStream`, `chat:stream-reset`)
+- Renderer subscribes to `onChatStreamReset` and uses the memoized `StreamingMarkdownBlock`
+- Deleted mission dirs stay deleted
+
+### Testing
+- 4 new L2 tests in `src/test/chat-preview6-fixes.test.ts` covering thinking accumulation, duplicate-final dedupe, IPC throttle, stream-reset on fallback.
+- vitest: 703 pass / 3 fail (pre-existing F-053 single-param migration tests, unrelated) / 3 skipped. 0 new regressions.
+- tsc --project tsconfig.electron.json clean.
+- npm run build clean.
+- L1 verify-chat.mjs PASS.
+
 ## [0.3.7-preview.5] - 2026-04-18
 
 ### Added — startup sweep kills zombie running missions from a previous session
