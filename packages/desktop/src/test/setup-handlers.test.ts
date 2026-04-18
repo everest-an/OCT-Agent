@@ -1,3 +1,6 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { EventEmitter } from 'events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -112,5 +115,67 @@ describe('registerSetupHandlers', () => {
     expect(runSpawn).toHaveBeenCalledTimes(1);
     expect(runSpawn).toHaveBeenCalledWith(process.execPath, expect.any(Array), expect.any(Object));
     expect(forceStopLocalDaemon).not.toHaveBeenCalled();
+  });
+
+  it('does not claim plugin install success when extraction leaves an empty extension directory', async () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awarenessclaw-setup-plugin-'));
+    fs.mkdirSync(path.join(tempHome, '.openclaw', 'extensions'), { recursive: true });
+
+    const persistAwarenessPluginConfig = vi.fn();
+    const sanitizeAwarenessPluginConfig = vi.fn();
+
+    registerSetupHandlers({
+      home: tempHome,
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      getNodeVersion: vi.fn(() => 'v22.0.0'),
+      runAsync: vi.fn(async (cmd: string) => {
+        if (cmd.includes('npm pack @awareness-sdk/openclaw-memory@latest')) {
+          return 'awareness-sdk-openclaw-memory-0.6.15.tgz';
+        }
+        if (cmd.includes('tar -xzf')) {
+          const extDir = path.join(tempHome, '.openclaw', 'extensions', 'openclaw-memory');
+          fs.mkdirSync(extDir, { recursive: true });
+          return '';
+        }
+        if (cmd.includes('clawhub@latest install awareness-memory --force')) {
+          throw new Error('clawhub install failed');
+        }
+        throw new Error(`unexpected command: ${cmd}`);
+      }),
+      safeShellExecAsync: vi.fn(async () => null),
+      getBundledNpmBin: vi.fn(() => null),
+      resolveBundledCache: vi.fn(() => null),
+      downloadFile: vi.fn(async () => undefined),
+      sleep: vi.fn(async () => undefined),
+      getLocalDaemonHealth: vi.fn(async () => null),
+      checkDaemonHealth: vi.fn(async () => false),
+      waitForLocalDaemonReady: vi.fn(async () => false),
+      sendSetupDaemonStatus: vi.fn(),
+      startLocalDaemonDetached: vi.fn(async () => undefined),
+      runSpawn: vi.fn(() => createSpawnedChild(0)),
+      forceStopLocalDaemon: vi.fn(async () => undefined),
+      clearAwarenessLocalNpxCache: vi.fn(),
+      formatDaemonSetupError: vi.fn(() => 'pending'),
+      persistAwarenessPluginConfig,
+      applyAwarenessPluginConfig: vi.fn(),
+      sanitizeAwarenessPluginConfig,
+      mergeOpenClawConfig: vi.fn((existing: Record<string, any>) => existing),
+      getDaemonStartupPromise: vi.fn(() => null),
+      setDaemonStartupPromise: vi.fn(),
+      getDaemonStartupLastKickoff: vi.fn(() => 0),
+      setDaemonStartupLastKickoff: vi.fn(),
+      sendSetupStatus: vi.fn(),
+      setOpenclawInstalling: vi.fn(),
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['setup:install-plugin']();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Awareness Memory plugin could not be installed');
+    expect(persistAwarenessPluginConfig).not.toHaveBeenCalled();
+    expect(sanitizeAwarenessPluginConfig).toHaveBeenCalledTimes(1);
+
+    fs.rmSync(tempHome, { recursive: true, force: true });
   });
 });

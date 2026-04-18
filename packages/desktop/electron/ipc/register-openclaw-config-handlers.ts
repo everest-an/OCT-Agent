@@ -150,6 +150,7 @@ export function registerOpenClawConfigHandlers(deps: {
   ipcMain.handle('permissions:update', async (_e, changes: {
     alsoAllow?: string[];
     denied?: string[];
+    profile?: string;
     execSecurity?: ExecApprovalSecurity;
     execAsk?: ExecApprovalAsk;
     execAskFallback?: ExecApprovalSecurity;
@@ -158,20 +159,26 @@ export function registerOpenClawConfigHandlers(deps: {
   }) => {
     try {
       const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
-      let config: any = {};
-      try {
-        config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      } catch {}
-      if (!config.tools) config.tools = {};
-      if (changes.alsoAllow !== undefined) config.tools.alsoAllow = changes.alsoAllow;
+      const existingConfig = readConfig(deps.home);
+      const merge = deps.mergeOpenClawConfig || ((current: Record<string, any>, incoming: Record<string, any>) => ({ ...current, ...incoming }));
+      const shouldEnforceCodingProfile = changes.profile !== undefined || changes.alsoAllow !== undefined;
+      const nextProfile = changes.profile || (shouldEnforceCodingProfile ? 'coding' : undefined);
+      const mergedConfig = nextProfile
+        ? merge(existingConfig, { tools: { profile: nextProfile } })
+        : { ...existingConfig };
+
+      if (!mergedConfig.tools) mergedConfig.tools = {};
+      if (changes.alsoAllow !== undefined) mergedConfig.tools.alsoAllow = changes.alsoAllow;
+      if (nextProfile) mergedConfig.tools.profile = nextProfile;
       if (changes.denied !== undefined) {
         if (changes.denied.length > 0) {
-          config.tools.denied = changes.denied;
+          mergedConfig.tools.denied = changes.denied;
         } else {
-          delete config.tools.denied;
+          delete mergedConfig.tools.denied;
         }
       }
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+      safeWriteJsonFile(configPath, mergedConfig);
       if (
         changes.execSecurity !== undefined ||
         changes.execAsk !== undefined ||

@@ -307,6 +307,29 @@ describe('desktop openclaw config merge', () => {
     expect(config.plugins.slots?.memory).toBeUndefined();
   });
 
+  it('removes stale openclaw-memory slot assignments even when the plugin exists on disk', () => {
+    const config: Record<string, any> = {
+      plugins: {
+        allow: ['openclaw-memory', 'browser'],
+        entries: {
+          'openclaw-memory': {
+            enabled: true,
+            config: { localUrl: 'http://127.0.0.1:37800' },
+          },
+        },
+        slots: {
+          memory: 'openclaw-memory',
+        },
+      },
+    };
+
+    sanitizeDesktopAwarenessPluginConfig(config, 'C:/Users/admin');
+
+    expect(config.plugins.entries['openclaw-memory']).toBeDefined();
+    expect(config.plugins.allow).toEqual(expect.arrayContaining(['openclaw-memory', 'browser']));
+    expect(config.plugins.slots?.memory).toBeUndefined();
+  });
+
   it('detects Windows OpenClaw 2026.4.10 as legacy safe-mode target', () => {
     expect(shouldUseLegacyWindowsOpenClawSafeMode('win32', '2026.4.10')).toBe(true);
     expect(shouldUseLegacyWindowsOpenClawSafeMode('win32', 'OpenClaw 2026.4.10 (44e5b62)')).toBe(true);

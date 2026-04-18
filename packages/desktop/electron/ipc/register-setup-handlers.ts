@@ -33,6 +33,10 @@ function normalizeHomePath(value: string) {
   return normalized || value;
 }
 
+function hasAwarenessPluginPackage(home: string) {
+  return fs.existsSync(path.join(home, '.openclaw', 'extensions', 'openclaw-memory', 'package.json'));
+}
+
 export function registerSetupHandlers(deps: {
   home: string;
   getEnhancedPath: () => string;
@@ -498,6 +502,9 @@ export function registerSetupHandlers(deps: {
         fs.mkdirSync(extDir, { recursive: true });
         await deps.runAsync(`tar -xzf "${tgzPath}" -C "${extDir}" --strip-components=1`, 30000);
         try { fs.unlinkSync(tgzPath); } catch {}
+        if (!hasAwarenessPluginPackage(deps.home)) {
+          throw new Error('awareness plugin package.json missing after extract');
+        }
         deps.persistAwarenessPluginConfig({ enableSlot: true });
         writeDesktopExecApprovalDefaults(deps.home);
         npmDirectOk = true;
@@ -509,6 +516,9 @@ export function registerSetupHandlers(deps: {
     if (hasOpenClaw) {
       try {
         await deps.runAsync(`cd "${deps.home}" && openclaw plugins install @awareness-sdk/openclaw-memory`, 60000);
+        if (!hasAwarenessPluginPackage(deps.home)) {
+          throw new Error('awareness plugin package.json missing after openclaw plugins install');
+        }
         deps.persistAwarenessPluginConfig({ enableSlot: true });
         writeDesktopExecApprovalDefaults(deps.home);
         return { success: true, method: 'openclaw-plugin' };
@@ -518,12 +528,18 @@ export function registerSetupHandlers(deps: {
     try {
       if (pluginTarball && npmCli) {
         await runWithBundledNpmCli(npmCli, `exec --yes "${pluginTarball}" install awareness-memory --force`, 60000, deps.home);
+        if (!hasAwarenessPluginPackage(deps.home)) {
+          throw new Error('awareness plugin package.json missing after bundled clawhub install');
+        }
         deps.persistAwarenessPluginConfig({ enableSlot: true });
         writeDesktopExecApprovalDefaults(deps.home);
         return { success: true, method: 'clawhub-offline' };
       }
 
       await deps.runAsync(`cd "${deps.home}" && npx -y clawhub@latest install awareness-memory --force`, 60000);
+      if (!hasAwarenessPluginPackage(deps.home)) {
+        throw new Error('awareness plugin package.json missing after clawhub install');
+      }
       deps.persistAwarenessPluginConfig({ enableSlot: true });
       writeDesktopExecApprovalDefaults(deps.home);
       return { success: true, method: 'clawhub' };
@@ -536,11 +552,21 @@ export function registerSetupHandlers(deps: {
         let config: any = {};
         try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
 
-        deps.applyAwarenessPluginConfig(config, { enableSlot: false });
+        if (config.plugins?.entries?.['openclaw-memory']) {
+          delete config.plugins.entries['openclaw-memory'];
+        }
+        if (Array.isArray(config.plugins?.allow)) {
+          config.plugins.allow = config.plugins.allow.filter((pluginId: string) => pluginId !== 'openclaw-memory');
+        }
+        if (config.plugins?.slots?.memory === 'openclaw-memory') {
+          delete config.plugins.slots.memory;
+        }
         deps.sanitizeAwarenessPluginConfig(config);
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-        writeDesktopExecApprovalDefaults(deps.home);
-        return { success: true, method: 'config-only', note: 'Plugin config written, will install on first run' };
+        return {
+          success: false,
+          error: 'Awareness Memory plugin could not be installed. The stale plugin config was removed to keep OpenClaw usable. Retry install after checking npm/network access.',
+        };
       } catch (err) {
         return { success: false, error: String(err) };
       }

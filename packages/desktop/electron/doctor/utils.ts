@@ -50,7 +50,12 @@ export function persistAwarenessPluginConfig(homedir: string) {
     },
   };
   config.plugins.allow = Array.from(new Set([...(normalizePluginAllow(config.plugins.allow) || []), 'openclaw-memory']));
-  config.plugins.slots = { ...(config.plugins.slots || {}), memory: 'openclaw-memory' };
+  if (config.plugins.slots?.memory === 'openclaw-memory') {
+    delete config.plugins.slots.memory;
+    if (Object.keys(config.plugins.slots).length === 0) {
+      delete config.plugins.slots;
+    }
+  }
   if (config.plugins.entries['memory-awareness']) delete config.plugins.entries['memory-awareness'];
   if (Array.isArray(config.plugins.allow)) {
     config.plugins.allow = config.plugins.allow.filter((pluginId: string) => pluginId !== 'memory-awareness');

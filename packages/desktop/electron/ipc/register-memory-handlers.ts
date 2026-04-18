@@ -210,19 +210,24 @@ export function registerMemoryHandlers() {
   });
 
   ipcMain.handle('memory:enable-slot-replacement', async () => {
-    // Write plugins.slots.memory = "openclaw-memory" into openclaw.json
-    // so OpenClaw uses Awareness Memory instead of memory-core
+    // Legacy compatibility path. Older builds tried to force
+    // plugins.slots.memory=openclaw-memory, but current OpenClaw versions reject
+    // that slot assignment. Keep Awareness Memory enabled via plugin entry and
+    // remove stale slot config instead of writing it back.
     const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
     try {
       let config: Record<string, any> = {};
       try { config = readJsonFileWithBom<Record<string, any>>(configPath) || {}; } catch { /* new file */ }
 
-      if (!config.plugins) config.plugins = {};
-      if (!config.plugins.slots) config.plugins.slots = {};
-      config.plugins.slots.memory = 'openclaw-memory';
+      if (config.plugins?.slots?.memory === 'openclaw-memory') {
+        delete config.plugins.slots.memory;
+        if (Object.keys(config.plugins.slots).length === 0) {
+          delete config.plugins.slots;
+        }
+      }
 
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
-      return { success: true, message: 'Memory slot set to openclaw-memory' };
+      return { success: true, message: 'Removed stale memory slot override; Awareness Memory remains enabled through plugin config.' };
     } catch (err: any) {
       return { success: false, error: err?.message || String(err) };
     }
@@ -232,10 +237,11 @@ export function registerMemoryHandlers() {
     const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
     try {
       const config = readJsonFileWithBom<Record<string, any>>(configPath) || {};
-      const currentSlot = config?.plugins?.slots?.memory || 'memory-core';
-      return { slot: currentSlot, isAwareness: currentSlot === 'openclaw-memory' };
+      const currentSlot = config?.plugins?.slots?.memory || null;
+      const pluginEnabled = config?.plugins?.entries?.['openclaw-memory']?.enabled === true;
+      return { slot: currentSlot, isAwareness: pluginEnabled };
     } catch {
-      return { slot: 'memory-core', isAwareness: false };
+      return { slot: null, isAwareness: false };
     }
   });
 

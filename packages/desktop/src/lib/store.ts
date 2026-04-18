@@ -345,7 +345,6 @@ async function syncToOpenClaw(config: AppConfig, providers: ModelProviderDef[]) 
   // Sync memory settings to plugin config (autoRecall, recallLimit, memoryMode)
   openclawConfig.plugins = {
     ...openclawConfig.plugins,
-    slots: { memory: 'openclaw-memory' },
     entries: {
       'openclaw-memory': {
         enabled: true,
