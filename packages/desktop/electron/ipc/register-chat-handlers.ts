@@ -630,40 +630,6 @@ ${message}`;
       const completedToolIds = new Set<string>();
       const toolNamesById = new Map<string, string>();
       let lastThinkingText = '';
-      // --- preview.6 chat bug fixes (non-invasive — wrap existing paths only) ---
-      // (a) thinking aggregation: accumulate live stream:"thinking" deltas so the
-      //     renderer sees full reasoning instead of the latest fragment only.
-      let liveThinkingBuffer = '';
-      const STREAM_THINKING_SEPARATOR = '';
-      // (b) chat:stream throttle: coalesce high-frequency text deltas to <= one
-      //     IPC send per ~40ms. Final flush on stream-end / error / timeout.
-      let pendingStreamChunk = '';
-      let streamThrottleTimer: ReturnType<typeof setTimeout> | null = null;
-      const STREAM_IPC_THROTTLE_MS = 40;
-      const flushPendingStream = () => {
-        if (streamThrottleTimer) { clearTimeout(streamThrottleTimer); streamThrottleTimer = null; }
-        if (pendingStreamChunk.length > 0) {
-          const chunk = pendingStreamChunk;
-          pendingStreamChunk = '';
-          send('chat:stream', chunk);
-        }
-      };
-      const sendStreamChunkThrottled = (chunk: string) => {
-        if (!chunk) return;
-        pendingStreamChunk += chunk;
-        if (!streamThrottleTimer) {
-          streamThrottleTimer = setTimeout(() => { streamThrottleTimer = null; flushPendingStream(); }, STREAM_IPC_THROTTLE_MS);
-        }
-      };
-      // (c) retry dedup: when a Gateway attempt fails mid-flight and we fall
-      //     back to CLI, the renderer already rendered partial bytes. Emit
-      //     a `chat:stream-reset` signal so the bubble clears before the
-      //     retry re-streams from scratch.
-      const requestStreamReset = (reason: string) => {
-        flushPendingStream();
-        send('chat:stream-reset', { reason });
-        fullResponseText = '';
-      };
       let pendingApprovalRequestId = '';
       let pendingApprovalCommand = '';
       let pendingApprovalDetail = '';
@@ -862,29 +828,10 @@ ${message}`;
 
         // Live thinking token stream (emitted when reasoning='stream' on the session).
         // Gateway broadcasts stream:"thinking" events unconditionally to WS operator clients.
-        // preview.6 fix: OpenClaw 2026.x always emits this stream as *incremental
-        // tokens* (never a full snapshot). Upstream `normalizeAgentGatewayEvent`
-        // copies the same fragment into both `delta` and `text`, so we cannot
-        // distinguish absolute-vs-delta here — instead treat every payload as a
-        // fragment and accumulate into a buffer. The renderer's single
-        // onChatThinking state handler then always sees the full reasoning so
-        // far, fixing the "thinking 散落 / only the last fragment shows" bug.
         if (normalizedAgentEvent.stream === 'thinking') {
-          const fragment = typeof normalizedAgentEvent.delta === 'string'
-            ? normalizedAgentEvent.delta
-            : typeof normalizedAgentEvent.text === 'string'
-              ? normalizedAgentEvent.text
-              : '';
-          if (fragment && !liveThinkingBuffer.endsWith(fragment)) {
-            // Guard against the rare duplicate emit (seq retry) — only append
-            // when the new fragment is genuinely new.
-            liveThinkingBuffer = liveThinkingBuffer
-              ? liveThinkingBuffer + STREAM_THINKING_SEPARATOR + fragment
-              : fragment;
-          }
-          if (liveThinkingBuffer && liveThinkingBuffer !== lastThinkingText) {
-            lastThinkingText = liveThinkingBuffer;
-            send('chat:thinking', liveThinkingBuffer);
+          const thinkingText = normalizedAgentEvent.delta || normalizedAgentEvent.text || '';
+          if (thinkingText) {
+            send('chat:thinking', thinkingText);
             send('chat:status', { type: 'thinking' });
           }
           return;
@@ -964,8 +911,7 @@ ${message}`;
             const newChunk = textContent.slice(fullResponseText.length);
             fullResponseText = textContent;
             sawAssistantTextDelta = true;
-            // preview.6: throttled to avoid per-token IPC/React re-render storm.
-            sendStreamChunkThrottled(newChunk);
+            send('chat:stream', newChunk);
             send('chat:status', { type: 'generating' });
           }
 
@@ -981,17 +927,6 @@ ${message}`;
             }
           }
         } else if (state === 'final') {
-          // preview.6: flush any pending throttled chunks before we enter the
-          // final handoff so the renderer has the full streamed text before any
-          // final content-block processing adds more state.
-          flushPendingStream();
-          if (sawFinalState) {
-            // Duplicate final frame guard — Gateway can occasionally emit two
-            // final events (tool_result-first then assistant-final). Without
-            // this dedupe processAssistantContentBlocks would re-fire tool
-            // events and tail text, which manifests as "last turn repeats".
-            return;
-          }
           sawFinalState = true;
           if (msg && msg.role === 'assistant') {
             finalAssistantText = extractAssistantText(msg).trim();
@@ -1006,7 +941,6 @@ ${message}`;
           clearTimeout(absoluteChatTimeout);
           chatResolve();
         } else if (state === 'aborted' || state === 'error') {
-          flushPendingStream();
           const rawError = payload.error || payload.message?.error || '';
           const errorStr = typeof rawError === 'string' ? rawError : JSON.stringify(rawError);
           send('chat:status', { type: 'error', message: classifyProviderError(errorStr, state) });
@@ -1081,11 +1015,6 @@ ${message}`;
           detail: awarenessInitFailureDetail,
         });
 
-        // preview.6: clear any partial stream the Gateway already pushed to the
-        // renderer before we re-stream via CLI; otherwise user sees the failed
-        // attempt concatenated with the successful retry.
-        requestStreamReset('awareness_init_retry');
-
         send('chat:status', {
           type: 'gateway',
           message: 'Detected Awareness memory compatibility mode. Retrying without awareness_init...',
@@ -1134,9 +1063,6 @@ ${message}`;
         });
 
         if (!pendingApprovalRequestId) {
-          // preview.6: reset partial stream before CLI fallback re-streams.
-          requestStreamReset('vpn_dns_retry');
-
           send('chat:status', {
             type: 'gateway',
             message: 'Detected VPN/DNS compatibility mode. Retrying with exec-based web access...',
@@ -1172,7 +1098,6 @@ ${message}`;
       }
 
       if (!usedCliCompatibilityRetry) {
-        flushPendingStream(); // preview.6: flush any throttled tail before closing.
         send('chat:stream-end', {});
       }
 
@@ -1201,10 +1126,6 @@ ${message}`;
         } else {
           console.warn('[chat] Empty response could not be classified cleanly', diagnostic);
         }
-
-        // preview.6: same reset as above — clear any partial Gateway bytes on the
-        // renderer before CLI fallback re-streams the full response.
-        requestStreamReset('gateway_empty_reply');
 
         send('chat:status', {
           type: 'gateway',

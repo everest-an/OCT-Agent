@@ -79,7 +79,6 @@ export interface ElectronAPI {
   chatApprove?: (sessionId: string, approvalRequestId: string) => Promise<{ success: boolean; command?: string; error?: string }>;
   onChatStream?: (callback: (chunk: string) => void) => void;
   onChatStreamEnd?: (callback: () => void) => void;
-  onChatStreamReset?: (callback: (info: { reason: string }) => void) => void;
   onChatThinking?: (callback: (text: string) => void) => void;
   onChatDebug?: (callback: (msg: string) => void) => void;
   onChatEvent?: (callback: (event: unknown) => void) => void;
