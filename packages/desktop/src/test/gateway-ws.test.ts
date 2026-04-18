@@ -131,4 +131,40 @@ describe('GatewayClient', () => {
     expect(second).toEqual({ skipped: true, reason: 'write-scopes-unavailable' });
     expect(rpcSpy).not.toHaveBeenCalled();
   });
+
+  it('retries reconnect with exponential backoff until a later attempt succeeds', async () => {
+    const client = new GatewayClient();
+    const connectSpy = vi.spyOn(client, 'connect')
+      .mockRejectedValueOnce(new Error('gateway still loading'))
+      .mockRejectedValueOnce(new Error('gateway still loading'))
+      .mockResolvedValue(undefined);
+
+    (client as any).scheduleReconnect();
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(connectSpy).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(connectSpy).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(12000);
+    expect(connectSpy).toHaveBeenCalledTimes(3);
+    expect((client as any).reconnectAttempts).toBe(0);
+  });
+
+  it('stops scheduling reconnect after max attempts', async () => {
+    const client = new GatewayClient();
+    const connectSpy = vi.spyOn(client, 'connect').mockRejectedValue(new Error('gateway down'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    (client as any).reconnectAttempts = 8;
+    (client as any).scheduleReconnect();
+
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(connectSpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith('[gateway-ws] Giving up reconnect after 8 attempts');
+
+    warnSpy.mockRestore();
+  });
 });

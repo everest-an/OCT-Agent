@@ -119,6 +119,8 @@ export class GatewayClient extends EventEmitter {
   private pendingRpc = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private rpcCounter = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempts = 0;
+  private static readonly MAX_RECONNECT_ATTEMPTS = 8;
   private config: GatewayConfig = { port: 18789, token: '' };
   private destroyed = false;
   private requestedScopes: string[] = ['operator.read'];
@@ -189,6 +191,7 @@ export class GatewayClient extends EventEmitter {
               clearTimeout(connectTimeout);
               this.connected = true;
               this.connId = res.payload.server?.connId || '';
+              this.reconnectAttempts = 0; // Reset on successful connect
               this.ws!.removeListener('message', onHandshakeMessage);
               this.setupListeners();
               resolve();
@@ -380,10 +383,27 @@ export class GatewayClient extends EventEmitter {
     // called connect() synchronously). The in-flight connect will either succeed or fail
     // on its own; a redundant reconnect here would race and corrupt this.ws.
     if (this._connectInFlightPromise) return;
+    if (this.reconnectAttempts >= GatewayClient.MAX_RECONNECT_ATTEMPTS) {
+      console.warn(`[gateway-ws] Giving up reconnect after ${this.reconnectAttempts} attempts`);
+      return;
+    }
+    // Exponential backoff: 3s, 6s, 12s, 24s, ... capped at 60s
+    const delay = Math.min(3000 * Math.pow(2, this.reconnectAttempts), 60000);
+    this.reconnectAttempts++;
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
-      try { await this.connect(); } catch { /* will retry on next call */ }
-    }, 3000);
+      try {
+        await this.connect();
+        // Reset attempts on successful reconnect
+        this.reconnectAttempts = 0;
+      } catch {
+        // FIX: Previous code gave up after a single failed reconnect. If the Gateway
+        // was mid-restart (e.g. dual-instance fight), the single retry would fail and
+        // the client would stay disconnected permanently. Retry with exponential backoff
+        // to cover the typical Gateway plugin-loading window on Windows.
+        if (!this.destroyed) this.scheduleReconnect();
+      }
+    }, delay);
   }
 
   private nextId(): string {

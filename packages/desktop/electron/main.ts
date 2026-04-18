@@ -21,6 +21,7 @@ import {
   waitForLocalDaemonReady,
 } from './local-daemon';
 import { GatewayClient } from './gateway-ws';
+import { findPrebindingGatewayPids } from './gateway-startup-guards';
 import {
   getChannelInboundAgent,
   setChannelInboundAgent,
@@ -834,7 +835,28 @@ async function startGatewayInUserSession(send?: (ch: string, data: any) => void)
   // Windows Scheduled Task, a previous app session, or Doctor auto-fix).
   // Spawning a second `gateway run --force` while one is loading plugins causes
   // the two processes to fight each other (both --force → mutual kill loop).
-  const existingGateway = !launchRecently && await isGatewayProcessAlive();
+  //
+  // FIX: isGatewayProcessAlive() only checks if port 18789 is bound. On Windows,
+  // the scheduled-task Gateway can take 15-30s to load plugins before binding the
+  // port. During that window, isGatewayProcessAlive() returns false, causing us
+  // to spawn a second `--force` instance → dual-instance fight → broken WS.
+  // We now also check for any existing gateway *process* (even if it hasn't bound
+  // the port yet) to avoid this race.
+  let existingGateway = !launchRecently && await isGatewayProcessAlive();
+  if (!existingGateway && !launchRecently) {
+    // Check if a gateway process exists but hasn't bound the port yet (still loading plugins).
+    // On Windows, the scheduled-task Gateway can take 15-30s to load plugins before binding
+    // the port. On macOS/Linux, LaunchAgent or systemd may have the same startup delay.
+    try {
+      const gatewayPids = await findPrebindingGatewayPids(process.platform, readShellOutputAsync, process.pid);
+      if (gatewayPids.length > 0) {
+        console.log(`[gateway] Found ${gatewayPids.length} gateway process(es) still loading plugins (PIDs: ${gatewayPids.join(',')}), waiting instead of spawning a new one`);
+        existingGateway = true;
+      }
+    } catch {
+      // Non-fatal: fall through to normal spawn logic
+    }
+  }
   if (existingGateway) {
     console.log('[gateway] Healthy gateway already listening on 18789 — skipping spawn to avoid dual-instance conflict');
     send?.('chat:status', { type: 'gateway', message: 'Waiting for existing Gateway to finish loading...' });
