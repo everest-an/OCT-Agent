@@ -1,134 +1,179 @@
-# Mission Flow · Resume / Durability Design
+# Mission Flow · Resume / Durability Design (rewritten 2026-04-18)
 
-> **Status**: 设计稿 (未开工)
-> **目标**：断网 / 关 OpenClaw Gateway / 关 AwarenessClaw 后，再打开能继续之前的 mission
-> **作者**: 2026-04-18 session handoff
-> **依赖**: 已完成的 F-Team-Tasks Phase 4+5 (mission-flow) + sweep handler (preview.5)
-
-## 用户诉求（原话）
-
-> 能够让任务持续进行也很重要，比如用户断网了，关闭 openclaw 了，下次打开能继续工作，
-> 包括关闭我们的 awarenessclaw，这些都是心跳要有的
-
-## 现状（preview.5 之后）
-
-已有：
-- **Runner idle timer**（15 min）— 单 step 内心跳，任何 delta/tool/final 重置
-- **Mission 文件持久化** — `~/.awarenessclaw/missions/<id>/mission.json` + artifacts/ + MEMORY.md
-- **Startup sweep** — app 启动时把上一 session 残留的 running/planning 自动标 failed
-- **Runner hydrateFromDisk** — cancel/approveAndRun 时发现内存 Map 没 mission → 从磁盘 load
-
-缺：
-- ❌ App 重启后对活着的 Gateway session 重新订阅（真正的 resume）
-- ❌ 断网 / 5xx 自动 retry
-- ❌ AwarenessClaw 关闭也持续跑（daemon 化）
-- ❌ Gateway 重启后 handoff
-
-## 四级 Resume 方案
-
-### L1 · re-attach live Gateway session（~3h 工）
-
-**场景**：用户关 AwarenessClaw 后重新打开，Gateway 还在跑，session 还活着。
-
-**思路**：
-1. App 启动时，对 `status=running` 且 `startedAt < handlerStartedAt` 的 mission，**不要立即 sweep**（修改 sweep 规则）
-2. 对每个这样的 mission：
-   - 读 current step 的 `sessionKey` + `runId`
-   - 调 `gateway.chatHistory(sessionKey)` 看是否还活着
-   - 如果 history 末尾是 `final` → 说明 step 其实完成了 → writeArtifact + 继续 next step
-   - 如果还在 active → 重新 `gateway.subscribe(sessionKey, handler)` → 接续 stream
-   - 如果 session 404/gone → 降级为 sweep（mark failed）
-
-**涉及文件**：
-- `electron/mission/mission-runner.ts` — 加 `resumeMission(missionId)` 方法
-- `electron/ipc/register-mission-handlers.ts` — 加 `mission:resume-pending` IPC + sweep 规则放宽
-- `src/components/mission-flow/MissionFlowShell.tsx` — mount 先调 resume-pending 再调 sweep-stale
-- `src/components/mission-flow/useMissionFlow.ts` — handle "resumed" stage 转换
-
-**测试要求（L1-L5 都要）**：
-- L2: runner.resumeMission(id) 能正确 re-subscribe + 处理 history 末尾的 3 种 state
-- L3: chaos — gateway 返回 session-not-found / 5xx / timeout
-- L4: 修改 e2e-mission-smoke.mjs 支持 resume — 跑一半 kill runner → 启新 runner → resume → mission:done
+> **Status**: 设计稿 v2（v1 被 web search 推翻）
+> **触发**：用户问 "openclaw 自己怎么做的？应该已经想到了吧？"
+> **结论**：**我们的 MissionRunner 在重造 TaskFlow 的轮子**。下一轮应该对齐 OpenClaw 原生能力。
 
 ---
 
-### L2 · auto-retry on transient error（~2h 工）
+## 🔎 OpenClaw 2026 原生 durable / resume 能力
 
-**场景**：断网 5 秒 / LLM provider 5xx / gateway timeout。
+（来自 web search + 本地源码 verify）
 
-**思路**：
-1. `mission-runner.ts::failStep` 里加 `retriable` 分类：
-   - `network_error` / `timeout` / `5xx` → retriable
-   - `permission_denied` / `context_overflow` / `invalid_plan` → not retriable
-2. Retriable failure：backoff retry N 次（1s → 2s → 4s → 8s, max 3 次）而不是直接 mark failed
-3. 每次 retry 前重新 `gateway.sendChat` 同样的 prompt
-4. 超过 retry budget 才 mark failed
+### ✅ OpenClaw TaskFlow（2026.4.2 落地）
 
-**涉及文件**：
-- `electron/mission/mission-runner.ts` — 加 retry 状态机 + retry counter per step
-- `electron/mission/types.ts` — step 加 `retries: number` 字段
+**官方定义**（docs.openclaw.ai）：
+> "Task Flow is the flow orchestration substrate that sits above background tasks and manages durable multi-step flows with their own state, revision tracking, and sync semantics while individual tasks remain the unit of detached work."
 
-**测试要求**：
-- L2: network_error 第一次 retry 成功；3 次都失败 mark failed
-- L3: context_overflow 不 retry（直接 fail）
+**核心能力**：
+- **Durable state**：flow state 在 Gateway 重启后**保留**
+- **Managed-vs-mirrored sync modes**
+- **Revision tracking**
+- **`openclaw flows` CLI**：list / show / recover / cancel
+  - `openclaw flows list` — 列所有 flow 状态
+  - `openclaw flows show <id>` — 看单个 flow
+  - `openclaw flows recover <flow-id>` — 从异常中断恢复
+  - `openclaw flows cancel` — sticky cancel intent（停止调度新 child，但不强杀正在跑的）
+- **Child task spawning is also durable**
 
----
+**Gateway WS RPC**：应该有对应的 `tasks_flow_spawn` / `flows.create` / `flows.recover` 等调用（待 verify，S1-T0 反向工程没做到这层）。
 
-### L3 · Daemon 化（关 AwarenessClaw 也继续跑）（~2-3 天工）
+### ⚠️ OpenClaw `sessions_spawn` 不 durable
 
-**场景**：用户点关闭 app 窗口 → 后台 daemon 继续跑 mission → 用户下次打开 app 能看到进度。
+核心限制（来自 issue 追踪）：
+> "Sub-agents spawned via `sessions_spawn` use UUID-based session keys (`agent:<id>:subagent:<uuid>`), and when the gateway restarts, these sessions are **dead** — there's no way to resume them by a stable name/key."
 
-这是 **S2 里 04-STAGES.md 原计划的 Stage 2**（Runner daemon + Resume）。
+Open issues，官方尚未修：
+- [#62442 Gateway restart causes session state loss, requiring manual intervention](https://github.com/openclaw/openclaw/issues/62442)
+- [#51814 Feature Request: Native Agent Wake-Up After Gateway Restart](https://github.com/openclaw/openclaw/issues/51814)
+- [#50791 Auto-resume pending sessions after Gateway restart](https://github.com/openclaw/openclaw/issues/50791)
+- [#26872 post-restart continuation](https://github.com/openclaw/openclaw/issues/26872)
+- [#51917 Auto-resume unanswered sessions after gateway restart](https://github.com/openclaw/openclaw/issues/51917)
+- [#19780 Persistent named sessions for sub-agents (durable thread context across gateway restarts)](https://github.com/openclaw/openclaw/issues/19780)
+- [#66909 Doc Clarification: Do tasks automatically resume after gateway restart?](https://github.com/openclaw/openclaw/issues/66909)
 
-**思路**：
-1. 独立 Node 进程 `awarenessclaw-runner-daemon`（可以独立 npm package 或内嵌 Electron）
-2. daemon 维护 MissionRunner 实例 + Gateway WS 长连接
-3. Electron app 只是 "view"：通过 unix socket (macOS/Linux) / named pipe (Windows) 连 daemon 获取 state
-4. App 关闭 daemon 不退；app 重开再连 daemon
-
-**工程量大**：需要 OS-level autostart + IPC transport 改造 + crash recovery + daemon 升级策略。
-
-**不建议在 preview 系列做**，留到 0.4.0。
-
----
-
-### L4 · 关 OpenClaw Gateway 也能恢复（不可控）
-
-**场景**：Gateway 崩了 / 用户手动 stop 了 gateway。
-
-**限制**：Gateway session 在 Gateway 进程内存里，Gateway 死了 session 就丢了。唯一办法是等 Gateway 重启后，**让 AwarenessClaw 重新 spawn worker**（而不是 resume 原 session）。
-
-**思路**：
-1. Gateway down → `gateway.sendChat` 失败 → runner 标记 step `paused-gateway-down`
-2. 用户/定期检测 Gateway 回来后，对 paused 的 mission 触发 "re-spawn from last-completed step"（重新从 artifact 拼 context 发给 worker）
-3. **注意**：这不是真 resume，是"从最后 checkpoint 重来"，worker 可能产出不同结果
-
-**工程量**：~4h，但需要验证 handoff context 质量。
+**唯一可用的 thread-durable session**：
+- `sessions_spawn` with `thread: true, mode: "session"`
+- **仅 Discord 通道支持**（桌面端用不上）
 
 ---
 
-## 推荐实施顺序
+## 🚨 我们当前实现的架构债
 
-1. **Preview.6 = L1 + L2**（5h 工）— 解决 90% 用户场景
-2. **0.3.8** = 打磨 + real E2E resume 脚本
-3. **0.4.0** = L3（daemon 化）— 大版本
-4. **0.4.x** = L4 (gateway 重启 handoff) — 按需
+S1-T0 决策文档（[07-DECISION-LOBSTER-VS-TASKFLOW.md](./07-DECISION-LOBSTER-VS-TASKFLOW.md)）写的是 **"方案 B · TaskFlow + sessions_spawn + Streaming"**。
 
-## 风险清单
+实际代码（`electron/mission/streaming-bridge.ts:74`）：
+```ts
+const result = await ws.chatSend(key, prompt, {...});
+```
+**我们用的是 `chat.send` RPC（普通 agent session）， 不是 `tasks_flow_spawn`，也不是 `sessions_spawn`**。
 
-1. **已 done step 的 artifact 如果是 partial write → 重启后 resume 读到残缺内容**
-   - 缓解：file-layout 已用 `writeFileAtomic`（tmp + rename）
-2. **Runner idle timer 在 L1 resume 后不会重置**
-   - 缓解：resumeMission 里重新 `armStepIdleTimer`
-3. **User 在 L1 resume 前已手动 cancel 的 mission 不能被 resume 复活**
-   - 缓解：resume 只对 status in [running, planning] 且 completedAt unset 的执行
-
-## 待决策
-
-1. Preview.6 做 L1 + L2 还是只做 L1？
-2. L1 需不需要 UI 提示"正在恢复之前的 mission..."？
-3. Sweep 规则放宽后，僵尸 mission 何时真的标 failed？（handlerStartedAt - 30min 之前且不在 runner Map 里？）
+后果：
+1. **完全没继承** OpenClaw TaskFlow 的 durable state
+2. **完全没享受** `openclaw flows recover` CLI
+3. **Mission Runner 是一个并行的 TaskFlow 山寨实现** — mission.json 存磁盘、step status 流转、idle timer … 全部是 OpenClaw 已经做了一遍的事
+4. 这违反 AwarenessClaw CLAUDE.md "核心原则 #1 套壳不复刻" 和 "#2 复用优先，不重复造轮子"
 
 ---
 
-**更新**：每次实现 L1/L2/L3 后在本文档打 ✅。
+## 📋 正确的 Resume 方案（重写）
+
+### 阶段 0：立即验证（30 min，preview.6 前必做）
+
+**反向工程 `openclaw flows` RPC + CLI**，搞清楚：
+1. Gateway WS 协议里 `tasks_flow_spawn` / `flows.list` / `flows.recover` 的帧格式
+2. Flow state 在磁盘 / SQLite 的实际结构（auxclawdbot/taskflow 仓库可能有线索）
+3. 用 `openclaw gateway --log-level debug` 跑 `openclaw flows list` 抓 WS 帧
+4. 确认 Flow 跑的 subagent session 在 gateway restart 后的行为
+
+产出：`docs/features/team-tasks/OPENCLAW_FLOWS_API.md` —— 一份"当前我们能用的 OpenClaw Flows RPC 清单"。
+
+如果 Flows API 不能 spawn 任意 agent 做 step → 退回只做 L1 L2（见下）
+如果能 → 进入阶段 1（重写 Runner）
+
+### 阶段 1 · 首选：Runner 迁到 OpenClaw Flows（~1-2 天）
+
+**改造**：
+- `electron/mission/mission-runner.ts` 内部用 `tasks_flow_spawn` 发起 flow
+- 每个 subtask → flow 里的一个 task
+- 状态持久化由 OpenClaw 管（mission.json 变成只是 UI 缓存）
+- Resume：`mission:resume` IPC → `openclaw flows recover <flowId>`
+
+**收益**：
+- 自动获得 Gateway 重启 durable（上游保证）
+- `openclaw flows list/show/cancel` 免费得到 ops 能力
+- 删掉自己的 idle timer / sweep / hydrateFromDisk（OpenClaw 管）
+
+**风险**：
+- Flows API 可能不支持"每个 subtask 指定不同 agentId"（需 verify）
+- TaskFlow 的 streaming / delta 格式可能和我们 `event:chat` delta 不一样
+- 大重构，影响 375 个测试
+
+### 阶段 2 · fallback：保留 chat.send，做薄 resume（~5h）
+
+**只做** "AwarenessClaw 重启，Gateway 活着" 这个最大用户场景（80%+ 场景）。
+
+**L1 · re-attach live session**：
+- AwarenessClaw 启动时对 status=running 的 mission：
+  - 读 step 的 sessionKey + runId
+  - `gateway.chatHistory(sessionKey)` 看历史
+  - 末尾 `final` → writeArtifact + spawnNextStep
+  - 还 active → `gateway.subscribe(sessionKey)` 继续订阅 delta
+  - Dead → 降级走 sweep 标 failed
+
+**L2 · auto-retry on transient error**：
+- network_error / gateway-5xx / timeout → backoff 1s/2s/4s 重试 max 3 次
+- permission_denied / context_overflow → 直接 fail
+
+**明确不做**：
+- ❌ Gateway 重启 session 恢复（上游限制 #62442）
+- ❌ 关 AwarenessClaw 继续跑（Electron main 死了，需要 daemon 化，见下）
+
+### 阶段 3 · 不做：Daemon 化（L3 原设计）
+
+**原 L3 方案**（独立 Runner daemon 进程）= 又一次重造 OpenClaw Gateway 已做的事。
+
+**正确姿势**：
+- OpenClaw Gateway 已经是 daemon（Windows Scheduled Task / macOS launchd）
+- 我们的 mission 应该跑在 Gateway 的 TaskFlow 里 → Gateway 活着任务就活着
+- AwarenessClaw UI 只是 TaskFlow 的 viewer
+
+这正是阶段 1 的目标。**不要**写独立 daemon。
+
+---
+
+## 📌 推荐下一轮 scope
+
+### 方案 A（激进 / 正确但风险大）
+
+**1.5 - 2 天**做：
+1. 阶段 0 反向工程 Flows API（30 min）
+2. 阶段 1 Runner 迁到 OpenClaw Flows（大重构）
+3. 删掉自己的 sweep / hydrateFromDisk / idle timer
+4. 所有 375 个测试适配
+
+### 方案 B（保守 / 快速 ship）
+
+**~5h** 做：
+1. 阶段 0 反向工程（30 min）
+2. 阶段 2 L1 + L2（re-attach + auto-retry）
+3. 明确记录**技术债 ticket**：Runner 应该迁到 OpenClaw Flows（后续 0.4.x）
+
+### 方案 C（推荐）
+
+**先 B，后 A**：
+- 短期 preview.6 = 方案 B (L1+L2 用 chat.history + subscribe)
+- 0.4.0 = 方案 A（Flows 迁移，大版本可以接受 breaking）
+
+---
+
+## 🔗 Sources（Web search 2026-04-18）
+
+- [OpenClaw Task Flow Docs](https://docs.openclaw.ai/automation/taskflow)
+- [OpenClaw 2026.4.2 Release Notes — Task Flows Land](https://www.openclawplaybook.ai/blog/openclaw-2026-4-2-release-task-flows-android-assistant/)
+- [OpenClaw 2026.4.2 Migration Guide (Efficient Coder)](https://www.xugj520.cn/en/archives/openclaw-2026-migration-configuration-security-task-flow.html)
+- [OpenClaw Sub-Agents Docs](https://docs.openclaw.ai/tools/subagents)
+- [OpenClaw Cheatsheet 2026 v2026.4.14](https://openclawcheatsheet.com/)
+- [OpenClaw Background Tasks Guide](https://remoteopenclaw.com/blog/openclaw-background-tasks-guide)
+- [Issue #62442 Gateway restart causes session state loss](https://github.com/openclaw/openclaw/issues/62442)
+- [Issue #51814 Native Agent Wake-Up After Gateway Restart](https://github.com/openclaw/openclaw/issues/51814)
+- [Issue #50791 Auto-resume pending sessions after Gateway restart](https://github.com/openclaw/openclaw/issues/50791)
+- [Issue #19780 Persistent named sessions for sub-agents](https://github.com/openclaw/openclaw/issues/19780)
+- [Issue #66909 Doc Clarification: Do tasks auto-resume?](https://github.com/openclaw/openclaw/issues/66909)
+- [auxclawdbot/taskflow (markdown/SQLite-backed task mgr)](https://github.com/auxclawdbot/taskflow)
+
+---
+
+## 🧾 给用户的诚实汇报
+
+**一句话**：OpenClaw 2026.4.2 已经给出了 TaskFlow 这个 durable substrate，我们的 MissionRunner 却绕开它自己搭了一个 mission.json + chat.send 的平行实现 —— 用户看到的 "关 app 就丢 mission" 其实是我们自己造的限制，不是 OpenClaw 的限制。正确的下一轮应该先**反向工程 `openclaw flows` API**，然后决定是重写对齐还是打薄 resume 补丁。
