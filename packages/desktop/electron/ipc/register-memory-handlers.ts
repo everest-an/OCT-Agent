@@ -3,7 +3,7 @@ import path from 'path';
 import { ipcMain } from 'electron';
 import os from 'os';
 import { callMcp, checkMemoryHealth, fetchMemoryEvents, fetchKnowledgeCards, fetchCardEvolution, type MemoryEventQueryOptions } from '../memory-client';
-import { buildMemoryInitArgs, buildMemorySearchArgs } from '../memory-protocol';
+import { buildMemoryInitArgs, buildMemorySearchArgs, MEMORY_SEARCH_RESULT_LIMIT } from '../memory-protocol';
 import { readJsonFileWithBom } from '../json-file';
 import {
   applyAllSelfImprovementPromotionProposals,
@@ -158,7 +158,10 @@ async function loadFileBackedMemoryEvents(opts: MemoryEventQueryOptions = {}) {
 
 export function registerMemoryHandlers() {
   ipcMain.handle('memory:search', async (_e, query: string) => {
-    return callMcp('awareness_recall', buildMemorySearchArgs(query));
+    return callMcp(
+      'awareness_recall',
+      buildMemorySearchArgs(query, { limit: MEMORY_SEARCH_RESULT_LIMIT }),
+    );
   });
 
   ipcMain.handle('memory:get-cards', async () => {

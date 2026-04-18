@@ -5,35 +5,26 @@ export const MEMORY_SEARCH_RESULT_LIMIT = 15;
 export const MEMORY_CONTEXT_CARD_LIMIT = 5;
 export const MEMORY_CONTEXT_TASK_LIMIT = 5;
 
-export function buildMemorySearchArgs(query: string) {
+// F-053 single-parameter surface: pass ONE `query` and let the daemon auto-route.
+// The daemon handles CJK detection, keyword extraction, and bucket shaping itself
+// — client-side splitting (the pre-F-053 behaviour below, preserved in comments
+// for reference) is both redundant and, for CJK, actively harmful (character-level
+// split forces BM25-only and loses semantic routing).
+//
+// Legacy multi-parameter form (semantic_query/keyword_query/scope/...) still
+// works against pre-F-053 daemons via the deprecation path — but the desktop
+// ships pinned to @awareness-sdk/local 0.8.0+, so we always use single-param.
+export function buildMemorySearchArgs(query: string, opts?: { limit?: number; tokenBudget?: number }) {
   const trimmedQuery = query.trim();
-
-  // Ensure we return a plain object with valid properties
   if (!trimmedQuery) {
-    return { semantic_query: '', keyword_query: '' };
+    return { query: '' };
   }
-
-  // Detect CJK vs English queries
-  const hasCJK = /[\u4e00-\u9fff]|[\u3040-\u309f]|[\u30a0-\u30ff]/.test(trimmedQuery);
-  if (hasCJK) {
-    // For CJK: split into characters, remove spaces, treat as keyword query
-    const cjkChars = trimmedQuery.replace(/\s/g, '').split('').filter(char => /\S/.test(char));
-    return {
-      semantic_query: '',
-      keyword_query: cjkChars.join(' '),
-    };
-  }
-
-  // For English: extract keywords and use full query
-  const keywords = trimmedQuery
-    .split(/\s+/)
-    .filter(word => word.length > 2) // Skip short words
-    .filter((word, index, arr) => arr.indexOf(word) === index); // Dedupe preserving order
-
-  return {
-    semantic_query: trimmedQuery,
-    keyword_query: keywords.join(' '),
+  const args: { query: string; limit?: number; token_budget?: number } = {
+    query: trimmedQuery,
   };
+  if (opts?.limit !== undefined) args.limit = opts.limit;
+  if (opts?.tokenBudget !== undefined) args.token_budget = opts.tokenBudget;
+  return args;
 }
 
 // Build arguments for awareness_init tool call
