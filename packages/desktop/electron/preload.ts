@@ -53,6 +53,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onChatStreamEnd: (callback: () => void) => {
     ipcRenderer.on('chat:stream-end', () => callback());
   },
+  // preview.6: when main falls back from Gateway to CLI mid-stream, renderer
+  // must clear already-shown partial bytes before CLI re-streams the full reply.
+  onChatStreamReset: (callback: (info: { reason: string }) => void) => {
+    ipcRenderer.on('chat:stream-reset', (_e: any, info: any) => callback(info || { reason: 'unknown' }));
+  },
   onChatStatus: (callback: (status: { type: string; tool?: string; toolStatus?: string; toolId?: string; detail?: string; approvalRequestId?: string; approvalCommand?: string }) => void) => {
     ipcRenderer.on('chat:status', (_e: any, status: any) => callback(status));
   },

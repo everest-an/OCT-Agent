@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { memo, useState, useEffect, useRef, useCallback } from 'react';
 import { ChevronDown, ChevronRight, Loader2, Copy, Check, X, Brain, Key, Wrench, Search, BookOpen, Save, Zap, CheckCircle2, Terminal, Paperclip } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -437,6 +437,31 @@ function useTypewriter(text: string, charsPerFrame = 3) {
 
 // --- Typewriter Message Component ---
 
+// preview.6: extracted + memoized so stream chunks don't cause unnecessary
+// ReactMarkdown re-parses. With the main-process 40ms IPC throttle this keeps
+// total re-renders per long response proportional to coalesced chunks, not to
+// per-token deltas.
+const StreamingMarkdownBlock = memo(function StreamingMarkdownBlock({
+  content,
+  streamClosed,
+}: { content: string; streamClosed: boolean }) {
+  return (
+    <div className="chat-markdown prose prose-sm max-w-none dark:prose-invert">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+        code({ children, className }) {
+          const isInline = !className;
+          if (isInline) return <code className="chat-inline-code px-1.5 py-0.5 rounded text-[12px]">{children}</code>;
+          return <CodeBlock code={String(children).replace(/\n$/, '')} language={className} />;
+        },
+        p({ children }) { return <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>; },
+      }}>
+        {content}
+      </ReactMarkdown>
+      {!streamClosed && <span className="animate-pulse text-brand-400 ml-0.5">▊</span>}
+    </div>
+  );
+});
+
 function TypewriterMessage({ content, isNew }: { content: string; isNew: boolean }) {
   const { displayed, done } = useTypewriter(isNew ? content : '', 3);
   const text = isNew ? displayed : content;
@@ -800,6 +825,23 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         mergeKey: 'live-stream',
       });
       setAgentStatus((current) => current === 'generating' ? 'thinking' : current);
+    });
+
+    // preview.6: when main signals a mid-stream fallback (Gateway -> CLI retry),
+    // wipe the partially rendered bubble content so CLI can re-stream cleanly.
+    // Fixes "last turn repeats" where the failed Gateway bytes concatenated
+    // with the successful CLI bytes on the same bubble.
+    api.onChatStreamReset?.((info: { reason: string }) => {
+      if (!activeRunRef.current) return;
+      streamingRef.current = '';
+      streamChunkCountRef.current = 0;
+      setStreamingContent('');
+      recordTraceEvent({
+        kind: 'status',
+        label: t('chat.trace.streamReset', 'Stream restarted'),
+        detail: info?.reason || 'retry',
+        mergeKey: 'live-stream',
+      });
     });
 
     // Status events (agent lifecycle + tool calls + gateway auto-start)
@@ -1706,20 +1748,12 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     }
   };
 
+  // preview.6: memoized renderer — the ReactMarkdown tree only re-parses when
+  // `content` or `streamClosed` actually changes. Combined with the main-
+  // process 40ms IPC throttle this reduces markdown re-renders during long
+  // streaming responses from O(tokens) to O(chunks/40ms).
   const renderStreamingContent = useCallback((content: string) => (
-    <div className="chat-markdown prose prose-sm max-w-none dark:prose-invert">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-        code({ children, className }) {
-          const isInline = !className;
-          if (isInline) return <code className="chat-inline-code px-1.5 py-0.5 rounded text-[12px]">{children}</code>;
-          return <CodeBlock code={String(children).replace(/\n$/, '')} language={className} />;
-        },
-        p({ children }) { return <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>; },
-      }}>
-        {content}
-      </ReactMarkdown>
-      {!streamClosed && <span className="animate-pulse text-brand-400 ml-0.5">▊</span>}
-    </div>
+    <StreamingMarkdownBlock content={content} streamClosed={streamClosed} />
   ), [streamClosed]);
 
   return (
