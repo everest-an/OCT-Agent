@@ -11,19 +11,36 @@ export function getMemoryClientProjectDir(): string | null {
   return _currentProjectDir;
 }
 
+// Node http rejects non-ISO-8859-1 bytes + control chars in header values
+// (throws TypeError synchronously from http.request). CJK/emoji/fullwidth
+// paths — common on Windows with Chinese usernames and on macOS workspace
+// folders — all trip it. We detect header-safe values vs. paths that need
+// base64 transport, and degrade to "no header" rather than crashing when
+// even base64 encoding fails.
+const HEADER_SAFE_RE = /^[\x20-\x7E\t]+$/;
+
+export function applyProjectDirHeader(headers: Record<string, string>, dir: string | null): void {
+  if (!dir) return;
+  if (HEADER_SAFE_RE.test(dir)) {
+    headers['X-Awareness-Project-Dir'] = dir;
+    return;
+  }
+  try {
+    headers['X-Awareness-Project-Dir-B64'] = Buffer.from(dir, 'utf8').toString('base64');
+  } catch (err) {
+    console.warn('[memory-client] failed to encode project dir for header; request will use daemon default project:', (err as Error).message);
+  }
+}
+
 function buildHeaders(extra?: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...extra };
-  if (_currentProjectDir) {
-    headers['X-Awareness-Project-Dir'] = _currentProjectDir;
-  }
+  applyProjectDirHeader(headers, _currentProjectDir);
   return headers;
 }
 
 function buildGetHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
-  if (_currentProjectDir) {
-    headers['X-Awareness-Project-Dir'] = _currentProjectDir;
-  }
+  applyProjectDirHeader(headers, _currentProjectDir);
   return headers;
 }
 

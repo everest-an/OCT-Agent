@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.7-preview.8] - 2026-04-18
+
+### Fixed — "记忆保存失败：Invalid character in header content" crash on CJK/emoji paths
+User-reported bug: on Windows with Chinese usernames (`C:\Users\张三\...`) or on macOS with localized workspace folders (`Awareness 文件夹`, `Project 🚀`), **every** memory save — `awareness_record`, `awareness_recall`, `awareness_init` — threw `TypeError: Invalid character in header content ["X-Awareness-Project-Dir"]` and the knowledge card was lost.
+
+**Root cause**: Node's `http.request()` enforces ISO-8859-1 on raw header values and throws `TypeError` **synchronously** at the `http.request(...)` call site. This bypasses `req.on('error')` entirely — the TypeError bubbles straight up through `fireAndForgetMemorySave` to the UI toast. Not Windows-specific; any non-ASCII path (CJK, emoji, fullwidth, combining marks) trips it on every platform.
+
+**Fix**:
+- `electron/memory-client.ts` — new `applyProjectDirHeader(headers, dir)` helper: ASCII paths keep the legacy `X-Awareness-Project-Dir` header; CJK/emoji paths switch to `X-Awareness-Project-Dir-B64` (base64 of UTF-8 bytes); encoding failures silently degrade to "no header" so the request still goes through (daemon uses its default project).
+- Requires daemon `@awareness-sdk/local@0.8.2+` (ships simultaneously) to decode the B64 header. Older daemons handle the ASCII path unchanged.
+
+### Added — regression tests
+- `src/test/memory-client-header-encoding.test.ts` — 10 cases: ASCII + plain header, Windows backslash path, CJK+space, Windows CJK username path, emoji, fullwidth Japanese/Korean, null/empty, CJK round-trip, and a chaos test asserting `applyProjectDirHeader` never throws for null/control-char/very-long/surrogate-pair inputs.
+
 ## [0.3.7-preview.7] - 2026-04-18
 
 ### Reverted — chat bug fixes from preview.6 broke Qwen agents
