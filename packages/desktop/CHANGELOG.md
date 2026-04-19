@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.3.7-preview.9] - 2026-04-18 (macOS only)
+
+### Added — clickable file paths in chat (user-visible)
+User complaint: when the AI answered with a saved file location like `` `/Users/edwinhao/Documents/New project/snake-game.html` ``, the path was plain text inside an inline code block — the user had to copy-paste it into Finder by hand. Now every **absolute path** that appears inside inline code is rendered as a small clickable chip.
+
+- **Click** — reveal the file in Finder (macOS) / Explorer (Windows) / file manager (Linux). Safer than opening, works for every file type.
+- **⌘+Click (macOS) / Ctrl+Click (Windows, Linux)** — open the file with its default application (double-click equivalent). Great for `.html`, `.md`, images.
+- **Hover** — shows the full untruncated path plus a one-line keybinding hint, localized per locale.
+- **Missing file** — the chip turns amber and displays "(not found)" instead of silently failing.
+- **Not-a-path strings** (like `useState`, `memory_id`, `mem_20260417_002209_1c9f`) keep the existing inline-code styling — detection uses strict prefixes (`/…/…`, `~/…`, `C:\…`, `D:/…`, `\\server\share\…`) and rejects URLs / relative paths / single-token identifiers.
+
+### Added — cross-platform shell IPC
+- `shell:show-item-in-folder` and `shell:open-path` IPC handlers with absolute-path validation, `~` expansion, existence check, and structured `{ok, error}` returns instead of throwing. Uses Electron's native `shell.showItemInFolder` / `shell.openPath`, which already maps to Explorer on Windows and xdg-open on Linux.
+- `electronAPI.showItemInFolder(path)` / `electronAPI.openPath(path)` exposed via contextBridge in `preload.ts`.
+
+### Added — i18n coverage (en + zh)
+`chat.filePath.revealMac` / `.revealWin` / `.revealLinux` / `.openHint` / `.clickHint` / `.notFound` / `.failed` in both English and Chinese dictionaries. Tooltip text and error badges localize automatically with the app language.
+
+### Added — regression tests
+- `src/test/FilePathChip.test.tsx` — 13 cases covering path recognition (Unix, macOS with spaces like `"New project"`, tilde, Windows drive letter with both slash styles, UNC), non-path rejection (URLs, relative paths, code identifiers), click / ⌘-click / Ctrl-click routing, not-found state, and IPC exception degradation.
+
+### Windows / Linux notes
+Packaged DMG is macOS-only this round; `.exe` / `.AppImage` builds will come in a later slot. The shell IPC handlers and chip component are platform-neutral and already detect Ctrl-click vs ⌘-click via `navigator.platform` — Windows / Linux users who install a dev build from source get the feature immediately.
+
 ## [0.3.7-preview.8] - 2026-04-18
 
 ### Fixed — "记忆保存失败：Invalid character in header content" crash on CJK/emoji paths

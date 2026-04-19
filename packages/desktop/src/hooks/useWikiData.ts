@@ -27,6 +27,7 @@ export interface WikiDataActions {
   loadScanStatus: () => Promise<void>;
   triggerScan: (mode?: 'full' | 'incremental') => Promise<void>;
   loadAllWikiData: () => Promise<void>;
+  resetWorkspaceState: () => void;
 }
 
 export type UseWikiDataReturn = WikiDataState & WikiDataActions;
@@ -175,6 +176,29 @@ export function useWikiData(): UseWikiDataReturn {
     }
   }, [loadTopics, loadSkills, loadTimelineDays, loadWorkspaceData, loadScanStatus]);
 
+  /**
+   * F-055b P1 — reset all workspace-scoped state when the user switches
+   * workspaces. Without this, the UI shows stale counts ("Code Files: 500"
+   * for the previous workspace) while the daemon has already swapped
+   * projectDir. Call this from the component that owns the workspace
+   * picker, *before* triggering the daemon switch, so the user sees an
+   * instant "clearing…" instead of a confusing mix of old + new data.
+   */
+  const resetWorkspaceState = useCallback(() => {
+    setWorkspaceFiles([]);
+    setWorkspaceDocs([]);
+    setWikiPages([]);
+    setScanStatus(null);
+    setWorkspaceStats(null);
+    setTopics([]);
+    setTimelineDays([]);
+    setWikiError(null);
+    if (scanPollRef.current) {
+      clearInterval(scanPollRef.current);
+      scanPollRef.current = null;
+    }
+  }, []);
+
   return {
     topics,
     skills,
@@ -193,5 +217,6 @@ export function useWikiData(): UseWikiDataReturn {
     loadScanStatus,
     triggerScan,
     loadAllWikiData,
+    resetWorkspaceState,
   };
 }

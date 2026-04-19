@@ -42,6 +42,12 @@ export interface SkillItem {
   created_at?: string;
   decay_score?: number;
   pinned?: boolean;
+  /** F-059 — skill growth lifecycle stage (seedling → budding → evergreen). */
+  growth_stage?: 'seedling' | 'budding' | 'evergreen';
+  /** F-059 — common pitfalls / anti-patterns associated with this skill. */
+  pitfalls?: string[];
+  /** F-059 — verification steps / assertions that prove the skill worked. */
+  verification?: string[];
 }
 
 export interface TimelineEventItem {

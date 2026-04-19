@@ -719,6 +719,13 @@ function TimelineDayView({
 }
 
 /* ── SkillsView ──────────────────────────────────────── */
+// F-059 — growth stage badge treatment mirrors CardDetail.tsx GROWTH constant.
+const SKILL_GROWTH: Record<string, { icon: string; label: string; className: string }> = {
+  seedling: { icon: '🌱', label: 'Seedling', className: 'text-emerald-400' },
+  budding: { icon: '🌿', label: 'Budding', className: 'text-emerald-500' },
+  evergreen: { icon: '🌳', label: 'Evergreen', className: 'text-emerald-700' },
+};
+
 function SkillsView({ skills }: { skills: SkillItem[] }) {
   const { t } = useI18n();
 
@@ -741,58 +748,99 @@ function SkillsView({ skills }: { skills: SkillItem[] }) {
       </h2>
 
       <div className="space-y-2">
-        {skills.map((skill) => (
-          <div
-            key={skill.id}
-            className="p-4 rounded-xl border border-slate-700/50 bg-slate-800/40 space-y-2"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <h3 className="text-sm font-semibold text-slate-200">{skill.name}</h3>
-                {skill.description && (
-                  <p className="mt-1 text-xs text-slate-400 leading-relaxed">{skill.description}</p>
+        {skills.map((skill) => {
+          const stageKey = (skill.growth_stage ?? 'seedling') as keyof typeof SKILL_GROWTH;
+          const stage = SKILL_GROWTH[stageKey] ?? SKILL_GROWTH.seedling;
+          const hasPitfalls = Array.isArray(skill.pitfalls) && skill.pitfalls.length > 0;
+          const hasVerification = Array.isArray(skill.verification) && skill.verification.length > 0;
+          return (
+            <div
+              key={skill.id}
+              className="p-4 rounded-xl border border-slate-700/50 bg-slate-800/40 space-y-2"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-semibold text-slate-200">{skill.name}</h3>
+                    <span
+                      className={`inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium ${stage.className}`}
+                      title={stage.label}
+                    >
+                      <span aria-hidden>{stage.icon}</span>
+                      <span>{stage.label}</span>
+                    </span>
+                  </div>
+                  {skill.description && (
+                    <p className="mt-1 text-xs text-slate-400 leading-relaxed">{skill.description}</p>
+                  )}
+                </div>
+                {skill.pinned && (
+                  <span className="text-xs text-amber-400">📌</span>
                 )}
               </div>
-              {skill.pinned && (
-                <span className="text-xs text-amber-400">📌</span>
-              )}
-            </div>
 
-            {/* Decay bar */}
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-1.5 rounded-full bg-slate-700 overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all ${
-                    (skill.decay_score ?? 1) > 0.6
-                      ? 'bg-emerald-500'
-                      : (skill.decay_score ?? 1) > 0.3
-                        ? 'bg-amber-500'
-                        : 'bg-red-500'
-                  }`}
-                  style={{ width: `${Math.round((skill.decay_score ?? 1) * 100)}%` }}
-                />
+              {/* Decay bar */}
+              <div className="flex items-center gap-3">
+                <div className="flex-1 h-1.5 rounded-full bg-slate-700 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      (skill.decay_score ?? 1) > 0.6
+                        ? 'bg-emerald-500'
+                        : (skill.decay_score ?? 1) > 0.3
+                          ? 'bg-amber-500'
+                          : 'bg-red-500'
+                    }`}
+                    style={{ width: `${Math.round((skill.decay_score ?? 1) * 100)}%` }}
+                  />
+                </div>
+                <span className="text-[10px] text-slate-500 shrink-0 w-8 text-right">
+                  {Math.round((skill.decay_score ?? 1) * 100)}%
+                </span>
               </div>
-              <span className="text-[10px] text-slate-500 shrink-0 w-8 text-right">
-                {Math.round((skill.decay_score ?? 1) * 100)}%
-              </span>
-            </div>
 
-            <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
-              {skill.use_count != null && (
-                <span>Used {skill.use_count}×</span>
+              <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+                {skill.use_count != null && (
+                  <span>Used {skill.use_count}×</span>
+                )}
+                {skill.confidence != null && (
+                  <span>Confidence {Math.round(skill.confidence * 100)}%</span>
+                )}
+                {skill.last_used_at && (
+                  <span>Last used {new Date(skill.last_used_at).toLocaleDateString()}</span>
+                )}
+                {skill.created_at && (
+                  <span>Created {new Date(skill.created_at).toLocaleDateString()}</span>
+                )}
+              </div>
+
+              {hasPitfalls && (
+                <details className="group">
+                  <summary className="cursor-pointer text-[11px] font-medium text-amber-400 hover:text-amber-300">
+                    ⚠️ {t('memory.skill.pitfalls', 'Pitfalls')} ({skill.pitfalls?.length})
+                  </summary>
+                  <ul className="mt-1.5 ml-4 list-disc space-y-0.5 text-[11px] text-slate-400">
+                    {skill.pitfalls?.map((p, i) => (
+                      <li key={i}>{p}</li>
+                    ))}
+                  </ul>
+                </details>
               )}
-              {skill.confidence != null && (
-                <span>Confidence {Math.round(skill.confidence * 100)}%</span>
-              )}
-              {skill.last_used_at && (
-                <span>Last used {new Date(skill.last_used_at).toLocaleDateString()}</span>
-              )}
-              {skill.created_at && (
-                <span>Created {new Date(skill.created_at).toLocaleDateString()}</span>
+
+              {hasVerification && (
+                <details className="group">
+                  <summary className="cursor-pointer text-[11px] font-medium text-sky-400 hover:text-sky-300">
+                    ✓ {t('memory.skill.verification', 'Verification')} ({skill.verification?.length})
+                  </summary>
+                  <ul className="mt-1.5 ml-4 list-disc space-y-0.5 text-[11px] text-slate-400">
+                    {skill.verification?.map((v, i) => (
+                      <li key={i}>{v}</li>
+                    ))}
+                  </ul>
+                </details>
               )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

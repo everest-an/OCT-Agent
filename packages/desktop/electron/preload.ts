@@ -3,6 +3,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   getPlatform: () => ipcRenderer.invoke('app:get-platform'),
   openExternal: (url: string) => ipcRenderer.invoke('app:open-external', url),
+  // Reveal a local file in Finder (macOS) / Explorer (Windows) / file manager (Linux).
+  showItemInFolder: (targetPath: string) => ipcRenderer.invoke('shell:show-item-in-folder', targetPath),
+  // Open a local file with its default OS application (equivalent to double-clicking).
+  openPath: (targetPath: string) => ipcRenderer.invoke('shell:open-path', targetPath),
   getDashboardUrl: () => ipcRenderer.invoke('app:get-dashboard-url'),
   appZoomGet: () => ipcRenderer.invoke('app:zoom:get'),
   appZoomIn: () => ipcRenderer.invoke('app:zoom:in'),

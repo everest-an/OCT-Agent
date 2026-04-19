@@ -17,6 +17,7 @@ import { ChatComposer } from '../components/dashboard/ChatComposer';
 import { ChatMessagesPane } from '../components/dashboard/ChatMessagesPane';
 import { ChatTracePanel, type ChatTraceEvent } from '../components/dashboard/ChatTracePanel';
 import { DashboardHeader } from '../components/dashboard/DashboardHeader';
+import { FilePathChip, looksLikeAbsolutePath } from '../components/dashboard/FilePathChip';
 import { SessionSidebar } from '../components/dashboard/SessionSidebar';
 import logoUrl from '../assets/logo.png';
 
@@ -449,6 +450,10 @@ function TypewriterMessage({ content, isNew }: { content: string; isNew: boolean
           code({ children, className, ...props }) {
             const isInline = !className;
             if (isInline) {
+              const text = String(children);
+              if (looksLikeAbsolutePath(text)) {
+                return <FilePathChip path={text} />;
+              }
               return <code className="chat-inline-code px-1.5 py-0.5 rounded text-[12px]" {...props}>{children}</code>;
             }
             return <CodeBlock code={String(children).replace(/\n$/, '')} language={className} />;
@@ -1711,7 +1716,11 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
         code({ children, className }) {
           const isInline = !className;
-          if (isInline) return <code className="chat-inline-code px-1.5 py-0.5 rounded text-[12px]">{children}</code>;
+          if (isInline) {
+            const text = String(children);
+            if (looksLikeAbsolutePath(text)) return <FilePathChip path={text} />;
+            return <code className="chat-inline-code px-1.5 py-0.5 rounded text-[12px]">{children}</code>;
+          }
           return <CodeBlock code={String(children).replace(/\n$/, '')} language={className} />;
         },
         p({ children }) { return <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>; },

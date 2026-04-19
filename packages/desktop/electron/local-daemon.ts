@@ -108,6 +108,42 @@ export async function forceStopLocalDaemon(options: { sleep: (ms: number) => Pro
   }
 }
 
+/**
+ * F-055b P0 — resolve the project dir the local daemon should boot against.
+ *
+ * Before F-055b, `local-daemon.ts` hardcoded `~/.openclaw`, so the daemon
+ * indexed `$HOME/.bun`, `$HOME/.claude`, `$HOME/.codex`, and other
+ * sibling caches as "workspace files" on startup. The user's selected
+ * workspace (from the Electron workspace picker) was only applied later
+ * via `/api/v1/workspace/switch`, which swapped paths but didn't rescan
+ * — so the stale graph_nodes persisted forever in the UI.
+ *
+ * Now we read `~/.awarenessclaw/active-workspace.json` (same file the
+ * `install-workspace-hook` uses) and pass the user's last-selected
+ * workspace to `--project` directly. The daemon boots scanning the
+ * right directory from the first tick, no rescan needed.
+ *
+ * Fallback: `~/.openclaw` when the state file is missing or unreadable,
+ * matching legacy behavior so first-run users still get a working app.
+ */
+function resolveInitialProjectDir(homedir: string): string {
+  const defaultDir = path.join(homedir, '.openclaw');
+  try {
+    const statePath = path.join(homedir, '.awarenessclaw', 'active-workspace.json');
+    if (!fs.existsSync(statePath)) return defaultDir;
+    const raw = fs.readFileSync(statePath, 'utf8');
+    const parsed = JSON.parse(raw) as { path?: unknown };
+    const candidate = typeof parsed?.path === 'string' ? parsed.path.trim() : '';
+    if (!candidate) return defaultDir;
+    // Sanity check: only trust absolute paths that actually exist.
+    if (!path.isAbsolute(candidate)) return defaultDir;
+    if (!fs.existsSync(candidate)) return defaultDir;
+    return candidate;
+  } catch {
+    return defaultDir;
+  }
+}
+
 export async function startLocalDaemonDetached(options: {
   homedir: string;
   resolveBundledCache: (fileName: string) => string | null;
@@ -116,7 +152,7 @@ export async function startLocalDaemonDetached(options: {
   getEnhancedPath: () => string;
 }) {
   const homedir = normalizeHomeDir(options.homedir);
-  const projectDir = path.join(homedir, '.openclaw');
+  const projectDir = resolveInitialProjectDir(homedir);
   const offlineTarball = options.resolveBundledCache('awareness-sdk-local.tgz');
   const npxArgs = ['-y', offlineTarball || '@awareness-sdk/local@latest', 'start', '--port', '37800', '--project', projectDir, '--background'];
 

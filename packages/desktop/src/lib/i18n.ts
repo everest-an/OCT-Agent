@@ -133,6 +133,14 @@ const en: Record<string, string> = {
   'chat.suggest.plan': 'Help me make a study plan',
   'chat.suggest.review': 'Review recent work',
   'chat.suggest.analyze': 'Help me analyze a technical problem',
+  // Clickable file path chip (Dashboard markdown inline code)
+  'chat.filePath.revealMac': 'Show in Finder',
+  'chat.filePath.revealWin': 'Show in Explorer',
+  'chat.filePath.revealLinux': 'Show in file manager',
+  'chat.filePath.openHint': 'Open with default app',
+  'chat.filePath.clickHint': 'Click',
+  'chat.filePath.notFound': 'not found',
+  'chat.filePath.failed': 'failed',
 
   // Memory
   'memory.title': 'Memory',
@@ -1466,6 +1474,13 @@ const zh: Record<string, string> = {
   'chat.suggest.plan': '帮我制定一个学习计划',
   'chat.suggest.review': '回顾一下最近的工作',
   'chat.suggest.analyze': '帮我分析一个技术问题',
+  'chat.filePath.revealMac': '在 Finder 中显示',
+  'chat.filePath.revealWin': '在资源管理器中显示',
+  'chat.filePath.revealLinux': '在文件管理器中显示',
+  'chat.filePath.openHint': '用默认应用打开',
+  'chat.filePath.clickHint': '点击',
+  'chat.filePath.notFound': '文件不存在',
+  'chat.filePath.failed': '打开失败',
 
   // Memory
   'memory.title': '记忆',
