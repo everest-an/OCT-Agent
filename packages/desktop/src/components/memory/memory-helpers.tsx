@@ -58,6 +58,8 @@ export interface DaemonHealth {
   version?: string;
   search_mode?: string;
   uptime?: number;
+  /** F-055 drift detection · daemon reports which project it is serving. */
+  project_dir?: string;
   stats?: {
     totalMemories: number;
     totalKnowledge: number;

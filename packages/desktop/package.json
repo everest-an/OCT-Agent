@@ -1,6 +1,6 @@
 {
   "name": "awareness-claw-desktop",
-  "version": "0.3.7-preview.12",
+  "version": "0.3.7-preview.13",
   "description": "AwarenessClaw Desktop — Visual AI agent manager with persistent memory",
   "author": "edwin-hao-ai",
   "main": "dist-electron/main.js",

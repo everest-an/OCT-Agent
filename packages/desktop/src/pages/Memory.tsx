@@ -30,14 +30,16 @@ import type { WikiSelectedItem } from '../components/memory/wiki-types';
 interface WorkspaceIndicatorProps {
   activePath: string | null;
   daemonProjectDir: string | null;
+  drift: { expected: string | null; actual: string | null } | null;
   t: (key: string, fallback?: string) => string;
 }
 
-function WorkspaceIndicator({ activePath, daemonProjectDir, t }: WorkspaceIndicatorProps) {
+function WorkspaceIndicator({ activePath, daemonProjectDir, drift, t }: WorkspaceIndicatorProps) {
   // Resolve a short display label: the basename of the active workspace, or
   // "OpenClaw" when the daemon is using the global default.
   const resolved = activePath && activePath.trim() ? activePath : daemonProjectDir;
   const isDefault = !activePath || !activePath.trim();
+  const hasDrift = !!drift;
 
   const label = (() => {
     if (isDefault) return t('memory.workspace.openclawDefault', 'OpenClaw');
@@ -45,21 +47,42 @@ function WorkspaceIndicator({ activePath, daemonProjectDir, t }: WorkspaceIndica
     return parts[parts.length - 1] || resolved || 'unknown';
   })();
 
-  const titleText = isDefault
-    ? t('memory.workspace.openclawTooltip', 'Global workspace: {path}').replace('{path}', resolved || '~/.openclaw')
-    : t('memory.workspace.projectTooltip', 'Project workspace: {path}').replace('{path}', resolved || '');
+  // F-055 drift: daemon is serving a different project than the desktop
+  // thinks. This is the symptom behind "cross-workspace pollution" UI
+  // reports — auto-repair kicks in on detection, but we surface the state
+  // so users can see what's happening and trust the fix is running.
+  const titleText = hasDrift
+    ? t(
+        'memory.workspace.driftTooltip',
+        'Workspace drift detected. Expected: {expected}. Daemon: {actual}. Auto-repairing…',
+      )
+        .replace('{expected}', drift.expected || '(none)')
+        .replace('{actual}', drift.actual || '(none)')
+    : isDefault
+      ? t('memory.workspace.openclawTooltip', 'Global workspace: {path}').replace('{path}', resolved || '~/.openclaw')
+      : t('memory.workspace.projectTooltip', 'Project workspace: {path}').replace('{path}', resolved || '');
+
+  const className = hasDrift
+    ? 'border-amber-500/60 bg-amber-500/10 text-amber-200'
+    : isDefault
+      ? 'border-slate-700/60 bg-slate-800/40 text-slate-400'
+      : 'border-brand-500/40 bg-brand-600/10 text-brand-200';
+
+  const iconClassName = hasDrift
+    ? 'text-amber-300 animate-pulse'
+    : isDefault
+      ? 'text-slate-500'
+      : 'text-brand-300';
 
   return (
     <div
-      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border ${
-        isDefault
-          ? 'border-slate-700/60 bg-slate-800/40 text-slate-400'
-          : 'border-brand-500/40 bg-brand-600/10 text-brand-200'
-      }`}
+      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border ${className}`}
       title={titleText}
     >
-      <FolderOpen size={12} className={isDefault ? 'text-slate-500' : 'text-brand-300'} />
-      <span className="truncate max-w-[180px]">{label}</span>
+      <FolderOpen size={12} className={iconClassName} />
+      <span className="truncate max-w-[180px]">
+        {hasDrift ? t('memory.workspace.syncing', 'Syncing…') : label}
+      </span>
     </div>
   );
 }
@@ -157,6 +180,45 @@ export default function Memory() {
   // Daemon connection
   const daemon = useDaemonConnection(api, t, reloadMemoryData);
   const { daemonHealth, daemonStarting, daemonConnected, checkHealth, startDaemonAndReload, handleStartDaemon } = daemon;
+
+  // F-055 · cross-workspace drift auto-repair.
+  //
+  // Symptom: user selected "New project" in AwarenessClaw but Memory panel
+  // still shows memories from the old workspace. Cause: desktop's active
+  // workspace and the daemon's real `project_dir` can drift out of sync
+  // (crash mid-switch, stale UI after workspace deletion, etc). The
+  // daemon has perfect per-project isolation (verified by
+  // sdks/local/test/f055-cross-workspace-isolation.test.mjs — 3/3 pass),
+  // so the fix is to ensure the desktop asks the daemon to sync, not to
+  // render whatever's cached. When drift is detected, we force a
+  // `workspaceSetActive` to repair, then `reloadMemoryData` to refresh.
+  const [workspaceDrift, setWorkspaceDrift] = useState<{ expected: string | null; actual: string | null } | null>(null);
+  useEffect(() => {
+    if (!daemonHealth?.project_dir) {
+      setWorkspaceDrift(null);
+      return;
+    }
+    const expected = activeWorkspace.path && activeWorkspace.path.trim() ? activeWorkspace.path : null;
+    const actual = daemonHealth.project_dir as string;
+    // No expected set = user is on OpenClaw default → any daemon dir is fine
+    if (!expected) { setWorkspaceDrift(null); return; }
+    // Normalize: drop trailing slash, normalize separators
+    const norm = (p: string) => p.replace(/\/+$/, '').replace(/\\/g, '/');
+    const drifted = norm(expected) !== norm(actual);
+    if (drifted) {
+      setWorkspaceDrift({ expected, actual });
+      // Auto-repair: ask the desktop IPC to switch back to the expected
+      // workspace. workspace:set-active broadcasts workspace:changed which
+      // Memory.tsx already listens for → reloadMemoryData fires.
+      if (api?.workspaceSetActive) {
+        void api.workspaceSetActive(expected).catch(() => { /* best-effort */ });
+      }
+    } else {
+      setWorkspaceDrift(null);
+    }
+    // Only react to daemonHealth + activeWorkspace, not api (stable ref).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [daemonHealth?.project_dir, activeWorkspace.path]);
 
   // Search
   const search = useMemorySearch(api, activeTab === 'overview' ? 'timeline' : activeTab, setEvents, memoryData.setEventsTotal);
@@ -373,6 +435,7 @@ export default function Memory() {
             <WorkspaceIndicator
               activePath={activeWorkspace.path}
               daemonProjectDir={activeWorkspace.daemonProjectDir}
+              drift={workspaceDrift}
               t={t}
             />
             <button

@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.3.7-preview.13] - 2026-04-19 (macOS + Windows)
+
+### Fixed — cross-workspace memory pollution (reported by user)
+Symptom: user selected a new project in AwarenessClaw but Memory panel
+kept showing memories from the previous workspace (e.g. "F-055/056/057
+PRD" turn_summary from the Awareness repo leaking into an unrelated
+fresh project view).
+
+Root cause: the daemon has perfect per-project isolation (verified by
+new `sdks/local/test/f055-cross-workspace-isolation.test.mjs` — 3/3
+pass), but the desktop's active workspace can drift out of sync with
+the daemon's real `project_dir` after a crashed switch / mid-load
+workspace change / stale UI cache.
+
+Fix: new drift auto-repair effect in Memory.tsx
+1. After each `checkHealth()`, compare `daemonHealth.project_dir` to
+   the expected `activeWorkspace.path`
+2. If mismatch → auto-call `workspaceSetActive(expected)` to force a
+   re-sync, then `reloadMemoryData()` kicks in via the normal
+   `workspace:changed` listener
+3. `WorkspaceIndicator` shows an amber "Syncing…" badge with a
+   tooltip naming expected vs actual — user sees what's happening
+
+Also added `project_dir` to the `DaemonHealth` type (was in the JSON
+already, just untyped).
+
 ## [0.3.7-preview.12] - 2026-04-19 (macOS + Windows)
 
 ### Fixed — macOS daemon upgrade "Command timed out"
