@@ -329,17 +329,29 @@ function TopicView({
     };
 
     if (isTagPseudoTopic) {
-      if (cards.length === 0) { setLoading(true); return; }
-      const tag = topicId.slice(4).toLowerCase();
-      const matched = cards.filter((c) => {
-        if (!c.tags) return false;
-        let parsed: unknown;
-        try { parsed = typeof c.tags === 'string' ? JSON.parse(c.tags) : c.tags; } catch { return false; }
-        if (!Array.isArray(parsed)) return false;
-        return parsed.some((tagValue) => String(tagValue).trim().toLowerCase() === tag);
-      });
-      resolveResult(matched as unknown as TopicMemberCard[]);
-      return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); };
+      // Client-side match against the preloaded (capped-at-50) card list
+      // is the fastest path when the tag's members happen to live in the
+      // top-50 recent cards. But if none match (e.g. the tag covers older
+      // cards), we fall through to the daemon, which has access to the
+      // full SQLite table and supports `tag_<name>` pseudo-ids as of
+      // sdks/local 0.9.10. Without this fallback, tag topics pointing at
+      // older cards rendered "Daemon is building the tag index…" for
+      // 3.2 s and then a blank page.
+      if (cards.length > 0) {
+        const tag = topicId.slice(4).toLowerCase();
+        const matched = cards.filter((c) => {
+          if (!c.tags) return false;
+          let parsed: unknown;
+          try { parsed = typeof c.tags === 'string' ? JSON.parse(c.tags) : c.tags; } catch { return false; }
+          if (!Array.isArray(parsed)) return false;
+          return parsed.some((tagValue) => String(tagValue).trim().toLowerCase() === tag);
+        });
+        if (matched.length > 0) {
+          resolveResult(matched as unknown as TopicMemberCard[]);
+          return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); };
+        }
+      }
+      // fall through to daemon fetch below
     }
 
     // --- FAST PATH 1: use topic.tags from sidebar data (available since daemon 0.5.17)

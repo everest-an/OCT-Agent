@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.3.7-preview.14] - 2026-04-19 (macOS + Windows)
+
+### Fixed — Wiki tag topics rendered "building index…" then blank
+
+Symptom: clicking a tag-aggregation topic in Memory › Wiki showed
+"Daemon is building the tag index, please wait…" for ~3 seconds, then
+a blank content pane with "0 cards" in the header even though the
+sidebar had counted members.
+
+Root cause: the client filtered the **preloaded** card snapshot (capped
+at 50 most-recent) for tag matches. For a tag whose member cards were
+older than the top-50 window, client-side match returned 0 → four
+retries → blank.
+
+Fix: `WikiContentArea.tsx` now falls through to the daemon's
+`/api/v1/knowledge/tag_<name>` endpoint (added in `@awareness-sdk/local`
+0.9.10) when client-side match yields 0 for a tag pseudo-topic. The
+daemon runs the same SQL tag-LIKE query as the sidebar count, so the
+number in the badge always matches what renders on click.
+
+Upgrade path: daemon 0.9.10+ is required for the fallback to work on
+older-tag-members. With older daemons the client still shows the
+client-side-matched subset (legacy behaviour).
+
 ## [0.3.7-preview.13] - 2026-04-19 (macOS + Windows)
 
 ### Fixed — cross-workspace memory pollution (reported by user)
