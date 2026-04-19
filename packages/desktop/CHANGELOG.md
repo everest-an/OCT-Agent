@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.7-preview.10] - 2026-04-19 (macOS only)
+
+### Added — F-059 skill UI (user-visible)
+- Skills list now shows growth-stage badge (🌳 evergreen / 🌿 budding /
+  🌱 seedling) next to each skill name.
+- Skill detail renders **Pitfalls** section (known failure modes) and
+  **Verification** section (post-run check signals) when present.
+- Knowledge cards Wiki view shows growth-stage icon (already shipped in
+  0.3.7-preview.9; retained).
+
 ## [0.3.7-preview.9] - 2026-04-18 (macOS only)
 
 ### Added — clickable file paths in chat (user-visible)
