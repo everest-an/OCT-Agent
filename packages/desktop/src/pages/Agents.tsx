@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Bot, Plus, Trash2, Link, Loader2, RefreshCw, Edit3, Check, X, AlertCircle, FileText, ChevronDown, ChevronUp, Save } from 'lucide-react';
+import { Bot, Plus, Trash2, Link, Loader2, RefreshCw, Edit3, Check, X, AlertCircle, FileText, ChevronDown, ChevronUp, Save, ShoppingBag } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { useAppConfig } from '../lib/store';
 import AgentWizard from '../components/AgentWizard';
 import AgentAvatar from '../components/AgentAvatar';
 import AgentEmojiPicker from '../components/AgentEmojiPicker';
+import AgentMarketplace from './AgentMarketplace';
 
 interface AgentInfo {
   id: string;
@@ -38,6 +39,9 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
 
   // Wizard state
   const [showWizard, setShowWizard] = useState(false);
+
+  // F-063 Marketplace overlay
+  const [showMarketplace, setShowMarketplace] = useState(false);
 
   // Identity editing
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -203,6 +207,16 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
 
   const fileDirty = fileContent !== fileOriginal;
 
+  // F-063: If marketplace overlay is open, render it full-bleed.
+  if (showMarketplace) {
+    return (
+      <AgentMarketplace
+        onClose={() => setShowMarketplace(false)}
+        onInstalled={() => { loadAgents(); }}
+      />
+    );
+  }
+
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
@@ -213,6 +227,12 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
             <p className="text-xs text-slate-500">{t('agents.subtitle')}</p>
           </div>
           <div className="flex items-center gap-2">
+            <button onClick={() => setShowMarketplace(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors"
+              title={t('agents.marketplace.title', 'Browse Agent Marketplace')}>
+              <ShoppingBag size={12} />
+              {t('agents.marketplace.entry', '浏览集市')}
+            </button>
             <button onClick={() => setShowWizard(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-brand-600 hover:bg-brand-500 text-white rounded-lg transition-colors">
               <Plus size={12} />

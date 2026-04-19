@@ -31,7 +31,12 @@ import {
 import { healMainAgentIfNeeded, healOrphanBindings } from './heal-main-agent';
 import { installWorkspaceInjectHook, readActiveWorkspace, writeActiveWorkspace } from './install-workspace-hook';
 import { createChannelLoginWithQR } from './ipc/channel-login-flow';
-import { registerAgentHandlers } from './ipc/register-agent-handlers';
+import {
+  registerAgentHandlers,
+  applyAgentIdentityFallback,
+  addAgentToConfigFallback,
+} from './ipc/register-agent-handlers';
+import { registerMarketplaceHandlers } from './ipc/register-marketplace-handlers';
 import { registerAppUtilityHandlers } from './ipc/register-app-utility-handlers';
 import { registerAppRuntimeHandlers } from './ipc/register-app-runtime-handlers';
 import { registerChannelConfigHandlers } from './ipc/register-channel-config-handlers';
@@ -2106,6 +2111,13 @@ registerAgentHandlers({
   runAsync,
   runSpawnAsync,
   runDoctorFix: (checkId: string) => getDoctor().runFix(checkId),
+});
+// F-063 Agent Marketplace — browse, install, submit
+registerMarketplaceHandlers({
+  home: HOME,
+  runSpawnAsync,
+  applyAgentIdentityFallback,
+  addAgentToConfigFallback,
 });
 registerChannelConfigHandlers({
   home: HOME,

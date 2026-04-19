@@ -213,6 +213,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
   agentsWriteFile: (id: string, fileName: string, content: string) => ipcRenderer.invoke('agents:write-file', id, fileName, content),
   agentsDeleteFile: (id: string, fileName: string) => ipcRenderer.invoke('agents:delete-file', id, fileName),
 
+  // F-063 Agent Marketplace
+  marketplaceList: (params?: { tier?: string; category?: string; q?: string; featured?: boolean }) =>
+    ipcRenderer.invoke('marketplace:list', params || {}),
+  marketplaceDetail: (slug: string) => ipcRenderer.invoke('marketplace:detail', slug),
+  marketplaceInstalledSlugs: () => ipcRenderer.invoke('marketplace:installed-slugs'),
+  marketplaceInstall: (slug: string) => ipcRenderer.invoke('marketplace:install', slug),
+  marketplaceSubmit: (payload: {
+    slug: string;
+    name: string;
+    description: string;
+    category: string;
+    tier: string;
+    emoji?: string;
+    markdown: string;
+    author_contact?: string;
+  }) => ipcRenderer.invoke('marketplace:submit', payload),
+
   // Models (dynamic)
   modelsReadProviders: () => ipcRenderer.invoke('models:read-providers'),
   modelsDiscover: (input: { providerKey: string; baseUrl: string; apiKey?: string }) => ipcRenderer.invoke('models:discover', input),

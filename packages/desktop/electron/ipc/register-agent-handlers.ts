@@ -650,7 +650,7 @@ function removeAgentFromConfigAndHealBindings(home: string, deletedAgentId: stri
   }
 }
 
-function addAgentToConfigFallback(
+export function addAgentToConfigFallback(
   home: string,
   agentId: string,
   options?: { model?: string | null },
@@ -684,7 +684,7 @@ function addAgentToConfigFallback(
   }
 }
 
-function applyAgentIdentityFallback(
+export function applyAgentIdentityFallback(
   home: string,
   agentId: string,
   identity: { name?: string; emoji?: string; avatar?: string; theme?: string },
