@@ -100,6 +100,11 @@ import { chatSendViaCli, chatSendViaCliWithWebCompatibilityRetry, prepareCliFall
 function classifyProviderError(rawError: string, state: string): string {
   const lower = rawError.toLowerCase();
 
+  // Gateway scope/authorization gate
+  if ((lower.includes('missing scope') && lower.includes('operator.write')) || lower.includes('scope-upgrade')) {
+    return 'gateway_auth_required';
+  }
+
   // Provider internal error (Qwen, OpenAI, etc.)
   if (/internal error|internal server error|500/i.test(rawError)) {
     return 'provider_internal';
@@ -136,6 +141,14 @@ function classifyProviderError(rawError: string, state: string): string {
 }
 
 const DESKTOP_DIRECT_CHAT_MODE_INSTRUCTION = '[Desktop chat mode] This turn came from AwarenessClaw\'s direct desktop chat UI. Treat it as a normal one-to-one user conversation, not as a heartbeat poll, cron/background check, or group/channel thread. Respond directly to the user\'s actual request. Do not output HEARTBEAT_OK unless the incoming message explicitly is a heartbeat/system health-check prompt asking for that exact acknowledgement. Do not apply group-chat silence rules to this desktop chat turn.';
+
+function isGatewayAuthScopeError(message: string): boolean {
+  const lower = String(message || '').toLowerCase();
+  return (
+    /needs local authorization|device authorization|device-required|pairing required|pairing-required|scope-upgrade/i.test(lower)
+    || (lower.includes('missing scope') && lower.includes('operator.write'))
+  );
+}
 
 function maybeSelfHealGateway1006(
   result: any,
@@ -500,7 +513,7 @@ ${message}`;
       : deps.ensureGatewayRunning());
     if (!gatewayReady.ok) {
       const gatewayErrorText = String(gatewayReady.error || '');
-      const authGated = /needs local authorization|device authorization|device-required|pairing required|pairing-required|scope-upgrade/i.test(gatewayErrorText);
+      const authGated = isGatewayAuthScopeError(gatewayErrorText);
       const now = Date.now();
       const canAttemptAuthRepair = authGated && (now - chatState.lastGatewayAuthRepairAt > 60_000);
 
@@ -1216,17 +1229,20 @@ ${message}`;
       }
       send('chat:stream-end', {});
       const errorMsg = err?.message || String(err);
-      if (errorMsg.includes('WebSocket') || errorMsg.includes('connect') || errorMsg.includes('timed out') || /pairing required/i.test(errorMsg)) {
+      const authScopeGated = isGatewayAuthScopeError(errorMsg);
+      if (errorMsg.includes('WebSocket') || errorMsg.includes('connect') || errorMsg.includes('timed out') || authScopeGated) {
         console.warn('[chat] WebSocket/pairing failed, falling back to CLI:', errorMsg);
         // For pairing-required failures, trigger a background reconnect+repair so the
         // next chat message goes through Gateway cleanly (write-scope pre-warm).
-        if (/pairing required/i.test(errorMsg)) {
+        if (/pairing required/i.test(errorMsg) || authScopeGated) {
           deps.getGatewayWs().catch(() => { /* background repair — don't block fallback */ });
         }
         requestedOptions.forceLocal = true;
         send('chat:status', {
           type: 'gateway',
-          message: 'Gateway connection is unstable. Sending this message through local fallback mode.',
+          message: authScopeGated
+            ? 'Local Gateway authorization is incomplete. Sending this message through local fallback mode.'
+            : 'Gateway connection is unstable. Sending this message through local fallback mode.',
         });
         const preparedCli = await prepareCliFallbackWithDaemonRetry(deps.prepareCliFallback, send);
         if (!preparedCli.ok) {
