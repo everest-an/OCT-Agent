@@ -15,10 +15,12 @@ import {
   clearAwarenessLocalNpxCache,
   forceStopLocalDaemon,
   formatDaemonSetupError,
+  freshNpxCacheArg,
   getLocalDaemonHealth,
   shutdownLocalDaemon,
   startLocalDaemonDetached,
   waitForLocalDaemonReady,
+  windowsForceKillTree,
 } from './local-daemon';
 import { GatewayClient } from './gateway-ws';
 import { findPrebindingGatewayPids } from './gateway-startup-guards';
@@ -785,7 +787,7 @@ async function ensureLocalDaemonReadyForRuntime(send?: (ch: string, data: any) =
       } catch {
         // best-effort cleanup before foreground bootstrap
       }
-      clearAwarenessLocalNpxCache(HOME);
+      await clearAwarenessLocalNpxCache(HOME);
 
       const foregroundBootstrapped = await bootstrapDaemonInForeground();
       if (foregroundBootstrapped) {
@@ -2033,6 +2035,8 @@ registerAppRuntimeHandlers({
   getBundledNpmBin,
   shutdownLocalDaemon,
   clearAwarenessLocalNpxCache,
+  windowsForceKillTree,
+  freshNpxCacheArg,
   doctor,
   getMainWindow: () => mainWindow,
   onUpgradeRunningChange: (running: boolean) => {

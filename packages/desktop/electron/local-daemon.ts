@@ -1,6 +1,8 @@
 import fs from 'fs';
 import http from 'http';
+import os from 'os';
 import path from 'path';
+import { spawn } from 'child_process';
 
 function normalizeHomeDir(value: string) {
   return String(value || '').trim().replace(/^['"]+|['"]+$/g, '');
@@ -20,7 +22,45 @@ function getNpxCacheDirs(homedir: string) {
   return Array.from(new Set(dirs.map((dir) => path.normalize(dir))));
 }
 
-export function clearAwarenessLocalNpxCache(homedir: string) {
+/**
+ * Remove a directory with retry on Windows EBUSY/EPERM. Windows holds
+ * handles briefly after a process exits (especially native addons like
+ * better-sqlite3.node + Defender scan). `fs.rmSync({force:true})` still
+ * throws on EBUSY — force only ignores ENOENT. We back off + retry.
+ */
+async function rmSyncWithRetry(target: string, retries = 5): Promise<boolean> {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      fs.rmSync(target, { recursive: true, force: true });
+      return true;
+    } catch (err: any) {
+      const code = err?.code || '';
+      // ENOENT means already gone; any other code except EBUSY/EPERM/ENOTEMPTY
+      // is a real error we can't recover from.
+      if (code === 'ENOENT') return true;
+      if (!['EBUSY', 'EPERM', 'ENOTEMPTY'].includes(code)) return false;
+      if (attempt === retries - 1) return false;
+      // Back off: 500 / 1000 / 1500 / 2000 / 2500 ms — total up to ~7.5s
+      await new Promise((r) => setTimeout(r, (attempt + 1) * 500));
+    }
+  }
+  return false;
+}
+
+/**
+ * Clear cached `@awareness-sdk/local` npx entries.
+ *
+ * Windows tricky bit: if the daemon was running from this cache when we
+ * try to clear, native DLL handles (better-sqlite3.node) may still be
+ * held for 1-3s after process exit. Caller should kill daemon first
+ * and ideally await ~1s before invoking this.
+ *
+ * Returns the list of entries we FAILED to clear (non-empty = user's
+ * next `npx install` may hit EBUSY; caller should fall back to
+ * `--cache=<tmp>` strategy).
+ */
+export async function clearAwarenessLocalNpxCache(homedir: string): Promise<string[]> {
+  const stuck: string[] = [];
   try {
     for (const npxCacheDir of getNpxCacheDirs(homedir)) {
       if (!fs.existsSync(npxCacheDir)) continue;
@@ -31,13 +71,57 @@ export function clearAwarenessLocalNpxCache(homedir: string) {
         const sdkDir = path.join(entryDir, 'node_modules', '@awareness-sdk');
         const localPkg = path.join(sdkDir, 'local', 'package.json');
         if (fs.existsSync(sdkDir) || fs.existsSync(localPkg)) {
-          fs.rmSync(entryDir, { recursive: true, force: true });
+          const ok = await rmSyncWithRetry(entryDir, 5);
+          if (!ok) stuck.push(entryDir);
         }
       }
     }
   } catch {
     // Best-effort cache cleanup only.
   }
+  return stuck;
+}
+
+/**
+ * Windows-only: force-kill a process tree. `process.kill(pid, 'SIGKILL')`
+ * on Windows calls TerminateProcess but ONLY on the tracked PID —
+ * spawned children survive and keep file handles, breaking npx install.
+ * `taskkill /F /T` forces the entire tree down.
+ */
+export async function windowsForceKillTree(pid: number, timeoutMs = 5000): Promise<boolean> {
+  if (process.platform !== 'win32' || !Number.isFinite(pid) || pid <= 0) return false;
+  return new Promise((resolve) => {
+    try {
+      const proc = spawn('taskkill', ['/F', '/T', '/PID', String(pid)], {
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+      const timer = setTimeout(() => {
+        try { proc.kill(); } catch {}
+        resolve(false);
+      }, timeoutMs);
+      proc.on('exit', (code) => {
+        clearTimeout(timer);
+        resolve(code === 0 || code === 128); // 128 = process not found (already dead)
+      });
+      proc.on('error', () => {
+        clearTimeout(timer);
+        resolve(false);
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+/**
+ * Build a fresh npx --cache arg — used when the default _npx cache is
+ * locked (Windows EBUSY). Using a throwaway cache sidesteps the need to
+ * overwrite locked files; the default cache will GC itself over time.
+ */
+export function freshNpxCacheArg(): string {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'awareness-npx-'));
+  return `--cache=${tmp}`;
 }
 
 export function formatDaemonSetupError() {

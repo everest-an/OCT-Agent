@@ -59,7 +59,9 @@ export function registerAppRuntimeHandlers(deps: {
   runAsyncWithProgress: (cmd: string, timeoutMs: number, onLine: (line: string, stream: 'stdout' | 'stderr') => void) => Promise<string>;
   getBundledNpmBin: (binName: 'npx' | 'npm') => string | null;
   shutdownLocalDaemon: (timeoutMs?: number) => Promise<boolean>;
-  clearAwarenessLocalNpxCache: (homedir: string) => void;
+  clearAwarenessLocalNpxCache: (homedir: string) => Promise<string[]> | string[] | void;
+  windowsForceKillTree?: (pid: number, timeoutMs?: number) => Promise<boolean>;
+  freshNpxCacheArg?: () => string;
   doctor?: {
     runChecks: (subset?: string[]) => Promise<any>;
     runFix: (checkId: string) => Promise<any>;
@@ -537,29 +539,66 @@ export function registerAppRuntimeHandlers(deps: {
           throw new Error(`Plugin upgrade failed: ${e.message?.slice(0, 200)}`);
         }
       } else if (component === 'daemon') {
+        const isWin = process.platform === 'win32';
         progress('daemon:shutdown', 'running');
         await deps.shutdownLocalDaemon(3000);
 
+        // Windows native addon (better-sqlite3.node) locks its DLL file as
+        // long as ANY process in the tree holds it. `process.kill` on
+        // Windows only terminates the tracked PID, leaving children +
+        // native handles alive — breaks the subsequent `npx install`
+        // with EBUSY on rename. Use `taskkill /F /T` to kill the tree.
         for (let w = 0; w < 6; w++) {
           const health = await deps.getLocalDaemonHealth(1000);
           if (!health?.pid) break;
           if (w === 3 && health?.version) {
             try { process.kill(health.pid, 'SIGKILL'); } catch {}
+            if (isWin && deps.windowsForceKillTree) {
+              try { await deps.windowsForceKillTree(health.pid, 5000); } catch {}
+            }
           }
-          await new Promise(r => setTimeout(r, 500));
+          await new Promise((r) => setTimeout(r, 500));
         }
+        // Extra settle time on Windows — DLL handles take 1-2s to drop
+        // even after TerminateProcess returns. Without this, the next
+        // rmSync/npx-rename hits EBUSY.
+        if (isWin) await new Promise((r) => setTimeout(r, 2000));
         progress('daemon:shutdown', 'done');
 
         progress('daemon:clear-cache', 'running');
-        deps.clearAwarenessLocalNpxCache(deps.home);
-        progress('daemon:clear-cache', 'done');
+        const stuck = (await Promise.resolve(deps.clearAwarenessLocalNpxCache(deps.home))) || [];
+        const cacheLocked = Array.isArray(stuck) && stuck.length > 0;
+        progress('daemon:clear-cache', cacheLocked ? 'running' : 'done', cacheLocked ? `${stuck.length} entries still locked — using fresh cache` : undefined);
+
+        // If the old cache is locked (Windows EBUSY that survived retry),
+        // install into a fresh throwaway --cache so npx doesn't need to
+        // rename over the locked dir. Resolves the Windows upgrade path
+        // when antivirus / file-indexer is scanning the old DLL.
+        const npxArgs = cacheLocked && deps.freshNpxCacheArg ? ` ${deps.freshNpxCacheArg()}` : '';
 
         progress('daemon:start', 'running');
-        await deps.runAsyncWithProgress(
-          `npx -y @awareness-sdk/local@latest start --port 37800 --project "${path.join(deps.home, '.openclaw')}" --background`,
-          60000,
-          (line) => { progress('daemon:start', 'running', line.slice(0, 120)); },
-        );
+        try {
+          await deps.runAsyncWithProgress(
+            `npx -y${npxArgs} @awareness-sdk/local@latest start --port 37800 --project "${path.join(deps.home, '.openclaw')}" --background`,
+            60000,
+            (line) => { progress('daemon:start', 'running', line.slice(0, 120)); },
+          );
+        } catch (err: any) {
+          // One more rescue: on any error, retry with a fresh --cache so
+          // users who hit EBUSY on the first attempt at least succeed on
+          // retry without having to reboot.
+          const msg = String(err?.message || '');
+          if ((msg.includes('EBUSY') || msg.includes('rename') || msg.includes('errno -4082')) && deps.freshNpxCacheArg) {
+            progress('daemon:start', 'running', 'cache locked — retrying with fresh cache...');
+            await deps.runAsyncWithProgress(
+              `npx -y ${deps.freshNpxCacheArg()} @awareness-sdk/local@latest start --port 37800 --project "${path.join(deps.home, '.openclaw')}" --background`,
+              60000,
+              (line) => { progress('daemon:start', 'running', line.slice(0, 120)); },
+            );
+          } else {
+            throw err;
+          }
+        }
         progress('daemon:start', 'done');
 
         for (let i = 0; i < 12; i++) {
@@ -585,6 +624,12 @@ export function registerAppRuntimeHandlers(deps: {
         return {
           success: false,
           error: 'Permission denied. Run this in terminal to fix:\n  npm config set prefix ~/.npm-global\n  export PATH=~/.npm-global/bin:$PATH',
+        };
+      }
+      if (msg.includes('EBUSY') || msg.includes('errno -4082')) {
+        return {
+          success: false,
+          error: 'Upgrade blocked: Windows file lock on the daemon cache.\nPlease:\n  1. Right-click the AwarenessClaw tray icon → Quit\n  2. Wait 5 seconds for the background daemon to release files\n  3. Re-open AwarenessClaw and click Upgrade again\nOr run: taskkill /F /T /IM node.exe (warning: kills all Node processes)',
         };
       }
       return { success: false, error: msg.slice(0, 300) };

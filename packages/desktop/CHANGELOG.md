@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.3.7-preview.11] - 2026-04-19 (macOS + Windows)
+
+### Fixed — Windows daemon upgrade EBUSY crash
+Reported by user: on Windows 11, upgrading Awareness Local Daemon from
+0.7.3 → 0.9.7 hit `npm error code EBUSY npm error syscall rename` and
+upgrade stalled indefinitely. Root cause: `process.kill(pid, 'SIGKILL')`
+on Windows only terminates the tracked PID — spawned children (and the
+better-sqlite3.node DLL they hold) survive, and npm's install-via-rename
+fails because the cache dir is still locked.
+
+Three-part fix:
+1. **Force-kill tree on Windows** — after `process.kill` we now also run
+   `taskkill /F /T /PID <pid>` to take down all children + native handles.
+2. **Retry cache cleanup with backoff** — `fs.rmSync({force:true})`
+   doesn't retry on EBUSY; we now back off 500/1000/1500/2000/2500 ms
+   (~7.5s total) before giving up.
+3. **Fallback to throwaway npx cache** — if the default `_npx` cache is
+   still locked after retry (antivirus / Windows indexer scanning the
+   DLL), we spawn the new daemon with `--cache=<fresh-tmp-dir>` so npx
+   doesn't need to overwrite the locked dir.
+4. **Friendly error message** — if ALL three fallbacks fail, user now
+   sees a 3-step recovery guide instead of a raw npm stack trace.
+
 ## [0.3.7-preview.10] - 2026-04-19 (macOS only)
 
 ### Added — F-059 skill UI (user-visible)
