@@ -576,11 +576,18 @@ export function registerAppRuntimeHandlers(deps: {
         // when antivirus / file-indexer is scanning the old DLL.
         const npxArgs = cacheLocked && deps.freshNpxCacheArg ? ` ${deps.freshNpxCacheArg()}` : '';
 
-        progress('daemon:start', 'running');
+        progress('daemon:start', 'running', 'downloading package (first install may take 1-3 min)...');
+        // 5 minute idle timeout (was 60s). First-time `npx` resolves
+        // the tarball, extracts, then compiles better-sqlite3 native
+        // addon — on slow CPUs / slow network this alone is 60-180s.
+        // 0.9.6+ also downloads multilingual-e5-small (118MB) on first
+        // daemon boot. runAsyncWithProgress is idle-timeout, so 300s
+        // only fires if nothing outputs for 5 min — safe ceiling.
+        const DAEMON_START_TIMEOUT_MS = 300_000;
         try {
           await deps.runAsyncWithProgress(
             `npx -y${npxArgs} @awareness-sdk/local@latest start --port 37800 --project "${path.join(deps.home, '.openclaw')}" --background`,
-            60000,
+            DAEMON_START_TIMEOUT_MS,
             (line) => { progress('daemon:start', 'running', line.slice(0, 120)); },
           );
         } catch (err: any) {
@@ -592,7 +599,7 @@ export function registerAppRuntimeHandlers(deps: {
             progress('daemon:start', 'running', 'cache locked — retrying with fresh cache...');
             await deps.runAsyncWithProgress(
               `npx -y ${deps.freshNpxCacheArg()} @awareness-sdk/local@latest start --port 37800 --project "${path.join(deps.home, '.openclaw')}" --background`,
-              60000,
+              DAEMON_START_TIMEOUT_MS,
               (line) => { progress('daemon:start', 'running', line.slice(0, 120)); },
             );
           } else {

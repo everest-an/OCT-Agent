@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.7-preview.12] - 2026-04-19 (macOS + Windows)
+
+### Fixed — macOS daemon upgrade "Command timed out"
+Reported by user: upgrading 0.9.6 → 0.9.7 on macOS hung at "正在启动新
+守护进程..." then failed with `升级失败: Command timed out`. The daemon
+start step had a 60s idle timeout, but first-time `npx -y
+@awareness-sdk/local@latest` runs through:
+  1. npx tarball resolve + extract (5-20s)
+  2. better-sqlite3 native-addon C++ compile (30-90s on slow CPUs)
+  3. F-060 default embedder switched to multilingual-e5-small 118MB —
+     first daemon boot downloads it synchronously (20-60s on slow net)
+
+Sum can exceed 60s easily. Bumped `DAEMON_START_TIMEOUT_MS` to 300s
+(5 min). `runAsyncWithProgress` uses idle timeout (resets on every
+line of stdout/stderr), so the new ceiling only fires if nothing
+happens for 5 straight minutes — a real stuck state, not slow network.
+First progress message also updated to hint "downloading package
+(first install may take 1-3 min)..." so users don't panic at 30s.
+
 ## [0.3.7-preview.11] - 2026-04-19 (macOS + Windows)
 
 ### Fixed — Windows daemon upgrade EBUSY crash
