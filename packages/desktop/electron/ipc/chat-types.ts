@@ -16,7 +16,7 @@ export type MemoryCapturePolicy = {
 };
 
 export const CHAT_TIMEOUT_MS = 120000;
-export const CHAT_IDLE_TIMEOUT_MS = 90000;
+export const CHAT_IDLE_TIMEOUT_MS = 180000;
 export const MCP_MEMORY_BOOTSTRAP_TIMEOUT_MS = 2500;
 export const MEMORY_BOOTSTRAP_MAX_CHARS = 4000;
 

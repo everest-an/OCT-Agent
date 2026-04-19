@@ -151,6 +151,7 @@ export function ChatMessagesPane({
   onCopyApproval,
   onStopRequest,
   errorHint,
+  gatewayHint,
   onDismissError,
   renderStreamingContent,
   TypewriterMessage,
@@ -181,6 +182,7 @@ export function ChatMessagesPane({
   onCopyApproval: (toolCall: ToolCallInfo) => void;
   onStopRequest: () => void | Promise<void>;
   errorHint?: string | null;
+  gatewayHint?: string | null;
   onDismissError: () => void;
   renderStreamingContent: (content: string) => React.ReactNode;
   TypewriterMessage: ({ content, isNew }: { content: string; isNew: boolean }) => React.ReactNode;
@@ -370,9 +372,14 @@ export function ChatMessagesPane({
                   );
                 })()}
                 {agentStatus !== 'error' && !streamingContent ? (
-                  <div className="flex items-center gap-2 text-sm text-slate-400">
-                    <Loader2 size={14} className="animate-spin text-brand-400" />
-                    <span>{statusLabel}</span>
+                  <div className="space-y-1.5 text-sm text-slate-400">
+                    <div className="flex items-center gap-2">
+                      <Loader2 size={14} className="animate-spin text-brand-400" />
+                      <span>{statusLabel}</span>
+                    </div>
+                    {gatewayHint ? (
+                      <p className="ml-6 text-xs text-sky-300/90">{gatewayHint}</p>
+                    ) : null}
                   </div>
                 ) : null}
 

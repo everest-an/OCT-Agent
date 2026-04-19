@@ -92,11 +92,15 @@ let gatewayWsClient: GatewayClient | null = null;
 let gatewayWsConnectPromise: Promise<GatewayClient> | null = null;
 let gatewayRepairPromise: Promise<{ ok: boolean; error?: string }> | null = null;
 let gatewayUserSessionLastLaunchAt = 0;
+let gatewayWarmupHandshakeFailures = 0;
+let gatewayLastRepairKickoffAt = 0;
 let openclawInstallInProgress = false;
 let upgradeInProgress = false;
 let legacyWindowsOpenClawSafeMode = false;
 
 const GATEWAY_USER_SESSION_RELAUNCH_COOLDOWN_MS = 15000;
+const GATEWAY_REPAIR_KICKOFF_COOLDOWN_MS = 60000;
+const GATEWAY_WARMUP_REPAIR_FAILURE_THRESHOLD = 3;
 const DAEMON_FOREGROUND_BOOTSTRAP_TIMEOUT_MS = 240000;
 const DAEMON_WAIT_AFTER_BOOTSTRAP_MS = 90000;
 
@@ -1490,6 +1494,7 @@ async function prepareGatewayForChat(): Promise<{ ok: boolean; error?: string }>
           // process — every subsequent chat hits the fast path above with no delay.
           await getGatewayWs();
           if (gatewayWsClient?.isConnected) {
+            gatewayWarmupHandshakeFailures = 0;
             return { ok: true };
           }
         } catch (err: any) {
@@ -1513,11 +1518,37 @@ async function prepareGatewayForChat(): Promise<{ ok: boolean; error?: string }>
           }
         }
       }
+
+      // Port is open but handshake still failed after retries.
+      // Treat this as warmup pressure first (no immediate restart), because
+      // restarting too aggressively here creates restart thrash on Windows.
+      gatewayWarmupHandshakeFailures += 1;
+      const now = Date.now();
+      const shouldKickRepair = gatewayWarmupHandshakeFailures >= GATEWAY_WARMUP_REPAIR_FAILURE_THRESHOLD
+        && (now - gatewayLastRepairKickoffAt) > GATEWAY_REPAIR_KICKOFF_COOLDOWN_MS;
+
+      if (shouldKickRepair) {
+        gatewayLastRepairKickoffAt = now;
+        send('chat:status', {
+          type: 'gateway',
+          message: 'Gateway handshake is repeatedly failing. Running a background repair...'
+        });
+        startGatewayRepairInBackground(send);
+      }
+
+      return {
+        ok: false,
+        error: 'Local Gateway is loading plugins. Answering directly for this message while Gateway finishes warming up.',
+      };
     }
 
     // Gateway is not reachable via TCP, or all WS handshake attempts failed.
     // Trigger a background repair and use CLI fallback for this message.
-    startGatewayRepairInBackground(send);
+    const now = Date.now();
+    if ((now - gatewayLastRepairKickoffAt) > GATEWAY_REPAIR_KICKOFF_COOLDOWN_MS) {
+      gatewayLastRepairKickoffAt = now;
+      startGatewayRepairInBackground(send);
+    }
 
     return {
       ok: false,
@@ -1646,7 +1677,7 @@ function parseLatestPairingSelection(raw: string): { requestId?: string; approve
 }
 
 function looksLikePairingAuthError(message: string): boolean {
-  return /pairing required|pairing-required|device-required|needs local authorization|device authorization|scope-upgrade/i.test(String(message || ''));
+  return /pairing required|pairing-required|device-required|needs local authorization|device authorization|scope-upgrade|missing scope|operator\.write|operator\.approvals/i.test(String(message || ''));
 }
 
 async function tryRepairGatewayPairing(): Promise<boolean> {

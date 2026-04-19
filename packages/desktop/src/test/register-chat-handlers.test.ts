@@ -654,7 +654,9 @@ describe('registerChatHandlers', () => {
     });
     expect(callMcpStrict).toHaveBeenCalledWith(
       'awareness_init',
-      expect.objectContaining({ query: '在 E:\\新建文件夹2 里写一个 txt 文件' }),
+      expect.objectContaining({
+        source: '在 E:\\新建文件夹2 里写一个 txt 文件',
+      }),
       expect.any(Number),
     );
     expect(ws.chatSend).toHaveBeenCalledWith(
@@ -1363,7 +1365,9 @@ describe('registerChatHandlers', () => {
     expect(wrapWindowsCommand).not.toHaveBeenCalled();
     expect(callMcpStrict).toHaveBeenCalledWith(
       'awareness_init',
-      expect.objectContaining({ query: 'create a file and verify it' }),
+      expect.objectContaining({
+        source: 'create a file and verify it',
+      }),
       expect.any(Number),
     );
 

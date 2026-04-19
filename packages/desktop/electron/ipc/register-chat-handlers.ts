@@ -145,7 +145,7 @@ const DESKTOP_DIRECT_CHAT_MODE_INSTRUCTION = '[Desktop chat mode] This turn came
 function isGatewayAuthScopeError(message: string): boolean {
   const lower = String(message || '').toLowerCase();
   return (
-    /needs local authorization|device authorization|device-required|pairing required|pairing-required|scope-upgrade/i.test(lower)
+    /needs local authorization|requires local authorization|device authorization|one-time device authorization|device-required|pairing required|pairing-required|scope-upgrade/i.test(lower)
     || (lower.includes('missing scope') && lower.includes('operator.write'))
   );
 }
@@ -567,6 +567,11 @@ ${message}`;
         const detail = preparedCli.error || 'unknown error';
         console.warn('[chat] CLI fallback preparation failed:', detail);
         if (preparedCli.daemonNotReady || /LOCAL_DAEMON_NOT_READY/i.test(detail)) {
+          send('chat:status', {
+            type: 'gateway',
+            message: 'Local memory service is still starting. Continuing this message in fallback mode without memory sync.',
+          });
+        } else {
           return withWorkspaceFallbackMeta({
             success: false,
             error: 'Local memory service is still starting. Please wait 20-60 seconds, then retry.',
@@ -1150,6 +1155,11 @@ ${message}`;
           const detail = preparedCli.error || 'unknown error';
           console.warn('[chat] CLI fallback preparation failed after empty Gateway reply:', detail);
           if (preparedCli.daemonNotReady || /LOCAL_DAEMON_NOT_READY/i.test(detail)) {
+            send('chat:status', {
+              type: 'gateway',
+              message: 'Local memory service is still starting. Continuing this message in fallback mode without memory sync.',
+            });
+          } else {
             return withWorkspaceFallbackMeta({
               success: false,
               error: 'Local memory service is still starting. Please wait 20-60 seconds, then retry.',
@@ -1249,6 +1259,11 @@ ${message}`;
           const detail = preparedCli.error || 'unknown error';
           console.warn('[chat] CLI fallback preparation failed:', detail);
           if (preparedCli.daemonNotReady || /LOCAL_DAEMON_NOT_READY/i.test(detail)) {
+            send('chat:status', {
+              type: 'gateway',
+              message: 'Local memory service is still starting. Continuing this message in fallback mode without memory sync.',
+            });
+          } else {
             return withWorkspaceFallbackMeta({
               success: false,
               error: 'Local memory service is still starting. Please wait 20-60 seconds, then retry.',

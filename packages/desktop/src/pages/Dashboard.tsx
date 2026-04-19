@@ -496,6 +496,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
   const [input, setInput] = useState('');
   const [agentStatus, setAgentStatus] = useState<AgentStatus>('idle');
   const [lastErrorHint, setLastErrorHint] = useState<string | null>(null);
+  const [lastGatewayStatusHint, setLastGatewayStatusHint] = useState<string | null>(null);
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
@@ -535,7 +536,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null);
   // Stream timeout tracking
   const streamTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const STREAM_TIMEOUT_MS = 60000; // 60s without any chunk = timeout
+  const STREAM_TIMEOUT_MS = 180000; // 180s without any chunk = timeout (CLI plugin loading + tool calls can take 90-120s)
   // Agent selector state
   const [agents, setAgents] = useState<Array<{ id: string; name: string; emoji: string; isDefault?: boolean }>>([]);
   const [showAgentMenu, setShowAgentMenu] = useState(false);
@@ -814,6 +815,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
       if (status.type === 'gateway') {
         // Gateway auto-start status — show as thinking with a message
         setAgentStatus('thinking');
+        setLastGatewayStatusHint(status.message || null);
         recordTraceEvent({
           kind: 'status',
           label: t('chat.trace.gatewayStatus', 'Gateway status'),
@@ -1410,6 +1412,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     traceEventsRef.current = [];
     setTraceEvents([]);
     setLiveThinkingExpanded(true);
+    setLastGatewayStatusHint(null);
     resetChatActivityTimeout();
     recordTraceEvent({
       kind: 'status',
@@ -1501,6 +1504,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
       traceEventsRef.current = [];
       setTraceEvents([]);
       setLiveThinkingExpanded(false);
+      setLastGatewayStatusHint(null);
       setAgentStatus('idle');
       } finally {
         activeRunRef.current = false;
@@ -1897,6 +1901,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
           onCopyApproval={handleCopyApproval}
           onStopRequest={handleStopActiveRequest}
           errorHint={lastErrorHint}
+          gatewayHint={lastGatewayStatusHint}
           onDismissError={() => {
             if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
             streamingRef.current = '';
@@ -1907,6 +1912,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
             setTraceEvents([]);
             setAgentStatus('idle');
             setLastErrorHint(null);
+            setLastGatewayStatusHint(null);
           }}
           renderStreamingContent={renderStreamingContent}
           TypewriterMessage={TypewriterMessage}

@@ -15,6 +15,7 @@ import {
 import { buildWebCompatibilityRetryPrompt } from './awareness-memory-utils';
 
 const LOCAL_DAEMON_RETRY_DELAY_MS = 8000;
+const CLI_FALLBACK_TIMEOUT_MESSAGE = 'Gateway is still warming up. This message was retried through local fallback mode, but the local agent still took too long to respond. Please wait a little longer and try again.';
 
 export async function prepareCliFallbackWithDaemonRetry(
   prepareCliFallback: (() => Promise<void>) | undefined,
@@ -216,13 +217,13 @@ export async function chatSendViaCli(
       if (timeoutHandle) clearTimeout(timeoutHandle);
       timeoutHandle = setTimeout(() => {
         try { child.kill(); } catch {}
-        finalize({ success: false, error: 'The agent took too long to respond. This usually happens when the system is still loading. Please try sending your message again.', sessionId: sid });
+        finalize({ success: false, error: CLI_FALLBACK_TIMEOUT_MESSAGE, sessionId: sid });
       }, CHAT_IDLE_TIMEOUT_MS);
     };
     // Absolute safety cap: even with activity, don't let a single chat run forever
     absoluteTimeoutHandle = setTimeout(() => {
       try { child.kill(); } catch {}
-      finalize({ success: false, error: 'The agent took too long to respond. This usually happens when the system is still loading. Please try sending your message again.', sessionId: sid });
+      finalize({ success: false, error: CLI_FALLBACK_TIMEOUT_MESSAGE, sessionId: sid });
     }, CHAT_TIMEOUT_MS * 5); // 10 minutes absolute max
 
     child.stdout?.on('data', (data: Buffer) => {
