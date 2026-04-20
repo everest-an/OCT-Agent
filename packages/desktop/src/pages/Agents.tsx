@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Bot, Plus, Trash2, Link, Loader2, RefreshCw, Edit3, Check, X, AlertCircle, FileText, ChevronDown, ChevronUp, Save, ShoppingBag } from 'lucide-react';
+import { Bot, Plus, Trash2, Link, Loader2, RefreshCw, Edit3, Check, X, AlertCircle, FileText, ChevronDown, ChevronUp, Save, ShoppingBag, Share2 } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { useAppConfig } from '../lib/store';
 import AgentWizard from '../components/AgentWizard';
 import AgentAvatar from '../components/AgentAvatar';
 import AgentEmojiPicker from '../components/AgentEmojiPicker';
 import AgentMarketplace from './AgentMarketplace';
+import ShareAgentForm from '../components/ShareAgentForm';
 
 interface AgentInfo {
   id: string;
@@ -42,6 +43,8 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
 
   // F-063 Marketplace overlay
   const [showMarketplace, setShowMarketplace] = useState(false);
+  // F-063 0.4.0: share modal state (per-agent)
+  const [shareAgentId, setShareAgentId] = useState<string | null>(null);
 
   // Identity editing
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -310,6 +313,16 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
                           managed on the Channels page via per-channel "Replied by" dropdown. */}
                       {!agent.isDefault && (
                         <button
+                          onClick={() => setShareAgentId(agent.id)}
+                          title={t('agents.share', '分享到集市')}
+                          aria-label={t('agents.share', '分享到集市')}
+                          className="p-1.5 rounded text-slate-500 hover:text-violet-400 hover:bg-violet-600/10"
+                        >
+                          <Share2 size={14} />
+                        </button>
+                      )}
+                      {!agent.isDefault && (
+                        <button
                           onClick={() => handleDelete(agent.id)}
                           disabled={deletingId === agent.id}
                           title={t('common.delete', 'Delete')}
@@ -456,6 +469,14 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
           onInstalledReload={loadAgents}
         />
       </div>
+
+      {/* F-063 0.4.0: share modal — auto-composes from the selected agent's workspace */}
+      {shareAgentId && (
+        <ShareAgentForm
+          preselectedAgentId={shareAgentId}
+          onClose={() => setShareAgentId(null)}
+        />
+      )}
     </div>
   );
 }

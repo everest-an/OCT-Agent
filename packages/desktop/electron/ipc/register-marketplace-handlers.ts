@@ -29,6 +29,10 @@ import {
   InstallDeps,
   InstallStage,
 } from "../agent-marketplace/installer";
+import {
+  convertWorkspaceToMarkdown,
+  WorkspaceFiles,
+} from "../agent-marketplace/reverse-converter";
 
 export interface MarketplaceHandlerDeps {
   home: string;
@@ -56,6 +60,58 @@ function readInstalledSlugs(home: string): string[] {
   } catch {
     return [];
   }
+}
+
+interface LocalAgentShareable {
+  id: string;
+  name: string;
+  emoji?: string;
+  color?: string;
+  hasWorkspace: boolean;
+}
+
+function readShareableAgents(home: string): LocalAgentShareable[] {
+  try {
+    const cfgPath = path.join(home, ".openclaw", "openclaw.json");
+    if (!fs.existsSync(cfgPath)) return [];
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
+    const list: any[] = Array.isArray(cfg?.agents?.list) ? cfg.agents.list : [];
+    return list
+      .filter((a) => a?.id && a.id !== "main")
+      .map((a) => {
+        const id = String(a.id);
+        const workspaceDir = path.join(home, ".openclaw", `workspace-${id}`);
+        return {
+          id,
+          name: a?.identity?.name || a?.name || id,
+          emoji: a?.identity?.emoji,
+          color: a?.identity?.theme || a?.identity?.color,
+          hasWorkspace: fs.existsSync(workspaceDir),
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+function readWorkspaceFiles(
+  home: string,
+  agentId: string
+): { files: WorkspaceFiles; dir: string } {
+  const dir = path.join(home, ".openclaw", `workspace-${agentId}`);
+  const files: WorkspaceFiles = {};
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+    return { files, dir };
+  }
+  for (const entry of fs.readdirSync(dir)) {
+    if (!entry.toLowerCase().endsWith(".md")) continue;
+    try {
+      files[entry] = fs.readFileSync(path.join(dir, entry), "utf-8");
+    } catch {
+      /* unreadable — skip silently */
+    }
+  }
+  return { files, dir };
 }
 
 function isSlugInUse(home: string, slug: string): boolean {
@@ -206,6 +262,68 @@ export function registerMarketplaceHandlers(deps: MarketplaceHandlerDeps): void 
         };
       } finally {
         inFlight.delete(slug);
+      }
+    }
+  );
+
+  ipcMain.handle(
+    "marketplace:list-shareable-agents",
+    async (): Promise<{ success: boolean; agents: LocalAgentShareable[] }> => {
+      return { success: true, agents: readShareableAgents(deps.home) };
+    }
+  );
+
+  ipcMain.handle(
+    "marketplace:compose-from-local",
+    async (
+      _e,
+      agentId: string
+    ): Promise<{
+      success: boolean;
+      markdown?: string;
+      description?: string;
+      tools?: string[];
+      name?: string;
+      emoji?: string;
+      files?: string[];
+      error?: string;
+    }> => {
+      try {
+        const agents = readShareableAgents(deps.home);
+        const target = agents.find((a) => a.id === agentId);
+        if (!target) {
+          return { success: false, error: "agent not found or is default main" };
+        }
+        const { files } = readWorkspaceFiles(deps.home, agentId);
+        if (Object.keys(files).length === 0) {
+          return {
+            success: false,
+            error: "agent workspace is empty — nothing to share",
+          };
+        }
+        const composed = convertWorkspaceToMarkdown({
+          agent: {
+            slug: agentId,
+            name: target.name,
+            emoji: target.emoji,
+            color: target.color,
+          },
+          files,
+        });
+        return {
+          success: true,
+          markdown: composed.markdown,
+          description: composed.description,
+          tools: composed.tools,
+          name: target.name,
+          emoji: target.emoji,
+          files: Object.keys(files).sort(),
+        };
+      } catch (err) {
+        return {
+          success: false,
+          error: (err as Error).message?.slice(0, 250) || "compose failed",
+        };
       }
     }
   );

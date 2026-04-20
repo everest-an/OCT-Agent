@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { ArrowLeft, Loader2, Sparkles, Check, AlertCircle, Send, Star, X } from 'lucide-react';
+import { ArrowLeft, Loader2, Sparkles, Check, AlertCircle, Star, X } from 'lucide-react';
 
 type Tier = 'consumer' | 'prosumer' | 'engineering';
 
@@ -56,7 +56,6 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
   const [installedSlugs, setInstalledSlugs] = useState<Set<string>>(new Set());
   const [installing, setInstalling] = useState<Map<string, InstallStage>>(new Map());
   const [detail, setDetail] = useState<MarketAgentDetail | null>(null);
-  const [showShareForm, setShowShareForm] = useState(false);
   const unsubRef = useRef<(() => void) | null>(null);
 
   const fetchAgents = useCallback(async () => {
@@ -209,14 +208,9 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowShareForm(true)}
-            className="text-xs px-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1"
-            title="分享你创建的 agent"
-          >
-            <Send className="h-3.5 w-3.5" />
-            分享我的 Agent
-          </button>
+          <span className="text-[11px] text-slate-400">
+            想分享你创建的 agent?到"多 Agent"页面,点 agent 卡片上的"分享"按钮。
+          </span>
         </div>
       </header>
 
@@ -352,14 +346,6 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
         />
       )}
 
-      {showShareForm && (
-        <ShareForm
-          onClose={() => setShowShareForm(false)}
-          onSubmitted={() => {
-            setShowShareForm(false);
-          }}
-        />
-      )}
     </div>
   );
 }
@@ -490,191 +476,6 @@ function DetailDrawer({
   );
 }
 
-function ShareForm({ onClose, onSubmitted }: { onClose: () => void; onSubmitted: () => void }) {
-  const [slug, setSlug] = useState('');
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('lifestyle');
-  const [tier, setTier] = useState<Tier>('consumer');
-  const [emoji, setEmoji] = useState('🤖');
-  const [markdown, setMarkdown] = useState(`---
-name: My Agent
-description: Describe what this agent does.
-color: slate
-emoji: 🤖
----
+// Share flow lives in <ShareAgentForm> and is triggered from the Agents page
+// per-card. The marketplace page no longer hosts a share button.
 
-# My Agent
-
-## Identity & Memory
-...
-
-## Core Mission
-...
-
-## Rules You Must Follow
-- ...
-
-## Communication Style
-...
-`);
-  const [contact, setContact] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleSubmit = async () => {
-    setError(null);
-    setMessage(null);
-    if (!/^[a-z][a-z0-9-]{2,63}$/.test(slug)) {
-      setError('slug 必须是 3-64 位小写字母/数字/连字符,且以字母开头');
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const api = (window as any).electronAPI;
-      const res = await api.marketplaceSubmit({
-        slug,
-        name,
-        description,
-        category,
-        tier,
-        emoji,
-        markdown,
-        author_contact: contact || undefined,
-      });
-      if (res?.success) {
-        setMessage('已提交!我们审核后会加入集市 🎉');
-        setTimeout(() => {
-          onSubmitted();
-        }, 1500);
-      } else {
-        setError(res?.error || '提交失败');
-      }
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div
-      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-          <h2 className="font-semibold">分享我的 Agent</h2>
-          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="p-5 space-y-4">
-          <p className="text-xs text-slate-500">
-            提交你创建的 agent 供其他用户安装。请不要包含隐私信息——所有投稿都会经过我们人工审核。
-          </p>
-
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <label className="block">
-              <span className="text-xs text-slate-500">Slug (URL 标识)</span>
-              <input
-                className="mt-1 w-full px-2 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
-                value={slug}
-                onChange={(e) => setSlug(e.target.value)}
-                placeholder="my-agent"
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs text-slate-500">Emoji</span>
-              <input
-                className="mt-1 w-full px-2 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
-                value={emoji}
-                onChange={(e) => setEmoji(e.target.value)}
-                maxLength={4}
-              />
-            </label>
-            <label className="col-span-2 block">
-              <span className="text-xs text-slate-500">名称</span>
-              <input
-                className="mt-1 w-full px-2 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </label>
-            <label className="col-span-2 block">
-              <span className="text-xs text-slate-500">简短描述</span>
-              <textarea
-                className="mt-1 w-full px-2 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={2}
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs text-slate-500">分类</span>
-              <input
-                className="mt-1 w-full px-2 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs text-slate-500">Tier</span>
-              <select
-                className="mt-1 w-full px-2 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
-                value={tier}
-                onChange={(e) => setTier(e.target.value as Tier)}
-              >
-                <option value="consumer">consumer (日常)</option>
-                <option value="prosumer">prosumer (专业)</option>
-                <option value="engineering">engineering (工程)</option>
-              </select>
-            </label>
-            <label className="col-span-2 block">
-              <span className="text-xs text-slate-500">联系方式 (可选,我们审核通过后会告知)</span>
-              <input
-                className="mt-1 w-full px-2 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
-                value={contact}
-                onChange={(e) => setContact(e.target.value)}
-                placeholder="邮箱 / X / GitHub 用户名"
-              />
-            </label>
-            <label className="col-span-2 block">
-              <span className="text-xs text-slate-500">Markdown 内容 (frontmatter + body)</span>
-              <textarea
-                className="mt-1 w-full px-2 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono text-[11px]"
-                value={markdown}
-                onChange={(e) => setMarkdown(e.target.value)}
-                rows={14}
-              />
-            </label>
-          </div>
-
-          {error && <div className="text-xs text-red-600">{error}</div>}
-          {message && <div className="text-xs text-emerald-600">{message}</div>}
-
-          <div className="flex gap-2 justify-end">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-sm rounded border border-slate-300 dark:border-slate-700"
-            >
-              取消
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={submitting}
-              className="px-4 py-2 text-sm rounded bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-60"
-            >
-              {submitting ? '提交中...' : '提交审核'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}

@@ -220,6 +220,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   marketplaceInstalledSlugs: () => ipcRenderer.invoke('marketplace:installed-slugs'),
   marketplaceInstallStatus: () => ipcRenderer.invoke('marketplace:install-status'),
   marketplaceInstall: (slug: string) => ipcRenderer.invoke('marketplace:install', slug),
+  marketplaceListShareableAgents: () => ipcRenderer.invoke('marketplace:list-shareable-agents'),
+  marketplaceComposeFromLocal: (agentId: string) => ipcRenderer.invoke('marketplace:compose-from-local', agentId),
   onMarketplaceInstallProgress: (cb: (payload: { slug: string; stage: string }) => void) => {
     const listener = (_e: any, payload: { slug: string; stage: string }) => cb(payload);
     ipcRenderer.on('marketplace:install-progress', listener);
