@@ -32,7 +32,15 @@ export interface AgentMeta {
 }
 
 export interface AgentDetail extends AgentMeta {
+  /** Single-file composed view (Claude sub-agent export + legacy fallback). */
   markdown: string;
+  /** F-063 per-file structured fields. Prefer these for installing. */
+  soul_md?: string | null;
+  agents_md?: string | null;
+  vibe?: string | null;
+  memory_md?: string | null;
+  user_md?: string | null;
+  heartbeat_md?: string | null;
 }
 
 export interface AgentListResponse {

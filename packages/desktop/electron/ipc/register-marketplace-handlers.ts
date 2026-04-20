@@ -240,6 +240,14 @@ export function registerMarketplaceHandlers(deps: MarketplaceHandlerDeps): void 
           {
             slug: detail.slug,
             markdown: detail.markdown,
+            structured: {
+              soul_md: detail.soul_md,
+              agents_md: detail.agents_md,
+              vibe: detail.vibe,
+              memory_md: detail.memory_md,
+              user_md: detail.user_md,
+              heartbeat_md: detail.heartbeat_md,
+            },
             displayNameOverride: detail.name_zh || detail.name,
             emojiOverride: detail.emoji,
             onProgress: (stage) => {

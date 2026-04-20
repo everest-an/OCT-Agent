@@ -28,7 +28,19 @@ export type InstallStage =
 
 export interface InstallInput {
   slug: string;
+  /** Fallback path: single-file markdown + keyword heuristic (legacy 0.4.0). */
   markdown: string;
+  /** Preferred path (F-063 0.4.1+): pre-split per-file content straight from DB.
+   *  When any of these is provided, installer skips the keyword heuristic and
+   *  writes each file verbatim for 100% round-trip fidelity. */
+  structured?: {
+    soul_md?: string | null;
+    agents_md?: string | null;
+    vibe?: string | null;
+    memory_md?: string | null;
+    user_md?: string | null;
+    heartbeat_md?: string | null;
+  };
   displayNameOverride?: string;
   emojiOverride?: string;
   onProgress?: (stage: InstallStage) => void;
@@ -83,6 +95,19 @@ export async function installMarketplaceAgent(
     return { success: false, error: `convert failed: ${(err as Error).message}` };
   }
 
+  // If the server provided structured per-file content, it wins over the
+  // keyword-heuristic output. This is the F-063 0.4.1+ path where admin
+  // edits separate fields and the client writes them verbatim.
+  if (input.structured) {
+    const s = input.structured;
+    if (s.soul_md && s.soul_md.trim()) converted.soulMd = s.soul_md;
+    if (s.agents_md && s.agents_md.trim()) converted.agentsMd = s.agents_md;
+    // IDENTITY.md is always `# emoji name\n\nvibe` — override vibe if given
+    if (s.vibe && s.vibe.trim()) {
+      converted.identityMd = `# ${converted.identity.emoji} ${converted.identity.name}\n\n${s.vibe.trim()}\n`;
+    }
+  }
+
   const slug = input.slug; // trust server slug over the name-derived one
   const displayName = (input.displayNameOverride ?? converted.identity.name).trim();
   const emoji = (input.emojiOverride ?? converted.identity.emoji).trim() || "🤖";
@@ -100,6 +125,19 @@ export async function installMarketplaceAgent(
   fs.writeFileSync(path.join(wsDir, "AGENTS.md"), converted.agentsMd, "utf-8");
   fs.writeFileSync(path.join(wsDir, "IDENTITY.md"), converted.identityMd, "utf-8");
   fs.writeFileSync(path.join(wsDir, "TOOLS.md"), converted.toolsMd, "utf-8");
+
+  // Optional workspace files (F-063 0.4.1+) — only written when the agent
+  // actually has content for them. OpenClaw happily accepts them alongside
+  // the mandatory 4-file layout.
+  if (input.structured?.memory_md && input.structured.memory_md.trim()) {
+    fs.writeFileSync(path.join(wsDir, "MEMORY.md"), input.structured.memory_md, "utf-8");
+  }
+  if (input.structured?.user_md && input.structured.user_md.trim()) {
+    fs.writeFileSync(path.join(wsDir, "USER.md"), input.structured.user_md, "utf-8");
+  }
+  if (input.structured?.heartbeat_md && input.structured.heartbeat_md.trim()) {
+    fs.writeFileSync(path.join(wsDir, "HEARTBEAT.md"), input.structured.heartbeat_md, "utf-8");
+  }
 
   progress("registering");
   const spawnArgs = [
