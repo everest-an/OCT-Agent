@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.1] - 2026-04-20 (macOS)
+
+### Changed — Agent 集市走 per-file 结构化字段
+
+- 后端每个 agent 现在把 SOUL.md / AGENTS.md / IDENTITY vibe / MEMORY.md /
+  USER.md / HEARTBEAT.md 存成独立字段。admin 编辑时按文件填写,避免了
+  "用户不按约定写 ## Identity 标题" 导致的安装分桶错乱
+- 桌面端安装流程:优先用后端传的结构化字段直接落盘 → workspace 文件;
+  只有老版本后端不传时才回退到关键词启发式
+- 可选的 MEMORY.md / USER.md / HEARTBEAT.md 只在 agent 真有内容时才写入
+  用户 workspace,不再无脑创建空文件
+- 100% round-trip: 分享的 agent 装到别人机器上,workspace 文件结构跟
+  原作者的完全一致
+
+### Added — 合成的单 markdown 保留用于 Claude sub-agent 导出
+
+- 后端维护一个 `markdown` 字段,每次写入时自动从结构化字段 compose 出来
+- 未来要把 agent 导出给 Claude sub-agent / Cursor subagent,后端直接返回
+  这个字段即可,不需要客户端再拼
+
 ## [0.4.0] - 2026-04-20 (macOS)
 
 ### Added — Agent Marketplace 正式版上线

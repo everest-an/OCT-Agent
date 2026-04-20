@@ -34,13 +34,18 @@ export interface AgentMeta {
 export interface AgentDetail extends AgentMeta {
   /** Single-file composed view (Claude sub-agent export + legacy fallback). */
   markdown: string;
-  /** F-063 per-file structured fields. Prefer these for installing. */
+  /** F-063 per-file structured fields — maps 1:1 to OpenClaw workspace layout.
+   *  Installer prefers these over heuristic split of `markdown`. */
   soul_md?: string | null;
   agents_md?: string | null;
   vibe?: string | null;
   memory_md?: string | null;
   user_md?: string | null;
   heartbeat_md?: string | null;
+  /** BOOT.md — gateway-restart checklist (distinct from BOOTSTRAP). */
+  boot_md?: string | null;
+  /** BOOTSTRAP.md — one-time Q&A seeded for new users; OpenClaw deletes after. */
+  bootstrap_md?: string | null;
 }
 
 export interface AgentListResponse {

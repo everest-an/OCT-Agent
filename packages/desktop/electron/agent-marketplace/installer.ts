@@ -40,6 +40,8 @@ export interface InstallInput {
     memory_md?: string | null;
     user_md?: string | null;
     heartbeat_md?: string | null;
+    boot_md?: string | null;
+    bootstrap_md?: string | null;
   };
   displayNameOverride?: string;
   emojiOverride?: string;
@@ -127,17 +129,21 @@ export async function installMarketplaceAgent(
   fs.writeFileSync(path.join(wsDir, "TOOLS.md"), converted.toolsMd, "utf-8");
 
   // Optional workspace files (F-063 0.4.1+) — only written when the agent
-  // actually has content for them. OpenClaw happily accepts them alongside
-  // the mandatory 4-file layout.
-  if (input.structured?.memory_md && input.structured.memory_md.trim()) {
-    fs.writeFileSync(path.join(wsDir, "MEMORY.md"), input.structured.memory_md, "utf-8");
-  }
-  if (input.structured?.user_md && input.structured.user_md.trim()) {
-    fs.writeFileSync(path.join(wsDir, "USER.md"), input.structured.user_md, "utf-8");
-  }
-  if (input.structured?.heartbeat_md && input.structured.heartbeat_md.trim()) {
-    fs.writeFileSync(path.join(wsDir, "HEARTBEAT.md"), input.structured.heartbeat_md, "utf-8");
-  }
+  // actually has content for them. OpenClaw's standard workspace supports:
+  //   MEMORY.md / USER.md    — privacy-sensitive, usually only set by end user
+  //   HEARTBEAT.md / BOOT.md — agent-behavior checklists, safe to ship from catalog
+  //   BOOTSTRAP.md           — one-time Q&A ritual; OpenClaw auto-deletes after
+  //                            completion, so it only seeds for brand-new workspaces
+  const writeOptional = (file: string, content: string | null | undefined) => {
+    if (content && content.trim()) {
+      fs.writeFileSync(path.join(wsDir, file), content, "utf-8");
+    }
+  };
+  writeOptional("MEMORY.md",    input.structured?.memory_md);
+  writeOptional("USER.md",      input.structured?.user_md);
+  writeOptional("HEARTBEAT.md", input.structured?.heartbeat_md);
+  writeOptional("BOOT.md",      input.structured?.boot_md);
+  writeOptional("BOOTSTRAP.md", input.structured?.bootstrap_md);
 
   progress("registering");
   const spawnArgs = [
