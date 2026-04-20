@@ -293,6 +293,14 @@ export class MarketplaceClient {
     emoji?: string;
     markdown: string;
     author_contact?: string;
+    soul_md?: string;
+    agents_md?: string;
+    vibe?: string;
+    memory_md?: string;
+    user_md?: string;
+    heartbeat_md?: string;
+    boot_md?: string;
+    bootstrap_md?: string;
   }): Promise<{ status: number; body: any }> {
     return postJson(
       `${this.apiBase}/marketplace/agents/submissions`,

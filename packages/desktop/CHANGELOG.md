@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.3] - 2026-04-21 (macOS)
+
+### Changed — 分享 Agent 改走无损结构化链路
+
+- **点"分享我的 Agent"现在把 SOUL / AGENTS / VIBE / MEMORY / USER / HEARTBEAT / BOOT / BOOTSTRAP 8 个文件以独立字段发到集市**,不再先合成单一 markdown 再让后端启发式切分。切分过程会丢细节、偶尔把字段分错桶,这一版彻底堵上
+- 审核后上架路径同样直接把 8 个字段落到 agent 表,别人安装时 workspace 文件结构与原作者 100% 一致
+
+### Added — 提交审核时的慢服务器 UX
+
+- 按钮现在有旋转 spinner + 实时秒数(`提交中... 8s`),不再是死转圈
+- 等待超过 6 秒会弹黄色提示"服务器正在处理,生产环境偶尔需要 8-12 秒",不会让用户误以为卡死
+- 提交失败后表单字段全部保留,按钮变"重试提交",不用重填 slug/描述/联系方式
+- 失败原因在 alert 框里带边框突出显示,下方小字提示"表单已保留,修复后可直接重试"
+
+### Added — 防回归测试(L1 + L2 + L3)
+
+- **L1 静态守卫**(`scripts/verify-marketplace.mjs`):8 个结构化字段在 ShareAgentForm / preload / 后端 Pydantic 三处强制同名,任何一处漏加 CI 会挂
+- **L2 后端集成**(`backend/tests/marketplace/test_admin_routes.py::TestStructuredFieldsRoundTrip`):submit 带 8 字段 → admin approve → 公开 catalog GET 回来字段非 null 且 byte-identical。堵住 "字段在路上丢了没人知道" 的哑 bug
+- **L3 客户端 chaos**(`src/test/share-agent-form-chaos.test.tsx`):happy / HTTP 500 / 网络断 / 慢服务器 / 无效 slug 五组,验证 UX 在任一失败模式下都可恢复
+
 ## [0.4.2] - 2026-04-20 (macOS)
 
 ### Added — 集市 agent 覆盖完整 OpenClaw workspace 9 文件

@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { convertWorkspaceToMarkdown } from '../../electron/agent-marketplace/reverse-converter';
+import {
+  convertWorkspaceToMarkdown,
+  extractStructuredFields,
+} from '../../electron/agent-marketplace/reverse-converter';
 
 describe('convertWorkspaceToMarkdown — happy path', () => {
   const sampleFiles = {
@@ -144,5 +147,56 @@ describe('convertWorkspaceToMarkdown — edge cases', () => {
     });
     expect(out.markdown).toContain('name: Test');
     expect(out.description).toBe('Test agent');
+  });
+});
+
+describe('extractStructuredFields — per-file passthrough', () => {
+  it('populates every workspace field verbatim (no heuristic splitting)', () => {
+    const files = {
+      'IDENTITY.md': '# 🧪 Pixel\n\nA pixel-art coach for retro game devs.\n',
+      'SOUL.md': '# SOUL\n\n## Voice\nWarm, concise.\n',
+      'AGENTS.md': '# AGENTS\n\n## Mission\nShip pixel art daily.\n',
+      'MEMORY.md': 'User prefers 16×16 sprites.\n',
+      'USER.md': '## Context\nIndie dev, solo.\n',
+      'HEARTBEAT.md': 'Ping every 2h.\n',
+      'BOOT.md': '## Gateway\n- reload tools\n',
+      'BOOTSTRAP.md': '## First Run Q&A\n- what games do you love?\n',
+    };
+    const s = extractStructuredFields(files);
+    expect(s.vibe).toContain('pixel-art coach');
+    expect(s.soul_md).toContain('## Voice');
+    expect(s.soul_md).not.toMatch(/^#\s+SOUL/);
+    expect(s.agents_md).toContain('## Mission');
+    expect(s.memory_md).toBe('User prefers 16×16 sprites.');
+    expect(s.user_md).toContain('## Context');
+    expect(s.heartbeat_md).toContain('Ping every 2h');
+    expect(s.boot_md).toContain('reload tools');
+    expect(s.bootstrap_md).toContain('First Run Q&A');
+  });
+
+  it('omits fields whose files are absent', () => {
+    const s = extractStructuredFields({
+      'IDENTITY.md': '# Test\n\nhello\n',
+      'SOUL.md': '## S\nbody\n',
+    });
+    expect(s.soul_md).toBeDefined();
+    expect(s.vibe).toBe('hello');
+    expect(s.agents_md).toBeUndefined();
+    expect(s.memory_md).toBeUndefined();
+    expect(s.boot_md).toBeUndefined();
+    expect(s.bootstrap_md).toBeUndefined();
+  });
+
+  it('convertWorkspaceToMarkdown returns structured alongside composed markdown', () => {
+    const out = convertWorkspaceToMarkdown({
+      agent: { slug: 'foo', name: 'Foo' },
+      files: {
+        'IDENTITY.md': '# Foo\n\nShort vibe.\n',
+        'SOUL.md': '## Voice\nhi\n',
+      },
+    });
+    expect(out.structured.vibe).toBe('Short vibe.');
+    expect(out.structured.soul_md).toContain('## Voice');
+    expect(out.markdown).toContain('name: Foo');
   });
 });

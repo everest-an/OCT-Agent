@@ -114,6 +114,94 @@ function checkBackendRoutes() {
   return errors;
 }
 
+/**
+ * F-063 structured fields (per-file workspace) must be consistent across
+ * three surfaces — desktop renderer payload, Electron preload type, backend
+ * Pydantic model. A silent divergence (e.g. renaming a column without
+ * updating the IPC type) would let submissions drop fields on the floor
+ * with no user-visible error.
+ */
+const STRUCTURED_FIELDS = [
+  "soul_md",
+  "agents_md",
+  "vibe",
+  "memory_md",
+  "user_md",
+  "heartbeat_md",
+  "boot_md",
+  "bootstrap_md",
+];
+
+function checkStructuredFieldsConsistency() {
+  const errors = [];
+
+  // 1) ShareAgentForm.tsx must send every field in marketplaceSubmit payload.
+  const formPath = path.join(
+    DESKTOP_ROOT,
+    "src",
+    "components",
+    "ShareAgentForm.tsx"
+  );
+  if (fs.existsSync(formPath)) {
+    const body = fs.readFileSync(formPath, "utf8");
+    for (const f of STRUCTURED_FIELDS) {
+      if (!body.includes(`${f}:`)) {
+        errors.push(`ShareAgentForm.tsx missing structured field '${f}'`);
+      }
+    }
+  }
+
+  // 2) preload.ts marketplaceSubmit type must declare all 8 fields.
+  const preloadPath = path.join(DESKTOP_ROOT, "electron", "preload.ts");
+  if (fs.existsSync(preloadPath)) {
+    const body = fs.readFileSync(preloadPath, "utf8");
+    // Narrow to the marketplaceSubmit block so we don't accidentally match
+    // the field names inside unrelated IPC types.
+    const submitBlock = body.match(
+      /marketplaceSubmit:\s*\(payload:\s*\{[\s\S]*?\}\)\s*=>\s*ipcRenderer\.invoke\('marketplace:submit'/
+    );
+    if (!submitBlock) {
+      errors.push("preload.ts: could not locate marketplaceSubmit payload type");
+    } else {
+      for (const f of STRUCTURED_FIELDS) {
+        if (!submitBlock[0].includes(`${f}?`)) {
+          errors.push(
+            `preload.ts marketplaceSubmit payload type missing '${f}?'`
+          );
+        }
+      }
+    }
+  }
+
+  // 3) Backend Pydantic SubmissionPayload must declare all 8 fields.
+  const modelsFile = path.join(
+    REPO_ROOT,
+    "backend",
+    "awareness",
+    "api",
+    "services",
+    "marketplace",
+    "models.py"
+  );
+  if (fs.existsSync(modelsFile)) {
+    const body = fs.readFileSync(modelsFile, "utf8");
+    const submitClass = body.match(
+      /class\s+SubmissionPayload[\s\S]*?(?=\nclass\s|\Z)/
+    );
+    if (!submitClass) {
+      errors.push("models.py: could not locate SubmissionPayload class");
+    } else {
+      for (const f of STRUCTURED_FIELDS) {
+        if (!submitClass[0].includes(`${f}:`)) {
+          errors.push(`SubmissionPayload missing field '${f}:'`);
+        }
+      }
+    }
+  }
+
+  return errors;
+}
+
 function main() {
   const handlers = extractHandlerChannels();
   const preload = extractPreloadChannels();
@@ -122,6 +210,7 @@ function main() {
   const errors = [];
   errors.push(...checkMarketplaceChannels(handlers, preload));
   errors.push(...checkBackendRoutes());
+  errors.push(...checkStructuredFieldsConsistency());
 
   const expectedApi = [
     "marketplaceList",

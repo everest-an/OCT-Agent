@@ -86,10 +86,59 @@ function normalizeFiles(files: WorkspaceFiles): Record<string, string> {
   return out;
 }
 
+export interface StructuredWorkspaceFields {
+  /** IDENTITY.md — emoji+name+vibe one-liner. We extract just the vibe
+   *  portion because emoji+name already live as agent fields. */
+  vibe?: string;
+  soul_md?: string;
+  agents_md?: string;
+  memory_md?: string;
+  user_md?: string;
+  heartbeat_md?: string;
+  boot_md?: string;
+  bootstrap_md?: string;
+}
+
+/**
+ * Read each workspace file verbatim (NO heuristic split). The caller ships
+ * structured fields straight to the marketplace submission so round-trip
+ * is lossless — admin review sees exactly what the user typed, and on
+ * approve the backend writes each column 1:1 without re-parsing.
+ */
+export function extractStructuredFields(
+  files: WorkspaceFiles
+): StructuredWorkspaceFields {
+  const normalized = normalizeFiles(files);
+  const out: StructuredWorkspaceFields = {};
+
+  if (normalized.SOUL)    out.soul_md    = stripLeadingH1(normalized.SOUL).trim() || undefined;
+  if (normalized.AGENTS)  out.agents_md  = stripLeadingH1(normalized.AGENTS).trim() || undefined;
+  if (normalized.MEMORY)  out.memory_md  = stripLeadingH1(normalized.MEMORY).trim() || undefined;
+  if (normalized.USER)    out.user_md    = stripLeadingH1(normalized.USER).trim() || undefined;
+  if (normalized.HEARTBEAT) out.heartbeat_md = stripLeadingH1(normalized.HEARTBEAT).trim() || undefined;
+  if (normalized.BOOT)    out.boot_md    = stripLeadingH1(normalized.BOOT).trim() || undefined;
+  if (normalized.BOOTSTRAP) out.bootstrap_md = stripLeadingH1(normalized.BOOTSTRAP).trim() || undefined;
+
+  // IDENTITY.md format is `# {emoji} {name}\n\n{vibe}` — pull the first
+  // non-heading paragraph out as vibe.
+  if (normalized.IDENTITY) {
+    const stripped = normalized.IDENTITY.replace(/^---[\s\S]*?---\n+/, "");
+    for (const raw of stripped.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line || line.startsWith("#")) continue;
+      out.vibe = line.slice(0, 480);
+      break;
+    }
+  }
+
+  return out;
+}
+
 export function convertWorkspaceToMarkdown(input: ReverseConvertInput): {
   markdown: string;
   description: string;
   tools: string[];
+  structured: StructuredWorkspaceFields;
 } {
   const normalized = normalizeFiles(input.files);
 
@@ -135,7 +184,8 @@ export function convertWorkspaceToMarkdown(input: ReverseConvertInput): {
   }
 
   const markdown = fmLines.join("\n") + bodyParts.join("\n") + "\n";
-  return { markdown, description, tools };
+  const structured = extractStructuredFields(input.files);
+  return { markdown, description, tools, structured };
 }
 
 function escapeYamlScalar(value: string): string {

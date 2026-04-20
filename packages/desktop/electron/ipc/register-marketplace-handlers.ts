@@ -296,6 +296,16 @@ export function registerMarketplaceHandlers(deps: MarketplaceHandlerDeps): void 
       name?: string;
       emoji?: string;
       files?: string[];
+      structured?: {
+        soul_md?: string;
+        agents_md?: string;
+        vibe?: string;
+        memory_md?: string;
+        user_md?: string;
+        heartbeat_md?: string;
+        boot_md?: string;
+        bootstrap_md?: string;
+      };
       error?: string;
     }> => {
       try {
@@ -328,6 +338,7 @@ export function registerMarketplaceHandlers(deps: MarketplaceHandlerDeps): void 
           name: target.name,
           emoji: target.emoji,
           files: Object.keys(files).sort(),
+          structured: composed.structured,
         };
       } catch (err) {
         return {
@@ -351,6 +362,14 @@ export function registerMarketplaceHandlers(deps: MarketplaceHandlerDeps): void 
         emoji?: string;
         markdown: string;
         author_contact?: string;
+        soul_md?: string;
+        agents_md?: string;
+        vibe?: string;
+        memory_md?: string;
+        user_md?: string;
+        heartbeat_md?: string;
+        boot_md?: string;
+        bootstrap_md?: string;
       }
     ): Promise<{ success: boolean; status?: string; error?: string }> => {
       try {

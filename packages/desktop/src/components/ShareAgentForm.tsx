@@ -13,6 +13,17 @@ import { Loader2, X } from 'lucide-react';
 
 type Tier = 'consumer' | 'prosumer' | 'engineering';
 
+interface StructuredFields {
+  soul_md?: string;
+  agents_md?: string;
+  vibe?: string;
+  memory_md?: string;
+  user_md?: string;
+  heartbeat_md?: string;
+  boot_md?: string;
+  bootstrap_md?: string;
+}
+
 interface ComposedAgent {
   markdown: string;
   description: string;
@@ -20,6 +31,7 @@ interface ComposedAgent {
   name: string;
   emoji?: string;
   files: string[];
+  structured: StructuredFields;
 }
 
 interface Props {
@@ -47,6 +59,21 @@ export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitte
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Elapsed-seconds counter so users on slow prod (3-10s latency) see
+  // progress instead of a blind spinner. Reset on every submit attempt.
+  const [elapsedSec, setElapsedSec] = useState(0);
+
+  useEffect(() => {
+    if (!submitting) {
+      setElapsedSec(0);
+      return;
+    }
+    const started = Date.now();
+    const handle = window.setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - started) / 1000));
+    }, 500);
+    return () => window.clearInterval(handle);
+  }, [submitting]);
 
   useEffect(() => {
     const api = (window as any).electronAPI;
@@ -66,6 +93,7 @@ export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitte
             name: res.name,
             emoji: res.emoji,
             files: res.files || [],
+            structured: res.structured || {},
           });
           setDescriptionOverride(res.description);
         } else {
@@ -109,6 +137,14 @@ export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitte
         emoji: composed.emoji || '🤖',
         markdown: finalMarkdown,
         author_contact: contact || undefined,
+        soul_md: composed.structured.soul_md,
+        agents_md: composed.structured.agents_md,
+        vibe: composed.structured.vibe,
+        memory_md: composed.structured.memory_md,
+        user_md: composed.structured.user_md,
+        heartbeat_md: composed.structured.heartbeat_md,
+        boot_md: composed.structured.boot_md,
+        bootstrap_md: composed.structured.bootstrap_md,
       });
       if (res?.success) {
         setMessage('已提交!我们审核后会告知你结果 🎉');
@@ -244,22 +280,56 @@ export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitte
               </details>
             </div>
 
-            {error && <div className="text-xs text-red-400">{error}</div>}
-            {message && <div className="text-xs text-emerald-400">{message}</div>}
+            {error && (
+              <div
+                className="text-xs text-red-400 bg-red-950/40 border border-red-900 rounded p-2"
+                role="alert"
+                data-testid="share-error"
+              >
+                {error}
+                <div className="text-[10px] text-slate-500 mt-1">
+                  表单已保留,修复后可直接重试。
+                </div>
+              </div>
+            )}
+            {message && (
+              <div
+                className="text-xs text-emerald-400"
+                role="status"
+                data-testid="share-success"
+              >
+                {message}
+              </div>
+            )}
+            {submitting && elapsedSec >= 6 && (
+              <div
+                className="text-xs text-amber-300 bg-amber-950/30 border border-amber-900 rounded p-2"
+                data-testid="share-slow-hint"
+              >
+                服务器正在处理 ({elapsedSec}s) — 生产环境偶尔需要 8-12 秒,请不要关闭窗口。
+              </div>
+            )}
 
             <div className="flex gap-2 justify-end">
               <button
                 onClick={onClose}
                 className="px-4 py-2 text-sm rounded border border-slate-700 text-slate-200"
+                disabled={submitting}
               >
                 取消
               </button>
               <button
                 onClick={handleSubmit}
                 disabled={submitting}
-                className="px-4 py-2 text-sm rounded bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-60"
+                className="px-4 py-2 text-sm rounded bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-60 inline-flex items-center gap-2"
+                data-testid="share-submit"
               >
-                {submitting ? '提交中...' : '提交审核'}
+                {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {submitting
+                  ? `提交中... ${elapsedSec > 0 ? `(${elapsedSec}s)` : ''}`
+                  : error
+                  ? '重试提交'
+                  : '提交审核'}
               </button>
             </div>
           </div>
