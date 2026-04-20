@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.2] - 2026-04-20 (macOS)
+
+### Added — 集市 agent 覆盖完整 OpenClaw workspace 9 文件
+
+- BOOT.md(网关重启 checklist)+ BOOTSTRAP.md(新用户一次性 Q&A)现在能从集市 seed。安装时如果集市 agent 定义了这两个文件,installer 会按需写入 `~/.openclaw/workspace-<slug>/`
+- 修复:189 个上架 agent 的 `vibe` 覆盖率从 6% 涨到 100%(agency-agents 把 vibe 放在 frontmatter,之前漏读)
+- Admin UI 表单重构成 3 段:📘 必填本体 (SOUL + AGENTS + Vibe) / 📗 集市 seed (HEARTBEAT + BOOT + BOOTSTRAP) / 🔒 隐私区默认隐藏 (MEMORY + USER),减少 admin 误填终端用户隐私数据
+
 ## [0.4.1] - 2026-04-20 (macOS)
 
 ### Changed — Agent 集市走 per-file 结构化字段
