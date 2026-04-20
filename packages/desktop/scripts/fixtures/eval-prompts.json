@@ -1,0 +1,22 @@
+[
+  {
+    "task": "我需要把后端部署到生产，用 Docker Compose。之前部署时遇到过容器端口冲突和 nginx 没 reload 的坑，怎么避免",
+    "category": "deployment"
+  },
+  {
+    "task": "Prisma 迁移在生产环境失败了，表外键类型不对，怎么回滚并修复",
+    "category": "database"
+  },
+  {
+    "task": "新增一个 Celery 任务，需要放到哪个 queue，怎么注册",
+    "category": "celery"
+  },
+  {
+    "task": "awareness daemon 启动不了，说 better-sqlite3 编译失败，怎么排查",
+    "category": "daemon"
+  },
+  {
+    "task": "发布新版本 @awareness-sdk/local 到 npm，直接 npm publish 报 ENEEDAUTH，怎么回事",
+    "category": "npm-publish"
+  }
+]
