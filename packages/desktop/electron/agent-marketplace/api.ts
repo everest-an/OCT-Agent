@@ -7,6 +7,9 @@
 
 import * as https from "https";
 import * as http from "http";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { URL } from "url";
 
 export interface AgentMeta {
@@ -23,6 +26,9 @@ export interface AgentMeta {
   tools: string[];
   featured: boolean;
   install_count: number;
+  compat?: string[];
+  source?: string;
+  author?: string;
 }
 
 export interface AgentDetail extends AgentMeta {
@@ -39,8 +45,38 @@ export interface MarketplaceClientOptions {
   timeoutMs?: number;
 }
 
+/** Production marketplace API base. Override at runtime via `AWARENESS_API_BASE`
+ *  env var or `~/.awareness/marketplace-config.json` (dev). */
 const DEFAULT_API_BASE = "https://awareness.market/api/v1";
 const DEFAULT_TIMEOUT_MS = 12000;
+
+/**
+ * Optional per-user override:
+ *   ~/.awareness/marketplace-config.json
+ *     { "apiBase": "http://localhost:8000/api/v1" }
+ *
+ * Useful for dogfooding against a local backend before prod deploy,
+ * or for running the desktop against a staging/preview cluster.
+ * Missing / malformed file is silently ignored.
+ */
+function readConfigFileApiBase(): string | null {
+  try {
+    const cfgPath = path.join(
+      os.homedir(),
+      ".awareness",
+      "marketplace-config.json"
+    );
+    if (!fs.existsSync(cfgPath)) return null;
+    const raw = fs.readFileSync(cfgPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.apiBase === "string" && parsed.apiBase.trim()) {
+      return parsed.apiBase.trim();
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 function getJson<T>(
   url: string,
@@ -192,10 +228,12 @@ export class MarketplaceClient {
   private timeoutMs: number;
 
   constructor(options: MarketplaceClientOptions = {}) {
-    this.apiBase = (options.apiBase || process.env.AWARENESS_API_BASE || DEFAULT_API_BASE).replace(
-      /\/+$/,
-      ""
-    );
+    const base =
+      options.apiBase ||
+      process.env.AWARENESS_API_BASE ||
+      readConfigFileApiBase() ||
+      DEFAULT_API_BASE;
+    this.apiBase = base.replace(/\/+$/, "");
     this.timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
   }
 

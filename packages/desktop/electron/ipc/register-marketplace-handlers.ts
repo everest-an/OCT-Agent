@@ -3,9 +3,19 @@
  *
  * Thin layer that exposes the cloud marketplace + local installer to the
  * renderer. Heavy lifting lives in electron/agent-marketplace/*.ts.
+ *
+ * Cross-navigation safety (F-063 preview.16):
+ *   - In-flight installs live in a main-process set so that if the user
+ *     navigates away mid-install and returns, the UI can re-query
+ *     `marketplace:install-status` and restore the "installing" state
+ *     without triggering a duplicate CLI call.
+ *   - Progress events are broadcast via webContents for every BrowserWindow,
+ *     so the overlay re-subscribes on remount and immediately shows the
+ *     stage (converting / writing-workspace / registering / applying-identity
+ *     / done).
  */
 
-import { ipcMain } from "electron";
+import { BrowserWindow, ipcMain } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -17,6 +27,7 @@ import {
 import {
   installMarketplaceAgent,
   InstallDeps,
+  InstallStage,
 } from "../agent-marketplace/installer";
 
 export interface MarketplaceHandlerDeps {
@@ -51,8 +62,20 @@ function isSlugInUse(home: string, slug: string): boolean {
   return readInstalledSlugs(home).includes(slug);
 }
 
+function broadcastProgress(slug: string, stage: InstallStage) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send("marketplace:install-progress", { slug, stage });
+    }
+  }
+}
+
 export function registerMarketplaceHandlers(deps: MarketplaceHandlerDeps): void {
   const client = new MarketplaceClient({ apiBase: deps.apiBase });
+
+  // Tracks slugs currently being installed by this main process.
+  // Key: slug, Value: latest stage (for status queries from re-mounted UI).
+  const inFlight = new Map<string, InstallStage>();
 
   ipcMain.handle(
     "marketplace:list",
@@ -104,13 +127,52 @@ export function registerMarketplaceHandlers(deps: MarketplaceHandlerDeps): void 
   );
 
   ipcMain.handle(
+    "marketplace:install-status",
+    async (): Promise<{
+      success: boolean;
+      inFlight: Array<{ slug: string; stage: InstallStage }>;
+    }> => {
+      return {
+        success: true,
+        inFlight: Array.from(inFlight.entries()).map(([slug, stage]) => ({
+          slug,
+          stage,
+        })),
+      };
+    }
+  );
+
+  ipcMain.handle(
     "marketplace:install",
     async (
       _e,
       slug: string
-    ): Promise<{ success: boolean; agentId?: string; error?: string; alreadyInstalled?: boolean }> => {
+    ): Promise<{
+      success: boolean;
+      agentId?: string;
+      error?: string;
+      alreadyInstalled?: boolean;
+    }> => {
+      // Guard: concurrent install already in flight for this slug.
+      if (inFlight.has(slug)) {
+        return {
+          success: false,
+          error: "install-in-progress",
+        };
+      }
+      inFlight.set(slug, "converting");
+
       try {
         const detail = await client.detail(slug);
+        // F-063 multi-host gate: AwarenessClaw currently only installs openclaw agents.
+        // Reject early with a friendly message so UI can suggest the right host.
+        const compat = Array.isArray(detail.compat) ? detail.compat : ["openclaw"];
+        if (!compat.includes("openclaw")) {
+          return {
+            success: false,
+            error: `agent only supports ${compat.join(", ")} — AwarenessClaw installs OpenClaw agents only`,
+          };
+        }
         const installDeps: InstallDeps = {
           home: deps.home,
           runSpawnAsync: deps.runSpawnAsync,
@@ -124,11 +186,14 @@ export function registerMarketplaceHandlers(deps: MarketplaceHandlerDeps): void 
             markdown: detail.markdown,
             displayNameOverride: detail.name_zh || detail.name,
             emojiOverride: detail.emoji,
+            onProgress: (stage) => {
+              inFlight.set(slug, stage);
+              broadcastProgress(slug, stage);
+            },
           },
           installDeps
         );
         if (result.success && !result.alreadyInstalled) {
-          // fire-and-forget install ping (analytics)
           client.installPing(slug).catch(() => {
             /* ignore — ping is best effort */
           });
@@ -139,6 +204,8 @@ export function registerMarketplaceHandlers(deps: MarketplaceHandlerDeps): void 
           success: false,
           error: (err as Error).message?.slice(0, 250) || "install failed",
         };
+      } finally {
+        inFlight.delete(slug);
       }
     }
   );

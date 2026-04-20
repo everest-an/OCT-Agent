@@ -448,6 +448,156 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
             ))}
           </div>
         )}
+
+        {/* F-063: Recommended agents from marketplace (featured, not yet installed) */}
+        <RecommendedAgentsSection
+          installedIds={new Set(agents.map(a => a.id))}
+          onBrowseAll={() => setShowMarketplace(true)}
+          onInstalledReload={loadAgents}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------
+// F-063: Small recommendation strip shown on the Agents home page.
+// Fetches featured agents from marketplace, filters out already-installed,
+// lets the user install with one click or jump to full marketplace.
+// ------------------------------------------------------------------
+
+interface MarketAgentLite {
+  slug: string;
+  name: string;
+  name_zh?: string | null;
+  description: string;
+  description_zh?: string | null;
+  emoji: string;
+  tier: string;
+  install_count: number;
+}
+
+type InstallStageLite = 'converting' | 'writing-workspace' | 'registering' | 'applying-identity' | 'done';
+
+const STAGE_LABELS_LITE: Record<InstallStageLite, string> = {
+  converting: '转换中...',
+  'writing-workspace': '写入工作区...',
+  registering: '注册中(15-30s)...',
+  'applying-identity': '应用身份...',
+  done: '完成',
+};
+
+function RecommendedAgentsSection({
+  installedIds,
+  onBrowseAll,
+  onInstalledReload,
+}: {
+  installedIds: Set<string>;
+  onBrowseAll: () => void;
+  onInstalledReload: () => void;
+}) {
+  const [recs, setRecs] = useState<MarketAgentLite[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [installing, setInstalling] = useState<Map<string, InstallStageLite>>(new Map());
+
+  const load = useCallback(async () => {
+    const api = (window as any).electronAPI;
+    if (!api?.marketplaceList) { setLoading(false); return; }
+    try {
+      const res = await api.marketplaceList({ featured: true });
+      if (res?.success) {
+        const items: MarketAgentLite[] = (res.data?.agents ?? [])
+          .filter((a: MarketAgentLite) => !installedIds.has(a.slug))
+          .slice(0, 4);
+        setRecs(items);
+      }
+    } catch { /* ignore */ }
+    setLoading(false);
+  }, [installedIds]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Subscribe to install progress broadcasts.
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (!api?.onMarketplaceInstallProgress) return;
+    const unsub = api.onMarketplaceInstallProgress((payload: { slug: string; stage: InstallStageLite }) => {
+      setInstalling(prev => {
+        const next = new Map(prev);
+        if (payload.stage === 'done') {
+          next.delete(payload.slug);
+        } else {
+          next.set(payload.slug, payload.stage);
+        }
+        return next;
+      });
+      if (payload.stage === 'done') {
+        onInstalledReload();
+        load();
+      }
+    });
+    return () => unsub();
+  }, [load, onInstalledReload]);
+
+  const handleInstall = async (slug: string) => {
+    const api = (window as any).electronAPI;
+    setInstalling(s => { const n = new Map(s); n.set(slug, 'converting'); return n; });
+    try {
+      await api.marketplaceInstall(slug);
+    } catch { /* ignore, progress events will update UI */ }
+  };
+
+  if (loading || recs.length === 0) return null;
+
+  return (
+    <div className="mt-8 rounded-xl border border-violet-800/40 bg-violet-950/10 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold text-violet-300">✨ 推荐给你</h2>
+          <p className="text-[11px] text-slate-500 mt-0.5">这些精选 agent 可能对你有用,一键就能添加</p>
+        </div>
+        <button
+          onClick={onBrowseAll}
+          className="text-[11px] px-2.5 py-1 rounded border border-violet-700 text-violet-300 hover:bg-violet-900/30"
+        >
+          查看更多 →
+        </button>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        {recs.map(agent => {
+          const stage = installing.get(agent.slug);
+          const isInstalling = !!stage;
+          return (
+            <div
+              key={agent.slug}
+              className="rounded-lg border border-slate-700/50 bg-slate-800/40 p-3 flex flex-col"
+            >
+              <div className="flex items-start gap-2 mb-2">
+                <span className="text-2xl">{agent.emoji}</span>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-xs font-medium truncate">{agent.name_zh || agent.name}</h3>
+                  <p className="text-[10px] text-slate-500 mt-0.5">📥 {agent.install_count}</p>
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-400 line-clamp-2 mb-2 flex-1">
+                {agent.description_zh || agent.description}
+              </p>
+              {isInstalling ? (
+                <div className="flex items-center gap-1.5 text-[10px] text-violet-300">
+                  <Loader2 size={10} className="animate-spin" />
+                  {STAGE_LABELS_LITE[stage!]}
+                </div>
+              ) : (
+                <button
+                  onClick={() => handleInstall(agent.slug)}
+                  className="text-[11px] py-1 rounded bg-violet-600 hover:bg-violet-500 text-white transition-colors"
+                >
+                  + 一键安装
+                </button>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

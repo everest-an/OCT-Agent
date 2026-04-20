@@ -218,7 +218,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('marketplace:list', params || {}),
   marketplaceDetail: (slug: string) => ipcRenderer.invoke('marketplace:detail', slug),
   marketplaceInstalledSlugs: () => ipcRenderer.invoke('marketplace:installed-slugs'),
+  marketplaceInstallStatus: () => ipcRenderer.invoke('marketplace:install-status'),
   marketplaceInstall: (slug: string) => ipcRenderer.invoke('marketplace:install', slug),
+  onMarketplaceInstallProgress: (cb: (payload: { slug: string; stage: string }) => void) => {
+    const listener = (_e: any, payload: { slug: string; stage: string }) => cb(payload);
+    ipcRenderer.on('marketplace:install-progress', listener);
+    return () => ipcRenderer.removeListener('marketplace:install-progress', listener);
+  },
   marketplaceSubmit: (payload: {
     slug: string;
     name: string;

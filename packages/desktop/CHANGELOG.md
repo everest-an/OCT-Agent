@@ -1,5 +1,84 @@
 # Changelog
 
+## [0.4.0] - 2026-04-20 (macOS)
+
+### Added — Agent Marketplace 正式版上线
+
+- **189 个精选 agent**:16 个原创 + 173 个来自 [agency-agents](https://github.com/msitarzewski/agency-agents) (MIT License)
+- **5 个分类 tab**: ⭐ 推荐 / 📚 日常工作 / 💼 专业场景 / 🔧 工程开发 / 全部
+- **新增中国市场 agent**: 小红书 / 抖音 / B 站 / 快手 / 知乎 / 微博 / 微信小程序 / 微信公众号 / 百度 SEO / 直播电商 / 私域运营 / 电商运营 / 中国市场本地化
+- **Admin 可编辑**: 官方 agent 可通过 `/admin/marketplace` 直接改 DB,秒级生效,不需要重新部署桌面端
+- **社区投稿**: 集市右上角"分享我的 Agent" → admin 审核队列 → 批准后上架
+- **多宿主架构就绪**: 每个 agent 可声明 compat(openclaw / claude-code / hermes / codex / cursor),桌面端当前只装 openclaw 的,其它 host 留待未来支持
+- **默认连接生产**: DMG 默认连 `https://awareness.market`,无需额外配置
+
+### Changed — 上游 backend 迁到 Postgres
+
+- 不再是文件存储(previews 都是),admin 改数据实时持久化
+- Install count 从真实用户安装累加,不会被 seed 覆盖
+
+## [0.3.7-preview.17] - 2026-04-20 (macOS)
+
+### Changed — F-063 Agent Marketplace 后端迁移到 PostgreSQL
+
+- 之前 marketplace 目录存在文件(`/app/data/marketplace-agents/index.json`),每次 admin 添加 / 编辑 agent 都要 SSH 改文件 + 重启容器。现在完全迁到 Postgres(`marketplace_agents` + `marketplace_submissions` 两张表),admin UI 添加/编辑/审核投稿直接改 DB,秒级生效,无需重新部署。
+- **Seed 机制**: Backend 启动时若 `marketplace_agents` 表为空,自动从 `backend/data/marketplace-agents/`(镜像 baked-in)导入 28 个种子 agent。CLI 工具 `backend/scripts/seed_marketplace_to_db.py` 支持手动 merge / --force-overwrite / --no-random 多种模式。
+- **初始下载数**: 28 个种子 agent 每个分配 1-200 之间的确定性随机值(slug hash → 映射),不再全是 0。方便冷启动时集市不显得冷清。
+- **多宿主架构**: Schema 新增 `compat TEXT[]` 字段,每个 agent 声明兼容宿主(openclaw / claude-code / hermes / codex / cursor)。当前 AwarenessClaw 只装 compat 含 `openclaw` 的 agent,其它 host 留待未来支持。
+- **来源追踪**: Schema 新增 `source` + `source_upstream` + `author` + `license` 字段。12 个来自 agency-agents (MIT) 的 agent 自动标记,社区投稿通过审核后标记 `source=community` + `author=submission:<id>`。
+
+### Changed — Admin UI 增强
+
+- Agent 列表新增"宿主 / 来源"列,显示每个 agent 的 compat badge + source
+- 创建/编辑表单新增兼容宿主多选 + License + Source upstream 字段
+- 已有社区投稿 agent 显示归属区块(来源 / 上游 URL / 作者)
+
+## [0.3.7-preview.16] - 2026-04-20 (macOS)
+
+### Fixed — F-063 Agent Marketplace UX polish
+
+- **Idempotent install**: 重复点击安装(或页面切回来再点)不再报 `Agent "xxx" already exists`。安装现在是幂等的 — 已存在直接视为成功。
+- **进度文案**: 安装过程中卡片显示当前阶段(转换中 / 写入工作区 / 注册中(~15-30秒) / 应用身份),不再是死 spinner。
+- **跨页面状态保留**: 在安装过程中切走页面再回来,安装状态自动恢复(主进程持久化 in-flight set + IPC 查询)。
+- **醒目返回按钮**: 集市页左上角加了 ← 返回按钮,不再靠右上角小 ✕ 关闭。
+
+### Added — Agents 主页推荐条 + 更多 agent
+
+- **"✨ 推荐给你" 区块**: Agents 主页底部显示 4 个 featured agent,直接 "+ 一键安装" 无需进入集市。
+- **集市扩容到 28 个 agent**(从 20 个): 新增 8 个中国市场专家 — 小红书 / 抖音 / B 站 / 百度 SEO / 快手 / 直播电商 / 私域运营 / 电商运营。
+- **原 20 个 agent 内容全面加深**: 每个 agent markdown 从 ~300 字扩到 2000-3000 字,对标 [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents) (MIT) 的深度:Identity / Core Mission / Critical Rules / Technical Deliverables / Workflow Process / Communication Style / Learning & Memory / Success Metrics / Advanced Capabilities 九大章节。
+
+### Added — 后端 seed 迁移机制(为远端部署留口子)
+
+- Docker 镜像内嵌 `/app/seed/marketplace-agents/` (从 `backend/data/` baked in)
+- Backend 启动时自动 seed 到 `/app/data/marketplace-agents/`:
+  - **首次**: 完整复制
+  - **后续**: 仅 merge 新 slug,不覆盖 admin 编辑或用户 install_count
+- `scripts/seed-marketplace-to-prod.sh` 手动 rsync 模式的同步脚本,生产部署时用
+
+## [0.3.7-preview.15] - 2026-04-20 (macOS)
+
+### Added — F-063 Agent Marketplace(浏览 / 一键安装 / 分享)
+
+在 Agents 页面右上角新增紫色 "浏览集市" 按钮,点开后进入 AwarenessClaw 内置 agent 集市:
+
+- **5 个分类 tab**: ⭐ 推荐 / 📚 日常工作 / 💼 专业场景 / 🔧 工程开发 / 全部
+- **20 个种子 agent** 覆盖写作、旅行、餐饮、社交、记账、学习、面试、反思、邮件、谈判、食谱、UX 文案、产品经理、设计评审、数据分析、代码审查、后端架构、DevOps、前端、安全审计
+- **一键安装**:点击 agent 卡片 → 展示完整 system prompt + tools + 标签 → 点 "安装到 AwarenessClaw" 秒级完成
+- **本地转换**:自动把 Claude Code subagent markdown(frontmatter + ## headings)拆成 OpenClaw workspace 的 SOUL.md / AGENTS.md / IDENTITY.md / TOOLS.md 四件套,emoji + 显示名写入 openclaw.json
+- **已安装检测**:已装 agent 显示 "✓ 已安装",不重复安装
+- **分享我的 Agent**:右上角按钮打开表单,提交后进入后台审核队列,通过后加入集市
+
+### Added — Marketplace backend API 自定义
+
+- 新增 `~/.awareness/marketplace-config.json` 配置文件支持,允许 `{"apiBase": "http://..."}` 覆盖默认的 `awareness.market`
+- 优先级:构造参数 > `AWARENESS_API_BASE` 环境变量 > config 文件 > 默认
+
+### 测试
+
+- 23 converter 单测 · 8 installer 单测 · 5 real-HTTP E2E 测试(含 502 + timeout chaos)· L1 contract guard
+- 本地 docker backend 端到端走通 list/detail/install/submit/admin-approve/delete
+
 ## [0.3.7-preview.14] - 2026-04-19 (macOS + Windows)
 
 ### Fixed — Wiki tag topics rendered "building index…" then blank

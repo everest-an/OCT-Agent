@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { X, Loader2, Sparkles, Check, AlertCircle, Send, Star } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { ArrowLeft, Loader2, Sparkles, Check, AlertCircle, Send, Star, X } from 'lucide-react';
 
 type Tier = 'consumer' | 'prosumer' | 'engineering';
 
@@ -24,6 +24,7 @@ interface MarketAgentDetail extends MarketAgent {
 }
 
 type TabKey = 'featured' | 'consumer' | 'prosumer' | 'engineering' | 'all';
+type InstallStage = 'converting' | 'writing-workspace' | 'registering' | 'applying-identity' | 'done';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'featured', label: '⭐ 推荐' },
@@ -32,6 +33,14 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'engineering', label: '🔧 工程开发' },
   { key: 'all', label: '全部' },
 ];
+
+const STAGE_LABELS: Record<InstallStage, string> = {
+  converting: '转换内容...',
+  'writing-workspace': '写入工作区...',
+  registering: '注册到 OpenClaw (~15-30 秒,首次加载插件较慢)...',
+  'applying-identity': '应用身份...',
+  done: '完成',
+};
 
 interface Props {
   onClose: () => void;
@@ -45,9 +54,10 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [agents, setAgents] = useState<MarketAgent[]>([]);
   const [installedSlugs, setInstalledSlugs] = useState<Set<string>>(new Set());
-  const [installing, setInstalling] = useState<Set<string>>(new Set());
+  const [installing, setInstalling] = useState<Map<string, InstallStage>>(new Map());
   const [detail, setDetail] = useState<MarketAgentDetail | null>(null);
   const [showShareForm, setShowShareForm] = useState(false);
+  const unsubRef = useRef<(() => void) | null>(null);
 
   const fetchAgents = useCallback(async () => {
     setLoading(true);
@@ -63,9 +73,10 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
       if (tab === 'featured') params.featured = true;
       else if (tab !== 'all') params.tier = tab;
 
-      const [listResp, slugResp] = await Promise.all([
+      const [listResp, slugResp, statusResp] = await Promise.all([
         api.marketplaceList(params),
         api.marketplaceInstalledSlugs?.() ?? Promise.resolve({ success: true, slugs: [] }),
+        api.marketplaceInstallStatus?.() ?? Promise.resolve({ success: true, inFlight: [] }),
       ]);
       if (!listResp?.success) {
         setError(listResp?.error || '无法连接到 agent 集市');
@@ -74,6 +85,13 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
       }
       if (slugResp?.success) {
         setInstalledSlugs(new Set(slugResp.slugs || []));
+      }
+      if (statusResp?.success && Array.isArray(statusResp.inFlight)) {
+        const map = new Map<string, InstallStage>();
+        for (const { slug, stage } of statusResp.inFlight) {
+          map.set(slug, (stage || 'converting') as InstallStage);
+        }
+        if (map.size > 0) setInstalling(map);
       }
     } catch (err) {
       setError((err as Error).message);
@@ -86,14 +104,54 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
     fetchAgents();
   }, [fetchAgents]);
 
+  // Subscribe to main-process install progress events. Survives remount.
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (!api?.onMarketplaceInstallProgress) return;
+    const unsub = api.onMarketplaceInstallProgress(
+      (payload: { slug: string; stage: InstallStage }) => {
+        setInstalling((prev) => {
+          const next = new Map(prev);
+          if (payload.stage === 'done') {
+            next.delete(payload.slug);
+          } else {
+            next.set(payload.slug, payload.stage);
+          }
+          return next;
+        });
+        if (payload.stage === 'done') {
+          // Refresh installed slugs + trigger Agents page reload.
+          api.marketplaceInstalledSlugs?.().then((r: any) => {
+            if (r?.success) setInstalledSlugs(new Set(r.slugs || []));
+          });
+          onInstalled();
+        }
+      }
+    );
+    unsubRef.current = unsub;
+    return () => {
+      if (unsubRef.current) unsubRef.current();
+    };
+  }, [onInstalled]);
+
   const handleInstall = async (slug: string) => {
     const api = (window as any).electronAPI;
-    setInstalling((s) => new Set(s).add(slug));
+    if (installing.has(slug) || installedSlugs.has(slug)) return;
+
+    // Optimistically mark installing — progress events will overwrite stage.
+    setInstalling((s) => {
+      const next = new Map(s);
+      next.set(slug, 'converting');
+      return next;
+    });
+
     try {
       const res = await api.marketplaceInstall(slug);
       if (res?.success) {
         setInstalledSlugs((s) => new Set(s).add(slug));
         onInstalled();
+      } else if (res?.error === 'install-in-progress') {
+        // Silent — another window/tab is already installing; progress events will update.
       } else {
         setError(res?.error || '安装失败');
       }
@@ -101,7 +159,7 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
       setError((err as Error).message);
     } finally {
       setInstalling((s) => {
-        const next = new Set(s);
+        const next = new Map(s);
         next.delete(slug);
         return next;
       });
@@ -135,9 +193,18 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
     <div className="h-full flex flex-col bg-gradient-to-br from-slate-50 to-blue-50/30 dark:from-slate-900 dark:to-slate-950">
       <header className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/70 backdrop-blur">
         <div className="flex items-center gap-3">
-          <Sparkles className="h-6 w-6 text-violet-500" />
+          <button
+            onClick={onClose}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            title="返回 Agent 列表"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            返回
+          </button>
+          <div className="h-6 border-r border-slate-300 dark:border-slate-700" />
+          <Sparkles className="h-5 w-5 text-violet-500" />
           <div>
-            <h1 className="text-lg font-semibold">Agent 集市</h1>
+            <h1 className="text-base font-semibold">Agent 集市</h1>
             <p className="text-xs text-slate-500">浏览精选 agent,一键安装到你的 AwarenessClaw</p>
           </div>
         </div>
@@ -149,13 +216,6 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
           >
             <Send className="h-3.5 w-3.5" />
             分享我的 Agent
-          </button>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
-            title="关闭"
-          >
-            <X className="h-4 w-4" />
           </button>
         </div>
       </header>
@@ -209,7 +269,8 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {filtered.map((agent) => {
               const installed = installedSlugs.has(agent.slug);
-              const isInstalling = installing.has(agent.slug);
+              const stage = installing.get(agent.slug);
+              const isInstalling = !!stage;
               return (
                 <div
                   key={agent.slug}
@@ -235,6 +296,14 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
                   <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-3 mb-3 flex-1">
                     {agent.description_zh || agent.description}
                   </p>
+
+                  {isInstalling && (
+                    <div className="mb-2 px-2 py-1.5 rounded bg-violet-50 dark:bg-violet-950/40 text-[11px] text-violet-700 dark:text-violet-300 flex items-center gap-1.5">
+                      <Loader2 className="h-3 w-3 animate-spin flex-shrink-0" />
+                      <span className="truncate">{STAGE_LABELS[stage]}</span>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs text-slate-400">
                       📥 {agent.install_count}
@@ -277,7 +346,7 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
         <DetailDrawer
           detail={detail}
           installed={installedSlugs.has(detail.slug)}
-          installing={installing.has(detail.slug)}
+          installingStage={installing.get(detail.slug)}
           onClose={() => setDetail(null)}
           onInstall={() => handleInstall(detail.slug)}
         />
@@ -302,16 +371,17 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
 function DetailDrawer({
   detail,
   installed,
-  installing,
+  installingStage,
   onClose,
   onInstall,
 }: {
   detail: MarketAgentDetail;
   installed: boolean;
-  installing: boolean;
+  installingStage: InstallStage | undefined;
   onClose: () => void;
   onInstall: () => void;
 }) {
+  const installing = !!installingStage;
   return (
     <div
       className="fixed inset-0 bg-black/40 z-50 flex items-stretch justify-end"
@@ -375,7 +445,7 @@ function DetailDrawer({
             📥 {detail.install_count} 人已安装
           </div>
 
-          <details className="border-t pt-3">
+          <details className="border-t pt-3" open>
             <summary className="text-xs font-semibold text-slate-500 cursor-pointer">
               查看完整 system prompt
             </summary>
@@ -383,6 +453,13 @@ function DetailDrawer({
               {detail.markdown}
             </pre>
           </details>
+
+          {installing && installingStage && (
+            <div className="px-3 py-2 rounded bg-violet-50 dark:bg-violet-950/40 text-xs text-violet-700 dark:text-violet-300 flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>{STAGE_LABELS[installingStage]}</span>
+            </div>
+          )}
 
           <button
             onClick={onInstall}

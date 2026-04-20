@@ -19,11 +19,19 @@ import * as path from "path";
 
 import { convertAgentToWorkspace } from "./converter";
 
+export type InstallStage =
+  | "converting"
+  | "writing-workspace"
+  | "registering"
+  | "applying-identity"
+  | "done";
+
 export interface InstallInput {
   slug: string;
   markdown: string;
   displayNameOverride?: string;
   emojiOverride?: string;
+  onProgress?: (stage: InstallStage) => void;
 }
 
 export interface InstallDeps {
@@ -59,6 +67,15 @@ export async function installMarketplaceAgent(
     return { success: false, error: `invalid slug: ${input.slug}` };
   }
 
+  const progress = (stage: InstallStage) => {
+    try {
+      input.onProgress?.(stage);
+    } catch {
+      /* never let a progress callback crash the install */
+    }
+  };
+
+  progress("converting");
   let converted;
   try {
     converted = convertAgentToWorkspace(input.markdown);
@@ -74,6 +91,7 @@ export async function installMarketplaceAgent(
     return { success: true, agentId: slug, alreadyInstalled: true };
   }
 
+  progress("writing-workspace");
   const wsDir = path.join(deps.home, ".openclaw", `workspace-${slug}`);
   fs.mkdirSync(wsDir, { recursive: true });
 
@@ -83,6 +101,7 @@ export async function installMarketplaceAgent(
   fs.writeFileSync(path.join(wsDir, "IDENTITY.md"), converted.identityMd, "utf-8");
   fs.writeFileSync(path.join(wsDir, "TOOLS.md"), converted.toolsMd, "utf-8");
 
+  progress("registering");
   const spawnArgs = [
     "agents",
     "add",
@@ -98,6 +117,12 @@ export async function installMarketplaceAgent(
     cliAdded = true;
   } catch (cliErr: any) {
     const raw = cliErr?.message || String(cliErr || "");
+    // Idempotent: another concurrent install (or an aborted UI session whose
+    // main-process spawn finished in the background) already added the agent.
+    // Treat as success — installation is idempotent by design.
+    if (/already exists/i.test(raw)) {
+      return { success: true, agentId: slug, alreadyInstalled: true };
+    }
     if (/timed? ?out|timeout/i.test(raw)) {
       const fallback = deps.addAgentToConfigFallback(deps.home, slug, {
         model: null,
@@ -132,6 +157,7 @@ export async function installMarketplaceAgent(
     // Non-fatal.
   }
 
+  progress("applying-identity");
   // Write display name + emoji into openclaw.json identity block.
   const identityResult = deps.applyAgentIdentityFallback(deps.home, slug, {
     name: displayName || undefined,
@@ -145,5 +171,6 @@ export async function installMarketplaceAgent(
     );
   }
 
+  progress("done");
   return { success: true, agentId: slug, alreadyInstalled: false };
 }

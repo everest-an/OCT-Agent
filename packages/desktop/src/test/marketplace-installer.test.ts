@@ -164,6 +164,77 @@ describe('installMarketplaceAgent — CLI timeout fallback', () => {
   });
 });
 
+describe('installMarketplaceAgent — idempotent already-exists', () => {
+  let tmpHome: string;
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'marketplace-'));
+    fs.mkdirSync(path.join(tmpHome, '.openclaw'), { recursive: true });
+  });
+  afterEach(() => {
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it('treats "Agent already exists" CLI error as success (idempotent)', async () => {
+    const spawn = vi.fn(async () => {
+      throw new Error('openclaw agents add failed: Agent "test-writer" already exists.');
+    }) as any;
+    const deps = makeDeps(tmpHome, { runSpawnAsync: spawn });
+    const result = await installMarketplaceAgent(
+      { slug: 'test-writer', markdown: SAMPLE_MD },
+      deps
+    );
+    expect(result.success).toBe(true);
+    expect(result.alreadyInstalled).toBe(true);
+  });
+});
+
+describe('installMarketplaceAgent — progress callbacks', () => {
+  let tmpHome: string;
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'marketplace-'));
+    fs.mkdirSync(path.join(tmpHome, '.openclaw'), { recursive: true });
+  });
+  afterEach(() => {
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it('emits all expected stages in order', async () => {
+    const stages: string[] = [];
+    const deps = makeDeps(tmpHome);
+    const result = await installMarketplaceAgent(
+      {
+        slug: 'test-writer',
+        markdown: SAMPLE_MD,
+        onProgress: (s) => stages.push(s),
+      },
+      deps
+    );
+    expect(result.success).toBe(true);
+    expect(stages).toEqual([
+      'converting',
+      'writing-workspace',
+      'registering',
+      'applying-identity',
+      'done',
+    ]);
+  });
+
+  it('survives a throwing onProgress callback', async () => {
+    const deps = makeDeps(tmpHome);
+    const result = await installMarketplaceAgent(
+      {
+        slug: 'test-writer',
+        markdown: SAMPLE_MD,
+        onProgress: () => {
+          throw new Error('progress callback crashed');
+        },
+      },
+      deps
+    );
+    expect(result.success).toBe(true);
+  });
+});
+
 describe('installMarketplaceAgent — validation', () => {
   let tmpHome: string;
   beforeEach(() => {
