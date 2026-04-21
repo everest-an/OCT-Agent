@@ -1,6 +1,14 @@
 # Changelog
 
-## [0.4.5] - 2026-04-21 (macOS)
+## [0.4.6] - 2026-04-21 (macOS)
+
+### Fixed — 打包版本强制走 prod,不再受本地 override 污染
+
+- **Packaged DMG 现在完全忽略 env `AWARENESS_API_BASE` 和 `~/.awareness/marketplace-config.json`**,硬锁到 `https://awareness.market/api/v1`。之前这两个 override 在 dev 和打包版都生效,后果是开发者电脑上留的测试 override 会"偷偷"跟着 DMG 发给用户(F-063 0.4.2-0.4.5 踩过的坑)
+- 启动时在 devtools console 打印 `[marketplace] apiBase=... (source: ...)`,用户一开 DevTools 就能验证请求到底发到哪台服务器,以后再出现"我提交没到 prod"的问题可以秒排查
+- 新增 3 组 L1 contract test (`marketplace-api-timeouts.test.ts`) 锁死:DEFAULT_API_BASE = prod、packaged 模式禁用 override、启动 log 必须有 `[marketplace] apiBase=` 字样。以后任何 commit 把这三条规则破坏了 CI 直接挂
+
+## [0.4.5] - 2026-04-21 (内部, 未发布)
 
 ### Fixed — 分享 submit 12 秒死超时(真实用户 bug)
 

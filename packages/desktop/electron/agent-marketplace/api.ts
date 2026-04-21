@@ -71,7 +71,25 @@ const DEFAULT_TIMEOUT_MS = 12000;
 const SUBMIT_TIMEOUT_MS = 45000;
 
 /**
- * Optional per-user override:
+ * Returns `true` if running inside a packaged DMG/exe, `false` in
+ * `npm run dev:electron` or in vitest. Packaged builds must ALWAYS hit
+ * prod — no env or config override allowed — so a dev's stale
+ * `~/.awareness/marketplace-config.json` can never leak into a shipped
+ * app. (Happened to F-063 0.4.2-0.4.5 on the dev machine.)
+ */
+function isPackagedApp(): boolean {
+  try {
+    // Electron import is lazy + guarded so vitest/CLI callers don't fail.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { app } = require("electron");
+    return app?.isPackaged === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Optional per-user override (DEV ONLY — ignored in packaged DMG):
  *   ~/.awareness/marketplace-config.json
  *     { "apiBase": "http://localhost:8000/api/v1" }
  *
@@ -248,13 +266,35 @@ export class MarketplaceClient {
   private timeoutMs: number;
 
   constructor(options: MarketplaceClientOptions = {}) {
-    const base =
-      options.apiBase ||
-      process.env.AWARENESS_API_BASE ||
-      readConfigFileApiBase() ||
-      DEFAULT_API_BASE;
+    const packaged = isPackagedApp();
+
+    // Packaged DMG MUST always hit prod. Env + config overrides are a dev
+    // convenience only — in shipped builds they're a footgun (stale
+    // ~/.awareness/marketplace-config.json silently redirected submits to
+    // localhost on a dev machine for weeks).
+    const explicit = options.apiBase;
+    const envOverride = packaged ? undefined : process.env.AWARENESS_API_BASE;
+    const fileOverride = packaged ? null : readConfigFileApiBase();
+    const base = explicit || envOverride || fileOverride || DEFAULT_API_BASE;
     this.apiBase = base.replace(/\/+$/, "");
     this.timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
+
+    // Print the resolved apiBase + its source so every user/dev can spot
+    // "why is submit hitting X?" in the devtools console (View → Toggle
+    // Developer Tools) without digging through code.
+    const source = explicit
+      ? "constructor"
+      : envOverride
+      ? "env AWARENESS_API_BASE (dev only)"
+      : fileOverride
+      ? "~/.awareness/marketplace-config.json (dev only)"
+      : packaged
+      ? "default (prod, packaged build — overrides disabled)"
+      : "default (prod)";
+    // eslint-disable-next-line no-console
+    console.log(
+      `[marketplace] apiBase=${this.apiBase} (source: ${source})`
+    );
   }
 
   list(params: {

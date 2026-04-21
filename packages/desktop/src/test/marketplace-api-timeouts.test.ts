@@ -48,3 +48,31 @@ describe('MarketplaceClient · submit timeout contract', () => {
     expect(submitBlock![0]).not.toMatch(/this\.timeoutMs/);
   });
 });
+
+describe('MarketplaceClient · packaged build forces prod apiBase', () => {
+  it('DEFAULT_API_BASE is the prod URL', () => {
+    const match = apiSource.match(/DEFAULT_API_BASE\s*=\s*"([^"]+)"/);
+    expect(match).not.toBeNull();
+    expect(match![1]).toBe('https://awareness.market/api/v1');
+  });
+
+  it('isPackagedApp() helper exists and guards env + file override', () => {
+    // Guard against a future refactor that re-exposes env + config
+    // override in packaged builds. A silent localhost leak in a shipped
+    // DMG happened once (F-063 0.4.2-0.4.5 on dev machine) — never again.
+    expect(apiSource).toMatch(/function\s+isPackagedApp\s*\(/);
+    expect(apiSource).toMatch(
+      /envOverride\s*=\s*packaged\s*\?\s*undefined\s*:\s*process\.env\.AWARENESS_API_BASE/
+    );
+    expect(apiSource).toMatch(
+      /fileOverride\s*=\s*packaged\s*\?\s*null\s*:\s*readConfigFileApiBase\(\)/
+    );
+  });
+
+  it('constructor prints apiBase source to console (devtools transparency)', () => {
+    // If "why is this submitting to localhost?" ever comes up again, the
+    // first debugging step should be "open devtools, look for
+    // [marketplace] apiBase=..." — this log line is the answer.
+    expect(apiSource).toMatch(/\[marketplace\]\s+apiBase=/);
+  });
+});
