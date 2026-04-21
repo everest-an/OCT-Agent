@@ -213,7 +213,18 @@ export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitte
           onClose();
         }, 1500);
       } else {
-        setError(res?.error || t('share.submitFailed'));
+        // Prefer the friendly localized message matched to the error code;
+        // fall back to the raw backend message so users can still diagnose.
+        const code = res?.errorCode as
+          | 'timeout'
+          | 'network'
+          | 'rate_limit'
+          | 'validation'
+          | 'unknown'
+          | undefined;
+        const friendly =
+          code && code !== 'unknown' ? t(`share.error.${code}`) : null;
+        setError(friendly || res?.error || t('share.submitFailed'));
       }
     } catch (err) {
       setError(String((err as Error).message || err));

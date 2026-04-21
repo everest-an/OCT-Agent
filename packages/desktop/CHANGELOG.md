@@ -1,6 +1,15 @@
 # Changelog
 
-## [0.4.4] - 2026-04-21 (macOS)
+## [0.4.5] - 2026-04-21 (macOS)
+
+### Fixed — 分享 submit 12 秒死超时(真实用户 bug)
+
+- 0.4.4 的分享表单在生产环境偶发"timeout after 12000ms"错误——因为 submit 的 HTTP 超时全局写死 12s,而生产真实延迟常到 10-25s(LLM 校验 + DB 写 + 限流检查)。直接提高到 **45s**,不改 GET 端点的 12s。
+- 错误信息不再直接抛原始技术文本("timeout after 12000ms" / "ECONNREFUSED")给用户。主进程把底层错误归一到 `errorCode`:`timeout` / `network` / `rate_limit` / `validation` / `unknown`,渲染端按 i18n 显示"服务器响应超时,请 30 秒后刷新查看"之类的友好文案
+- 新增 L3 contract test(`marketplace-api-timeouts.test.ts`)锁死 `SUBMIT_TIMEOUT_MS ≥ 30000`,防止后人改动时无意间把超时调回 12s 导致同 bug 再现
+- 新增 3 组 UI chaos test:timeout / network / rate-limit 下错误信息都不能泄露原始技术文本,必须显示友好 i18n 消息
+
+## [0.4.4] - 2026-04-21 (内部, 未发布)
 
 ### Fixed — 分享表单 UX bug
 

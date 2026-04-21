@@ -371,22 +371,36 @@ export function registerMarketplaceHandlers(deps: MarketplaceHandlerDeps): void 
         boot_md?: string;
         bootstrap_md?: string;
       }
-    ): Promise<{ success: boolean; status?: string; error?: string }> => {
+    ): Promise<{
+      success: boolean;
+      status?: string;
+      error?: string;
+      errorCode?: "timeout" | "network" | "rate_limit" | "validation" | "unknown";
+    }> => {
       try {
         const res = await client.submit(payload);
         if (res.status >= 200 && res.status < 300) {
           return { success: true, status: res.body?.status || "pending" };
         }
-        return {
-          success: false,
-          error:
-            (res.body && (res.body.detail || res.body.error)) ||
-            `HTTP ${res.status}`,
-        };
+        const backendMsg =
+          (res.body && (res.body.detail || res.body.error)) ||
+          `HTTP ${res.status}`;
+        let errorCode: "rate_limit" | "validation" | "unknown" = "unknown";
+        if (res.status === 429) errorCode = "rate_limit";
+        else if (res.status === 400 || res.status === 422) errorCode = "validation";
+        return { success: false, error: backendMsg, errorCode };
       } catch (err) {
+        const raw = (err as Error).message || "submit failed";
+        // Map opaque technical errors to stable i18n codes the renderer can
+        // localize. Keep raw message in `error` for diagnostics / console.
+        let errorCode: "timeout" | "network" | "unknown" = "unknown";
+        if (/timeout/i.test(raw)) errorCode = "timeout";
+        else if (/ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ENETUNREACH|ECONNRESET|socket hang up/i.test(raw))
+          errorCode = "network";
         return {
           success: false,
-          error: (err as Error).message?.slice(0, 250) || "submit failed",
+          error: raw.slice(0, 250),
+          errorCode,
         };
       }
     }

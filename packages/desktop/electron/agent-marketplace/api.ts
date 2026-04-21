@@ -61,7 +61,14 @@ export interface MarketplaceClientOptions {
 /** Production marketplace API base. Override at runtime via `AWARENESS_API_BASE`
  *  env var or `~/.awareness/marketplace-config.json` (dev). */
 const DEFAULT_API_BASE = "https://awareness.market/api/v1";
+
+/** GET endpoints (list/detail) — fast, safe to give up after 12s. */
 const DEFAULT_TIMEOUT_MS = 12000;
+
+/** Write endpoints (submit) — prod sometimes takes 10-25s due to LLM-backed
+ *  validation + DB write + rate-limit check. 12s is too aggressive here and
+ *  was actually firing on real users mid-submission (F-063 0.4.4 bug). */
+const SUBMIT_TIMEOUT_MS = 45000;
 
 /**
  * Optional per-user override:
@@ -302,10 +309,12 @@ export class MarketplaceClient {
     boot_md?: string;
     bootstrap_md?: string;
   }): Promise<{ status: number; body: any }> {
+    // Override the default GET timeout with a generous submit-specific one.
+    // Prod latency for POST /submissions is 10-25s (LLM validation + DB write).
     return postJson(
       `${this.apiBase}/marketplace/agents/submissions`,
       payload,
-      this.timeoutMs
+      SUBMIT_TIMEOUT_MS
     );
   }
 }

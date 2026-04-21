@@ -1402,6 +1402,10 @@ const en: Record<string, string> = {
   'share.category.wellness': 'Wellness',
   'share.category.writing': 'Writing',
   'share.category.other': 'Other',
+  'share.error.timeout': 'Server took longer than expected to respond. The request may still be processing — wait 30 seconds, refresh the marketplace, and check if your submission appears. If not, click retry.',
+  'share.error.network': 'Network is unavailable. Check your internet connection and retry.',
+  'share.error.rate_limit': 'Too many submissions from this device. Please wait a few minutes and retry.',
+  'share.error.validation': 'Submission rejected — please review the form fields and fix any highlighted issues.',
 };
 
 const zh: Record<string, string> = {
@@ -2798,6 +2802,10 @@ const zh: Record<string, string> = {
   'share.category.wellness': '健康',
   'share.category.writing': '写作',
   'share.category.other': '其他',
+  'share.error.timeout': '服务器响应超时,提交请求可能仍在处理。请等 30 秒后刷新集市查看是否已提交。如果没有,点"重试提交"。',
+  'share.error.network': '网络不可用,请检查网络连接后重试。',
+  'share.error.rate_limit': '此设备提交过于频繁,请等几分钟后重试。',
+  'share.error.validation': '提交被拒绝,请检查表单字段并修复标红的错误。',
 };
 
 // Japanese and Korean use English as fallback for now

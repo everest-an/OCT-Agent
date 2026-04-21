@@ -69,6 +69,62 @@ describe('ShareAgentForm · L3 chaos', () => {
     await screen.findByTestId('share-success');
   });
 
+  it('timeout from IPC (F-063 0.4.4 bug): shows friendly timeout message, NOT raw "timeout after 12000ms"', async () => {
+    // This is the exact payload shape the Electron main process returns when
+    // the HTTPS request hits its socket timeout. Before 0.4.5, the raw
+    // technical message leaked to the user as the error body — a real user
+    // on prod actually saw "timeout after 12000ms" and had no idea what to do.
+    const submit = vi.fn().mockResolvedValue({
+      success: false,
+      error: 'timeout after 12000ms',
+      errorCode: 'timeout',
+    });
+    mountWithApi(submit);
+
+    await screen.findByTestId('share-submit');
+    fireEvent.click(screen.getByTestId('share-submit'));
+    await screen.findByTestId('share-error');
+    const errorText = screen.getByTestId('share-error').textContent || '';
+    // Raw technical message must NOT be shown.
+    expect(errorText).not.toMatch(/timeout after 12000ms/);
+    // Friendly message IS shown (English per test locale).
+    expect(errorText).toMatch(
+      /Server took longer than expected|refresh the marketplace/i
+    );
+  });
+
+  it('network error: shows friendly network message, not ECONNREFUSED', async () => {
+    const submit = vi.fn().mockResolvedValue({
+      success: false,
+      error: 'ECONNREFUSED 127.0.0.1:8000',
+      errorCode: 'network',
+    });
+    mountWithApi(submit);
+
+    await screen.findByTestId('share-submit');
+    fireEvent.click(screen.getByTestId('share-submit'));
+    await screen.findByTestId('share-error');
+    const errorText = screen.getByTestId('share-error').textContent || '';
+    expect(errorText).not.toMatch(/ECONNREFUSED/);
+    expect(errorText).toMatch(/Network is unavailable/i);
+  });
+
+  it('rate-limit 429: shows friendly throttling message', async () => {
+    const submit = vi.fn().mockResolvedValue({
+      success: false,
+      error: 'HTTP 429',
+      errorCode: 'rate_limit',
+    });
+    mountWithApi(submit);
+
+    await screen.findByTestId('share-submit');
+    fireEvent.click(screen.getByTestId('share-submit'));
+    await screen.findByTestId('share-error');
+    expect(screen.getByTestId('share-error').textContent).toMatch(
+      /Too many submissions/i
+    );
+  });
+
   it('500 from backend: displays error, preserves form state, button shows 重试提交', async () => {
     const submit = vi
       .fn()
