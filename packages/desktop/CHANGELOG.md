@@ -1,6 +1,23 @@
 # Changelog
 
-## [0.4.3] - 2026-04-21 (macOS)
+## [0.4.4] - 2026-04-21 (macOS)
+
+### Fixed — 分享表单 UX bug
+
+- **分类现在是真的下拉框**(之前是自由文本输入,用户根本选不到 academic / data / design 等 20 个真实分类,只能瞎打字)。补全了后端接受的全部 20 个 category + community + other
+- **分类 dropdown 21 项全部 i18n**:academic / career / community / data / design / education / engineering / finance / game-dev / lifestyle / marketing / paid-media / product / productivity / project-mgmt / sales / spatial / specialized / support / wellness / writing / other,中英文独立显示
+- **整个分享表单 30+ 文案走 i18n**:标题、所有字段标签、错误提示、按钮、slow-server 提示、tier 选项、联系方式 placeholder,彻底告别硬编码中文
+- 提交中途点击模态背景不再会把对话框关掉(之前会丢失 in-flight 请求)
+- 按 `Esc` 关闭模态;`role="dialog"` + `aria-modal="true"` 让屏幕阅读器认得出
+- 表单字段级 `aria-invalid` + 红色边框高亮:slug 写错会在 slug 输入框上标红,用户一眼就知道哪里错,不用再去页面底部读错误文本
+- 必填字段用 `*` 号、可选字段明确标 `(optional)`,避免"联系方式"被误以为必填
+- 小屏(<768px)下表单自动堆成单列(grid-cols-1 md:grid-cols-2)
+
+### Added — 多一层 L3 chaos 测试
+
+- 新增"提交中点击背景不应关闭模态"回归测试
+
+## [0.4.3] - 2026-04-21 (内部, 未发布)
 
 ### Changed — 分享 Agent 改走无损结构化链路
 

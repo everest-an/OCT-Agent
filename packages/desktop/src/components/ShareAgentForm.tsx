@@ -1,15 +1,22 @@
 /**
  * ShareAgentForm — modal for submitting a locally-created agent to the
- * marketplace review queue (F-063 0.4.0).
+ * marketplace review queue (F-063).
  *
- * Invoked from the multi-agent page (one button per user-created agent).
- * The workspace files of the selected agent are read via main-process IPC,
- * reverse-composed into a single Claude-Code-style markdown, and submitted
- * alongside category/tier/contact metadata.
+ * 0.4.4 changes:
+ *   - Category is now a proper <select> populated from the 20 real catalog
+ *     categories (previously a free-form text input — users couldn't pick
+ *     the right bucket)
+ *   - All UI strings threaded through useI18n() — no hardcoded Chinese
+ *   - Escape key closes the modal, backdrop click is disabled during submit
+ *     so a misclick can't cancel a 10s in-flight submission
+ *   - Errors highlight the offending field instead of only showing a
+ *     generic message at the bottom
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Loader2, X } from 'lucide-react';
+
+import { useI18n } from '../lib/i18n';
 
 type Tier = 'consumer' | 'prosumer' | 'engineering';
 
@@ -41,6 +48,35 @@ interface Props {
   onSubmitted?: () => void;
 }
 
+// Must match backend `_ALLOWED_CATEGORIES` and the keys under
+// sdks/.../marketplace-agents/sources. Keep alphabetical — the select order
+// matters for usability. 'community' + 'other' are end-user fallbacks when
+// nothing fits.
+const CATEGORY_OPTIONS = [
+  'academic',
+  'career',
+  'community',
+  'data',
+  'design',
+  'education',
+  'engineering',
+  'finance',
+  'game-dev',
+  'lifestyle',
+  'marketing',
+  'paid-media',
+  'product',
+  'productivity',
+  'project-mgmt',
+  'sales',
+  'spatial',
+  'specialized',
+  'support',
+  'wellness',
+  'writing',
+  'other',
+] as const;
+
 function yamlEscape(value: string): string {
   if (/[:#"\n]/.test(value)) {
     return `"${value.replace(/"/g, '\\"')}"`;
@@ -48,7 +84,10 @@ function yamlEscape(value: string): string {
   return value;
 }
 
+type FieldError = 'slug' | 'description' | null;
+
 export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitted }: Props) {
+  const { t } = useI18n();
   const [composed, setComposed] = useState<ComposedAgent | null>(null);
   const [loading, setLoading] = useState(true);
   const [slug, setSlug] = useState(preselectedAgentId);
@@ -59,10 +98,11 @@ export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitte
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Elapsed-seconds counter so users on slow prod (3-10s latency) see
-  // progress instead of a blind spinner. Reset on every submit attempt.
+  const [fieldError, setFieldError] = useState<FieldError>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
 
+  // Elapsed-seconds counter so users on slow prod (3-10s latency) see
+  // progress instead of a blind spinner. Reset on every submit attempt.
   useEffect(() => {
     if (!submitting) {
       setElapsedSec(0);
@@ -75,10 +115,20 @@ export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitte
     return () => window.clearInterval(handle);
   }, [submitting]);
 
+  // Escape key closes the modal (unless submitting, to avoid dropping an
+  // in-flight request).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !submitting) onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [submitting, onClose]);
+
   useEffect(() => {
     const api = (window as any).electronAPI;
     if (!api?.marketplaceComposeFromLocal) {
-      setError('此版本 AwarenessClaw 不支持分享,请升级到 0.4.0+');
+      setError(t('share.versionRequired'));
       setLoading(false);
       return;
     }
@@ -97,23 +147,33 @@ export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitte
           });
           setDescriptionOverride(res.description);
         } else {
-          setError(res?.error || '读取 agent workspace 失败');
+          setError(res?.error || t('share.workspaceLoadFailed'));
         }
       })
       .catch((err: any) => setError(String(err?.message || err)))
       .finally(() => setLoading(false));
-  }, [preselectedAgentId]);
+  }, [preselectedAgentId, t]);
+
+  const composedHelp = useMemo(() => {
+    if (!composed) return '';
+    return t('share.composedFrom')
+      .replace('{count}', String(composed.files.length))
+      .replace('{slug}', preselectedAgentId);
+  }, [composed, preselectedAgentId, t]);
 
   const handleSubmit = async () => {
     if (!composed) return;
     setError(null);
     setMessage(null);
+    setFieldError(null);
     if (!/^[a-z][a-z0-9-]{2,63}$/.test(slug)) {
-      setError('Slug 必须是 3-64 位小写字母/数字/连字符,且以字母开头');
+      setError(t('share.slugInvalid'));
+      setFieldError('slug');
       return;
     }
     if (!descriptionOverride.trim()) {
-      setError('请填写描述');
+      setError(t('share.descriptionRequired'));
+      setFieldError('description');
       return;
     }
 
@@ -147,13 +207,13 @@ export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitte
         bootstrap_md: composed.structured.bootstrap_md,
       });
       if (res?.success) {
-        setMessage('已提交!我们审核后会告知你结果 🎉');
+        setMessage(t('share.submitted'));
         setTimeout(() => {
           onSubmitted?.();
           onClose();
         }, 1500);
       } else {
-        setError(res?.error || '提交失败');
+        setError(res?.error || t('share.submitFailed'));
       }
     } catch (err) {
       setError(String((err as Error).message || err));
@@ -162,10 +222,15 @@ export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitte
     }
   };
 
+  const slowHint = t('share.slowHint').replace('{elapsed}', String(elapsedSec));
+
   return (
     <div
       className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-      onClick={onClose}
+      onClick={submitting ? undefined : onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('share.title')}
     >
       <div
         className="bg-slate-900 rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-slate-700"
@@ -173,10 +238,15 @@ export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitte
       >
         <div className="p-5 border-b border-slate-800 flex items-center justify-between">
           <h2 className="font-semibold text-slate-100">
-            🔗 分享 Agent 到集市
+            🔗 {t('share.title')}
             {composed && <span className="ml-2 text-slate-400 font-normal">— {composed.name}</span>}
           </h2>
-          <button onClick={onClose} className="p-1 rounded hover:bg-slate-800 text-slate-400">
+          <button
+            onClick={onClose}
+            disabled={submitting}
+            className="p-1 rounded hover:bg-slate-800 text-slate-400 disabled:opacity-40"
+            aria-label={t('share.close')}
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -191,7 +261,7 @@ export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitte
           <div className="p-6">
             <div className="text-sm text-red-400 bg-red-950/40 border border-red-900 rounded p-3">{error}</div>
             <button onClick={onClose} className="mt-4 px-4 py-2 text-sm rounded border border-slate-700 text-slate-200">
-              关闭
+              {t('share.close')}
             </button>
           </div>
         )}
@@ -199,81 +269,108 @@ export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitte
         {composed && (
           <div className="p-5 space-y-4">
             <p className="text-xs text-slate-500">
-              已自动从 <span className="font-mono text-slate-400">~/.openclaw/workspace-{preselectedAgentId}</span> 读取 {composed.files.length} 个文件,合并成单一 markdown 供审核:<br/>
+              {composedHelp}<br/>
               <span className="font-mono text-[11px]">{composed.files.join(' · ')}</span>
             </p>
 
-            <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
               <label className="block">
-                <span className="text-xs text-slate-400">Slug (URL 标识) *</span>
+                <span className="text-xs text-slate-400">
+                  {t('share.slugLabel')} <span className="text-red-400">*</span>
+                </span>
                 <input
-                  className="mt-1 w-full px-2 py-1.5 rounded border border-slate-700 bg-slate-800 text-slate-100"
+                  className={`mt-1 w-full px-2 py-1.5 rounded border bg-slate-800 text-slate-100 ${
+                    fieldError === 'slug'
+                      ? 'border-red-500 focus:outline-red-500'
+                      : 'border-slate-700'
+                  }`}
                   value={slug}
-                  onChange={(e) => setSlug(e.target.value)}
+                  onChange={(e) => {
+                    setSlug(e.target.value);
+                    if (fieldError === 'slug') setFieldError(null);
+                  }}
                   pattern="^[a-z][a-z0-9-]{2,63}$"
+                  aria-invalid={fieldError === 'slug' || undefined}
                 />
+                <span className="text-[10px] text-slate-600">{t('share.slugHelp')}</span>
               </label>
-              <div className="flex items-center gap-2 pt-5">
+              <div className="flex items-center gap-2 md:pt-5">
                 <span className="text-2xl">{composed.emoji || '🤖'}</span>
                 <span className="text-sm text-slate-300">{composed.name}</span>
               </div>
 
-              <label className="col-span-2 block">
-                <span className="text-xs text-slate-400">描述(让别人知道这个 agent 能干嘛)*</span>
+              <label className="md:col-span-2 block">
+                <span className="text-xs text-slate-400">
+                  {t('share.descriptionLabel')} <span className="text-red-400">*</span>
+                </span>
                 <textarea
-                  className="mt-1 w-full px-2 py-1.5 rounded border border-slate-700 bg-slate-800 text-slate-100"
+                  className={`mt-1 w-full px-2 py-1.5 rounded border bg-slate-800 text-slate-100 ${
+                    fieldError === 'description'
+                      ? 'border-red-500 focus:outline-red-500'
+                      : 'border-slate-700'
+                  }`}
                   value={descriptionOverride}
-                  onChange={(e) => setDescriptionOverride(e.target.value)}
+                  onChange={(e) => {
+                    setDescriptionOverride(e.target.value);
+                    if (fieldError === 'description') setFieldError(null);
+                  }}
                   rows={3}
+                  aria-invalid={fieldError === 'description' || undefined}
                 />
               </label>
 
               <label className="block">
-                <span className="text-xs text-slate-400">分类</span>
-                <input
+                <span className="text-xs text-slate-400">{t('share.categoryLabel')}</span>
+                <select
                   className="mt-1 w-full px-2 py-1.5 rounded border border-slate-700 bg-slate-800 text-slate-100"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                />
+                >
+                  {CATEGORY_OPTIONS.map((c) => (
+                    <option key={c} value={c}>
+                      {t(`share.category.${c}`)}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className="block">
-                <span className="text-xs text-slate-400">Tier</span>
+                <span className="text-xs text-slate-400">{t('share.tierLabel')}</span>
                 <select
                   className="mt-1 w-full px-2 py-1.5 rounded border border-slate-700 bg-slate-800 text-slate-100"
                   value={tier}
                   onChange={(e) => setTier(e.target.value as Tier)}
                 >
-                  <option value="consumer">consumer (日常)</option>
-                  <option value="prosumer">prosumer (专业)</option>
-                  <option value="engineering">engineering (工程)</option>
+                  <option value="consumer">{t('share.tier.consumer')}</option>
+                  <option value="prosumer">{t('share.tier.prosumer')}</option>
+                  <option value="engineering">{t('share.tier.engineering')}</option>
                 </select>
               </label>
 
-              <label className="col-span-2 block">
-                <span className="text-xs text-slate-400">联系方式(可选,审核通过后我们告知你)</span>
+              <label className="md:col-span-2 block">
+                <span className="text-xs text-slate-400">{t('share.contactLabel')}</span>
                 <input
                   className="mt-1 w-full px-2 py-1.5 rounded border border-slate-700 bg-slate-800 text-slate-100"
                   value={contact}
                   onChange={(e) => setContact(e.target.value)}
-                  placeholder="邮箱 / X / GitHub 用户名"
+                  placeholder={t('share.contactPlaceholder')}
                 />
               </label>
 
               {composed.tools.length > 0 && (
-                <div className="col-span-2">
-                  <span className="text-xs text-slate-400">自动提取的工具权限:</span>
+                <div className="md:col-span-2">
+                  <span className="text-xs text-slate-400">{t('share.toolsExtracted')}</span>
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {composed.tools.map((t) => (
-                      <span key={t} className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                        {t}
+                    {composed.tools.map((tool) => (
+                      <span key={tool} className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                        {tool}
                       </span>
                     ))}
                   </div>
                 </div>
               )}
 
-              <details className="col-span-2 rounded border border-slate-700 p-2 text-xs">
-                <summary className="cursor-pointer text-slate-500">预览提交的 markdown 内容</summary>
+              <details className="md:col-span-2 rounded border border-slate-700 p-2 text-xs">
+                <summary className="cursor-pointer text-slate-500">{t('share.previewLabel')}</summary>
                 <pre className="mt-2 text-[10px] bg-slate-950 border border-slate-800 rounded p-2 font-mono overflow-auto max-h-64 text-slate-300">
                   {composed.markdown}
                 </pre>
@@ -287,9 +384,7 @@ export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitte
                 data-testid="share-error"
               >
                 {error}
-                <div className="text-[10px] text-slate-500 mt-1">
-                  表单已保留,修复后可直接重试。
-                </div>
+                <div className="text-[10px] text-slate-500 mt-1">{t('share.formRetained')}</div>
               </div>
             )}
             {message && (
@@ -306,7 +401,7 @@ export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitte
                 className="text-xs text-amber-300 bg-amber-950/30 border border-amber-900 rounded p-2"
                 data-testid="share-slow-hint"
               >
-                服务器正在处理 ({elapsedSec}s) — 生产环境偶尔需要 8-12 秒,请不要关闭窗口。
+                {slowHint}
               </div>
             )}
 
@@ -316,7 +411,7 @@ export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitte
                 className="px-4 py-2 text-sm rounded border border-slate-700 text-slate-200"
                 disabled={submitting}
               >
-                取消
+                {t('share.cancel')}
               </button>
               <button
                 onClick={handleSubmit}
@@ -326,10 +421,10 @@ export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitte
               >
                 {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                 {submitting
-                  ? `提交中... ${elapsedSec > 0 ? `(${elapsedSec}s)` : ''}`
+                  ? `${t('share.submitting')}${elapsedSec > 0 ? ` (${elapsedSec}s)` : ''}`
                   : error
-                  ? '重试提交'
-                  : '提交审核'}
+                  ? t('share.retry')
+                  : t('share.submit')}
               </button>
             </div>
           </div>

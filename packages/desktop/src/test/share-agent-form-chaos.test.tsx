@@ -83,8 +83,8 @@ describe('ShareAgentForm · L3 chaos', () => {
     expect(screen.getByTestId('share-error')).toHaveTextContent('HTTP 500');
     // Form state preserved — user does not re-type slug/description.
     expect(slugInput).toHaveValue('pixel-pal');
-    // Button label switches to 重试提交 so user knows retry is one click away.
-    expect(screen.getByTestId('share-submit')).toHaveTextContent('重试提交');
+    // Button label switches to Retry submission so user knows retry is one click away.
+    expect(screen.getByTestId('share-submit')).toHaveTextContent(/Retry submission|重试提交/);
   });
 
   it('network failure: rejected promise → shows error without spinner hang', async () => {
@@ -123,7 +123,9 @@ describe('ShareAgentForm · L3 chaos', () => {
       vi.advanceTimersByTime(7000);
     });
     await screen.findByTestId('share-slow-hint');
-    expect(screen.getByTestId('share-slow-hint')).toHaveTextContent(/服务器正在处理/);
+    expect(screen.getByTestId('share-slow-hint')).toHaveTextContent(
+      /Server is processing|服务器正在处理/
+    );
 
     // Clean up the pending promise so React doesn't leak it.
     resolver?.({ success: true });
@@ -140,6 +142,42 @@ describe('ShareAgentForm · L3 chaos', () => {
 
     await screen.findByTestId('share-error');
     expect(submit).not.toHaveBeenCalled();
-    expect(screen.getByTestId('share-error')).toHaveTextContent('Slug');
+    expect(screen.getByTestId('share-error')).toHaveTextContent(/Slug|slug/);
+    // Field-level error highlight visible on slug input.
+    expect(slugInput).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('backdrop click during submit does NOT close modal (avoids losing in-flight request)', async () => {
+    let resolver: ((v: { success: boolean }) => void) | null = null;
+    const submit = vi.fn(
+      () =>
+        new Promise<{ success: boolean }>((resolve) => {
+          resolver = resolve;
+        })
+    );
+    const onClose = vi.fn();
+    (window as any).electronAPI = {
+      ...(window as any).electronAPI,
+      marketplaceComposeFromLocal: vi.fn().mockResolvedValue(composedFixture),
+      marketplaceSubmit: submit,
+    };
+    const { container } = render(
+      <ShareAgentForm
+        preselectedAgentId="pixel-pal"
+        onClose={onClose}
+        onSubmitted={vi.fn()}
+      />
+    );
+
+    await screen.findByTestId('share-submit');
+    fireEvent.click(screen.getByTestId('share-submit'));
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+
+    // Simulate backdrop click while submission is in flight.
+    const backdrop = container.querySelector('[role="dialog"]');
+    if (backdrop) fireEvent.click(backdrop);
+    expect(onClose).not.toHaveBeenCalled();
+
+    resolver?.({ success: true });
   });
 });
