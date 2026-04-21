@@ -1,5 +1,16 @@
 import http from 'http';
 
+// Daemon base URL. Production default is the hardcoded local daemon.
+// `__setDaemonBaseForTest` allows L3 chaos tests to redirect traffic to
+// a mock HTTP server on a dynamic port. Not exported via index / IPC.
+let _daemonBase = 'http://127.0.0.1:37800';
+export function __setDaemonBaseForTest(url: string): void {
+  _daemonBase = url;
+}
+export function __resetDaemonBaseForTest(): void {
+  _daemonBase = 'http://127.0.0.1:37800';
+}
+
 // Per-request project isolation: set via setMemoryClientProjectDir()
 let _currentProjectDir: string | null = null;
 
@@ -66,7 +77,7 @@ export function callMcp(toolName: string, args: Record<string, any>): Promise<an
       }
     }
     
-    const req = http.request('http://127.0.0.1:37800/mcp', {
+    const req = http.request(`${_daemonBase}/mcp`, {
       method: 'POST',
       headers: buildHeaders(),
       timeout: 15000,
@@ -127,7 +138,7 @@ export function callMcpStrict(toolName: string, args: Record<string, any>, timeo
       }
     }
     
-    const req = http.request('http://127.0.0.1:37800/mcp', {
+    const req = http.request(`${_daemonBase}/mcp`, {
       method: 'POST',
       headers: buildHeaders(),
       timeout: timeoutMs,
