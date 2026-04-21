@@ -87,4 +87,48 @@ describe('Dashboard - model and file attachment', () => {
 
     (window as any).electronAPI = origApi;
   });
+
+  it('retries once with a fresh session id when the main process reports a stale Gateway session', async () => {
+    const chatSendFn = vi
+      .fn()
+      .mockResolvedValueOnce({
+        success: false,
+        error: 'Invalid session ID: agent:social-content-creator:webchat:session-1776750081734',
+        sessionId: 'session-recovered',
+        resetSession: true,
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        text: 'recovered reply',
+        sessionId: 'session-recovered',
+      });
+
+    const origApi = (window as any).electronAPI;
+    (window as any).electronAPI = {
+      ...origApi,
+      chatSend: chatSendFn,
+    };
+
+    await act(async () => { render(<Dashboard />); });
+
+    const textarea = screen.getByPlaceholderText(/message|输入/) as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'hello' } });
+    });
+
+    const buttons = screen.getAllByRole('button');
+    const sendBtn = buttons[buttons.length - 1];
+    await act(async () => { fireEvent.click(sendBtn); });
+
+    await waitFor(() => {
+      expect(chatSendFn).toHaveBeenCalledTimes(2);
+      expect(chatSendFn.mock.calls[1]?.[1]).toBe('session-recovered');
+    });
+
+    const sessions = JSON.parse(localStorage.getItem('awareness-claw-sessions') || '[]');
+    expect(sessions[0]?.id).toBe('session-recovered');
+    expect(localStorage.getItem('awareness-claw-active-session')).toBe('session-recovered');
+
+    (window as any).electronAPI = origApi;
+  });
 });

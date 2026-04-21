@@ -150,6 +150,35 @@ function isGatewayAuthScopeError(message: string): boolean {
   );
 }
 
+function isInvalidGatewaySessionError(message: string): boolean {
+  const lower = String(message || '').toLowerCase();
+  return (
+    lower.includes('invalid session id')
+    || lower.includes('invalid session key')
+    || lower.includes('unknown session id')
+    || lower.includes('unknown session key')
+    || lower.includes('session not found')
+  );
+}
+
+function buildReplacementSessionId(sessionId: string): string {
+  const replacementLeaf = `session-${Date.now()}`;
+  const current = String(sessionId || '').trim();
+  if (!current) return replacementLeaf;
+
+  const webchatMarker = ':webchat:';
+  const webchatIndex = current.lastIndexOf(webchatMarker);
+  if (webchatIndex >= 0) {
+    return `${current.slice(0, webchatIndex + webchatMarker.length)}${replacementLeaf}`;
+  }
+
+  if (current.startsWith('session-')) {
+    return replacementLeaf;
+  }
+
+  return `${current}-${Date.now()}`;
+}
+
 function maybeSelfHealGateway1006(
   result: any,
   send: (channel: string, payload: any) => void,
@@ -335,6 +364,15 @@ export function registerChatHandlers(deps: {
     const requestedAgentId = requestedOptions.agentId || 'main';
     const validated = validateAgentIdAgainstConfig(os.homedir(), requestedAgentId);
     const agentId = validated.resolvedAgentId;
+    
+    // 📊 DIAGNOSTIC: Log agent validation for debugging marketplace agent issues
+    console.log('[chat] Agent validation check:', {
+      requested: requestedAgentId,
+      resolved: agentId,
+      wasStale: validated.wasStale,
+      configPath: `${os.homedir()}/.openclaw/openclaw.json`,
+      timestamp: new Date().toISOString(),
+    });
     if (validated.wasStale) {
       console.warn('[chat] Stale agentId requested by renderer; downgrading to main', {
         requestedAgentId,
@@ -351,6 +389,7 @@ export function registerChatHandlers(deps: {
         message: `Selected agent "${requestedAgentId}" no longer exists. Switched to the default agent for this reply.`,
       });
     }
+
     const rawSid = sessionId || `ac-${Date.now()}`;
     const sid = agentId !== 'main'
       ? `agent:${agentId}:webchat:${rawSid}`
@@ -961,6 +1000,18 @@ ${message}`;
         } else if (state === 'aborted' || state === 'error') {
           const rawError = payload.error || payload.message?.error || '';
           const errorStr = typeof rawError === 'string' ? rawError : JSON.stringify(rawError);
+          // 🚨 CRITICAL: Check if this is an "Invalid session ID" error for non-main agent
+          // If so, throw it (not resolve) so catch block can trigger CLI fallback
+          if (isInvalidGatewaySessionError(errorStr) && agentId !== 'main') {
+            console.warn('[chat] Invalid session error in event:chat for non-main agent; throwing to trigger CLI fallback', {
+              agent: agentId,
+              error: errorStr.substring(0, 150),
+            });
+            if (chatTimeout) clearTimeout(chatTimeout);
+            clearTimeout(absoluteChatTimeout);
+            throw new Error(errorStr);
+          }
+          
           send('chat:status', { type: 'error', message: classifyProviderError(errorStr, state) });
           if (chatTimeout) clearTimeout(chatTimeout);
           clearTimeout(absoluteChatTimeout);
@@ -982,14 +1033,49 @@ ${message}`;
         }
       }
 
-      await ws.chatSend(sid, fullMessage, {
-        thinking: requestedOptions.thinkingLevel && requestedOptions.thinkingLevel !== 'off' ? requestedOptions.thinkingLevel : undefined,
-        verbose: 'full',
-        // Pass user's reasoning preference directly. 'stream' enables live
-        // thinking token delivery via stream:"thinking" agent events; 'on'
-        // includes reasoning in the final response only; undefined/'off' disables.
-        reasoning: requestedOptions.reasoningDisplay && requestedOptions.reasoningDisplay !== 'off' ? requestedOptions.reasoningDisplay : undefined,
-      });
+      // 📊 DIAGNOSTIC: Log Gateway chatSend attempt for non-main agents
+      if (agentId !== 'main') {
+        console.log('[chat] 📤 Gateway chatSend START (non-main agent)', {
+          agent: agentId,
+          sessionId: sid,
+          messageLength: fullMessage.length,
+          model: sanitizedModelRef,
+          thinking: requestedOptions.thinkingLevel,
+          reasoning: requestedOptions.reasoningDisplay,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      try {
+        await ws.chatSend(sid, fullMessage, {
+          thinking: requestedOptions.thinkingLevel && requestedOptions.thinkingLevel !== 'off' ? requestedOptions.thinkingLevel : undefined,
+          verbose: 'full',
+          // Pass user's reasoning preference directly. 'stream' enables live
+          // thinking token delivery via stream:"thinking" agent events; 'on'
+          // includes reasoning in the final response only; undefined/'off' disables.
+          reasoning: requestedOptions.reasoningDisplay && requestedOptions.reasoningDisplay !== 'off' ? requestedOptions.reasoningDisplay : undefined,
+        });
+
+        if (agentId !== 'main') {
+          console.log('[chat] 📥 Gateway chatSend SUCCESS (non-main agent)', {
+            agent: agentId,
+            sessionId: sid,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } catch (chatSendErr: any) {
+        if (agentId !== 'main') {
+          console.error('[chat] 💥 Gateway chatSend FAILED (non-main agent)', {
+            agent: agentId,
+            sessionId: sid,
+            error: String(chatSendErr),
+            errorMessage: chatSendErr?.message,
+            errorCode: chatSendErr?.code,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        throw chatSendErr;
+      }
 
       await chatDone;
 
@@ -1119,6 +1205,17 @@ ${message}`;
         send('chat:stream-end', {});
       }
 
+      // Some Gateway builds may surface invalid session as assistant final text
+      // instead of emitting an error state. Route it into the existing catch/fallback flow.
+      if (agentId !== 'main' && finalText && isInvalidGatewaySessionError(finalText)) {
+        console.warn('[chat] Invalid session surfaced as final assistant text; rerouting to CLI fallback', {
+          agent: agentId,
+          sessionId: sid,
+          preview: finalText.slice(0, 160),
+        });
+        throw new Error(finalText);
+      }
+
       if (!finalText && !pendingApprovalRequestId) {
         const diagnostic = {
           sessionId: sid,
@@ -1239,9 +1336,88 @@ ${message}`;
       }
       send('chat:stream-end', {});
       const errorMsg = err?.message || String(err);
-      const authScopeGated = isGatewayAuthScopeError(errorMsg);
-      if (errorMsg.includes('WebSocket') || errorMsg.includes('connect') || errorMsg.includes('timed out') || authScopeGated) {
-        console.warn('[chat] WebSocket/pairing failed, falling back to CLI:', errorMsg);
+      
+      // 📊 DIAGNOSTIC: Log all Gateway errors for debugging
+      console.error('[chat] 🚨 Gateway error detected', {
+        agent: agentId,
+        sessionId: sid,
+        errorMessage: errorMsg,
+        isInvalidSessionError: isInvalidGatewaySessionError(errorMsg),
+        isWebSocketError: /WebSocket|connect|timed out/.test(errorMsg),
+        isAuthError: /pairing|auth|permission/.test(errorMsg),
+        errorPreview: errorMsg.substring(0, 200),
+        timestamp: new Date().toISOString(),
+      });
+
+      if (isInvalidGatewaySessionError(errorMsg)) {
+        // Two cases:
+        // 1. Session truly expired (stale) → generate new session with same agent
+        // 2. Agent itself invalid (deleted/misconfigured) → switch to 'main' for retry
+        // 3. New agent not yet recognized by Gateway → force CLI fallback
+        const wasStaleAgent = agentId !== 'main' && requestedOptions.agentId === 'main';
+        if (wasStaleAgent) {
+          // Case 2: Agent was already downgraded to 'main' by validateAgentIdAgainstConfig
+          // but still got "Invalid session ID". Means the agent validation itself is broken
+          // or OpenClaw is in a half-dead state. Fall back to CLI immediately.
+          console.error('[chat] Invalid session error even with fallback to main agent; switching to CLI', {
+            requestedAgentId: requestedOptions.agentId,
+            resolvedAgentId: agentId,
+            error: errorMsg,
+          });
+          requestedOptions.forceLocal = true;
+        } else if (agentId !== 'main') {
+          // Case 3: Non-main agent with invalid session.
+          // This can happen when:
+          // - Agent is newly downloaded from Agent Market but not yet loaded by Gateway
+          // - Agent exists in openclaw.json but Gateway hasn't reloaded config
+          // - Agent is operator-only and doesn't support webchat mode
+          // Solution: Force CLI fallback which will load the latest config
+          console.warn('[chat] ⚠️ Invalid session with non-main agent; forcing CLI fallback to load latest config', {
+            agent: agentId,
+            sessionId: sid,
+            configPath: `${os.homedir()}/.openclaw/openclaw.json`,
+            error: errorMsg,
+            timestamp: new Date().toISOString(),
+          });
+          requestedOptions.forceLocal = true;
+          send('chat:status', {
+            type: 'gateway',
+            message: `The selected agent (${agentId}) is not yet available via Gateway. Using local CLI mode to ensure the latest configuration is loaded...`,
+          });
+        } else {
+          // Case 1: Main agent with invalid session → true session expiration
+          const replacementSessionId = buildReplacementSessionId(sid);
+          console.warn('[chat] Gateway rejected a stale session id for main agent', {
+            previousSessionId: sid,
+            replacementSessionId,
+            error: errorMsg,
+          });
+          send('chat:status', {
+            type: 'gateway',
+            message: 'This chat session expired after a Gateway restart. Creating a fresh session automatically...',
+          });
+          return withWorkspaceFallbackMeta({
+            success: false,
+            text: '',
+            error: errorMsg,
+            sessionId: replacementSessionId,
+            resetSession: true,
+          });
+        }
+      }
+      
+      // Handle forceLocal flag set above for non-main agent with invalid session
+      let authScopeGated = isGatewayAuthScopeError(errorMsg);
+      if (requestedOptions.forceLocal || errorMsg.includes('WebSocket') || errorMsg.includes('connect') || errorMsg.includes('timed out') || authScopeGated) {
+        if (requestedOptions.forceLocal) {
+          console.log('[chat] 📍 CLI fallback triggered (forceLocal flag)', {
+            agent: agentId,
+            reason: 'Invalid session with non-main agent',
+            timestamp: new Date().toISOString(),
+          });
+        } else {
+          console.warn('[chat] WebSocket/pairing failed, falling back to CLI:', errorMsg);
+        }
         // For pairing-required failures, trigger a background reconnect+repair so the
         // next chat message goes through Gateway cleanly (write-scope pre-warm).
         if (/pairing required/i.test(errorMsg) || authScopeGated) {

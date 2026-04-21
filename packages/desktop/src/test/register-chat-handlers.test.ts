@@ -213,6 +213,185 @@ describe('registerChatHandlers', () => {
     );
   });
 
+  it('detects invalid agent in session id and forces CLI fallback', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      throw new Error('Invalid session ID: agent:social-content-creator:webchat:session-1776750081734');
+    });
+
+    const sendToRenderer = vi.fn();
+
+    registerChatHandlers({
+      sendToRenderer,
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+      prepareCliFallback: vi.fn(async () => ({ ok: true })), // Mock daemon check
+    });
+
+    const handlers = getRegisteredHandlers();
+    // We expect this to timeout or fail since we're not fully mocking the CLI flow
+    // But the key is that Gateway error is detected and forceLocal is set
+    try {
+      await handlers['chat:send']({}, 'hello', 'agent:social-content-creator:webchat:session-1776750081734', {
+        agentId: 'social-content-creator',
+        timeout: 1000, // Short timeout to avoid hanging
+      });
+    } catch (e) {
+      // Expected to fail in test environment
+    }
+
+    // Verify that the error detection triggered the correct status message
+    expect(sendToRenderer).toHaveBeenCalledWith(
+      'chat:status',
+      expect.objectContaining({
+        type: 'gateway',
+        message: expect.stringContaining('not yet available via Gateway'),
+      }),
+    );
+  });
+
+  // New comprehensive test: marketplace agent → invalid session → automatic CLI recovery
+  it('marketplace agent with invalid session triggers CLI fallback path', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      // Gateway rejects new marketplace agent
+      throw new Error('Invalid session ID: agent:meal-planner:webchat:session-1776752219758');
+    });
+
+    const sendToRenderer = vi.fn();
+
+    registerChatHandlers({
+      sendToRenderer,
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+      prepareCliFallback: vi.fn(async () => ({ ok: true })),
+    });
+
+    const handlers = getRegisteredHandlers();
+    
+    // Simulate marketplace agent chat - we don't care if it fails in tests
+    // The key is that the error detection + CLI fallback path is triggered
+    try {
+      await handlers['chat:send']({}, 'meal planner help', 'agent:meal-planner:webchat:session-1776752219758', {
+        agentId: 'meal-planner',
+        timeout: 500, // Short timeout
+      });
+    } catch (e) {
+      // Expected to fail in test environment due to short timeout
+    }
+
+    // Verify the critical path: error detected + user informed + CLI fallback triggered
+    expect(sendToRenderer).toHaveBeenCalledWith(
+      'chat:status',
+      expect.objectContaining({
+        type: 'gateway',
+        message: expect.stringMatching(/not yet available via Gateway|CLI mode/),
+      }),
+    );
+  });
+
+  it('detects stale session on main agent and returns new session id for retry', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      throw new Error('Invalid session ID: session-1776750081734');
+    });
+
+    const sendToRenderer = vi.fn();
+
+    registerChatHandlers({
+      sendToRenderer,
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, 'hello', 'session-1776750081734', {
+      agentId: 'main',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.resetSession).toBe(true);
+    expect(result.sessionId).toMatch(/^session-\d+$/);
+    expect(result.sessionId).not.toBe('session-1776750081734');
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(sendToRenderer).toHaveBeenCalledWith(
+      'chat:status',
+      expect.objectContaining({
+        type: 'gateway',
+        message: expect.stringContaining('Creating a fresh session automatically'),
+      }),
+    );
+  });
+
+  it('triggers CLI fallback when invalid session appears as final assistant text for non-main agent', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        ws.emit('event:chat', {
+          sessionKey: 'agent:meal-planner:webchat:session-1776752219758',
+          state: 'final',
+          message: {
+            role: 'assistant',
+            content: 'Error: Invalid session ID: agent:meal-planner:webchat:session-1776752219758',
+          },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    const sendToRenderer = vi.fn();
+
+    registerChatHandlers({
+      sendToRenderer,
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+      prepareCliFallback: vi.fn(async () => ({ ok: true })),
+    });
+
+    const handlers = getRegisteredHandlers();
+    try {
+      await handlers['chat:send']({}, 'hello', 'session-1776752219758', {
+        agentId: 'meal-planner',
+        timeout: 500,
+      });
+    } catch {
+      // Expected in test env without full CLI process wiring
+    }
+
+    expect(sendToRenderer).toHaveBeenCalledWith(
+      'chat:status',
+      expect.objectContaining({
+        type: 'gateway',
+        message: expect.stringContaining('not yet available via Gateway'),
+      }),
+    );
+  });
+
+
   it('filters Node internal stack lines and returns a friendly runtime repair hint for npx ENOENT', async () => {
     const fakeChild = createCliFallbackErrorChild([
       '[openclaw] Uncaught exception: Error: spawn npx ENOENT',
@@ -1373,6 +1552,39 @@ describe('registerChatHandlers', () => {
 
     fakeChild.emitOutput();
     await expect(pending).resolves.toMatchObject({ success: true, text: 'CLI fallback reply', sessionId: 'test-session' });
+  });
+
+  it('normalizes gateway session key before CLI fallback --session-id for non-main agent', async () => {
+    const fakeChild = createCliFallbackChild('CLI fallback reply');
+    const runSpawn = vi.fn(() => fakeChild as any);
+
+    registerChatHandlers({
+      sendToRenderer: vi.fn(),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: false, error: 'Gateway failed to start.' })),
+      getGatewayWs: vi.fn(),
+      getConnectedGatewayWs: vi.fn(() => null),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      runSpawn,
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const pending = handlers['chat:send']({}, 'hello', 'session-1776752219758', { agentId: 'meal-planner' });
+    await vi.waitFor(() => expect(runSpawn).toHaveBeenCalledTimes(1));
+
+    const [cmd, args] = runSpawn.mock.calls[0] as unknown as [string, string[]];
+    expect(cmd).toBe('openclaw');
+    const sidArgIndex = args.indexOf('--session-id');
+    expect(sidArgIndex).toBeGreaterThanOrEqual(0);
+    // CLI must receive the raw session id, not gateway-prefixed key.
+    expect(args[sidArgIndex + 1]).toBe('session-1776752219758');
+    expect(args[sidArgIndex + 1]).not.toContain('agent:meal-planner:webchat:');
+
+    fakeChild.emitOutput();
+    await expect(pending).resolves.toMatchObject({ success: true, text: 'CLI fallback reply' });
   });
 
   it('flags unverified local file-write success claims in CLI fallback output', async () => {

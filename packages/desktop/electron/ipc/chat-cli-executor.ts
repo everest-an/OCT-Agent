@@ -17,6 +17,16 @@ import { buildWebCompatibilityRetryPrompt } from './awareness-memory-utils';
 const LOCAL_DAEMON_RETRY_DELAY_MS = 8000;
 const CLI_FALLBACK_TIMEOUT_MESSAGE = 'Gateway is still warming up. This message was retried through local fallback mode, but the local agent still took too long to respond. Please wait a little longer and try again.';
 
+function normalizeCliSessionId(sessionId: string): string {
+  const raw = String(sessionId || '').trim();
+  if (!raw) return raw;
+  const prefixed = raw.match(/^agent:[^:]+:webchat:(.+)$/i);
+  if (prefixed && prefixed[1]) {
+    return prefixed[1];
+  }
+  return raw;
+}
+
 export async function prepareCliFallbackWithDaemonRetry(
   prepareCliFallback: (() => Promise<void>) | undefined,
   send: (channel: string, payload: any) => void,
@@ -70,6 +80,7 @@ export async function chatSendViaCli(
   },
 ): Promise<any> {
   return new Promise((resolve) => {
+    const cliSid = normalizeCliSessionId(sid);
     let settled = false;
     const collectedLines: string[] = [];
     const rawOutputLines: string[] = [];
@@ -115,7 +126,7 @@ export async function chatSendViaCli(
     const escapedMsg = requestMessage.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\\$').replace(/`/g, '\\`');
     // Note: openclaw CLI does not support --reasoning flag; reasoning is controlled via
     // openclaw.json agents.defaults.reasoningDefault (set in syncToOpenClaw)
-    const openclawArgs = ['agent', '--session-id', sid, '-m', requestMessage, '--verbose', 'full'];
+    const openclawArgs = ['agent', '--session-id', cliSid, '-m', requestMessage, '--verbose', 'full'];
     if (options?.forceLocal) {
       openclawArgs.splice(1, 0, '--local');
     }
@@ -126,7 +137,7 @@ export async function chatSendViaCli(
       openclawArgs.push('--agent', sanitizedAgentId);
     }
     const localFlag = options?.forceLocal ? ' --local' : '';
-    const commandWithMode = `openclaw agent${localFlag} --session-id "${sid}" -m "${escapedMsg}" --verbose full${thinkingFlag}${agentFlag}`;
+    const commandWithMode = `openclaw agent${localFlag} --session-id "${cliSid}" -m "${escapedMsg}" --verbose full${thinkingFlag}${agentFlag}`;
     const cwd = options?.workspacePath || os.homedir();
     const spawnChatProcess = deps.spawnChatProcess || spawn;
     const child = deps.runSpawn

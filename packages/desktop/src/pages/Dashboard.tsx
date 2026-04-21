@@ -1291,6 +1291,16 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     setSessions(prev => prev.map(s => s.id === id ? updater(s) : s));
   };
 
+  const remapSessionId = useCallback((fromId: string, toId: string) => {
+    if (!fromId || !toId || fromId === toId) return;
+    setSessions((prev) => prev.map((session) => (
+      session.id === fromId
+        ? { ...session, id: toId, updatedAt: Date.now() }
+        : session
+    )));
+    setActiveSessionId((current) => (current === fromId ? toId : current));
+  }, []);
+
   const handleNewSession = useCallback(() => {
     const s = createSession(t('chat.newSession', 'New Chat'));
     setSessions(prev => [s, ...prev]);
@@ -1422,14 +1432,29 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
 
     if (window.electronAPI) {
       try {
-      const result = await (window.electronAPI as any).chatSend(trimmed, activeSessionId, {
+      const requestOptions = {
         thinkingLevel: config.thinkingLevel || 'low',
         reasoningDisplay: config.reasoningDisplay || 'on',
         model: `${config.providerKey}/${config.modelId}`,
         files: filePaths,
         workspacePath: projectRoot || undefined,
         agentId: options?.targetAgentId || config.selectedAgentId || 'main',
-      });
+      };
+      const chatSendApi = (window.electronAPI as any).chatSend;
+      let effectiveSessionId = activeSessionId;
+      let result = await chatSendApi(trimmed, effectiveSessionId, requestOptions);
+
+      if (result?.resetSession && result?.sessionId && result.sessionId !== effectiveSessionId) {
+        remapSessionId(effectiveSessionId, result.sessionId);
+        effectiveSessionId = result.sessionId;
+        recordTraceEvent({
+          kind: 'status',
+          label: t('chat.trace.requestSent', 'Request sent'),
+          detail: 'Gateway session expired. Retrying with a fresh chat session.',
+        });
+        result = await chatSendApi(trimmed, effectiveSessionId, requestOptions);
+      }
+
       if (result?.workspacePathInvalid && projectRoot) {
         setProjectRoot('');
       }
@@ -1470,7 +1495,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
       };
 
       setNewestMsgId(assistantMsg.id);
-      updateSession(activeSessionId, s => ({
+      updateSession(effectiveSessionId, s => ({
         ...s,
         messages: [...s.messages, assistantMsg],
         updatedAt: Date.now(),
@@ -1481,7 +1506,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
       // Fallback title (truncated user text) is already set in addUserMessageToSession
       if (result?.success && isFirstMessageRef.current) {
         isFirstMessageRef.current = false;
-        const sid = activeSessionId;
+        const sid = effectiveSessionId;
         window.electronAPI?.chatGenerateTitle?.({
           userMessage: options?.userText || trimmed,
           assistantMessage: responseText.slice(0, 300),
@@ -1512,7 +1537,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         setIsSending(false);
       }
     }
-  }, [activeSessionId, agents, config.language, config.modelId, config.providerKey, config.selectedAgentId, config.thinkingLevel, projectRoot, t, updateSession]);
+  }, [activeSessionId, agents, config.language, config.modelId, config.providerKey, config.reasoningDisplay, config.selectedAgentId, config.thinkingLevel, projectRoot, recordTraceEvent, remapSessionId, t, updateSession]);
 
   // Process the next queued message (called after a run completes)
   const processNextQueued = useCallback(async () => {
