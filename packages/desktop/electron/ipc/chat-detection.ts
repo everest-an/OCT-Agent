@@ -64,7 +64,46 @@ export function hasMeaningfulAgentText(text: string): boolean {
   if (!trimmed) return false;
   if (/^no response$/i.test(trimmed)) return false;
   if (/^blocked$/i.test(trimmed)) return false;
+  if (isGatewayDiagnosticNoise(trimmed)) return false;
   return true;
+}
+
+/**
+ * Detect Gateway verbose diagnostic lines that should NOT be shown as assistant text.
+ *
+ * OpenClaw Gateway emits plugin/config diagnostics through the same WS event stream
+ * as assistant text when verbose='full'. These lines are internal warnings, not LLM
+ * output. If they are the *only* content in a response, the user sees a confusing
+ * diagnostic instead of an actual reply.
+ *
+ * Known patterns:
+ *   - `plugins.entries.<name>: plugin disabled (memory slot set to "<slot>") but config is present`
+ *   - `plugins.entries.<name>: <any single-line diagnostic>`
+ *   - `[plugins] Registered <name>`
+ *   - `[diagnostic] ...`
+ *   - `[info] ...` / `[warn] ...` / `[error] ...`
+ *
+ * This function is intentionally conservative — it only matches well-known Gateway
+ * noise patterns. Unknown text passes through to the user.
+ */
+export function isGatewayDiagnosticNoise(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  // Each line must be a diagnostic line for the whole block to be noise.
+  const lines = trimmed.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length === 0) return false;
+
+  return lines.every(line => {
+    const l = line.trim();
+    // plugins.entries.<id>: <diagnostic>
+    if (/^plugins\.entries\.\S+:\s+/i.test(l)) return true;
+    // [plugins] Registered ... / [diagnostic] ... / [info] ... / [warn] ... / [error] ...
+    if (/^\[(plugins|diagnostic|info|warn|error|tools|agent\/|context-diag|commands|reload|acp-client)\]/i.test(l)) return true;
+    // Registered plugin ...
+    if (/^Registered plugin\b/i.test(l)) return true;
+    return false;
+  });
 }
 
 export function looksLikeAwarenessInitCompatibilityError(text: string): boolean {

@@ -36,6 +36,7 @@ import {
   extractFirstHttpUrl,
   hasMeaningfulAgentText,
   looksLikeAwarenessInitCompatibilityError,
+  isGatewayDiagnosticNoise,
 } from './chat-detection';
 import {
   parseMcpTextPayload,
@@ -966,10 +967,21 @@ ${message}`;
 
           if (textContent && textContent.length > fullResponseText.length) {
             const newChunk = textContent.slice(fullResponseText.length);
-            fullResponseText = textContent;
-            sawAssistantTextDelta = true;
-            send('chat:stream', newChunk);
-            send('chat:status', { type: 'generating' });
+            // Filter out Gateway verbose diagnostic lines (e.g. plugin slot warnings)
+            // that leak into the assistant text stream. Only suppress the chunk if
+            // the *entire accumulated text so far* is diagnostic noise — once real
+            // LLM output arrives, the diagnostic prefix is already in fullResponseText
+            // and won't be re-sent as a new chunk.
+            if (isGatewayDiagnosticNoise(textContent)) {
+              // Track the text but don't stream it to the user yet.
+              // If real content arrives later, it will be streamed as a delta.
+              fullResponseText = textContent;
+            } else {
+              fullResponseText = textContent;
+              sawAssistantTextDelta = true;
+              send('chat:stream', newChunk);
+              send('chat:status', { type: 'generating' });
+            }
           }
 
           if (Array.isArray(msg.content)) processAssistantContentBlocks(msg.content);
@@ -1087,6 +1099,16 @@ ${message}`;
       if (agentToolEventHandler) ws.removeListener('event:agent:tool', agentToolEventHandler);
 
       let finalText = fullResponseText.trim() || finalAssistantText || '';
+
+      // Strip Gateway diagnostic noise from the final response. If the entire
+      // response is just plugin warnings (e.g. "plugins.entries.openclaw-memory:
+      // plugin disabled ..."), treat it as empty so the CLI fallback kicks in
+      // and the user gets an actual LLM reply instead of a confusing diagnostic.
+      if (finalText && isGatewayDiagnosticNoise(finalText)) {
+        console.warn('[chat] Stripping Gateway diagnostic noise from final response:', finalText.slice(0, 200));
+        finalText = '';
+      }
+
       let shouldFlagUnverifiedLocalFileOperation = looksLikeFilesystemMutationRequest(message)
         && looksLikeSuccessfulFilesystemMutationResponse(finalText)
         && !pendingApprovalRequestId
