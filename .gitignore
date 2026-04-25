@@ -17,6 +17,7 @@ Thumbs.db
 *.tgz
 package-lock.json
 .awareness/
+.clawhub/
 packages/desktop/.awareness/
 packages/desktop/.clawhub/
 packages/desktop/skills/
