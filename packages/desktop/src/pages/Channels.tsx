@@ -212,6 +212,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
   const [pairingError, setPairingError] = useState<string | null>(null);
   const [pairingNotice, setPairingNotice] = useState<string | null>(null);
   const [asciiQR, setAsciiQR] = useState<string | null>(null);
+  const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [channelProgress, setChannelProgress] = useState<string | null>(null);
   const [configuredChannels, setConfiguredChannels] = useState<Set<string>>(new Set());
   const [disconnectedChannels, setDisconnectedChannels] = useState<Set<string>>(new Set());
@@ -349,10 +350,20 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
       setAsciiQR(art);
       setChannelProgress(null);
     });
+    (window.electronAPI as any).onChannelQrUrl?.((url: string) => {
+      setQrUrl(url);
+    });
     (window.electronAPI as any).onChannelStatus?.((statusKey: string) => {
       setChannelProgress(statusKey);
       // QR scan done — backend is now binding/confirming; clear QR so status messages show
-      if (statusKey.includes('binding') || statusKey.includes('confirming') || statusKey.includes('awaitingConfirmation')) {
+      if (
+        statusKey.includes('binding')
+        || statusKey.includes('confirming')
+        || statusKey.includes('awaitingConfirmation')
+        || statusKey.includes('qrReady')
+        || statusKey.includes('qrRefreshing')
+        || statusKey.includes('qrExpiredFinal')
+      ) {
         setAsciiQR(null);
       }
     });
@@ -411,7 +422,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
     setPairingApproving(false);
     setPairingError(null);
     setPairingNotice(null);
-    setAsciiQR(null); setChannelProgress(null);
+    setAsciiQR(null); setQrUrl(null); setChannelProgress(null);
     setTestStatus('idle'); setTestError(null); setTestNotice(null); setLastError(null);
 
     // Pre-fill from existing config
@@ -1024,7 +1035,14 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                             <div className="flex justify-center bg-white rounded-xl p-3">
                               <pre className="text-black text-[10px] leading-none font-mono whitespace-pre select-text">{asciiQR}</pre>
                             </div>
-                            <p className="text-xs text-slate-500 text-center">{t('channels.qr.waiting', 'Waiting for scan...')}</p>
+                            <p className="text-xs text-slate-500 text-center">
+                              {channelProgress ? translateStatus(channelProgress) : t('channels.qr.waiting', 'Waiting for scan...')}
+                            </p>
+                            {qrUrl && activeWizard === 'wechat' && (
+                              <p className="text-[11px] text-slate-600 text-center max-w-sm mx-auto">
+                                {t('channels.qr.latestHint', 'This panel always shows the latest QR code. If it refreshes, scan the newest one only.')}
+                              </p>
+                            )}
                           </div>
                         ) : (
                           <div className="text-center space-y-4">

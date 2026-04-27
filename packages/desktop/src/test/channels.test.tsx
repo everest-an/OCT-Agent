@@ -415,4 +415,85 @@ describe('Channels Page', () => {
 
     expect(api.channelPairingApprove).toHaveBeenCalledWith('feishu', '5MQFD7PH');
   });
+
+  it('shows the latest-QR hint when WeChat QR url events arrive', async () => {
+    const api = window.electronAPI as any;
+    let qrListener: ((art: string) => void) | null = null;
+    let qrUrlListener: ((url: string) => void) | null = null;
+    api.channelSetup = vi.fn().mockImplementation(() => new Promise(() => {}));
+
+    api.onChannelQR = vi.fn((callback: (art: string) => void) => {
+      qrListener = callback;
+    });
+    api.onChannelQrUrl = vi.fn((callback: (url: string) => void) => {
+      qrUrlListener = callback;
+    });
+
+    await act(async () => { render(<Channels />); });
+
+    const wechatBtn = screen.getByText('WeChat').closest('button');
+    expect(wechatBtn).toBeTruthy();
+    await act(async () => { fireEvent.click(wechatBtn as HTMLButtonElement); });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Connect$/i }));
+    });
+
+    await act(async () => {
+      qrUrlListener?.('https://liteapp.weixin.qq.com/q/fresh-code');
+      qrListener?.('██\n██');
+    });
+
+    expect(screen.getByText(/always shows the latest QR code/i)).toBeInTheDocument();
+  });
+
+  it('clears the previous WeChat QR on refresh status and shows the replacement QR when it arrives', async () => {
+    const api = window.electronAPI as any;
+    let qrListener: ((art: string) => void) | null = null;
+    let qrUrlListener: ((url: string) => void) | null = null;
+    let statusListener: ((status: string) => void) | null = null;
+    api.channelSetup = vi.fn().mockImplementation(() => new Promise(() => {}));
+
+    api.onChannelQR = vi.fn((callback: (art: string) => void) => {
+      qrListener = callback;
+    });
+    api.onChannelQrUrl = vi.fn((callback: (url: string) => void) => {
+      qrUrlListener = callback;
+    });
+    api.onChannelStatus = vi.fn((callback: (status: string) => void) => {
+      statusListener = callback;
+    });
+
+    await act(async () => { render(<Channels />); });
+
+    const wechatBtn = screen.getByText('WeChat').closest('button');
+    expect(wechatBtn).toBeTruthy();
+    await act(async () => { fireEvent.click(wechatBtn as HTMLButtonElement); });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Connect$/i }));
+    });
+
+    await act(async () => {
+      qrUrlListener?.('https://liteapp.weixin.qq.com/q/old-code');
+      qrListener?.('OLD-QR');
+    });
+
+    expect(screen.getByText('OLD-QR')).toBeInTheDocument();
+
+    await act(async () => {
+      statusListener?.('channels.status.qrRefreshing::1');
+    });
+
+    expect(screen.queryByText('OLD-QR')).not.toBeInTheDocument();
+    expect(screen.getByText(/refreshing a new one/i)).toBeInTheDocument();
+
+    await act(async () => {
+      qrUrlListener?.('https://liteapp.weixin.qq.com/q/new-code');
+      qrListener?.('NEW-QR');
+    });
+
+    expect(screen.getByText('NEW-QR')).toBeInTheDocument();
+    expect(screen.queryByText('OLD-QR')).not.toBeInTheDocument();
+  });
 });

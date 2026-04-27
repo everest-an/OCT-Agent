@@ -292,6 +292,9 @@ export interface ElectronAPI {
   // Active project workspace (shared between desktop chat and channel inbound hook)
   workspaceGetActive?: () => Promise<{ success: boolean; path?: string | null; error?: string }>;
   workspaceSetActive?: (path: string | null) => Promise<{ success: boolean; error?: string }>;
+  onChannelQR?: (callback: (art: string) => void) => void;
+  onChannelQrUrl?: (callback: (url: string) => void) => void;
+  onChannelStatus?: (callback: (status: string) => void) => void;
   // Channel-level inbound agent routing (simple default "which agent answers this channel")
   channelGetInboundAgent?: (channelId: string) => Promise<{ success: boolean; agentId?: string | null; error?: string }>;
   channelSetInboundAgent?: (channelId: string, agentId: string) => Promise<{ success: boolean; error?: string }>;

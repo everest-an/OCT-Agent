@@ -129,6 +129,9 @@ Object.defineProperty(window, 'electronAPI', {
     channelDisconnect: () => Promise.resolve({ success: true }),
     channelListConfigured: () => Promise.resolve({ success: true, configured: ['telegram'] }),
     channelListSupported: () => Promise.resolve({ success: false, channels: [] }),
+    onChannelQR: () => {},
+    onChannelQrUrl: () => {},
+    onChannelStatus: () => {},
     channelGetRegistry: () => Promise.resolve({ channels: [
       { id: 'local', openclawId: 'local', label: 'Local Chat', color: '#6366F1', iconType: 'svg', connectionType: 'one-click', configFields: [], saveStrategy: 'cli', order: 0, source: 'builtin' },
       { id: 'wechat', openclawId: 'openclaw-weixin', label: 'WeChat', color: '#07C160', iconType: 'svg', connectionType: 'one-click', configFields: [], saveStrategy: 'json-direct', setupFlow: 'qr-login', order: 4, source: 'builtin' },

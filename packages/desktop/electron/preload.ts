@@ -92,6 +92,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onChannelQR: (callback: (art: string) => void) => {
     ipcRenderer.on('channel:qr-art', (_e: any, art: string) => callback(art));
   },
+  onChannelQrUrl: (callback: (url: string) => void) => {
+    ipcRenderer.on('channel:qr-url', (_e: any, url: string) => callback(url));
+  },
   onChannelStatus: (callback: (status: string) => void) => {
     ipcRenderer.on('channel:status', (_e: any, status: string) => callback(status));
   },
