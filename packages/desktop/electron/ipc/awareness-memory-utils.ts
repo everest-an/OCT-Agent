@@ -1,6 +1,8 @@
 // Extracted from register-chat-handlers.ts — Awareness memory bootstrap utilities.
 // No logic changes, only moved.
 
+import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { readJsonFileWithBom } from '../json-file';
 import { buildMemoryInitArgs } from '../memory-protocol';
@@ -22,6 +24,80 @@ export function parseMcpTextPayload(mcpResponse: any) {
   } catch {
     return {};
   }
+}
+
+// ----------------------------------------------------------------------------
+// Pending extraction relay
+//
+// The local Awareness daemon emits `_extraction_instruction` on every
+// `awareness_record(action="remember")` response when the caller didn't pass
+// pre-extracted insights. The instruction is a plain-text prompt asking the
+// host LLM to produce a JSON object of knowledge_cards / risks / action_items
+// and submit it back via `awareness_record(action="submit_insights", insights={...})`.
+//
+// Desktop's chat path is fire-and-forget for memory saves, so we cannot block
+// the current turn waiting for an extra LLM round-trip. Instead we stash the
+// instruction on disk and re-inject it into the *next* turn's bootstrap
+// section so the host LLM acts on it during normal conversation. If the user
+// never starts another turn the instruction is dropped on TTL (30 min) — the
+// cloud backend's fallback loop will still re-emit the request later.
+//
+// File: ~/.awareness-claw/pending-extraction.json (single-slot — newest wins).
+// ----------------------------------------------------------------------------
+const PENDING_EXTRACTION_TTL_MS = 30 * 60 * 1000;
+const PENDING_EXTRACTION_MAX_CHARS = 6000;
+
+function pendingExtractionFile(homeDir: string): string {
+  return path.join(homeDir, '.awareness-claw', 'pending-extraction.json');
+}
+
+interface PendingExtraction {
+  instruction: string;
+  recorded_at: number;
+  memory_id?: string;
+  session_id?: string;
+}
+
+export function writePendingExtraction(homeDir: string, payload: PendingExtraction): void {
+  try {
+    const file = pendingExtractionFile(homeDir);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(payload), { encoding: 'utf-8', mode: 0o600 });
+  } catch (err) {
+    console.warn('[awareness] writePendingExtraction failed:', (err as Error).message);
+  }
+}
+
+export function consumePendingExtraction(homeDir: string): PendingExtraction | null {
+  try {
+    const file = pendingExtractionFile(homeDir);
+    if (!fs.existsSync(file)) return null;
+    const raw = fs.readFileSync(file, 'utf-8');
+    fs.unlinkSync(file); // one-shot — delete on read so we don't loop forever
+    const parsed = JSON.parse(raw) as PendingExtraction;
+    if (!parsed?.instruction) return null;
+    if (typeof parsed.recorded_at === 'number' && Date.now() - parsed.recorded_at > PENDING_EXTRACTION_TTL_MS) {
+      return null; // stale — drop
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function buildPendingExtractionSection(pending: PendingExtraction): string {
+  const trimmed = truncateDetail(pending.instruction, PENDING_EXTRACTION_MAX_CHARS);
+  return [
+    '[Pending insight extraction from previous turn]',
+    'The Awareness daemon could not extract structured insights from the previous',
+    'turn because no host LLM was available at write-time. Before responding to',
+    'the user this turn, follow the instruction below to produce a JSON object',
+    'with knowledge_cards / action_items / risks / skills, then submit it via:',
+    '  awareness_record(action="submit_insights", insights=<your_json_object>)',
+    'Then continue with the user\'s actual request.',
+    '',
+    trimmed,
+  ].join('\n');
 }
 
 export function buildAwarenessInitSkipInstruction(errorDetail?: string): string {
@@ -122,6 +198,7 @@ export function shouldRetryAfterAwarenessInitFailure(originalRequest: string, fi
 export async function tryBuildDesktopMemoryBootstrapSection(
   callMcpStrict: (toolName: string, args: Record<string, any>, timeoutMs?: number) => Promise<any>,
   userMessage: string,
+  homeDir: string = os.homedir(),
 ): Promise<string> {
   const mcpResponse = await callMcpStrict(
     'awareness_init',
@@ -129,7 +206,13 @@ export async function tryBuildDesktopMemoryBootstrapSection(
     MCP_MEMORY_BOOTSTRAP_TIMEOUT_MS,
   );
   const memoryPayload = parseMcpTextPayload(mcpResponse);
-  return buildDesktopMemoryBootstrapSection(memoryPayload, chatState.awarenessInitCompatibilityMode ? chatState.lastAwarenessInitCompatibilityError : undefined);
+  const baseSection = buildDesktopMemoryBootstrapSection(memoryPayload, chatState.awarenessInitCompatibilityMode ? chatState.lastAwarenessInitCompatibilityError : undefined);
+
+  // Re-inject any pending extraction instruction stashed by the previous
+  // turn's fire-and-forget memory save (see fireAndForgetMemorySave below).
+  const pending = consumePendingExtraction(homeDir);
+  if (!pending) return baseSection;
+  return [baseSection, buildPendingExtractionSection(pending)].filter(Boolean).join('\n\n');
 }
 
 export function getMemoryCapturePolicy(homeDir: string): MemoryCapturePolicy {
@@ -201,6 +284,22 @@ export function fireAndForgetMemorySave(params: {
     if (parsed?.error) {
       throw new Error(parsed.error);
     }
+
+    // Stash any extraction instruction the daemon emitted so the next
+    // chat turn's bootstrap section can ask the host LLM to act on it.
+    // This closes the historical gap where Desktop captured events but
+    // never produced knowledge_cards because the LLM never saw the
+    // extraction prompt.
+    const instruction = parsed?._extraction_instruction || parsed?.extraction_request;
+    if (typeof instruction === 'string' && instruction.trim().length > 0) {
+      writePendingExtraction(homeDir, {
+        instruction: instruction,
+        recorded_at: Date.now(),
+        memory_id: parsed?.memory_id,
+        session_id: parsed?.session_id,
+      });
+    }
+
     send('chat:status', {
       type: 'tool_update',
       toolId: memoryToolId,

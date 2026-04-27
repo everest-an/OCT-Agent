@@ -1,6 +1,6 @@
 {
   "name": "awareness-claw-desktop",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "description": "AwarenessClaw Desktop — Visual AI agent manager with persistent memory",
   "author": "edwin-hao-ai",
   "main": "dist-electron/main.js",
@@ -69,7 +69,14 @@
       "node_modules/npm/**/*"
     ],
     "extraResources": [
-      { "from": "workflows", "to": "workflows", "filter": ["*.yaml", "*.yml"] }
+      {
+        "from": "workflows",
+        "to": "workflows",
+        "filter": [
+          "*.yaml",
+          "*.yml"
+        ]
+      }
     ],
     "mac": {
       "target": [
