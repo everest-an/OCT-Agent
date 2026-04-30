@@ -1,10 +1,13 @@
 <p align="center">
-      <img src="assets/oct-agent-pixel.svg" alt="OCT AGENT" width="1145" style="max-width: 100%; height: auto;" />
+      <img src="assets/github banner.png" alt="OCT AGENT" style="max-width: 100%; height: auto;" />
 </p>
 
 # OCT Agent 🐙
 
-[Documentation](https://awareness.market) [Discord](https://discord.gg/awareness) [License: MIT](LICENSE) [Built by Awareness](https://awareness.market)
+[![Documentation](https://img.shields.io/badge/Documentation-Awareness-3B82F6?style=for-the-badge&logo=readthedocs&logoColor=white)](https://awareness.market)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/awareness)
+[![License: MIT](https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](LICENSE)
+[![Built by Awareness](https://img.shields.io/badge/Built%20by-Awareness-A855F7?style=for-the-badge&logo=sparkles&logoColor=white)](https://awareness.market)
 
 > The AI agent that never forgets — and works with all its arms at once. Built by [Awareness](https://awareness.market).
 

@@ -19,7 +19,7 @@ import { ChatTracePanel, type ChatTraceEvent } from '../components/dashboard/Cha
 import { DashboardHeader } from '../components/dashboard/DashboardHeader';
 import { FilePathChip, looksLikeAbsolutePath } from '../components/dashboard/FilePathChip';
 import { SessionSidebar } from '../components/dashboard/SessionSidebar';
-import logoUrl from '../assets/logo.png';
+import logoUrl from '../assets/logo.svg';
 
 // --- Types ---
 

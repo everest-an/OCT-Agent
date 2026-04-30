@@ -25,7 +25,7 @@ import ProviderIcon from '../components/ProviderIcon';
 import WorkspaceStep from '../components/setup/WorkspaceStep';
 import CloudAuthStep from '../components/setup/CloudAuthStep';
 import { FolderOpen } from 'lucide-react';
-import logoUrl from '../assets/logo.png';
+import logoUrl from '../assets/logo.svg';
 
 interface SetupProps {
   onComplete: () => void;

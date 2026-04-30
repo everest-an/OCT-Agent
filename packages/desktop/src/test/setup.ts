@@ -2,7 +2,6 @@ import '@testing-library/jest-dom';
 import { vi } from 'vitest';
 
 // Mock image imports (vitest doesn't handle static assets)
-vi.mock('../assets/logo.png', () => ({ default: 'logo.png' }));
 vi.mock('../assets/logo.svg', () => ({ default: 'logo.svg' }));
 
 // Mock DOM APIs not available in jsdom

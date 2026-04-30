@@ -6,7 +6,7 @@
 import { useState } from 'react';
 import { ChevronRight, ChevronLeft, Sparkles, User, Bot, Zap, Feather, Briefcase, MessageSquare, Loader2 } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
-import logoUrl from '../assets/logo.png';
+import logoUrl from '../assets/logo.svg';
 
 type PersonalityStyle = 'friendly' | 'professional' | 'minimal' | 'creative';
 

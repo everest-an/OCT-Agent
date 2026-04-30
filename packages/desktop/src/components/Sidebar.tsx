@@ -1,5 +1,5 @@
 import { MessageCircle, Brain, Radio, Puzzle, Settings, Clock, Bot, Cpu } from 'lucide-react';
-import logoUrl from '../assets/logo.png';
+import logoUrl from '../assets/logo.svg';
 import { useI18n } from '../lib/i18n';
 
 export type Page = 'chat' | 'memory' | 'channels' | 'models' | 'skills' | 'automation' | 'agents' | 'settings';
