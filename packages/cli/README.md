@@ -48,7 +48,7 @@ Download the full **AwarenessClaw Desktop** app (Electron, macOS / Windows / Lin
 
 ## License
 
-MIT — see [LICENSE](../../LICENSE) in the repository root.
+Apache 2.0 — see [LICENSE](../../LICENSE) in the repository root.
 
 ## Links
 

@@ -6,7 +6,7 @@
 
 [![Documentation](https://img.shields.io/badge/Documentation-Awareness-3B82F6?style=for-the-badge&logo=readthedocs&logoColor=white)](https://awareness.market)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/awareness)
-[![License: MIT](https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-22C55E?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](LICENSE)
 [![Built by Awareness](https://img.shields.io/badge/Built%20by-Awareness-A855F7?style=for-the-badge&logo=sparkles&logoColor=white)](https://awareness.market)
 
 > The AI agent that never forgets — and works with all its arms at once. Built by [Awareness](https://awareness.market).
@@ -182,4 +182,4 @@ cd packages/desktop && npm run dev
 
 ## License
 
-MIT — Built by [Awareness](https://awareness.market).
+Apache 2.0 — Built by [Awareness](https://awareness.market).
