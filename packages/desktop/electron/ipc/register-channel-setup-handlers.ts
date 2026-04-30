@@ -156,7 +156,7 @@ export function registerChannelSetupHandlers(deps: {
     }
     if (/PluginLoadFailureError|plugin load failed|Cannot find module/i.test(message)) {
       return `${channelLabel} setup was blocked because another enabled plugin failed to load. ` +
-        'AwarenessClaw will retry with isolated channel loading automatically. ' +
+        'OCT will retry with isolated channel loading automatically. ' +
         'If it still fails, disable unrelated channels/plugins in Settings and retry.';
     }
     return message.slice(0, 300) || `Channel setup failed for "${openclawId}".`;

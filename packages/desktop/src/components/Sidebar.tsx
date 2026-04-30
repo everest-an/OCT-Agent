@@ -27,7 +27,7 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
     <aside className="w-20 bg-slate-950 border-r border-slate-800 flex flex-col items-center pt-12 pb-4 gap-1">
       {/* Logo */}
       <div className="mb-6">
-        <img src={logoUrl} alt="AwarenessClaw" className="w-8 h-8 rounded-lg" />
+        <img src={logoUrl} alt="OCT" className="w-8 h-8 rounded-lg" />
       </div>
 
       {/* Nav items */}

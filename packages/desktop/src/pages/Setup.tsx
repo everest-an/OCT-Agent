@@ -389,7 +389,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
           {/* ===== WELCOME ===== */}
           {step === 'welcome' && (
             <div className="text-center space-y-8">
-              <img src={logoUrl} alt="AwarenessClaw" className="w-20 h-20 mx-auto animate-pulse-soft" />
+              <img src={logoUrl} alt="OCT" className="w-20 h-20 mx-auto animate-pulse-soft" />
               <div>
                 <h1 className="text-3xl font-bold mb-3">
                   {t('setup.welcome.title')}

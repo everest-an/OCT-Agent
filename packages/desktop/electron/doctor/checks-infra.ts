@@ -282,7 +282,7 @@ export async function fixGatewayStart(ctx: Ctx): Promise<FixResult> {
             return {
               id: 'gateway-running',
               success: false,
-              message: 'Windows blocked Gateway service installation and the OpenClaw command is not ready yet. Reopen AwarenessClaw as administrator once, then run Doctor again.',
+              message: 'Windows blocked Gateway service installation and the OpenClaw command is not ready yet. Reopen OCT as administrator once, then run Doctor again.',
             };
           }
         }

@@ -64,7 +64,7 @@ export async function checkOpenclawCommandHealth(ctx: Ctx): Promise<CheckResult>
     fixable: 'auto',
     fixDescription: ctx.deps.platform === 'win32'
       ? 'Refresh the Windows OpenClaw command shims'
-      : 'Install and pin the AwarenessClaw managed OpenClaw runtime',
+      : 'Install and pin the OCT managed OpenClaw runtime',
     detail: ctx.openclawCandidates.join('; '),
   };
 }

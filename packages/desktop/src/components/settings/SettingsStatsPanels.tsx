@@ -76,7 +76,7 @@ export function SettingsVersionPanel({
       <h3 className="settings-section-title mb-3">{t('settings.versions')}</h3>
       <div className="grid grid-cols-2 gap-2 text-xs">
         <div className="flex justify-between p-2 settings-glass-soft">
-          <span className="text-slate-400">{t('app.name', 'AwarenessClaw')}</span>
+          <span className="text-slate-400">{t('app.name', 'OCT')}</span>
           <span className="text-slate-200 font-mono">v{packageVersion}</span>
         </div>
         <div className="flex justify-between p-2 settings-glass-soft">

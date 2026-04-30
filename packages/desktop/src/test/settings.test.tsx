@@ -95,7 +95,7 @@ describe('Settings Page', () => {
 
   it('renders system section', async () => {
     await act(async () => { render(<Settings />); });
-    expect(screen.getByText('AwarenessClaw')).toBeInTheDocument();
+    expect(screen.getByText('OCT')).toBeInTheDocument();
   });
 
   // --- Token Optimization tests ---

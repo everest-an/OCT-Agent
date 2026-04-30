@@ -399,7 +399,7 @@ describe('Channels Page', () => {
 
     await waitFor(() => {
       expect(screen.getAllByText(/copy the pairing code from the card and approve it below/i).length).toBeGreaterThan(0);
-      expect(screen.getByText(/AwarenessClaw will approve it for you/i)).toBeInTheDocument();
+      expect(screen.getByText(/OCT will approve it for you/i)).toBeInTheDocument();
     });
 
     const pairingInput = screen.getByPlaceholderText(/Paste code or full approve line/i) as HTMLInputElement;

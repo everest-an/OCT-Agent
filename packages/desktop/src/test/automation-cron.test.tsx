@@ -241,10 +241,10 @@ describe('Automation cron visual selector', () => {
         jobs: [
           {
             id: 'heartbeat-1',
-            name: 'AwarenessClaw Heartbeat',
+            name: 'OCT Heartbeat',
             enabled: true,
             schedule: { kind: 'cron', expr: '*/30 * * * *' },
-            payload: { kind: 'systemEvent', text: 'AwarenessClaw heartbeat check' },
+            payload: { kind: 'systemEvent', text: 'OCT heartbeat check' },
             sessionTarget: 'main',
           },
           {
@@ -265,7 +265,7 @@ describe('Automation cron visual selector', () => {
       expect(screen.getByText('Daily brief')).toBeInTheDocument();
     });
 
-    expect(screen.queryByText('AwarenessClaw Heartbeat')).not.toBeInTheDocument();
+    expect(screen.queryByText('OCT Heartbeat')).not.toBeInTheDocument();
 
     (window as any).electronAPI = origApi;
   });

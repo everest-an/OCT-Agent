@@ -16,6 +16,6 @@ describe('Settings Connection Test', () => {
 
   it('renders version info', async () => {
     await act(async () => { render(<Settings />); });
-    expect(screen.getByText('AwarenessClaw')).toBeInTheDocument();
+    expect(screen.getByText('OCT')).toBeInTheDocument();
   });
 });

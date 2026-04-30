@@ -20,7 +20,7 @@ export function ensureInternalHook(homedir: string) {
     const hookContent = `#!/usr/bin/env node
 /**
  * Awareness Memory backup hook — captures message:sent events as fallback.
- * Deployed by AwarenessClaw installer. Source: openclaw-hook
+ * Deployed by OCT installer. Source: openclaw-hook
  * HOOK_VERSION=${HOOK_VERSION}
  *
  * OpenClaw Internal Hook format: receives JSON events on stdin (one per line).

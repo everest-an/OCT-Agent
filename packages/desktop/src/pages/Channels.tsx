@@ -586,7 +586,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
       : activeWizard === 'feishu'
         ? t(
             'channels.pairing.help.feishu',
-            'If Feishu shows an "access not configured" card, paste the 8-character pairing code or the full "openclaw pairing approve ..." line here. AwarenessClaw will approve it for you.',
+            'If Feishu shows an "access not configured" card, paste the 8-character pairing code or the full "openclaw pairing approve ..." line here. OCT will approve it for you.',
           )
         : t('channels.pairing.help', 'Received a pairing prompt? Paste the 8-character code or the full "openclaw pairing approve ..." line here.');
 

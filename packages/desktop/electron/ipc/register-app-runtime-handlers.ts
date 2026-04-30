@@ -172,14 +172,14 @@ export function registerAppRuntimeHandlers(deps: {
   ipcMain.handle('app:check-updates', async () => {
     const updates: any[] = [];
 
-    // Desktop app (AwarenessClaw itself) update check — polls backend for latest version.
+    // Desktop app (OCT itself) update check — polls backend for latest version.
     try {
       const currentDesktop = app.getVersion();
       const latest = await fetchLatestDesktopVersion();
       if (latest && currentDesktop && compareSemver(latest.latestVersion, currentDesktop) > 0) {
         updates.push({
           component: 'desktop',
-          label: 'AwarenessClaw Desktop',
+          label: 'OCT Desktop',
           currentVersion: currentDesktop,
           latestVersion: latest.latestVersion,
           changelog: latest.releaseNotes || undefined,
@@ -636,7 +636,7 @@ export function registerAppRuntimeHandlers(deps: {
       if (msg.includes('EBUSY') || msg.includes('errno -4082')) {
         return {
           success: false,
-          error: 'Upgrade blocked: Windows file lock on the daemon cache.\nPlease:\n  1. Right-click the AwarenessClaw tray icon → Quit\n  2. Wait 5 seconds for the background daemon to release files\n  3. Re-open AwarenessClaw and click Upgrade again\nOr run: taskkill /F /T /IM node.exe (warning: kills all Node processes)',
+          error: 'Upgrade blocked: Windows file lock on the daemon cache.\nPlease:\n  1. Right-click the OCT tray icon → Quit\n  2. Wait 5 seconds for the background daemon to release files\n  3. Re-open OCT and click Upgrade again\nOr run: taskkill /F /T /IM node.exe (warning: kills all Node processes)',
         };
       }
       return { success: false, error: msg.slice(0, 300) };

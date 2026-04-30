@@ -39,7 +39,7 @@ describe('memory-client applyProjectDirHeader', () => {
 
   it('Windows CJK username path → B64 header', () => {
     const headers: Record<string, string> = {};
-    const dir = 'C:\\Users\\张三\\Documents\\AwarenessClaw';
+    const dir = 'C:\\Users\\张三\\Documents\\OCT';
     applyProjectDirHeader(headers, dir);
     expect(headers['X-Awareness-Project-Dir-B64']).toBe(Buffer.from(dir, 'utf8').toString('base64'));
   });

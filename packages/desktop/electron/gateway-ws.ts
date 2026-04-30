@@ -220,7 +220,7 @@ export class GatewayClient extends EventEmitter {
               version: '1.0.0',
               platform: process.platform,
               mode: GatewayClient.CLIENT_MODE,
-              displayName: 'AwarenessClaw Desktop',
+              displayName: 'OCT Desktop',
             },
             role: GatewayClient.ROLE,
             scopes: this.requestedScopes,

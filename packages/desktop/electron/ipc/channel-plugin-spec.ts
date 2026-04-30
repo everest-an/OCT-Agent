@@ -27,7 +27,7 @@ function findOpenClawPackageDirQuick(): string | null {
   const home = os.homedir();
   const candidates: string[] = [];
 
-  // Managed runtime (AwarenessClaw bundled install)
+  // Managed runtime (OCT bundled install)
   candidates.push(
     path.join(home, '.awareness-claw', 'openclaw-runtime', 'node_modules', 'openclaw'),
     path.join(home, '.awareness-claw', 'openclaw-runtime', 'lib', 'node_modules', 'openclaw'),

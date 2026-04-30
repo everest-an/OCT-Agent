@@ -897,7 +897,7 @@ export default function Models() {
                     )}
                     {hasCrossVendorDiscoveries && (
                       <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
-                        {t('models.discoverCrossVendor', 'This endpoint also returned models from other vendors. They stay visible for manual use, but AwarenessClaw will not switch to them automatically.')}
+                        {t('models.discoverCrossVendor', 'This endpoint also returned models from other vendors. They stay visible for manual use, but OCT will not switch to them automatically.')}
                       </div>
                     )}
                     {selectionNeedsReview && (

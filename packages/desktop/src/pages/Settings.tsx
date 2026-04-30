@@ -838,7 +838,7 @@ export default function Settings() {
               window.location.reload();
             } else if (result.error !== 'Cancelled') {
               const msg = result.error === 'Invalid config file format'
-                ? t('settings.import.formatError', 'Invalid config file. Please use a file exported from AwarenessClaw.')
+                ? t('settings.import.formatError', 'Invalid config file. Please use a file exported from OCT.')
                 : `${t('settings.import.failed')} ${result.error}`;
               alert(msg);
             }
@@ -869,7 +869,7 @@ export default function Settings() {
           packageVersion={pkg.version}
           versionInfo={versionInfo}
           t={t}
-          onOpenGithub={() => { void openExternal('https://github.com/edwin-hao-ai/AwarenessClaw', 'settings-github'); }}
+          onOpenGithub={() => { void openExternal('https://github.com/edwin-hao-ai/OCT', 'settings-github'); }}
           githubOpening={isOpening('settings-github')}
         />
       </div>

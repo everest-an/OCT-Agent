@@ -1,7 +1,7 @@
 {
   "name": "awareness-claw-desktop",
   "version": "0.4.7",
-  "description": "AwarenessClaw Desktop — Visual AI agent manager with persistent memory",
+  "description": "OCT Desktop — Visual AI agent manager with persistent memory",
   "author": "edwin-hao-ai",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -54,7 +54,7 @@
   },
   "build": {
     "appId": "market.awareness.claw",
-    "productName": "AwarenessClaw",
+    "productName": "OCT",
     "directories": {
       "output": "release"
     },
@@ -133,7 +133,7 @@
       "oneClick": false,
       "perMachine": false,
       "createDesktopShortcut": "always",
-      "shortcutName": "AwarenessClaw",
+      "shortcutName": "OCT",
       "allowToChangeInstallationDirectory": false,
       "include": "scripts/installer.nsh"
     },

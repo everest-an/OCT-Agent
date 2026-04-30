@@ -63,7 +63,7 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
     setError(null);
     const api = (window as any).electronAPI;
     if (!api?.marketplaceList) {
-      setError('桌面应用未加载 marketplace IPC,请重启 AwarenessClaw');
+      setError('桌面应用未加载 marketplace IPC,请重启 OCT');
       setLoading(false);
       return;
     }
@@ -204,7 +204,7 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
           <Sparkles className="h-5 w-5 text-violet-500" />
           <div>
             <h1 className="text-base font-semibold">Agent 集市</h1>
-            <p className="text-xs text-slate-500">浏览精选 agent,一键安装到你的 AwarenessClaw</p>
+            <p className="text-xs text-slate-500">浏览精选 agent,一键安装到你的 OCT</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -460,14 +460,14 @@ function DetailDrawer({
           >
             {installed ? (
               <span className="flex items-center justify-center gap-1.5">
-                <Check className="h-4 w-4" /> 已安装到 AwarenessClaw
+                <Check className="h-4 w-4" /> 已安装到 OCT
               </span>
             ) : installing ? (
               <span className="flex items-center justify-center gap-1.5">
                 <Loader2 className="h-4 w-4 animate-spin" /> 安装中...
               </span>
             ) : (
-              '+ 安装到 AwarenessClaw'
+              '+ 安装到 OCT'
             )}
           </button>
         </div>

@@ -1,5 +1,5 @@
 /**
- * App Doctor — automatic diagnostics and repair for AwarenessClaw.
+ * App Doctor — automatic diagnostics and repair for OCT.
  *
  * Checks: node, openclaw, version conflicts, gateway, plugin, daemon, bindings, permissions.
  * Each check returns a user-friendly result; fixable items can be auto-repaired.

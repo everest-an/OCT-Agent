@@ -63,7 +63,7 @@ export function DashboardHeader({
         <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="1.5" rx="0.75" fill="currentColor"/><rect x="2" y="7.25" width="12" height="1.5" rx="0.75" fill="currentColor"/><rect x="2" y="11.5" width="12" height="1.5" rx="0.75" fill="currentColor"/></svg>
       </button>
 
-      <img src={logoUrl} alt="AwarenessClaw" className="w-5 h-5 rounded" />
+      <img src={logoUrl} alt="OCT" className="w-5 h-5 rounded" />
 
       <button
         onClick={onSelectProjectRoot}

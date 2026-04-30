@@ -106,7 +106,7 @@ export function SettingsHealthPanel({
     )}>
       <div className="p-4 space-y-2">
         <div className="flex items-center justify-between mb-3">
-          <p className="text-xs text-slate-500">{t('settings.health.desc', 'Automatic diagnostics for OpenClaw and AwarenessClaw')}</p>
+          <p className="text-xs text-slate-500">{t('settings.health.desc', 'Automatic diagnostics for OpenClaw and OCT')}</p>
           <button
             onClick={onRunDoctor}
             disabled={doctorLoading}

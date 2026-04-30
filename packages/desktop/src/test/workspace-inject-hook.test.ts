@@ -10,7 +10,7 @@ import {
 } from '../../electron/install-workspace-hook';
 
 /**
- * Deep tests for the AwarenessClaw active-workspace injection flow. These cover three layers:
+ * Deep tests for the OCT active-workspace injection flow. These cover three layers:
  *
  *   1. Pure helpers: readActiveWorkspace / writeActiveWorkspace (state file I/O)
  *   2. Installer: installWorkspaceInjectHook (deploys script + registers in openclaw.json)

@@ -206,7 +206,7 @@ function createWindow() {
     void dialog.showMessageBox(mainWindow, {
       type: 'warning',
       title: 'Upgrade In Progress',
-      message: 'AwarenessClaw is upgrading components right now.',
+      message: 'OCT is upgrading components right now.',
       detail: 'Please keep this window open until the upgrade finishes. Leaving now can interrupt the upgrade and corrupt runtime files.',
       buttons: ['OK'],
       defaultId: 0,
@@ -976,7 +976,7 @@ async function startGatewayInUserSession(send?: (ch: string, data: any) => void)
 
   return {
     ok: false,
-    error: 'AwarenessClaw could not start the local Gateway automatically. Please check Settings → Gateway and try again.',
+    error: 'OCT could not start the local Gateway automatically. Please check Settings → Gateway and try again.',
   };
 }
 
@@ -1232,8 +1232,8 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
         return {
           ok: false,
           error: isGatewayPermissionError(message)
-            ? 'AwarenessClaw could not install the Windows Gateway service because administrator permission was denied, and the temporary Gateway fallback also failed. Please reopen the app as administrator once, then try again.'
-            : 'AwarenessClaw could not install the Windows Gateway service automatically, and the temporary Gateway fallback also failed. Please reopen the app once and try again, or use Settings → Gateway for manual repair.',
+            ? 'OCT could not install the Windows Gateway service because administrator permission was denied, and the temporary Gateway fallback also failed. Please reopen the app as administrator once, then try again.'
+            : 'OCT could not install the Windows Gateway service automatically, and the temporary Gateway fallback also failed. Please reopen the app once and try again, or use Settings → Gateway for manual repair.',
         };
       }
       return {
@@ -1270,13 +1270,13 @@ async function startGatewayWithRepair(send?: (ch: string, data: any) => void): P
           return {
             ok: false,
             error: isGatewayPermissionError(repairMessage)
-              ? 'AwarenessClaw could not repair the Windows Gateway service because administrator permission was denied, and the temporary Gateway fallback also failed. Please reopen the app as administrator once, then try again.'
-              : 'AwarenessClaw could not repair the Windows Gateway service automatically, and the temporary Gateway fallback also failed. Please reopen the app once and try again, or use Settings → Gateway for manual repair.',
+              ? 'OCT could not repair the Windows Gateway service because administrator permission was denied, and the temporary Gateway fallback also failed. Please reopen the app as administrator once, then try again.'
+              : 'OCT could not repair the Windows Gateway service automatically, and the temporary Gateway fallback also failed. Please reopen the app once and try again, or use Settings → Gateway for manual repair.',
           };
         }
         return {
           ok: false,
-          error: 'AwarenessClaw could not repair the local Gateway service automatically. Please check Settings → Gateway and try again.',
+          error: 'OCT could not repair the local Gateway service automatically. Please check Settings → Gateway and try again.',
         };
       }
     } else if (/not recognized|not found|ENOENT/i.test(message)) {
@@ -1598,7 +1598,7 @@ function discoverOpenClawChannels(): void {
     const stderrRedirect = process.platform === 'win32' ? '2>NUL' : '2>/dev/null';
     let distDir = '';
 
-    // Strategy 0: managed runtime dist (AwarenessClaw bundled install)
+    // Strategy 0: managed runtime dist (OCT bundled install)
     const managedCandidates = [
       path.join(HOME, '.awareness-claw', 'openclaw-runtime', 'node_modules', 'openclaw', 'dist'),
       path.join(HOME, '.awareness-claw', 'openclaw-runtime', 'lib', 'node_modules', 'openclaw', 'dist'),
@@ -1863,11 +1863,11 @@ function createTray() {
   }
 
   tray = new Tray(trayIcon);
-  tray.setToolTip('AwarenessClaw');
+  tray.setToolTip('OCT');
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Show AwarenessClaw',
+      label: 'Show OCT',
       click: () => {
         if (mainWindow) {
           mainWindow.show();
@@ -1905,7 +1905,7 @@ function createTray() {
             void dialog.showMessageBox(mainWindow, {
               type: 'warning',
               title: 'Upgrade In Progress',
-              message: 'AwarenessClaw is upgrading components right now.',
+              message: 'OCT is upgrading components right now.',
               detail: 'Please wait for the upgrade to complete before quitting.',
               buttons: ['OK'],
               defaultId: 0,
@@ -2635,7 +2635,7 @@ app.on('before-quit', (e: Event) => {
       void dialog.showMessageBox(mainWindow, {
         type: 'warning',
         title: 'Upgrade In Progress',
-        message: 'AwarenessClaw is upgrading components right now.',
+        message: 'OCT is upgrading components right now.',
         detail: 'Please wait for upgrade completion before closing the app.',
         buttons: ['OK'],
         defaultId: 0,

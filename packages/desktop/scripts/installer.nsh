@@ -12,6 +12,8 @@
 
 !macro customUnInstall
   ; Stop the desktop app first so tray-hidden instances do not keep gateway/daemon alive.
+  ; Try both process names: new brand (OCT.exe) and legacy brand (AwarenessClaw.exe).
+  ExecWait `"$SYSDIR\taskkill.exe" /F /T /IM OCT.exe`
   ExecWait `"$SYSDIR\taskkill.exe" /F /T /IM AwarenessClaw.exe`
 
   ; Ask OpenClaw and the local daemon to stop gracefully before file removal.

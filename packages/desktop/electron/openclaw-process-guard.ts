@@ -422,7 +422,7 @@ export function killAllStaleChannelOps(): Promise<void> {
 // they ARE the channel bot that receives and routes messages.
 
 /**
- * Kill ALL orphan processes related to AwarenessClaw that were not tracked by
+ * Kill ALL orphan processes related to OCT that were not tracked by
  * the in-process child tracking (e.g. spawned by a previous crashed session,
  * or detached npx/daemon processes). Called from `app.on('before-quit')` as
  * a last-resort sweep after tracked children have already been killed.

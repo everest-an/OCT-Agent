@@ -64,7 +64,7 @@ export default function WorkspaceStep({ onNext, onBack, onSkip }: WorkspaceStepP
           {t('setup.workspace.title', 'Choose your default project folder')}
         </h2>
         <p className="text-slate-400 text-sm">
-          {t('setup.workspace.subtitle', 'AwarenessClaw scans this folder to build your memory, wiki, and code index.')}
+          {t('setup.workspace.subtitle', 'OCT scans this folder to build your memory, wiki, and code index.')}
         </p>
       </div>
 

@@ -4,7 +4,7 @@ import path from 'path';
 import { safeWriteJsonFile } from './json-file';
 
 /**
- * Deploy and register the AwarenessClaw "active workspace" hook into the OpenClaw
+ * Deploy and register the OCT "active workspace" hook into the OpenClaw
  * runtime. This hook runs `before_prompt_build` for every inbound message — channel
  * (WeChat, Telegram, …) and otherwise — and prepends a "[Project working directory: …]"
  * prefix derived from `~/.awarenessclaw/active-workspace.json`. That file is written by
@@ -32,9 +32,9 @@ export interface InstallWorkspaceHookResult {
 const HOOK_NAME = 'awareness-workspace-inject';
 const HOOK_VERSION = 1; // bump when index.cjs body changes meaningfully
 
-const HOOK_SCRIPT = `// AwarenessClaw active-workspace prompt-injection hook
+const HOOK_SCRIPT = `// OCT active-workspace prompt-injection hook
 // version: ${HOOK_VERSION}
-// Auto-deployed by AwarenessClaw — DO NOT edit manually.
+// Auto-deployed by OCT — DO NOT edit manually.
 //
 // Reads ~/.awarenessclaw/active-workspace.json on every before_prompt_build event and
 // returns prependContext that names the active project directory. Mirrors the prefix
@@ -143,7 +143,7 @@ export function installWorkspaceInjectHook(home: string = os.homedir()): Install
   const desiredEntry = {
     enabled: true,
     path: hookFile,
-    description: 'AwarenessClaw: inject active project working directory into channel inbound messages',
+    description: 'OCT: inject active project working directory into channel inbound messages',
   };
   let entryChanged = false;
   if (!existingEntry || typeof existingEntry !== 'object') {

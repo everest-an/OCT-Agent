@@ -1,7 +1,7 @@
 /**
  * F-031 Phase 3+4 — Desktop CardDetail first-cut.
  *
- * Minimal card detail view for the AwarenessClaw desktop app. Mirrors the
+ * Minimal card detail view for the OCT desktop app. Mirrors the
  * cloud CardDetailSheet contract but fetches nothing for now — real related /
  * backlinks lookups will be wired through the daemon REST proxy once that
  * surface is defined.

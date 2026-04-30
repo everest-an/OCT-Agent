@@ -125,7 +125,7 @@ export function freshNpxCacheArg(): string {
 }
 
 export function formatDaemonSetupError() {
-  return 'Local service is taking longer than expected. AwarenessClaw already retried automatically. Please keep this window open, check your network, and try again in a minute.';
+  return 'Local service is taking longer than expected. OCT already retried automatically. Please keep this window open, check your network, and try again in a minute.';
 }
 
 export function requestLocalDaemon(pathname: string, method: 'GET' | 'POST' = 'GET', timeoutMs = 2000): Promise<{ statusCode: number; body: string }> {

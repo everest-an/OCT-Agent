@@ -268,7 +268,7 @@ export function ChatMessagesPane({
             <div key={message.id} className="group -mx-4 px-4 py-3 rounded-xl hover:bg-slate-800/30 transition-colors">
               <div className="flex gap-3">
                 <AgentAvatar
-                  name={message.agentName || currentAgent?.name || t('app.name', 'AwarenessClaw')}
+                  name={message.agentName || currentAgent?.name || t('app.name', 'OCT')}
                   emoji={message.agentEmoji}
                   size={24}
                   fallback="logo"
@@ -276,7 +276,7 @@ export function ChatMessagesPane({
                 />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[11px] text-slate-300 font-medium">{message.agentName || currentAgent?.name || t('app.name', 'AwarenessClaw')}</span>
+                    <span className="text-[11px] text-slate-300 font-medium">{message.agentName || currentAgent?.name || t('app.name', 'OCT')}</span>
                     {message.model && <span className="text-[10px] text-slate-600">{message.model.split('/').pop()}</span>}
                     <span className="text-[10px] text-slate-600">{new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
@@ -318,7 +318,7 @@ export function ChatMessagesPane({
           <div className="group -mx-4 px-4 py-3 bg-slate-800/20 rounded-xl">
             <div className="flex gap-3">
               <AgentAvatar
-                name={currentAgent?.name || t('app.name', 'AwarenessClaw')}
+                name={currentAgent?.name || t('app.name', 'OCT')}
                 emoji={currentAgent?.emoji}
                 size={24}
                 fallback="logo"
@@ -326,7 +326,7 @@ export function ChatMessagesPane({
               />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[11px] text-slate-300 font-medium">{currentAgent?.name || t('app.name', 'AwarenessClaw')}</span>
+                  <span className="text-[11px] text-slate-300 font-medium">{currentAgent?.name || t('app.name', 'OCT')}</span>
                   {config.modelId && <span className="text-[10px] text-slate-600">{config.modelId.split('/').pop()}</span>}
                 </div>
 

@@ -34,10 +34,10 @@ describe('Dashboard (Chat)', () => {
     expect(screen.getByText(/学习计划/)).toBeInTheDocument();
   });
 
-  it('renders AwarenessClaw logo in header', async () => {
+  it('renders OCT logo in header', async () => {
     await act(async () => { render(<Dashboard />); });
-    // Header uses an img with alt="AwarenessClaw" instead of visible text
-    expect(screen.getByAltText('AwarenessClaw')).toBeInTheDocument();
+    // Header uses an img with alt="OCT" instead of visible text
+    expect(screen.getByAltText('OCT')).toBeInTheDocument();
   });
 
   it('renders input area', async () => {
@@ -141,7 +141,7 @@ describe('Dashboard (Chat)', () => {
     await act(async () => { render(<Dashboard />); });
 
     await waitFor(() => {
-      expect(screen.getByText('欢迎使用 AwarenessClaw')).toBeInTheDocument();
+      expect(screen.getByText('欢迎使用 OCT')).toBeInTheDocument();
     });
   });
 
@@ -249,7 +249,7 @@ describe('Dashboard (Chat)', () => {
     await act(async () => { fireEvent.click(sendBtn); });
 
     await waitFor(() => {
-      expect(screen.getByText(/AwarenessClaw 没有验证这次本地文件修改/)).toBeInTheDocument();
+      expect(screen.getByText(/OCT 没有验证这次本地文件修改/)).toBeInTheDocument();
     });
     expect(screen.queryByText(/已保存到 E:\\新建文件夹2\\我是谁.txt/)).not.toBeInTheDocument();
   });

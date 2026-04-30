@@ -220,13 +220,13 @@ export function registerMarketplaceHandlers(deps: MarketplaceHandlerDeps): void 
 
       try {
         const detail = await client.detail(slug);
-        // F-063 multi-host gate: AwarenessClaw currently only installs openclaw agents.
+        // F-063 multi-host gate: OCT currently only installs openclaw agents.
         // Reject early with a friendly message so UI can suggest the right host.
         const compat = Array.isArray(detail.compat) ? detail.compat : ["openclaw"];
         if (!compat.includes("openclaw")) {
           return {
             success: false,
-            error: `agent only supports ${compat.join(", ")} — AwarenessClaw installs OpenClaw agents only`,
+            error: `agent only supports ${compat.join(", ")} — OCT installs OpenClaw agents only`,
           };
         }
         const installDeps: InstallDeps = {

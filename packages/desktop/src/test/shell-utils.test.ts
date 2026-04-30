@@ -95,8 +95,8 @@ describe('createShellUtils', () => {
     const utils = createShellUtils({
       home: 'C:/Users/tester',
       app: {
-        getPath: () => 'C:/Program Files/AwarenessClaw/AwarenessClaw.exe',
-        getAppPath: () => 'E:/AwarenessClaw/packages/desktop',
+        getPath: () => 'C:/Program Files/OCT/OCT.exe',
+        getAppPath: () => 'E:/OCT/packages/desktop',
       },
     });
 
@@ -127,8 +127,8 @@ describe('createShellUtils', () => {
     const utils = createShellUtils({
       home: 'C:/Users/tester',
       app: {
-        getPath: () => 'C:/Program Files/AwarenessClaw/AwarenessClaw.exe',
-        getAppPath: () => 'E:/AwarenessClaw/packages/desktop',
+        getPath: () => 'C:/Program Files/OCT/OCT.exe',
+        getAppPath: () => 'E:/OCT/packages/desktop',
       },
     });
 

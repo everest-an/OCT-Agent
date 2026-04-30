@@ -1469,14 +1469,14 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         ? (result.text || streamingRef.current.trim() || result.error || fallbackNoResponseText)
         : (streamingRef.current.trim() || result.text || result.error || fallbackNoResponseText);
       const workspaceFallbackWarningText = result?.workspacePathInvalid
-        ? t('chat.workspace.invalidCleared', 'The selected project folder is no longer available. AwarenessClaw switched to normal chat mode. Choose a project folder again before requesting project file edits.')
+        ? t('chat.workspace.invalidCleared', 'The selected project folder is no longer available. OCT switched to normal chat mode. Choose a project folder again before requesting project file edits.')
         : '';
       const vpnDnsWarningText = result?.vpnDnsCompatibilityIssue
         ? t('chat.vpnDnsCompatibilityWarning', 'Detected a VPN/DNS compatibility issue: public websites were resolved to special-use IP ranges, so web_fetch/browser may be blocked. In your VPN or proxy app, disable full DNS hijack or enable split DNS for public websites, then retry. Temporary workaround: use web_search plus exec-based download commands.')
         : '';
       const appendedWarnings = [workspaceFallbackWarningText, vpnDnsWarningText].filter(Boolean);
       const responseText = result?.unverifiedLocalFileOperation
-        ? t('chat.localFileChangeUnverified', 'AwarenessClaw did not verify this local file change. The agent answered as if it finished, but no completed tool result was recorded for the request, so the file was not confirmed on disk.')
+        ? t('chat.localFileChangeUnverified', 'OCT did not verify this local file change. The agent answered as if it finished, but no completed tool result was recorded for the request, so the file was not confirmed on disk.')
         : (appendedWarnings.length > 0 ? `${baseResponseText}\n\n${appendedWarnings.join('\n\n')}` : baseResponseText);
 
       const activeAgentId = options?.targetAgentId || config.selectedAgentId || 'main';
@@ -1913,7 +1913,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
               ? { id: found.id, name: found.name, emoji: found.emoji }
               : {
                   id: activeId,
-                  name: activeId === 'main' ? t('app.name', 'AwarenessClaw') : activeId,
+                  name: activeId === 'main' ? t('app.name', 'OCT') : activeId,
                   emoji: resolveFallbackAgentEmoji(activeId),
                 };
           })()}

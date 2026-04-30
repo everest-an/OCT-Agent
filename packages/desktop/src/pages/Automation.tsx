@@ -51,9 +51,9 @@ interface CronAddRequest {
 type FrequencyType = 'daily' | 'hourly' | 'weekly' | 'custom';
 
 const ACTIVE_SESSION_STORAGE_KEY = 'awareness-claw-active-session';
-const HEARTBEAT_JOB_NAME = 'AwarenessClaw Heartbeat';
-const HEARTBEAT_EVENT_TEXT = 'AwarenessClaw heartbeat check';
-const HEARTBEAT_JOB_DESCRIPTION = 'Managed by AwarenessClaw heartbeat toggle';
+const HEARTBEAT_JOB_NAME = 'OCT Heartbeat';
+const HEARTBEAT_EVENT_TEXT = 'OCT heartbeat check';
+const HEARTBEAT_JOB_DESCRIPTION = 'Managed by OCT heartbeat toggle';
 
 const WEEKDAYS = [
   { value: 1, key: 'auto.day.mon', fallback: 'Mon' },

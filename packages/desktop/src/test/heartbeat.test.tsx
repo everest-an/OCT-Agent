@@ -70,9 +70,9 @@ describe('Automation - heartbeat persistence', () => {
 
     await waitFor(() => {
       expect(cronAddFn).toHaveBeenCalledWith(expect.objectContaining({
-        name: 'AwarenessClaw Heartbeat',
+        name: 'OCT Heartbeat',
         cron: '*/30 * * * *',
-        systemEvent: 'AwarenessClaw heartbeat check',
+        systemEvent: 'OCT heartbeat check',
         sessionTarget: 'main',
         wakeMode: 'now',
       }));

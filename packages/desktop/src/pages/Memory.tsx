@@ -183,7 +183,7 @@ export default function Memory() {
 
   // F-055 · cross-workspace drift auto-repair.
   //
-  // Symptom: user selected "New project" in AwarenessClaw but Memory panel
+  // Symptom: user selected "New project" in OCT but Memory panel
   // still shows memories from the old workspace. Cause: desktop's active
   // workspace and the daemon's real `project_dir` can drift out of sync
   // (crash mid-switch, stale UI after workspace deletion, etc). The

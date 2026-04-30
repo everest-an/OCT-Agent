@@ -4,7 +4,7 @@ import path from 'path';
 import { readJsonFileWithBom, safeWriteJsonFile } from './json-file';
 
 /**
- * Channel-level default inbound-agent routing for AwarenessClaw.
+ * Channel-level default inbound-agent routing for OCT.
  *
  * OpenClaw stores routing rules in `openclaw.json bindings[]` with first-match-wins
  * semantics:

@@ -272,7 +272,7 @@ export function registerSetupHandlers(deps: {
             return {
               success: false,
               error: 'Node.js installer ran but node is not available. This usually means administrator rights are needed.',
-              hint: 'Please reopen AwarenessClaw as administrator, or install Node.js manually from https://nodejs.org',
+              hint: 'Please reopen OCT as administrator, or install Node.js manually from https://nodejs.org',
             };
           }
           return { success: true, method: 'msi' };
@@ -282,7 +282,7 @@ export function registerSetupHandlers(deps: {
             return {
               success: false,
               error: 'Node.js installation requires administrator rights.',
-              hint: 'Please reopen AwarenessClaw as administrator, or install Node.js manually from https://nodejs.org',
+              hint: 'Please reopen OCT as administrator, or install Node.js manually from https://nodejs.org',
             };
           }
           return { success: false, error: msg, hint: 'Please install Node.js 22+ manually from https://nodejs.org' };
@@ -439,7 +439,7 @@ export function registerSetupHandlers(deps: {
         if (execPolicy?.trim().toLowerCase() === 'restricted') {
           return {
             success: false,
-            error: 'PowerShell execution policy is too restrictive to install OpenClaw.\nPlease run in PowerShell as administrator:\n  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser\nThen reopen AwarenessClaw.',
+            error: 'PowerShell execution policy is too restrictive to install OpenClaw.\nPlease run in PowerShell as administrator:\n  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser\nThen reopen OCT.',
           };
         }
         await runOpenClawStage('setup.install.openclawStatus.officialInstaller', () => deps.runAsync('powershell -NoProfile -Command "irm https://openclaw.ai/install.ps1 | iex"', OPENCLAW_INSTALL_TIMEOUT_MS));
@@ -454,7 +454,7 @@ export function registerSetupHandlers(deps: {
       }
       return {
         success: false,
-        error: 'OpenClaw files were downloaded, but the command is still unavailable. AwarenessClaw will not continue until OpenClaw can actually run.',
+        error: 'OpenClaw files were downloaded, but the command is still unavailable. OCT will not continue until OpenClaw can actually run.',
       };
     } catch (err) {
       const msg = String(err);
@@ -625,7 +625,7 @@ export function registerSetupHandlers(deps: {
         });
       } catch (err: any) {
         if (err?.code === 'ENOENT') {
-          return { success: false, error: 'Node/npm not found. Please install Node.js 22+ and reopen AwarenessClaw.' };
+          return { success: false, error: 'Node/npm not found. Please install Node.js 22+ and reopen OCT.' };
         }
         const foregroundStarted = await bootstrapDaemonInForeground('setup.install.daemonStatus.preparing');
         if (!foregroundStarted) {
@@ -664,7 +664,7 @@ export function registerSetupHandlers(deps: {
         });
       } catch (err: any) {
         if (err?.code === 'ENOENT') {
-          return { success: false, error: 'Node/npm not found. Please install Node.js 22+ and reopen AwarenessClaw.' };
+          return { success: false, error: 'Node/npm not found. Please install Node.js 22+ and reopen OCT.' };
         }
         const foregroundStarted = await bootstrapDaemonInForeground('setup.install.daemonStatus.retrying');
         if (!foregroundStarted) {
