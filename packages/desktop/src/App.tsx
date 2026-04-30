@@ -338,7 +338,7 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden pt-8">
         <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
 
-        <main className="flex-1 overflow-hidden relative">
+        <main className="flex-1 overflow-hidden relative bg-white dark:bg-[#090912]">
           {/* Dashboard is always mounted so in-flight chats survive tab switches */}
           <div className={`absolute inset-0 overflow-y-auto ${currentPage === 'chat' ? '' : 'hidden'}`}>
             <Dashboard isActive={currentPage === 'chat'} onNavigate={setCurrentPage}

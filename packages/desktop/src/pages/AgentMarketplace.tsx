@@ -189,8 +189,8 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
   }, [agents, search]);
 
   return (
-    <div className="h-full flex flex-col bg-gradient-to-br from-slate-50 to-blue-50/30 dark:from-slate-900 dark:to-slate-950">
-      <header className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/70 backdrop-blur">
+    <div className="h-full flex flex-col bg-white dark:bg-[#090912]">
+      <header className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-white/[0.06] bg-white/78 dark:bg-[#090912]/80 backdrop-blur">
         <div className="flex items-center gap-3">
           <button
             onClick={onClose}
@@ -214,7 +214,7 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
         </div>
       </header>
 
-      <div className="px-6 py-3 flex items-center gap-4 flex-wrap border-b border-slate-200 dark:border-slate-800 bg-white/40 dark:bg-slate-900/40">
+      <div className="px-6 py-3 flex items-center gap-4 flex-wrap border-b border-slate-200 dark:border-white/[0.06] bg-white/78 dark:bg-[#12121e]/58">
         <div className="flex gap-1.5 flex-wrap">
           {TABS.map((t) => (
             <button
@@ -223,7 +223,7 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
               className={`text-xs px-3 py-1.5 rounded-full transition-colors ${
                 tab === t.key
                   ? 'bg-violet-600 text-white'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                  : 'bg-slate-100 dark:bg-white/[0.06] text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/[0.1]'
               }`}
             >
               {t.label}
@@ -235,7 +235,7 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
           placeholder="搜索 agent 名称 / 标签..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 min-w-[200px] max-w-md text-sm px-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-400"
+          className="flex-1 min-w-[200px] max-w-md text-sm px-3 py-1.5 rounded-md border border-slate-300 dark:border-white/[0.08] bg-white dark:bg-[#12121e] focus:outline-none focus:ring-2 focus:ring-violet-400"
         />
       </div>
 
@@ -268,7 +268,7 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
               return (
                 <div
                   key={agent.slug}
-                  className="group rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 hover:shadow-md hover:border-violet-300 dark:hover:border-violet-700 transition-all cursor-pointer flex flex-col"
+                  className="group rounded-xl border border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#12121e]/72 p-4 hover:shadow-md hover:border-violet-300 dark:hover:border-violet-500/40 transition-all cursor-pointer flex flex-col"
                   onClick={() => handleOpenDetail(agent.slug)}
                 >
                   <div className="flex items-start gap-3 mb-3">
@@ -292,7 +292,7 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
                   </p>
 
                   {isInstalling && (
-                    <div className="mb-2 px-2 py-1.5 rounded bg-violet-50 dark:bg-violet-950/40 text-[11px] text-violet-700 dark:text-violet-300 flex items-center gap-1.5">
+                    <div className="mb-2 px-2 py-1.5 rounded bg-violet-50 dark:bg-violet-500/10 text-[11px] text-violet-700 dark:text-violet-300 flex items-center gap-1.5">
                       <Loader2 className="h-3 w-3 animate-spin flex-shrink-0" />
                       <span className="truncate">{STAGE_LABELS[stage]}</span>
                     </div>
@@ -312,7 +312,7 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
                         installed
                           ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 cursor-default'
                           : isInstalling
-                          ? 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 cursor-wait'
+                          ? 'bg-slate-200 dark:bg-white/[0.06] text-slate-600 dark:text-slate-400 cursor-wait'
                           : 'bg-violet-600 hover:bg-violet-700 text-white'
                       }`}
                     >
@@ -370,14 +370,14 @@ function DetailDrawer({
   const installing = !!installingStage;
   return (
     <div
-      className="fixed inset-0 bg-black/40 z-50 flex items-stretch justify-end"
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-stretch justify-end"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md bg-white dark:bg-slate-900 shadow-2xl overflow-y-auto"
+        className="w-full max-w-md bg-white dark:bg-[#12121e]/92 dark:backdrop-blur-3xl shadow-[0_0_40px_rgba(0,0,0,0.5)] dark:border-l dark:border-white/[0.08] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 p-4 flex items-center justify-between">
+        <div className="sticky top-0 bg-white/80 dark:bg-[#12121e]/72 backdrop-blur-md border-b border-slate-200 dark:border-white/[0.08] p-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-2xl">{detail.emoji}</span>
             <div>
@@ -385,7 +385,7 @@ function DetailDrawer({
               <p className="text-xs text-slate-500">{detail.category}</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800">
+          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100 dark:hover:bg-white/[0.08]">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -402,7 +402,7 @@ function DetailDrawer({
                 {detail.tools.map((t) => (
                   <span
                     key={t}
-                    className="text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800"
+                    className="text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-white/[0.06]"
                   >
                     {t}
                   </span>
@@ -418,7 +418,7 @@ function DetailDrawer({
                 {detail.tags.map((t) => (
                   <span
                     key={t}
-                    className="text-xs px-2 py-0.5 rounded bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300"
+                    className="text-xs px-2 py-0.5 rounded bg-violet-50 dark:bg-violet-500/10 text-violet-700 dark:text-violet-300"
                   >
                     #{t}
                   </span>
@@ -435,13 +435,13 @@ function DetailDrawer({
             <summary className="text-xs font-semibold text-slate-500 cursor-pointer">
               查看完整 system prompt
             </summary>
-            <pre className="mt-2 text-[10px] leading-relaxed whitespace-pre-wrap bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded p-3 font-mono overflow-x-auto max-h-96 overflow-y-auto">
+            <pre className="mt-2 text-[10px] leading-relaxed whitespace-pre-wrap bg-slate-50 dark:bg-[#090912] border border-slate-200 dark:border-white/[0.06] rounded p-3 font-mono overflow-x-auto max-h-96 overflow-y-auto">
               {detail.markdown}
             </pre>
           </details>
 
           {installing && installingStage && (
-            <div className="px-3 py-2 rounded bg-violet-50 dark:bg-violet-950/40 text-xs text-violet-700 dark:text-violet-300 flex items-center gap-2">
+            <div className="px-3 py-2 rounded bg-violet-50 dark:bg-violet-500/10 text-xs text-violet-700 dark:text-violet-300 flex items-center gap-2">
               <Loader2 className="h-4 w-4 animate-spin" />
               <span>{STAGE_LABELS[installingStage]}</span>
             </div>
@@ -454,7 +454,7 @@ function DetailDrawer({
               installed
                 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
                 : installing
-                ? 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                ? 'bg-slate-200 text-slate-600 dark:bg-white/[0.06] dark:text-slate-400'
                 : 'bg-violet-600 hover:bg-violet-700 text-white'
             }`}
           >

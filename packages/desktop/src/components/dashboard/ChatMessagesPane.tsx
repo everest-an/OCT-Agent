@@ -198,8 +198,8 @@ export function ChatMessagesPane({
         : null;
 
   return (
-    <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
-      <div className="max-w-3xl mx-auto space-y-5 w-full">
+    <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+      <div className="max-w-3xl mx-auto space-y-6 w-full">
         {messages.length === 0 && agentStatus === 'idle' && (
           <div className="flex flex-col items-center justify-center h-full text-slate-500 space-y-6">
             <img src={logoUrl} alt="" className="w-16 h-16 opacity-30" />
@@ -216,7 +216,7 @@ export function ChatMessagesPane({
                   <p className="text-base mb-1">{t('chat.empty.title')}</p>
                   <p className="text-xs text-slate-600">{t('chat.empty.subtitle')}</p>
                 </div>
-                <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-left">
+                <div className="w-full max-w-lg rounded-2xl border border-slate-800/80 bg-slate-900/50 backdrop-blur-sm p-5 text-left shadow-lg shadow-black/10">
                   <div className="flex items-start gap-3">
                     <div className="rounded-xl bg-sky-500/10 p-2 text-sky-400">
                       <FolderOpen size={18} />
@@ -233,7 +233,7 @@ export function ChatMessagesPane({
                 </div>
                 <div className="flex flex-wrap gap-2 max-w-lg justify-center">
                   {[t('chat.suggest.plan'), t('chat.suggest.review'), t('chat.suggest.analyze')].map((question) => (
-                    <button key={question} onClick={() => onSuggestionSelect(question)} className="px-3 py-1.5 text-xs bg-slate-800/80 hover:bg-slate-700 rounded-xl text-slate-300 border border-slate-700/50 transition-colors">
+                    <button key={question} onClick={() => onSuggestionSelect(question)} className="px-3.5 py-2 text-xs bg-slate-800/60 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-slate-200 border border-slate-700/40 hover:border-slate-600/60 transition-all duration-150">
                       {question}
                     </button>
                   ))}
@@ -246,8 +246,8 @@ export function ChatMessagesPane({
         {messages.map((message) => (
           message.role === 'user' ? (
             <div key={message.id} className="flex justify-end group">
-              <div className="max-w-[75%]">
-                <div className="px-4 py-3 rounded-2xl rounded-br-md text-sm bg-brand-600 text-white">
+              <div className="max-w-[78%]">
+                <div className="px-4 py-3 rounded-[18px] rounded-br-[6px] text-sm bg-brand-600 text-white shadow-md shadow-brand-900/30 leading-relaxed">
                   {message.files && message.files.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mb-2">
                       {message.files.map((file, index) => (
@@ -265,7 +265,7 @@ export function ChatMessagesPane({
               </div>
             </div>
           ) : (
-            <div key={message.id} className="group -mx-4 px-4 py-3 rounded-xl hover:bg-slate-800/30 transition-colors">
+            <div key={message.id} className="group -mx-3 px-3 py-3.5 rounded-2xl hover:bg-slate-800/25 transition-all duration-200">
               <div className="flex gap-3">
                 <AgentAvatar
                   name={message.agentName || currentAgent?.name || t('app.name', 'OCT')}

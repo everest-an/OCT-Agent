@@ -454,13 +454,14 @@ export default function Automation() {
   return (
     <div className="h-full flex flex-col">
       {deleteConfirm && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-8">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-xs p-5 space-y-4">
-            <p className="text-sm text-slate-200">{t('auto.deleteConfirm', 'Delete this scheduled task?')}</p>
-            <div className="flex gap-2 justify-end">
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md flex items-center justify-center z-50 p-8">
+          <div className="bg-slate-900/80 border border-white/[0.08] backdrop-blur-3xl rounded-3xl w-full max-w-sm p-6 space-y-5 shadow-2xl">
+            <h2 className="text-lg font-medium tracking-tight text-white">{t('auto.delete')}</h2>
+            <p className="text-[13px] leading-relaxed text-slate-300">{t('auto.deleteConfirm', 'Delete this scheduled task?')}</p>
+            <div className="flex gap-2 justify-end pt-2">
               <button
                 onClick={() => setDeleteConfirm(null)}
-                className="px-4 py-1.5 text-sm text-slate-400 hover:text-slate-200"
+                className="px-4 py-2 text-[13px] font-medium text-white/70 hover:text-white hover:bg-white/10 rounded-full transition-colors"
               >
                 {t('auto.cancel')}
               </button>
@@ -478,7 +479,7 @@ export default function Automation() {
         </div>
       )}
 
-      <div className="px-6 py-4 border-b border-slate-800">
+      <div className="px-6 py-4 border-b border-slate-800/60 backdrop-blur-sm bg-slate-900/20">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-semibold flex items-center gap-2">
@@ -490,7 +491,7 @@ export default function Automation() {
             <button
               onClick={() => { void loadJobs(); }}
               disabled={loading}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-full transition-colors"
             >
               {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
               {t('common.refresh')}
@@ -498,7 +499,7 @@ export default function Automation() {
             <button
               onClick={() => { void openDashboard('automation-dashboard'); }}
               disabled={isOpening('automation-dashboard')}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 disabled:text-slate-600 bg-slate-800 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium text-slate-400 hover:text-white disabled:text-slate-600 bg-white/5 hover:bg-white/10 rounded-full transition-colors"
             >
               {isOpening('automation-dashboard') ? <Loader2 size={12} className="animate-spin" /> : <ExternalLink size={12} />} {t('auto.dashboard', 'Dashboard')}
             </button>
@@ -506,28 +507,29 @@ export default function Automation() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-2xl">
-        <div className="space-y-3">
-          <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">{t('auto.heartbeat')}</h3>
-          <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm font-medium">{t('auto.heartbeat.title')}</div>
-                <div className="text-xs text-slate-500">{t('auto.heartbeat.desc')}</div>
+      <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center">
+        <div className="w-full max-w-2xl space-y-6">
+          <div className="space-y-3">
+            <h3 className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest pl-2">{t('auto.heartbeat')}</h3>
+            <div className="bg-slate-900/60 backdrop-blur-xl rounded-2xl border border-white/[0.06] p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-slate-200">{t('auto.heartbeat.title')}</div>
+                  <div className="text-[13px] text-slate-400">{t('auto.heartbeat.desc')}</div>
+                </div>
+                <button
+                  onClick={() => setHeartbeatEnabled(!heartbeatEnabled)}
+                  aria-label={t('auto.heartbeat.title', 'Heartbeat Check')}
+                  title={t('auto.heartbeat.title', 'Heartbeat Check')}
+                  className={`w-11 h-6 rounded-full transition-colors relative ${heartbeatEnabled ? 'bg-brand-500' : 'bg-white/10'}`}
+                >
+                  <div className={`w-5 h-5 rounded-full bg-white absolute top-0.5 transition-transform shadow-sm ${heartbeatEnabled ? 'translate-x-[21px]' : 'translate-x-px'}`} />
+                </button>
               </div>
-              <button
-                onClick={() => setHeartbeatEnabled(!heartbeatEnabled)}
-                aria-label={t('auto.heartbeat.title', 'Heartbeat Check')}
-                title={t('auto.heartbeat.title', 'Heartbeat Check')}
-                className={`w-11 h-6 rounded-full transition-colors relative ${heartbeatEnabled ? 'bg-brand-600' : 'bg-slate-700'}`}
-              >
-                <div className={`w-5 h-5 rounded-full bg-white absolute top-0.5 transition-transform ${heartbeatEnabled ? 'translate-x-[21px]' : 'translate-x-px'}`} />
-              </button>
-            </div>
-            {heartbeatEnabled && (
-              <div className="flex items-center gap-3 border-t border-slate-700/50 pt-3">
-                <span className="text-xs text-slate-400">{t('auto.heartbeat.interval')}</span>
-                <input
+              {heartbeatEnabled && (
+                <div className="flex items-center gap-3 border-t border-white/[0.06] pt-3 mt-1">
+                  <span className="text-[13px] text-slate-400">{t('auto.heartbeat.interval')}</span>
+                  <input
                   type="range"
                   min={5}
                   max={120}
@@ -544,35 +546,37 @@ export default function Automation() {
         </div>
 
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">{t('auto.tasks')}</h3>
+          <div className="flex items-center justify-between pl-2 pr-1">
+            <h3 className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest">{t('auto.tasks')}</h3>
             <button
               onClick={() => setShowAddForm(true)}
-              className="flex items-center gap-1 text-xs text-brand-400 hover:text-brand-300"
+              className="flex items-center gap-1 text-[13px] font-medium text-brand-400 hover:text-brand-300 transition-colors"
             >
-              <Plus size={12} /> {t('auto.addTask')}
+              <Plus size={14} strokeWidth={2.5} /> {t('auto.addTask')}
             </button>
           </div>
 
           {showAddForm && (
-            <div className="bg-slate-800/50 rounded-xl border border-brand-600/30 p-4 space-y-4 animate-fade-in">
-              <div className="text-sm font-medium">{t('auto.newTask')}</div>
+            <div className="bg-slate-900/60 backdrop-blur-xl rounded-2xl border border-brand-500/30 p-5 space-y-5 shadow-lg animate-fade-in relative overflow-hidden">
+              <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-brand-500/20 to-transparent" />
+              
+              <div className="text-sm font-medium text-slate-200">{t('auto.newTask')}</div>
 
               <div className="flex flex-wrap gap-2">
                 {PRESETS.map((preset, index) => (
                   <button
                     key={index}
                     onClick={() => applyPreset(preset)}
-                    className="px-2.5 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors"
+                    className="px-3 py-1.5 text-[12px] font-medium bg-white/5 hover:bg-white/10 rounded-full text-slate-300 transition-colors"
                   >
                     {t(preset.labelKey, preset.labelFallback)}
                   </button>
                 ))}
               </div>
 
-              <div>
-                <label className="text-xs text-slate-400 block mb-1.5">{t('auto.frequency')}</label>
-                <div className="grid grid-cols-4 gap-1.5">
+              <div className="space-y-4 pt-2">
+                <label className="text-[12px] font-medium text-slate-400 block mb-2">{t('auto.frequency')}</label>
+                <div className="grid grid-cols-4 gap-2">
                   {([
                     { key: 'daily', label: t('auto.daily') },
                     { key: 'hourly', label: t('auto.hourly') },
@@ -582,10 +586,10 @@ export default function Automation() {
                     <button
                       key={option.key}
                       onClick={() => setFrequency(option.key)}
-                      className={`py-1.5 text-xs rounded-lg transition-colors ${
+                      className={`py-2 text-[13px] font-medium rounded-xl transition-colors ${
                         frequency === option.key
-                          ? 'bg-brand-600 text-white'
-                          : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                          ? 'bg-brand-500 text-white'
+                          : 'bg-white/5 text-slate-400 hover:bg-white/10'
                       }`}
                     >
                       {option.label}
@@ -596,17 +600,17 @@ export default function Automation() {
 
               {(frequency === 'daily' || frequency === 'weekly') && (
                 <div>
-                  <label className="text-xs text-slate-400 block mb-1.5">{t('auto.time', 'Time')}</label>
+                  <label className="text-[12px] font-medium text-slate-400 block mb-2">{t('auto.time', 'Time')}</label>
                   <div className="flex items-center gap-2">
                     <select
                       value={hour}
                       onChange={(event) => setHour(Number.parseInt(event.target.value, 10))}
                       aria-label={t('auto.time', 'Time')}
                       title={t('auto.time', 'Time')}
-                      className="px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500 appearance-none cursor-pointer"
+                      className="px-4 py-2 bg-slate-950/40 border border-white/[0.08] rounded-xl text-sm text-slate-200 focus:outline-none focus:border-brand-500 appearance-none cursor-pointer"
                     >
                       {hours.map((value) => (
-                        <option key={value} value={value}>{String(value).padStart(2, '0')}</option>
+                        <option key={value} value={value} className="bg-slate-900">{String(value).padStart(2, '0')}</option>
                       ))}
                     </select>
                     <span className="text-slate-500 text-lg font-bold">:</span>
@@ -615,10 +619,10 @@ export default function Automation() {
                       onChange={(event) => setMinute(Number.parseInt(event.target.value, 10))}
                       aria-label={t('auto.time', 'Time')}
                       title={t('auto.time', 'Time')}
-                      className="px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500 appearance-none cursor-pointer"
+                      className="px-4 py-2 bg-slate-950/40 border border-white/[0.08] rounded-xl text-sm text-slate-200 focus:outline-none focus:border-brand-500 appearance-none cursor-pointer"
                     >
                       {minutes.map((value) => (
-                        <option key={value} value={value}>{String(value).padStart(2, '0')}</option>
+                        <option key={value} value={value} className="bg-slate-900">{String(value).padStart(2, '0')}</option>
                       ))}
                     </select>
                   </div>
@@ -627,16 +631,16 @@ export default function Automation() {
 
               {frequency === 'hourly' && (
                 <div>
-                  <label className="text-xs text-slate-400 block mb-1.5">{t('auto.atMinute', 'At minute')}</label>
+                  <label className="text-[12px] font-medium text-slate-400 block mb-2">{t('auto.atMinute', 'At minute')}</label>
                   <select
                     value={minute}
                     onChange={(event) => setMinute(Number.parseInt(event.target.value, 10))}
                     aria-label={t('auto.atMinute', 'At minute')}
                     title={t('auto.atMinute', 'At minute')}
-                    className="px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500 appearance-none cursor-pointer"
+                    className="px-4 py-2 bg-slate-950/40 border border-white/[0.08] rounded-xl text-sm text-slate-200 focus:outline-none focus:border-brand-500 appearance-none cursor-pointer"
                   >
                     {minutes.map((value) => (
-                      <option key={value} value={value}>:{String(value).padStart(2, '0')}</option>
+                      <option key={value} value={value} className="bg-slate-900">:{String(value).padStart(2, '0')}</option>
                     ))}
                   </select>
                 </div>
@@ -644,16 +648,16 @@ export default function Automation() {
 
               {frequency === 'weekly' && (
                 <div>
-                  <label className="text-xs text-slate-400 block mb-1.5">{t('auto.days', 'Days')}</label>
-                  <div className="flex gap-1.5">
+                  <label className="text-[12px] font-medium text-slate-400 block mb-2">{t('auto.days', 'Days')}</label>
+                  <div className="flex gap-2">
                     {WEEKDAYS.map((day) => (
                       <button
                         key={day.value}
                         onClick={() => toggleDay(day.value)}
-                        className={`w-9 h-9 rounded-lg text-xs font-medium transition-colors ${
+                        className={`w-10 h-10 rounded-xl text-[13px] font-medium transition-colors ${
                           selectedDays.includes(day.value)
-                            ? 'bg-brand-600 text-white'
-                            : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                            ? 'bg-brand-500 text-white shadow-sm'
+                            : 'bg-white/5 text-slate-400 hover:bg-white/10'
                         }`}
                       >
                         {t(day.key, day.fallback)}
@@ -665,17 +669,17 @@ export default function Automation() {
 
               {frequency === 'custom' && (
                 <div>
-                  <label className="text-xs text-slate-400 block mb-1">{t('auto.cronExpression', 'Cron expression')}</label>
+                  <label className="text-[12px] font-medium text-slate-400 block mb-2">{t('auto.cronExpression', 'Cron expression')}</label>
                   <input
                     value={customCron}
                     onChange={(event) => setCustomCron(event.target.value)}
                     placeholder={t('auto.cronPlaceholder', '0 9 * * * (daily at 9 AM)')}
                     aria-label={t('auto.cronExpression', 'Cron expression')}
                     title={t('auto.cronExpression', 'Cron expression')}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm font-mono focus:outline-none focus:border-brand-500"
+                    className="w-full px-4 py-2 bg-slate-950/40 border border-white/[0.08] rounded-xl text-sm text-slate-200 font-mono focus:outline-none focus:border-brand-500 placeholder:text-slate-600"
                   />
                   {customCron && !isValidCron(customCron) ? (
-                    <p className="text-[10px] text-amber-400 mt-1">{t('auto.cronInvalid', 'Needs 5 fields: minute hour day month weekday')}</p>
+                    <p className="text-[11px] text-amber-400 mt-2 ml-1">{t('auto.cronInvalid', 'Needs 5 fields: minute hour day month weekday')}</p>
                   ) : (
                     <p className="text-[10px] text-slate-600 mt-1">{t('auto.cronFormat', 'Format: minute hour day month weekday')}</p>
                   )}
@@ -765,28 +769,28 @@ export default function Automation() {
             const secondaryDescription = job.description && job.description !== payloadText ? job.description : '';
 
             return (
-              <div key={job.id || index} className="bg-slate-800/50 rounded-xl border border-slate-700/50 p-4 flex items-start justify-between group">
+              <div key={job.id || index} className="bg-slate-900/60 backdrop-blur-xl rounded-2xl border border-white/[0.06] p-5 flex items-start justify-between group hover:border-white/[0.1] hover:bg-slate-900/80 transition-colors">
                 <div className="flex-1">
                   {job.raw ? (
-                    <p className="text-sm text-slate-300 font-mono">{job.raw}</p>
+                    <p className="text-[13px] text-slate-300 font-mono">{job.raw}</p>
                   ) : (
                     <>
-                      <div className="flex flex-wrap items-center gap-2 mb-1">
-                        <span className="text-sm font-medium text-slate-100">{job.name || t('auto.newTask', 'Scheduled task')}</span>
-                        <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-slate-700 text-slate-300">{statusLabel}</span>
+                      <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                        <span className="text-sm font-medium text-slate-200">{job.name || t('auto.newTask', 'Scheduled task')}</span>
+                        <span className="text-[10px] uppercase font-semibold tracking-wider px-2 py-0.5 rounded-full bg-white/10 text-slate-300">{statusLabel}</span>
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-2 mb-2">
+                      <div className="flex flex-wrap items-center gap-2 mb-2.5">
                         {expression && (
-                          <code className="text-xs px-1.5 py-0.5 bg-slate-700 rounded text-brand-300 font-mono">{expression}</code>
+                          <code className="text-[11px] px-2 py-0.5 bg-slate-900 border border-white/[0.04] rounded-md text-brand-400 font-mono">{expression}</code>
                         )}
-                        {scheduleSummary && <span className="text-xs text-slate-500">{scheduleSummary}</span>}
+                        {scheduleSummary && <span className="text-[11px] text-slate-400">{scheduleSummary}</span>}
                       </div>
 
-                      {payloadText && <p className="text-sm text-slate-300">{payloadText}</p>}
-                      {secondaryDescription && <p className="text-xs text-slate-500 mt-1">{secondaryDescription}</p>}
+                      {payloadText && <p className="text-[13px] leading-relaxed text-slate-300">{payloadText}</p>}
+                      {secondaryDescription && <p className="text-[12px] text-slate-500 mt-1.5">{secondaryDescription}</p>}
 
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11px] text-slate-500">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-3 text-[11px] text-slate-500">
                         {sessionLabel && <span>{sessionLabel}</span>}
                         {job.agentId && <span>{job.agentId}</span>}
                         {nextRun && <span>{t('auto.label.nextRun', 'Next {time}').replace('{time}', nextRun)}</span>}
@@ -800,9 +804,9 @@ export default function Automation() {
                     onClick={() => setDeleteConfirm(job.id || null)}
                     aria-label={t('common.delete', 'Delete')}
                     title={t('common.delete', 'Delete')}
-                    className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-all p-1"
+                    className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 transition-all p-2 rounded-full hover:bg-red-400/10"
                   >
-                    <Trash2 size={14} />
+                    <Trash2 size={16} />
                   </button>
                 ) : null}
               </div>
@@ -810,9 +814,10 @@ export default function Automation() {
           })}
         </div>
 
-        <p className="text-xs text-slate-600 text-center pb-4">
+        <p className="text-[11px] text-slate-600 text-center pt-4 pb-8">
           {t('auto.footer')}
         </p>
+      </div>
       </div>
     </div>
   );

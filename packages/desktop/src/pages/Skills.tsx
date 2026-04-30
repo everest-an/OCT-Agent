@@ -106,10 +106,10 @@ function summarizeMissing(skill: LocalSkillStatus) {
 }
 
 function getSkillStatusLabel(skill: Pick<LocalSkillStatus, 'eligible' | 'disabled' | 'blockedByAllowlist'>, t: TranslateFunc) {
-  if (skill.disabled) return { label: t('skills.status.disabled', 'Disabled'), className: 'text-slate-400 bg-slate-700/60' };
-  if (skill.blockedByAllowlist) return { label: t('skills.status.blocked', 'Blocked'), className: 'text-amber-300 bg-amber-500/10' };
-  if (skill.eligible) return { label: t('skills.status.ready', 'Ready'), className: 'text-emerald-300 bg-emerald-500/10' };
-  return { label: t('skills.status.needsSetup', 'Needs Setup'), className: 'text-amber-300 bg-amber-500/10' };
+git status  if (skill.disabled) return { label: t('skills.status.disabled', 'Disabled'), className: 'text-slate-500 dark:text-slate-400 bg-slate-200/60 dark:bg-slate-700/60' };
+  if (skill.blockedByAllowlist) return { label: t('skills.status.blocked', 'Blocked'), className: 'text-amber-600 dark:text-amber-300 bg-amber-500/10' };
+  if (skill.eligible) return { label: t('skills.status.ready', 'Ready'), className: 'text-emerald-600 dark:text-emerald-300 bg-emerald-500/10' };
+  return { label: t('skills.status.needsSetup', 'Needs Setup'), className: 'text-amber-600 dark:text-amber-300 bg-amber-500/10' };
 }
 
 function buildLocalDetail(skill: LocalSkillStatus): SkillDetail {
@@ -426,66 +426,69 @@ export default function Skills() {
   const showInstalled = filter === 'installed' && searchResults === null;
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col relative z-0">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-slate-800">
+      <div className="ui-page-header relative z-10">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h1 className="text-lg font-semibold flex items-center gap-2">
-              <Package size={20} className="text-brand-400" /> {t('skills.title')}
+            <h1 className="ui-page-title">
+              <span className="ui-title-icon">
+                <Package size={16} />
+              </span>
+              {t('skills.title')}
             </h1>
-            <p className="text-xs text-slate-500">
+            <p className="ui-page-subtitle">
               {t('skills.localSummary', '{count} local skills').replace('{count}', String(localStatusCounts.all))}
               {remoteSkills.length > 0 && ` · ${t('skills.remoteSummary', '{count} popular ClawHub skills').replace('{count}', String(remoteSkills.length))}`}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 relative z-10">
             <button
               onClick={loadData}
               disabled={loading}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 rounded-lg transition-colors"
+              className="ui-toolbar-button"
             >
-              {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
               {t('skills.refresh')}
             </button>
             <button
               onClick={() => { void openExternal('https://clawhub.ai', 'skills-clawhub'); }}
               disabled={isOpening('skills-clawhub')}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 disabled:text-slate-600 bg-slate-800 rounded-lg transition-colors"
+              className="ui-toolbar-button disabled:opacity-50"
             >
-              {isOpening('skills-clawhub') ? <Loader2 size={12} className="animate-spin" /> : <ExternalLink size={12} />} ClawHub
+              {isOpening('skills-clawhub') ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />} ClawHub
             </button>
           </div>
         </div>
 
         <div className="flex gap-3">
-          <div className="relative flex-1">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+          <div className="relative flex-1 group">
+            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-brand-500 transition-colors" />
             <input
               value={searchQuery}
               onChange={e => { setSearchQuery(e.target.value); if (!e.target.value) { setSearchResults(null); setVisibleCount(PAGE_SIZE); } }}
               onKeyDown={e => e.key === 'Enter' && handleSearch()}
               placeholder={t('skills.search.placeholder')}
-              className="w-full pl-10 pr-4 py-2.5 bg-slate-800 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+              className="ui-input w-full pl-10 pr-4 py-2.5 text-[13px] placeholder-slate-500"
             />
           </div>
           {searching && <Loader2 size={16} className="animate-spin text-brand-400 self-center" />}
-          <div className="flex bg-slate-800 rounded-xl overflow-hidden">
+          <div className="ui-surface-soft flex p-1">
             <button
               onClick={() => { setFilter('all'); setSearchResults(null); setSearchQuery(''); setVisibleCount(PAGE_SIZE); }}
-              className={`px-3 py-2 text-xs transition-colors ${filter === 'all' && !searchResults ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+              className={`px-3 py-1.5 text-[13px] font-medium rounded-xl transition-all ${filter === 'all' && !searchResults ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'}`}
             >
               {t('skills.explore')}
             </button>
             <button
               onClick={() => { setFilter('builtin'); setSearchResults(null); setSearchQuery(''); }}
-              className={`px-3 py-2 text-xs transition-colors ${filter === 'builtin' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+              className={`px-3 py-1.5 text-[13px] font-medium rounded-xl transition-all ${filter === 'builtin' ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'}`}
             >
               {t('skills.showBuiltin')}
             </button>
             <button
               onClick={() => { setFilter('installed'); setSearchResults(null); setSearchQuery(''); setVisibleCount(PAGE_SIZE); }}
-              className={`px-3 py-2 text-xs transition-colors ${filter === 'installed' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+              className={`px-3 py-1.5 text-[13px] font-medium rounded-xl transition-all ${filter === 'installed' ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'}`}
             >
               {t('skills.installed')}
             </button>
@@ -495,46 +498,47 @@ export default function Skills() {
 
       {/* Error banner */}
       {actionError && (
-        <div className="mx-6 mt-3 p-3 bg-red-600/10 border border-red-600/20 rounded-xl text-xs text-red-400 flex items-start gap-2">
-          <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
-          <div className="flex-1">{actionError}</div>
-          <button onClick={() => setActionError(null)} className="text-red-500 hover:text-red-300">×</button>
+        <div className="mx-8 mt-4 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-[13px] text-red-600 dark:text-red-400 flex items-start gap-3 backdrop-blur-xl shadow-sm">
+          <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+          <div className="flex-1 font-medium">{actionError}</div>
+          <button onClick={() => setActionError(null)} className="text-red-500/70 hover:text-red-600 dark:hover:text-red-300 transition-colors"><X size={16} /></button>
         </div>
       )}
 
       {/* Install progress banner */}
       {installProgress && !actionError && (
-        <div className="mx-6 mt-3 p-3 bg-brand-600/10 border border-brand-500/20 rounded-xl text-xs text-brand-300 flex items-center gap-2">
-          <Loader2 size={14} className="animate-spin flex-shrink-0" />
+        <div className="mx-8 mt-4 p-4 bg-brand-500/10 border border-brand-500/20 rounded-2xl text-[13px] font-medium text-brand-600 dark:text-brand-300 flex items-center gap-3 backdrop-blur-xl shadow-sm">
+          <Loader2 size={16} className="animate-spin flex-shrink-0" />
           <span>{installProgress}</span>
         </div>
       )}
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className="flex-1 overflow-y-auto p-8 space-y-8 relative">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-brand-500/5 blur-[100px] pointer-events-none rounded-full z-0" />
         {filter === 'all' && searchResults === null && localSkills.length > 0 && (
-          <div>
-            <h2 className="text-sm font-semibold text-slate-300 mb-1">{t('skills.localSectionTitle', 'OpenClaw Local Skills')}</h2>
-            <p className="text-xs text-slate-500 mb-4">{t('skills.localSectionDesc', 'Official local skill status from openclaw skills list --json, aligned with the Control UI.')}</p>
-            <div className="grid grid-cols-4 gap-3 mb-4">
-              <div className="p-3 bg-slate-800/50 border border-slate-700/50 rounded-xl">
-                <div className="text-[11px] uppercase tracking-wide text-slate-500">{t('skills.status.all', 'All')}</div>
-                <div className="mt-1 text-xl font-semibold">{localStatusCounts.all}</div>
+          <div className="relative z-10">
+            <h2 className="text-[15px] font-semibold text-slate-900 dark:text-slate-200 mb-1">{t('skills.localSectionTitle', 'OpenClaw Local Skills')}</h2>
+            <p className="text-[13px] text-slate-500 dark:text-slate-400 mb-6">{t('skills.localSectionDesc', 'Official local skill status from openclaw skills list --json, aligned with the Control UI.')}</p>
+            <div className="grid grid-cols-4 gap-4 mb-6">
+              <div className="ui-surface p-4">
+                <div className="text-[11px] font-bold tracking-widest text-slate-500 mb-1">{t('skills.status.all', 'ALL')}</div>
+                <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">{localStatusCounts.all}</div>
               </div>
-              <div className="p-3 bg-slate-800/50 border border-emerald-500/20 rounded-xl">
-                <div className="text-[11px] uppercase tracking-wide text-slate-500">{t('skills.status.ready', 'Ready')}</div>
-                <div className="mt-1 text-xl font-semibold text-emerald-300">{localStatusCounts.ready}</div>
+              <div className="p-4 bg-emerald-500/5 dark:bg-emerald-500/10 backdrop-blur-xl border border-emerald-500/20 rounded-3xl shadow-sm">
+                <div className="text-[11px] font-bold tracking-widest text-emerald-600 dark:text-emerald-400 mb-1">{t('skills.status.ready', 'READY')}</div>
+                <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-300">{localStatusCounts.ready}</div>
               </div>
-              <div className="p-3 bg-slate-800/50 border border-amber-500/20 rounded-xl">
-                <div className="text-[11px] uppercase tracking-wide text-slate-500">{t('skills.status.needsSetup', 'Needs Setup')}</div>
-                <div className="mt-1 text-xl font-semibold text-amber-300">{localStatusCounts.needsSetup}</div>
+              <div className="p-4 bg-amber-500/5 dark:bg-amber-500/10 backdrop-blur-xl border border-amber-500/20 rounded-3xl shadow-sm">
+                <div className="text-[11px] font-bold tracking-widest text-amber-600 dark:text-amber-400 mb-1">{t('skills.status.needsSetup', 'NEEDS SETUP')}</div>
+                <div className="text-2xl font-bold text-amber-600 dark:text-amber-300">{localStatusCounts.needsSetup}</div>
               </div>
-              <div className="p-3 bg-slate-800/50 border border-slate-700/50 rounded-xl">
-                <div className="text-[11px] uppercase tracking-wide text-slate-500">{t('skills.status.disabled', 'Disabled')}</div>
-                <div className="mt-1 text-xl font-semibold text-slate-300">{localStatusCounts.disabled}</div>
+              <div className="ui-surface p-4">
+                <div className="text-[11px] font-bold tracking-widest text-slate-500 mb-1">{t('skills.status.disabled', 'DISABLED')}</div>
+                <div className="text-2xl font-bold text-slate-600 dark:text-slate-300">{localStatusCounts.disabled}</div>
               </div>
             </div>
-            <div className="flex gap-2 flex-wrap mb-4">
+            <div className="flex gap-2 flex-wrap mb-6">
               {LOCAL_STATUS_TABS.map(tab => {
                 const count = tab === 'all'
                   ? localStatusCounts.all
@@ -547,7 +551,7 @@ export default function Skills() {
                   <button
                     key={tab}
                     onClick={() => setLocalStatusFilter(tab)}
-                    className={`px-3 py-2 text-xs rounded-xl transition-colors ${localStatusFilter === tab ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}
+                    className={`px-3 py-1.5 text-[12px] font-medium rounded-xl transition-all border shadow-sm ${localStatusFilter === tab ? 'bg-brand-500/10 border-brand-500/20 text-brand-600 dark:text-brand-300' : 'bg-white/40 dark:bg-slate-900/40 border-black/[0.04] dark:border-white/[0.04] text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'}`}
                   >
                     {t(`skills.status.${tab === 'needs-setup' ? 'needsSetup' : tab}`, tab)} <span className="opacity-70">{count}</span>
                   </button>
@@ -555,39 +559,39 @@ export default function Skills() {
               })}
             </div>
             {localSkillGroups.length === 0 ? (
-              <div className="text-center py-10 text-slate-500 bg-slate-800/20 rounded-2xl border border-slate-800">
-                <p className="text-sm">{t('skills.localEmpty', 'No local skills in this status.')}</p>
+              <div className="ui-surface text-center py-10 text-slate-500 relative z-10">
+                <p className="text-[13px]">{t('skills.localEmpty', 'No local skills in this status.')}</p>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-6 relative z-10">
                 {localSkillGroups.map(([groupLabel, skills]) => (
-                  <div key={groupLabel} className="rounded-2xl border border-slate-800 overflow-hidden bg-slate-900/40">
-                    <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-                      <h3 className="text-sm font-medium text-slate-200">{groupLabel}</h3>
-                      <span className="text-[11px] text-slate-500">{skills.length}</span>
+                  <div key={groupLabel} className="ui-surface overflow-hidden">
+                    <div className="px-6 py-4 border-b border-black/[0.04] dark:border-white/[0.04] flex items-center justify-between bg-slate-50/50 dark:bg-slate-950/20">
+                      <h3 className="text-[14px] font-semibold text-slate-900 dark:text-slate-200 tracking-tight">{groupLabel}</h3>
+                      <span className="text-[12px] font-medium text-slate-500 dark:text-slate-400 bg-black/5 dark:bg-white/10 px-2 py-0.5 rounded-md">{skills.length}</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-3 p-4">
+                    <div className="grid grid-cols-2 gap-4 p-6">
                       {skills.map(skill => {
                         const status = getSkillStatusLabel(skill, t);
                         return (
                           <div
                             key={skill.skillKey || skill.name}
                             onClick={() => openDetail(skill.skillKey || skill.name, skill)}
-                            className="p-4 bg-slate-800/50 border border-slate-700/50 rounded-xl hover:border-slate-600 transition-colors cursor-pointer"
+                            className="ui-surface-soft ui-card-interactive p-5 cursor-pointer group"
                           >
-                            <div className="flex items-start gap-3">
-                              <div className="text-2xl leading-none">{skill.emoji || '🧩'}</div>
+                            <div className="flex items-start gap-4">
+                              <div className="text-3xl leading-none group-hover:scale-110 transition-transform duration-300 drop-shadow-sm">{skill.emoji || '🧩'}</div>
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2">
-                                  <h4 className="text-sm font-medium text-slate-200 truncate">{skill.name}</h4>
-                                  {skill.bundled && <span className="text-[10px] text-slate-500">{t('skills.builtInBadge', 'Built-in')}</span>}
+                                  <h4 className="text-[14px] font-semibold text-slate-900 dark:text-slate-200 truncate group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">{skill.name}</h4>
+                                  {skill.bundled && <span className="text-[10px] font-bold tracking-wider uppercase text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">{t('skills.builtInBadge', 'Built-in')}</span>}
                                 </div>
-                                <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{skill.description}</p>
+                                <p className="text-[12px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 leading-relaxed">{skill.description}</p>
                               </div>
                             </div>
-                            <div className="mt-3 flex items-center justify-between gap-2">
-                              <span className={`px-2 py-1 rounded-md text-[10px] ${status.className}`}>{status.label}</span>
-                              <span className="text-[10px] text-slate-600 truncate">{summarizeMissing(skill) || skill.source}</span>
+                            <div className="mt-4 flex items-center justify-between gap-2 border-t border-black/[0.02] dark:border-white/[0.02] pt-3">
+                              <span className={`px-2 py-1 rounded-md text-[10px] font-bold tracking-wider uppercase border border-black/[0.02] dark:border-white/[0.02] shadow-sm ${status.className}`}>{status.label}</span>
+                              <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 dark:text-slate-500 truncate">{summarizeMissing(skill) || skill.source}</span>
                             </div>
                           </div>
                         );
@@ -602,28 +606,28 @@ export default function Skills() {
 
         {/* Built-in section */}
         {showBuiltin && (
-          <div>
-            <h2 className="text-sm font-semibold text-slate-300 mb-1">{t('skills.builtin')}</h2>
-            <p className="text-xs text-slate-500 mb-4">{t('skills.builtinSectionDesc', 'Bundled OpenClaw skills from the official local status report.')}</p>
-            <div className="grid grid-cols-2 gap-3">
+          <div className="relative z-10">
+            <h2 className="text-[15px] font-semibold text-slate-900 dark:text-slate-200 mb-1">{t('skills.builtin')}</h2>
+            <p className="text-[13px] text-slate-500 dark:text-slate-400 mb-6">{t('skills.builtinSectionDesc', 'Bundled OpenClaw skills from the official local status report.')}</p>
+            <div className="grid grid-cols-2 gap-4">
               {localBuiltinSkills.map(skill => {
                 const status = getSkillStatusLabel(skill, t);
                 return (
                   <div
                     key={skill.skillKey || skill.name}
                     onClick={() => openDetail(skill.skillKey || skill.name, skill)}
-                    className="p-4 bg-slate-800/50 border border-slate-700/50 rounded-xl hover:border-slate-600 transition-colors cursor-pointer"
+                    className="ui-surface ui-card-interactive p-5 cursor-pointer group"
                   >
-                    <div className="flex items-start gap-3">
-                      <span className="text-2xl">{skill.emoji || '🧩'}</span>
+                    <div className="flex items-start gap-4">
+                      <span className="text-3xl drop-shadow-sm group-hover:scale-110 transition-transform duration-300">{skill.emoji || '🧩'}</span>
                       <div className="flex-1 min-w-0">
-                        <h4 className="text-sm font-medium text-slate-200 truncate">{skill.name}</h4>
-                        <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{skill.description}</p>
+                        <h4 className="text-[14px] font-semibold text-slate-900 dark:text-slate-200 truncate group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">{skill.name}</h4>
+                        <p className="text-[12px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 leading-relaxed">{skill.description}</p>
                       </div>
                     </div>
-                    <div className="mt-3 flex items-center justify-between gap-2">
-                      <span className={`px-2 py-1 rounded-md text-[10px] ${status.className}`}>{status.label}</span>
-                      <span className="text-[10px] text-slate-600 truncate">{summarizeMissing(skill) || skill.source}</span>
+                    <div className="mt-4 flex items-center justify-between gap-2 border-t border-black/[0.02] dark:border-white/[0.02] pt-3">
+                      <span className={`px-2 py-1 rounded-md text-[10px] font-bold tracking-wider uppercase border border-black/[0.02] dark:border-white/[0.02] shadow-sm ${status.className}`}>{status.label}</span>
+                      <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 dark:text-slate-500 truncate">{summarizeMissing(skill) || skill.source}</span>
                     </div>
                   </div>
                 );
@@ -634,34 +638,34 @@ export default function Skills() {
 
         {/* Installed local skills section */}
         {showInstalled && (
-          <div>
-            <h2 className="text-sm font-semibold text-slate-300 mb-1">{t('skills.installed')}</h2>
-            <p className="text-xs text-slate-500 mb-4">{t('skills.installedSectionDesc', 'Workspace and managed skills visible to the current OpenClaw workspace.')}</p>
+          <div className="relative z-10">
+            <h2 className="text-[15px] font-semibold text-slate-900 dark:text-slate-200 mb-1">{t('skills.installed')}</h2>
+            <p className="text-[13px] text-slate-500 dark:text-slate-400 mb-6">{t('skills.installedSectionDesc', 'Workspace and managed skills visible to the current OpenClaw workspace.')}</p>
             {localInstalledSkills.length === 0 ? (
-              <div className="text-center py-12 text-slate-500">
-                <Package size={32} className="mx-auto mb-3 text-slate-600" />
-                <p className="text-sm">{t('skills.noInstalled')}</p>
+              <div className="ui-surface text-center py-16 text-slate-500">
+                <Package size={32} className="mx-auto mb-4 text-slate-400 opacity-50" />
+                <p className="text-[13px] font-medium">{t('skills.noInstalled')}</p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-4">
                 {localInstalledSkills.map(skill => {
                   const status = getSkillStatusLabel(skill, t);
                   return (
                     <div
                       key={skill.skillKey || skill.name}
                       onClick={() => openDetail(skill.skillKey || skill.name, skill)}
-                      className="p-4 bg-slate-800/50 border border-slate-700/50 rounded-xl hover:border-slate-600 transition-colors cursor-pointer"
+                      className="ui-surface ui-card-interactive p-5 cursor-pointer group"
                     >
-                      <div className="flex items-start gap-3">
-                        <span className="text-2xl">{skill.emoji || '🧩'}</span>
+                      <div className="flex items-start gap-4">
+                        <span className="text-3xl drop-shadow-sm group-hover:scale-110 transition-transform duration-300">{skill.emoji || '🧩'}</span>
                         <div className="flex-1 min-w-0">
-                          <h4 className="font-medium text-sm truncate">{skill.name}</h4>
-                          <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{skill.description}</p>
+                          <h4 className="text-[14px] font-semibold text-slate-900 dark:text-slate-200 truncate group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">{skill.name}</h4>
+                          <p className="text-[12px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 leading-relaxed">{skill.description}</p>
                         </div>
                       </div>
-                      <div className="mt-3 flex items-center justify-between gap-2">
-                        <span className={`px-2 py-1 rounded-md text-[10px] ${status.className}`}>{status.label}</span>
-                        <span className="text-[10px] text-slate-600 truncate">{skill.source}</span>
+                      <div className="mt-4 flex items-center justify-between gap-2 border-t border-black/[0.02] dark:border-white/[0.02] pt-3">
+                        <span className={`px-2 py-1 rounded-md text-[10px] font-bold tracking-wider uppercase border border-black/[0.02] dark:border-white/[0.02] shadow-sm ${status.className}`}>{status.label}</span>
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 dark:text-slate-500 truncate">{skill.source}</span>
                       </div>
                     </div>
                   );
@@ -673,10 +677,10 @@ export default function Skills() {
 
         {/* Popular Skills section (only on Explore tab, not during search) */}
         {showRecommended && (
-          <div>
-            <h2 className="text-sm font-semibold text-slate-300 mb-1">{t('skills.popular', 'Popular on ClawHub')}</h2>
-            <p className="text-xs text-slate-500 mb-4">{t('skills.popular.desc', 'Official ClawHub list sorted by downloads with nonSuspiciousOnly=true.')}</p>
-            <div className="grid grid-cols-2 gap-3">
+          <div className="relative z-10">
+            <h2 className="text-[15px] font-semibold text-slate-900 dark:text-slate-200 mb-1">{t('skills.popular', 'Popular on ClawHub')}</h2>
+            <p className="text-[13px] text-slate-500 dark:text-slate-400 mb-6">{t('skills.popular.desc', 'Official ClawHub list sorted by downloads with nonSuspiciousOnly=true.')}</p>
+            <div className="grid grid-cols-2 gap-4">
               {recommendedList.map(skill => {
                 const isInstalled = installedSlugs.has(skill.slug);
                 const isActioning = actionSlug === skill.slug;
@@ -684,28 +688,28 @@ export default function Skills() {
                   <div
                     key={skill.slug}
                     onClick={() => openDetail(skill.slug)}
-                    className="p-4 bg-gradient-to-br from-brand-600/5 to-transparent border border-brand-500/20 rounded-xl hover:border-brand-500/40 transition-colors cursor-pointer"
+                    className="p-5 bg-gradient-to-br from-brand-500/10 dark:from-brand-600/10 to-transparent backdrop-blur-xl border border-brand-500/20 dark:border-brand-500/30 rounded-3xl hover:border-brand-500/40 dark:hover:border-brand-500/50 hover:shadow-md transition-all duration-200 cursor-pointer shadow-sm group"
                   >
-                    <div className="flex items-start gap-3">
-                      <span className="text-2xl">{skill.emoji || '⭐'}</span>
+                    <div className="flex items-start gap-4">
+                      <span className="text-3xl drop-shadow-sm group-hover:scale-110 transition-transform duration-300">{skill.emoji || '⭐'}</span>
                       <div className="flex-1 min-w-0">
-                        <h4 className="font-medium text-sm truncate">{skill.displayName || skill.name || skill.slug}</h4>
-                        <p className="text-xs text-brand-300/70 mt-0.5">{t('skills.popular.rankHint', 'Ranked from official ClawHub popularity data')}</p>
-                        <p className="text-xs text-slate-500 mt-1 line-clamp-1">{skill.summary || skill.description}</p>
+                        <h4 className="text-[14px] font-semibold text-slate-900 dark:text-slate-200 truncate group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">{skill.displayName || skill.name || skill.slug}</h4>
+                        <p className="text-[11px] font-medium text-brand-600/70 dark:text-brand-300/70 mt-1">{t('skills.popular.rankHint', 'Ranked from official ClawHub popularity data')}</p>
+                        <p className="text-[12px] text-slate-500 dark:text-slate-400 mt-2 line-clamp-1 leading-relaxed">{skill.summary || skill.description}</p>
                       </div>
                     </div>
-                    <div className="mt-3 flex justify-end">
+                    <div className="mt-4 flex justify-end border-t border-brand-500/10 pt-3">
                       {isInstalled ? (
-                        <span className="flex items-center gap-1 text-xs text-emerald-400">
-                          <Check size={12} /> {t('skills.installed')}
+                        <span className="flex items-center gap-1 text-[12px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg">
+                          <Check size={14} /> {t('skills.installed')}
                         </span>
                       ) : (
                         <button
                           onClick={e => { e.stopPropagation(); handleInstall(skill.slug); }}
                           disabled={isActioning}
-                          className="flex items-center gap-1 px-3 py-1.5 text-xs bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 text-white rounded-lg transition-colors"
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 text-white rounded-xl transition-colors shadow-sm"
                         >
-                          {isActioning ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                          {isActioning ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                           {isActioning ? t('skills.installing') : t('skills.install')}
                         </button>
                       )}
@@ -719,22 +723,22 @@ export default function Skills() {
 
         {/* Skills grid (explore / installed / search results) */}
         {!showBuiltin && !showInstalled && (
-          <>
+          <div className="relative z-10">
             {showRecommended && displayList.length > 0 && (
-              <h2 className="text-sm font-semibold text-slate-300">{t('skills.explore')}</h2>
+              <h2 className="text-[15px] font-semibold text-slate-900 dark:text-slate-200 mb-6">{t('skills.explore')}</h2>
             )}
             {loading ? (
-              <div className="flex items-center justify-center h-40 text-slate-500">
-                <Loader2 size={20} className="animate-spin mr-2" /> {t('skills.loading')}
+              <div className="flex items-center justify-center h-40 text-[13px] text-slate-500 dark:text-slate-400">
+                <Loader2 size={20} className="animate-spin mr-2 text-brand-500" /> {t('skills.loading')}
               </div>
             ) : displayList.length === 0 && !showRecommended ? (
-              <div className="text-center py-12 text-slate-500">
-                <Package size={32} className="mx-auto mb-3 text-slate-600" />
-                <p className="text-sm">{searchResults !== null ? t('skills.noResults') : filter === 'installed' ? t('skills.noInstalled') : t('skills.noSkills')}</p>
+              <div className="ui-surface text-center py-16 text-slate-500">
+                <Package size={32} className="mx-auto mb-4 text-slate-400 opacity-50" />
+                <p className="text-[13px] font-medium">{searchResults !== null ? t('skills.noResults') : filter === 'installed' ? t('skills.noInstalled') : t('skills.noSkills')}</p>
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-4">
                   {displayList.map(skill => {
                     const isInstalled = installedSlugs.has(skill.slug);
                     const isActioning = actionSlug === skill.slug;
@@ -744,35 +748,35 @@ export default function Skills() {
                       <div
                         key={skill.slug}
                         onClick={() => openDetail(skill.slug)}
-                        className="p-4 bg-slate-800/50 border border-slate-700/50 rounded-xl hover:border-slate-600 transition-colors cursor-pointer"
+                        className="ui-surface ui-card-interactive p-5 cursor-pointer group"
                       >
-                        <div className="flex items-start gap-3">
-                          <span className="text-2xl">{skill.emoji || '🧩'}</span>
+                        <div className="flex items-start gap-4">
+                          <span className="text-3xl drop-shadow-sm group-hover:scale-110 transition-transform duration-300">{skill.emoji || '🧩'}</span>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
-                              <h4 className="font-medium text-sm truncate">{skill.displayName || skill.name || skill.slug}</h4>
-                              <span className="text-[10px] text-slate-600">
+                              <h4 className="text-[14px] font-semibold text-slate-900 dark:text-slate-200 truncate group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">{skill.displayName || skill.name || skill.slug}</h4>
+                              <span className="text-[10px] font-medium tracking-wider text-slate-400 dark:text-slate-500 bg-black/5 dark:bg-white/10 px-1.5 py-0.5 rounded">
                                 v{isInstalled ? installedInfo?.version : skill.version || '?'}
                               </span>
                             </div>
-                            <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">
+                            <p className="text-[12px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 leading-relaxed">
                               {skill.summary || skill.description || skill.slug}
                             </p>
                             {skill.owner && (
-                              <span className="text-[10px] text-slate-600 mt-1 inline-block">{skill.owner}</span>
+                              <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 mt-2 inline-block">@{skill.owner}</span>
                             )}
                           </div>
                         </div>
-                        <div className="mt-3 flex justify-end gap-2">
+                        <div className="mt-4 flex justify-end gap-2 border-t border-black/[0.02] dark:border-white/[0.02] pt-3">
                           {isInstalled ? (
                             <>
-                              <span className="flex items-center gap-1 text-xs text-emerald-400 mr-auto">
-                                <Check size={12} /> {t('skills.installed')}
+                              <span className="flex items-center gap-1 text-[12px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg mr-auto">
+                                <Check size={14} /> {t('skills.installed')}
                               </span>
                               <button
                                 onClick={e => { e.stopPropagation(); handleUninstall(skill.slug); }}
                                 disabled={isActioning}
-                                className="flex items-center gap-1 px-2.5 py-1 text-xs text-red-400/70 hover:text-red-400 hover:bg-red-600/10 rounded-lg transition-colors"
+                                className="flex items-center gap-1 px-3 py-1.5 text-[12px] font-medium text-red-600 dark:text-red-400 hover:text-white hover:bg-red-500 rounded-xl transition-colors shadow-sm border border-red-500/20 hover:border-red-500"
                               >
                                 {isActioning ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
                                 {t('skills.uninstall')}
@@ -782,9 +786,9 @@ export default function Skills() {
                             <button
                               onClick={e => { e.stopPropagation(); handleInstall(skill.slug); }}
                               disabled={isActioning}
-                              className="flex items-center gap-1 px-3 py-1.5 text-xs bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 text-white rounded-lg transition-colors"
+                              className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 text-white rounded-xl transition-colors shadow-sm"
                             >
-                              {isActioning ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                              {isActioning ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                               {isActioning ? t('skills.installing') : t('skills.install')}
                             </button>
                           )}
@@ -807,57 +811,57 @@ export default function Skills() {
                 )}
               </>
             )}
-          </>
+          </div>
         )}
       </div>
 
       {/* Skill Detail Modal */}
       {(detailSkill || detailLoading) && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-8">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-8">
+          <div className="bg-white/90 dark:bg-slate-950/90 border border-black/[0.08] dark:border-white/[0.08] backdrop-blur-2xl rounded-3xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl shadow-black/60">
             {/* Header */}
-            <div className="flex items-center justify-between p-5 border-b border-slate-800">
+            <div className="flex items-center justify-between p-6 border-b border-black/[0.06] dark:border-white/[0.06]">
               {detailLoading ? (
-                <div className="flex items-center gap-2 text-slate-400">
+                <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500">
                   <Loader2 size={16} className="animate-spin" /> {t('common.loading', 'Loading...')}
                 </div>
               ) : (
                 <div className="flex items-center gap-3 min-w-0">
                   <span className="text-2xl">{detailSkill?.emoji || '🧩'}</span>
                   <div className="min-w-0">
-                    <h2 className="text-lg font-semibold truncate">{detailSkill?.displayName || detailSkill?.name || detailSkill?.slug}</h2>
-                    <p className="text-xs text-slate-500">
+                    <h2 className="text-lg font-semibold truncate text-slate-900 dark:text-white">{detailSkill?.displayName || detailSkill?.name || detailSkill?.slug}</h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
                       v{detailSkill?.version || '?'}
                       {detailSkill?.owner && ` · ${detailSkill.owner}`}
                     </p>
                   </div>
                 </div>
               )}
-              <button onClick={() => setDetailSkill(null)} aria-label={t('common.close', 'Close')} title={t('common.close', 'Close')} className="text-slate-500 hover:text-slate-300 flex-shrink-0">
+              <button onClick={() => setDetailSkill(null)} aria-label={t('common.close', 'Close')} title={t('common.close', 'Close')} className="text-slate-400 hover:text-slate-700 dark:text-slate-500 dark:hover:text-white flex-shrink-0 transition-colors">
                 <X size={20} />
               </button>
             </div>
 
             {/* Content */}
             {detailSkill && (
-              <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              <div className="flex-1 overflow-y-auto p-6 space-y-5">
                 {(detailSkill.description || detailSkill.summary) && (
-                  <p className="text-sm text-slate-300">{detailSkill.description || detailSkill.summary}</p>
+                  <p className="text-[15px] text-slate-900 dark:text-slate-200 leading-relaxed">{detailSkill.description || detailSkill.summary}</p>
                 )}
 
                 {(detailSkill.source || detailSkill.homepage || detailSkill.primaryEnv || detailSkill.missing) && (
-                  <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50 space-y-2">
-                    <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider">{t('skills.openclawStatus', 'OpenClaw Status')}</h4>
-                    {detailSkill.source && <p className="text-xs text-slate-400">{t('skills.sourceLabel', 'Source')}: {detailSkill.source}</p>}
+                  <div className="bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl rounded-2xl p-4 border border-black/[0.04] dark:border-white/[0.04] space-y-2">
+                    <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">{t('skills.openclawStatus', 'OpenClaw Status')}</h4>
+                    {detailSkill.source && <p className="text-xs text-slate-500 dark:text-slate-400">{t('skills.sourceLabel', 'Source')}: {detailSkill.source}</p>}
                     {(typeof detailSkill.eligible === 'boolean' || typeof detailSkill.disabled === 'boolean') && (
-                      <p className="text-xs text-slate-400">{t('skills.statusLabel', 'Status')}: {getSkillStatusLabel({ eligible: Boolean(detailSkill.eligible), disabled: Boolean(detailSkill.disabled), blockedByAllowlist: Boolean(detailSkill.blockedByAllowlist) }, t).label}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{t('skills.statusLabel', 'Status')}: {getSkillStatusLabel({ eligible: Boolean(detailSkill.eligible), disabled: Boolean(detailSkill.disabled), blockedByAllowlist: Boolean(detailSkill.blockedByAllowlist) }, t).label}</p>
                     )}
-                    {detailSkill.primaryEnv && <p className="text-xs text-slate-400">{t('skills.primaryEnvLabel', 'Primary env')}: {detailSkill.primaryEnv}</p>}
+                    {detailSkill.primaryEnv && <p className="text-xs text-slate-500 dark:text-slate-400">{t('skills.primaryEnvLabel', 'Primary env')}: {detailSkill.primaryEnv}</p>}
                     {detailSkill.homepage && (
                       <button
                         onClick={() => { void openExternal(detailSkill.homepage || '', `skill-homepage-${detailSkill.slug}`); }}
                         disabled={isOpening(`skill-homepage-${detailSkill.slug}`)}
-                        className="text-xs text-brand-300 hover:text-brand-200"
+                        className="text-xs text-brand-600 dark:text-brand-300 hover:underline"
                       >
                         {t('skills.openHomepage', 'Open homepage')}
                       </button>
@@ -866,7 +870,7 @@ export default function Skills() {
                       <button
                         onClick={() => { void openExternal(detailSkill.clawhubUrl || '', `skill-clawhub-${detailSkill.slug}`); }}
                         disabled={isOpening(`skill-clawhub-${detailSkill.slug}`)}
-                        className="text-xs text-brand-300 hover:text-brand-200"
+                        className="text-xs text-brand-600 dark:text-brand-300 hover:underline"
                       >
                         {t('skills.viewOnClawHub', 'View on ClawHub (install guide & docs)')}
                       </button>
@@ -879,7 +883,7 @@ export default function Skills() {
                         : navigator.platform?.startsWith('Mac') ? 'darwin' : 'linux';
                       const compatible = osList.includes(currentOs);
                       return (
-                        <p className={`text-xs flex items-center gap-1 ${compatible ? 'text-emerald-400' : 'text-amber-300'}`}>
+                        <p className={`text-xs flex items-center gap-1 ${compatible ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-500 dark:text-amber-300'}`}>
                           <span>{compatible ? '✓' : '⚠'}</span>
                           <span>
                             {compatible
@@ -898,7 +902,7 @@ export default function Skills() {
                       blockedByAllowlist: Boolean(detailSkill.blockedByAllowlist),
                       missing: detailSkill.missing,
                     }) && (
-                      <p className="text-xs text-amber-300">{t('skills.missingLabel', 'Missing')}: {summarizeMissing({
+                      <p className="text-xs text-amber-500 dark:text-amber-300">{t('skills.missingLabel', 'Missing')}: {summarizeMissing({
                         name: detailSkill.name || detailSkill.slug,
                         description: detailSkill.description || '',
                         source: detailSkill.source || '',
@@ -912,36 +916,36 @@ export default function Skills() {
                 )}
 
                 {(detailSkill.skillMd || detailSkill.readme) && (
-                  <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
-                    <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">{t('skills.documentation', 'Documentation')}</h4>
-                    <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono max-h-60 overflow-y-auto">
+                  <div className="bg-white/70 dark:bg-slate-900/70 backdrop-blur rounded-2xl p-4 border border-black/[0.04] dark:border-white/[0.04]">
+                    <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">{t('skills.documentation', 'Documentation')}</h4>
+                    <pre className="text-xs text-slate-700 dark:text-slate-200 whitespace-pre-wrap font-mono max-h-60 overflow-y-auto">
                       {detailSkill.skillMd || detailSkill.readme}
                     </pre>
                   </div>
                 )}
 
                 {(installedSlugs.has(detailSkill.slug) || !!detailSkill.primaryEnv || (detailSkill.missing?.env?.length ?? 0) > 0 || (detailSkill.missing?.config?.length ?? 0) > 0) && (
-                  <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
-                    <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">{t('skills.configuration', 'Configuration')}</h4>
+                  <div className="bg-white/70 dark:bg-slate-900/70 backdrop-blur rounded-2xl p-4 border border-black/[0.04] dark:border-white/[0.04]">
+                    <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-3">{t('skills.configuration', 'Configuration')}</h4>
                     {Object.keys(skillConfig).length === 0 ? (
-                      <p className="text-xs text-slate-600">{t('skills.noConfigOptions', 'No configuration options. Add key-value pairs below.')}</p>
+                      <p className="text-xs text-slate-400 dark:text-slate-500">{t('skills.noConfigOptions', 'No configuration options. Add key-value pairs below.')}</p>
                     ) : null}
                     <div className="space-y-2">
                       {Object.entries(skillConfig).map(([key, val]) => (
                         <div key={key} className="flex items-center gap-2">
-                          <span className="text-xs font-mono text-slate-400 w-32 truncate flex-shrink-0">{key}</span>
+                          <span className="text-xs font-mono text-slate-500 dark:text-slate-400 w-32 truncate flex-shrink-0">{key}</span>
                           <input
                             value={val}
                             onChange={e => { setSkillConfig(prev => ({ ...prev, [key]: e.target.value })); setConfigDirty(true); }}
                             aria-label={key}
                             title={key}
-                            className="flex-1 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-xs font-mono focus:outline-none focus:border-brand-500"
+                            className="flex-1 px-2 py-1 bg-white dark:bg-slate-900 border border-black/[0.08] dark:border-white/[0.08] rounded text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-brand-500"
                           />
                           <button
                             onClick={() => { const next = { ...skillConfig }; delete next[key]; setSkillConfig(next); setConfigDirty(true); }}
                             aria-label={t('common.remove', 'Remove')}
                             title={t('common.remove', 'Remove')}
-                            className="text-slate-600 hover:text-red-400"
+                            className="text-slate-400 hover:text-red-500 dark:text-slate-500 dark:hover:text-red-400"
                           >
                             <Trash2 size={12} />
                           </button>
@@ -952,7 +956,7 @@ export default function Skills() {
                       <input
                         placeholder={t('skills.configKeyPlaceholder', 'key')}
                         id="new-config-key"
-                        className="flex-1 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-xs font-mono focus:outline-none focus:border-brand-500"
+                        className="flex-1 px-2 py-1 bg-white dark:bg-slate-900 border border-black/[0.08] dark:border-white/[0.08] rounded text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-brand-500"
                         onKeyDown={e => {
                           if (e.key === 'Enter') {
                             const input = e.target as HTMLInputElement;
@@ -967,7 +971,7 @@ export default function Skills() {
                           const k = input?.value.trim();
                           if (k && !(k in skillConfig)) { setSkillConfig(prev => ({ ...prev, [k]: '' })); setConfigDirty(true); input.value = ''; }
                         }}
-                        className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded text-slate-300"
+                        className="px-2 py-1 text-xs bg-brand-600 hover:bg-brand-500 text-white rounded transition-colors"
                       >
                         {t('skills.addConfig', '+ Add')}
                       </button>
@@ -989,10 +993,10 @@ export default function Skills() {
 
             {/* Footer actions */}
             {detailSkill && (
-              <div className="flex justify-end gap-2 p-5 border-t border-slate-800">
+              <div className="flex justify-end gap-2 p-6 border-t border-black/[0.06] dark:border-white/[0.06] bg-white/70 dark:bg-slate-900/70 rounded-b-3xl">
                 {detailSkill.eligible ? (
                   /* Skill is ready — show installed badge */
-                  <span className="flex items-center gap-1 text-xs text-emerald-400 mr-auto">
+                  <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 mr-auto">
                     <Check size={12} /> {t('skills.status.ready', 'Ready')}
                   </span>
                 ) : detailSkill.bundled && !detailSkill.eligible ? (
@@ -1001,7 +1005,7 @@ export default function Skills() {
                     /* OS incompatible — show clear message, no install button */
                     <div className="flex-1 space-y-2">
                       <div className="flex items-center gap-2 px-3 py-2 bg-red-500/10 rounded-lg">
-                        <span className="text-red-400 text-sm">
+                        <span className="text-red-500 dark:text-red-400 text-sm">
                           {t('skills.osIncompatible', 'This skill requires {os} and is not available on your system.').replace('{os}', (detailSkill.missing?.os || []).map(os => os === 'darwin' ? 'macOS' : os === 'win32' ? 'Windows' : os === 'linux' ? 'Linux' : os).join(' / '))}
                         </span>
                       </div>
@@ -1012,27 +1016,27 @@ export default function Skills() {
                     <div className="flex-1 space-y-1">
                       {(detailSkill.install && detailSkill.install.length > 0) ? (
                         detailSkill.install.map((spec: InstallSpec) => (
-                          <div key={spec.id} className="flex items-center gap-2 text-xs text-slate-300">
-                            <span className="px-1.5 py-0.5 bg-slate-700 rounded text-[10px] uppercase">{spec.kind}</span>
+                          <div key={spec.id} className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+                            <span className="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-800 rounded text-[10px] uppercase">{spec.kind}</span>
                             <span>{spec.label}</span>
                           </div>
                         ))
                       ) : (detailSkill.missing?.bins?.length ?? 0) > 0 ? (
-                        <p className="text-xs text-slate-400">
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
                           {t('skills.missingBinsHint', 'Install the required tools: {bins}').replace('{bins}', (detailSkill.missing?.bins || []).join(', '))}
                         </p>
                       ) : (detailSkill.missing?.env?.length ?? 0) > 0 ? (
-                        <p className="text-xs text-slate-400">
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
                           {t('skills.missingEnvHint', 'Set required environment variables: {env}').replace('{env}', (detailSkill.missing?.env || []).join(', '))}
                         </p>
                       ) : null}
                       {actionSlug === detailSkill.slug && installProgress && (
-                        <p className="text-xs text-sky-400 animate-pulse">
+                        <p className="text-xs text-sky-600 dark:text-sky-400 animate-pulse">
                           {installProgress}
                         </p>
                       )}
                       {installResult && (
-                        <p className={`text-xs ${installResult.success ? 'text-emerald-400' : 'text-red-400'}`}>
+                        <p className={`text-xs ${installResult.success ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
                           {installResult.message}
                         </p>
                       )}
@@ -1049,7 +1053,7 @@ export default function Skills() {
                       <button
                         onClick={() => { void openExternal(detailSkill.homepage || '', `skill-install-${detailSkill.slug}`); }}
                         disabled={isOpening(`skill-install-${detailSkill.slug}`)}
-                        className="flex items-center gap-1 px-4 py-2 text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition-colors flex-shrink-0"
+                        className="flex items-center gap-1 px-4 py-2 text-sm bg-white dark:bg-slate-900 border border-black/[0.08] dark:border-white/[0.08] text-slate-700 dark:text-slate-200 rounded-xl transition-colors flex-shrink-0 hover:bg-slate-100 dark:hover:bg-slate-800"
                       >
                         <ExternalLink size={14} />
                         {t('skills.openInstallGuide', 'Install Guide')}
@@ -1060,14 +1064,14 @@ export default function Skills() {
                 ) : installedSlugs.has(detailSkill.slug) ? (
                   /* ClawHub installed skill — show usage guide + uninstall */
                   <>
-                    <span className="flex items-center gap-1 text-xs text-emerald-400 mr-auto">
+                    <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 mr-auto">
                       <Check size={12} /> {t('skills.installed')}
                     </span>
                     {detailSkill.clawhubUrl && (
                       <button
                         onClick={() => { void openExternal(detailSkill.clawhubUrl || '', `skill-guide-${detailSkill.slug}`); }}
                         disabled={isOpening(`skill-guide-${detailSkill.slug}`)}
-                        className="flex items-center gap-1 px-4 py-2 text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition-colors"
+                        className="flex items-center gap-1 px-4 py-2 text-sm bg-white dark:bg-slate-900 border border-black/[0.08] dark:border-white/[0.08] text-slate-700 dark:text-slate-200 rounded-xl transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
                       >
                         <ExternalLink size={14} />
                         {t('skills.usageGuide', 'Usage Guide')}
@@ -1076,7 +1080,7 @@ export default function Skills() {
                     <button
                       onClick={async () => { await handleUninstall(detailSkill.slug); }}
                       disabled={actionSlug === detailSkill.slug}
-                      className="flex items-center gap-1 px-4 py-2 text-sm text-red-400 hover:bg-red-600/10 rounded-xl transition-colors"
+                      className="flex items-center gap-1 px-4 py-2 text-sm text-red-500 dark:text-red-400 hover:bg-red-500/10 rounded-xl transition-colors"
                     >
                       {actionSlug === detailSkill.slug ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                       {t('skills.uninstall')}

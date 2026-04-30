@@ -16,13 +16,23 @@ export function SettingsToggle({ checked, onChange }: { checked: boolean; onChan
   );
 }
 
-export function SettingsSection({ title, children }: { title: ReactNode; children: ReactNode }) {
+export function SettingsSection({
+  title,
+  children,
+  seamless = false,
+}: {
+  title: ReactNode;
+  children: ReactNode;
+  seamless?: boolean;
+}) {
   return (
     <div className="space-y-3">
       <h3 className="settings-section-title">{title}</h3>
-      <div className="settings-glass-card divide-y divide-slate-700/30">
-        {children}
-      </div>
+      {seamless ? children : (
+        <div className="settings-glass-card divide-y divide-slate-700/30">
+          {children}
+        </div>
+      )}
     </div>
   );
 }

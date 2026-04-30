@@ -391,6 +391,8 @@ const en: Record<string, string> = {
 
   // Settings
   'settings.title': 'Settings',
+  'settings.legal.privacy': 'Privacy Policy',
+  'settings.legal.terms': 'Terms of Service',
   'settings.model': 'AI Model',
   'settings.model.change': 'Change Model',
   'settings.model.current': 'Current',
@@ -1797,6 +1799,8 @@ const zh: Record<string, string> = {
 
   // Settings
   'settings.title': '设置',
+  'settings.legal.privacy': '隐私政策',
+  'settings.legal.terms': '服务条款',
   'settings.model': 'AI 模型',
   'settings.model.change': '切换模型',
   'settings.model.current': '当前',

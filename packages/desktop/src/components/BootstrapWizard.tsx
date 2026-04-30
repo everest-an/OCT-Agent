@@ -115,7 +115,7 @@ export default function BootstrapWizard({ onComplete, onSkip }: BootstrapWizardP
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/95 flex items-center justify-center p-6">
+    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-6">
       <div className="w-full max-w-lg">
         {/* Header */}
         <div className="text-center mb-8">
@@ -132,7 +132,7 @@ export default function BootstrapWizard({ onComplete, onSkip }: BootstrapWizardP
         </div>
 
         {/* Step content */}
-        <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-6 min-h-[280px] flex flex-col">
+        <div className="bg-slate-900/80 backdrop-blur-3xl rounded-3xl border border-white/[0.08] shadow-[0_24px_48px_rgba(0,0,0,0.5)] p-6 min-h-[280px] flex flex-col">
           {step === 0 && (
             <div className="flex-1 flex flex-col items-center justify-center gap-6">
               <div className="w-14 h-14 rounded-full bg-brand-500/10 flex items-center justify-center">

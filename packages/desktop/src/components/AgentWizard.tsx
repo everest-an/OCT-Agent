@@ -144,7 +144,7 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
   const canProceed = agentName.trim().length > 0;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/95 flex items-center justify-center p-6">
+    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-6">
       <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="text-center mb-6">
@@ -179,7 +179,7 @@ export default function AgentWizard({ onComplete, onCancel }: AgentWizardProps) 
         )}
 
         {/* Step content */}
-        <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-6 min-h-[300px] flex flex-col">
+        <div className="bg-slate-900/80 backdrop-blur-3xl rounded-3xl border border-white/[0.08] shadow-[0_24px_48px_rgba(0,0,0,0.5)] p-6 min-h-[300px] flex flex-col">
 
           {/* Step 0: Name */}
           {step === 0 && (

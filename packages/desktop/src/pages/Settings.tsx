@@ -872,6 +872,26 @@ export default function Settings() {
           onOpenGithub={() => { void openExternal('https://github.com/edwin-hao-ai/OCT', 'settings-github'); }}
           githubOpening={isOpening('settings-github')}
         />
+
+        <footer className="flex items-center justify-end gap-3 pt-1 text-[11px] text-slate-500 dark:text-slate-500">
+          <button
+            type="button"
+            onClick={() => { void openExternal('https://awareness.market/docs?doc=privacy', 'settings-privacy-policy'); }}
+            disabled={isOpening('settings-privacy-policy')}
+            className="transition-colors hover:text-slate-900 disabled:opacity-50 dark:hover:text-slate-300"
+          >
+            {t('settings.legal.privacy', 'Privacy Policy')}
+          </button>
+          <span className="text-slate-300 dark:text-slate-700">/</span>
+          <button
+            type="button"
+            onClick={() => { void openExternal('https://awareness.market/docs?doc=terms', 'settings-terms'); }}
+            disabled={isOpening('settings-terms')}
+            className="transition-colors hover:text-slate-900 disabled:opacity-50 dark:hover:text-slate-300"
+          >
+            {t('settings.legal.terms', 'Terms of Service')}
+          </button>
+        </footer>
       </div>
     </div>
   );

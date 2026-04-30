@@ -533,54 +533,52 @@ export default function Models() {
   }, [customMode, editingProvider, t]);
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="px-6 py-4 border-b border-slate-800">
-        <h1 className="text-lg font-semibold inline-flex items-center gap-2">
-          <Bot size={18} className="text-sky-300" />
+    <div className="h-full flex flex-col relative z-0">
+      <div className="ui-page-header relative z-10">
+        <h1 className="ui-page-title">
+          <span className="ui-title-icon">
+            <Bot size={16} />
+          </span>
           {t('models.title', 'Models')}
         </h1>
-        <p className="mt-1 text-sm text-slate-400">{t('models.subtitle', 'Manage the active model, OpenClaw-supported providers, and your own custom model catalog in one place.')}</p>
+        <p className="ui-page-subtitle">{t('models.subtitle', 'Manage the active model, OpenClaw-supported providers, and your own custom model catalog in one place.')}</p>
       </div>
 
-      <div className="p-6 space-y-6">
+      <div className="flex-1 overflow-y-auto p-8 relative">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-brand-500/5 blur-[100px] pointer-events-none rounded-full z-0" />
+
         {savedState === 'done' && (
-          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-5 py-4 text-[13px] font-medium text-emerald-700 dark:text-emerald-200 mb-6 flex items-start gap-2 relative z-10">
+            <Check size={16} className="shrink-0 mt-0.5 text-emerald-500 dark:text-emerald-300" />
             {t('models.saved', 'Model configuration saved. New chats will use the selected primary model.')}
           </div>
         )}
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)] relative z-10">
           <div className="space-y-6">
             <SettingsSection title={t('models.providers', 'Providers')}>
-              <div className="p-4 space-y-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="text-sm font-medium text-slate-100">{t('models.pickProvider', 'Choose a provider')}</div>
-                    <div className="mt-1 text-xs text-slate-500">{t('models.pickProviderHint', 'Click any provider card to open its setup dialog. The main page should stay clean; detailed settings live in the popup.')}</div>
-                  </div>
-                </div>
+              <div className="p-1 space-y-4">
+                <div className="mt-1 text-[13px] text-slate-500 dark:text-slate-400">{t('models.pickProviderHint', 'Click any provider card to open its setup dialog. The main page should stay clean; detailed settings live in the popup.')}</div>
 
                 {loading && (
-                  <div className="flex items-center gap-2 px-1 py-1 text-xs text-slate-500">
-                    <Loader2 size={12} className="animate-spin" />
+                  <div className="flex items-center justify-center gap-2 mb-6 py-6 border border-black/[0.04] dark:border-white/[0.04] bg-white/50 dark:bg-slate-900/40 backdrop-blur-xl rounded-2xl text-[13px] font-medium text-slate-500 dark:text-slate-400">
+                    <Loader2 size={16} className="animate-spin text-brand-400" />
                     {t('common.loading', 'Loading...')}
                   </div>
                 )}
 
-                <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+                <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3 mt-4">
                   <button
                     onClick={beginCustomProvider}
-                    className="rounded-2xl border border-dashed border-slate-600 bg-slate-900/50 p-4 text-left transition-colors hover:border-brand-500 hover:bg-brand-600/10"
+                    className="ui-surface ui-card-interactive border-dashed p-5 text-left group"
                   >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600/15 text-brand-300">
-                          <Plus size={18} />
-                        </div>
-                        <div>
-                          <div className="text-sm font-medium text-slate-100">{t('models.addProvider', 'Add Custom Provider')}</div>
-                          <div className="mt-1 text-xs text-slate-500">{t('models.addProviderHint', 'Define your own provider key, base URL, and model IDs.')}</div>
-                        </div>
+                    <div className="flex items-center gap-4">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-500/10 text-brand-400 group-hover:scale-110 group-hover:bg-brand-500/20 transition-all">
+                        <Plus size={20} />
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900 dark:text-slate-200 dark:group-hover:text-white transition-colors">{t('models.addProvider', 'Add Custom Provider')}</div>
+                        <div className="text-[12px] text-slate-500 dark:text-slate-500 mt-0.5 leading-tight">{t('models.addProviderHint', 'Define your own provider key, base URL, and model IDs.')}</div>
                       </div>
                     </div>
                   </button>
@@ -597,31 +595,36 @@ export default function Models() {
                       <button
                         key={provider.key}
                         onClick={() => openProviderModal(provider.key)}
-                        className={`rounded-2xl border p-4 text-left transition-colors ${isActive ? 'border-brand-500 bg-brand-600/10' : 'border-slate-700 bg-slate-900/50 hover:border-slate-500'}`}
+                        className={`ui-surface ui-card-interactive relative overflow-hidden p-5 text-left group ${isActive ? 'border-brand-500/40 bg-brand-500/5 dark:bg-brand-500/10' : ''}`}
                       >
-                        <div className="flex items-start justify-between gap-3">
+                        {isActive && (
+                          <div className="absolute top-0 right-0 w-32 h-32 bg-brand-500/10 blur-[40px] rounded-full pointer-events-none" />
+                        )}
+                        <div className="flex items-start justify-between gap-3 relative z-10">
                           <div>
-                            <div className="text-base font-medium text-slate-100 inline-flex items-center gap-2">
-                              <ProviderIcon providerKey={provider.key} size={16} />
+                            <div className="text-[15px] font-semibold text-slate-900 dark:text-slate-200 inline-flex items-center gap-2.5">
+                              <ProviderIcon providerKey={provider.key} size={20} className="drop-shadow-md" />
                               {provider.name}
                             </div>
-                            <div className="mt-1 text-xs text-slate-500">{provider.tag || provider.key}</div>
+                            <div className="mt-1 text-[12px] text-slate-500 font-medium">{provider.tag || provider.key}</div>
                           </div>
                           {isActive && (
-                            <span className="rounded-full bg-emerald-500/15 px-2 py-1 text-[11px] font-medium text-emerald-300">
-                              {t('models.active', 'Active')}
+                            <span className="rounded-full bg-brand-500/15 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-brand-300 border border-brand-500/20">
+                              {t('models.active', 'ACTIVE')}
                             </span>
                           )}
                         </div>
 
-                        <div className="mt-3 text-sm text-slate-300">{provider.desc}</div>
+                        <div className="mt-4 text-[13px] text-slate-500 dark:text-slate-400 leading-relaxed line-clamp-2 relative z-10 min-h-[40px]">{provider.desc}</div>
 
-                        <div className="mt-4 flex items-center justify-between text-xs text-slate-500">
-                          <span className="inline-flex items-center gap-2">
-                            <Database size={12} />
+                        <div className="mt-5 flex items-center justify-between text-[12px] text-slate-500 font-medium relative z-10">
+                          <span className="inline-flex items-center gap-1.5 bg-slate-100/80 dark:bg-slate-950/40 px-2 py-1 rounded-md border border-black/[0.03] dark:border-white/[0.02]">
+                            <Database size={12} className="text-slate-400" />
                             {t('models.catalogCount', '{count} models').replace('{count}', String(mergedProviderModels.length))}
                           </span>
-                          <span>{isActive ? t('models.configureActive', 'Edit active model') : t('models.configureProvider', 'Configure')}</span>
+                          <span className={`${isActive ? 'text-brand-500 dark:text-brand-400 opacity-100' : 'text-slate-700 dark:text-white opacity-0 group-hover:opacity-100'} transition-opacity flex items-center gap-1`}>
+                            {isActive ? t('models.configureActive', 'Edit Active') : t('models.configureProvider', 'Configure')}
+                          </span>
                         </div>
                       </button>
                     );
@@ -632,42 +635,33 @@ export default function Models() {
           </div>
 
           <div className="space-y-6">
-            <SettingsSection title={t('models.current', 'Current Model')}>
-              <div className="p-4 space-y-4">
-                <div className="rounded-2xl border border-slate-700 bg-slate-900/50 p-4">
-                  <div className="text-xs uppercase tracking-[0.2em] text-slate-500">{t('models.current', 'Current Model')}</div>
-                  <div className="mt-2 text-base font-medium text-slate-100">
-                    {activeProvider
-                      ? activeProvider.name
-                      : t('models.notConfigured', 'No active model configured')}
+            <SettingsSection title={t('models.current', 'Current Model')} seamless>
+              <div className="ui-surface p-6 relative overflow-hidden group">
+                <div className="absolute -top-10 -right-10 w-40 h-40 bg-brand-500/10 blur-[50px] rounded-full pointer-events-none group-hover:bg-brand-500/20 transition-all" />
+                <div className="text-[11px] uppercase tracking-widest font-semibold text-brand-400 mb-2 relative z-10">{t('models.current', 'ACTIVE')}</div>
+                <div className="text-xl font-bold text-slate-900 dark:text-white mb-2 relative z-10">
+                  {activeProvider
+                    ? activeProvider.name
+                    : t('models.notConfigured', 'No configuration')}
+                </div>
+                {activeProvider && (
+                  <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-100/80 dark:bg-slate-950/40 border border-black/[0.04] dark:border-white/[0.04] rounded-xl text-[13px] font-medium text-slate-700 dark:text-slate-300 mb-4 relative z-10">
+                    <ProviderIcon providerKey={activeProvider.key} size={16} />
+                    {activeProvider.key}
                   </div>
-                  {activeProvider && (
-                    <div className="mt-1 inline-flex items-center gap-2 text-xs text-slate-500">
-                      <ProviderIcon providerKey={activeProvider.key} size={13} />
-                      {activeProvider.key}
-                    </div>
-                  )}
-                  <div className="mt-1 text-sm text-slate-300">{activeModel?.label || config.modelId || t('models.notConfigured', 'No active model configured')}</div>
-                  <div className="mt-3 text-xs text-slate-500">{t('models.currentHint', 'Saving here updates both Desktop local state and OpenClaw primary model.')}</div>
-                  {activeProvider && (
-                    <button
-                      onClick={() => openProviderModal(activeProvider.key)}
-                      className="mt-4 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-brand-500"
-                    >
-                      {t('models.configureActive', 'Edit active model')}
-                    </button>
-                  )}
+                )}
+                <div className="text-[13px] text-slate-500 dark:text-slate-400 relative z-10 bg-slate-100/80 dark:bg-black/20 rounded-xl p-3 border border-black/[0.03] dark:border-white/[0.02]">
+                  <span className="text-slate-500 block mb-1 uppercase text-[10px] font-bold tracking-wider">{t('settings.modelId', 'Model ID')}</span>
+                  <span className="text-slate-900 dark:text-slate-200 font-mono tracking-tight">{activeModel?.label || config.modelId || t('models.notConfigured', 'None')}</span>
                 </div>
               </div>
             </SettingsSection>
-
-            <SettingsSection title={t('models.dynamicFlow', 'Dynamic flow')}>
-              <div className="p-4">
-                <div className="rounded-2xl border border-sky-500/20 bg-sky-500/10 px-4 py-4 text-sm text-sky-100">
-                  <div className="font-medium">{t('models.dialogFlowTitle', 'Cleaner flow')}</div>
-                  <div className="mt-2 text-xs leading-5 text-sky-100/80">{t('models.dialogFlowHint', 'On this page you only choose the provider. All connection details, API type, model discovery, and custom model IDs are edited inside a dialog so the page stays readable.')}</div>
-                  <div className="mt-3 text-xs leading-5 text-sky-100/80">{sourceSummary}</div>
-                </div>
+            
+            <SettingsSection title={t('models.dynamicFlow', 'Dynamic flow')} seamless>
+              <div className="ui-surface p-6 border-sky-500/20 bg-sky-500/5">
+                <div className="text-sm font-semibold text-sky-300">{t('models.dialogFlowTitle', 'Cleaner flow')}</div>
+                <div className="mt-2 text-[13px] leading-relaxed text-sky-200/80">{t('models.dialogFlowHint', 'On this page you only choose the provider. All connection details, API type, model discovery, and custom model IDs are edited inside a dialog so the page stays readable.')}</div>
+                <div className="mt-3 text-[12px] font-medium text-sky-400/80">{sourceSummary}</div>
               </div>
             </SettingsSection>
           </div>
@@ -687,21 +681,21 @@ export default function Models() {
             paddingClass="p-0"
             footer={(
               <div className="flex items-center justify-between gap-3 px-6 py-4">
-                <div className="flex items-start gap-2 text-xs text-amber-100">
-                  <Sparkles size={14} className="mt-0.5 text-amber-300" />
+                <div className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-100">
+                  <Sparkles size={14} className="mt-0.5 text-amber-600 dark:text-amber-300" />
                   <span>{t('models.saveHint', 'Save writes this provider profile into Desktop local config and syncs the same catalog to openclaw.json.models.providers.')}</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <button
                     onClick={closeModal}
-                    className="rounded-lg bg-slate-800 px-4 py-2 text-xs font-medium text-slate-200 transition-colors hover:bg-slate-700"
+                    className="rounded-lg bg-slate-100 px-4 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                   >
                     {t('common.cancel', 'Cancel')}
                   </button>
                   <button
                     onClick={() => { void saveProvider(); }}
                     disabled={saveDisabled}
-                    className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-brand-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-500"
+                    className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-brand-500 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 dark:disabled:bg-slate-700 dark:disabled:text-slate-500"
                   >
                     <Check size={12} /> {t('models.saveAndActivate', 'Save & Activate')}
                   </button>
@@ -711,43 +705,43 @@ export default function Models() {
           >
             <div className="p-6 space-y-6">
               {!!saveError && (
-                <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+                <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
                   {saveError}
                 </div>
               )}
-              <div className="rounded-2xl border border-slate-700 bg-slate-900/50 px-4 py-4">
+              <div className="rounded-2xl border border-slate-200/80 bg-white/70 px-4 py-4 dark:border-slate-700 dark:bg-slate-900/50">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
-                    <div className="text-base font-medium text-slate-100 inline-flex items-center gap-2">
+                    <div className="text-base font-medium text-slate-900 inline-flex items-center gap-2 dark:text-slate-100">
                       {!customMode && <ProviderIcon providerKey={editingProvider?.key || effectiveProviderKey} size={16} />}
                       {customMode ? t('models.quickSetup', 'Quick Setup') : `${editingProvider?.name || providerName}`}
                     </div>
-                    <div className="mt-1 text-xs text-slate-500">{customMode ? t('models.quickSetupHint', 'Start with the provider name, endpoint, and API type. Advanced fields stay tucked away until you need them.') : editingProvider?.desc || sourceSummary}</div>
+                    <div className="mt-1 text-xs text-slate-600 dark:text-slate-500">{customMode ? t('models.quickSetupHint', 'Start with the provider name, endpoint, and API type. Advanced fields stay tucked away until you need them.') : editingProvider?.desc || sourceSummary}</div>
                   </div>
                   {!customMode && editingProvider?.tag && (
-                    <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300">{editingProvider.tag}</span>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{editingProvider.tag}</span>
                   )}
                 </div>
               </div>
 
               <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
                 <div className="space-y-5">
-                  <div className="rounded-2xl border border-slate-700 bg-slate-900/50 p-4 space-y-4">
+                  <div className="rounded-2xl border border-slate-200/80 bg-white/70 p-4 space-y-4 dark:border-slate-700 dark:bg-slate-900/50">
                     <div>
-                      <div className="text-sm font-medium text-slate-100">{t('models.quickSetup', 'Quick Setup')}</div>
-                      <div className="mt-1 text-xs text-slate-500">{t('models.quickSetupHint', 'Start with the provider name, endpoint, and API type. Advanced fields stay tucked away until you need them.')}</div>
+                      <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{t('models.quickSetup', 'Quick Setup')}</div>
+                      <div className="mt-1 text-xs text-slate-600 dark:text-slate-500">{t('models.quickSetupHint', 'Start with the provider name, endpoint, and API type. Advanced fields stay tucked away until you need them.')}</div>
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
                       <div>
-                        <label htmlFor="models-provider-name" className="block text-xs font-medium text-slate-400 mb-1">{t('models.providerName', 'Provider Name')}</label>
+                        <label htmlFor="models-provider-name" className="block text-xs font-medium text-slate-600 mb-1 dark:text-slate-400">{t('models.providerName', 'Provider Name')}</label>
                         <input
                           id="models-provider-name"
                           type="text"
                           value={providerName}
                           onChange={(event) => setProviderName(event.target.value)}
                           disabled={!customMode}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-brand-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                          className="w-full rounded-lg border border-slate-300/80 bg-white/80 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                           placeholder={t('models.providerNamePlaceholder', 'My Provider')}
                         />
                         <div className="mt-1 text-[11px] text-slate-500">
@@ -756,7 +750,7 @@ export default function Models() {
                       </div>
 
                       <div>
-                        <label htmlFor="models-api-type" className="block text-xs font-medium text-slate-400 mb-1">{t('models.apiType', 'API Type')}</label>
+                        <label htmlFor="models-api-type" className="block text-xs font-medium text-slate-600 mb-1 dark:text-slate-400">{t('models.apiType', 'API Type')}</label>
                         <select
                           id="models-api-type"
                           aria-label={t('models.apiType', 'API Type')}
@@ -769,7 +763,7 @@ export default function Models() {
                             }
                             setApiType(nextValue);
                           }}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-brand-500 focus:outline-none"
+                          className="w-full rounded-lg border border-slate-300/80 bg-white/80 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                         >
                           {apiTypeOptions.map((option) => (
                             <option key={option.value} value={option.value}>{option.label}</option>
@@ -783,7 +777,7 @@ export default function Models() {
                     </div>
 
                     <div>
-                      <label htmlFor="models-base-url" className="block text-xs font-medium text-slate-400 mb-1">
+                      <label htmlFor="models-base-url" className="block text-xs font-medium text-slate-600 mb-1 dark:text-slate-400">
                         {t('settings.model.baseUrl', 'API Base URL')}
                       </label>
                       <input
@@ -791,7 +785,7 @@ export default function Models() {
                         type="text"
                         value={baseUrl}
                         onChange={(event) => setBaseUrl(event.target.value)}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-brand-500 focus:outline-none"
+                        className="w-full rounded-lg border border-slate-300/80 bg-white/80 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                         placeholder="https://api.example.com/v1"
                       />
                       {!customMode && baseUrl === (editingProvider?.baseUrl || '') && (
@@ -802,15 +796,15 @@ export default function Models() {
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-slate-700 bg-slate-900/50 p-4 space-y-4">
+                  <div className="rounded-2xl border border-slate-200/80 bg-white/70 p-4 space-y-4 dark:border-slate-700 dark:bg-slate-900/50">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <div className="text-sm font-medium text-slate-100">{t('models.requiresKey', 'Requires API key')}</div>
-                        <div className="mt-1 text-xs text-slate-500">{t('models.requiresKeyHint', 'Turn this off for local or unauthenticated endpoints such as Ollama.')}</div>
+                        <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{t('models.requiresKey', 'Requires API key')}</div>
+                        <div className="mt-1 text-xs text-slate-600 dark:text-slate-500">{t('models.requiresKeyHint', 'Turn this off for local or unauthenticated endpoints such as Ollama.')}</div>
                       </div>
                       <button
                         onClick={() => setNeedsKey((value) => !value)}
-                        className={`rounded-full px-3 py-1 text-xs font-medium ${needsKey ? 'bg-brand-600 text-white' : 'bg-slate-700 text-slate-300'}`}
+                        className={`rounded-full px-3 py-1 text-xs font-medium ${needsKey ? 'bg-brand-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}
                       >
                         {needsKey ? t('common.on', 'on') : t('common.off', 'off')}
                       </button>
@@ -818,53 +812,53 @@ export default function Models() {
 
                     {needsKey && (
                       <div>
-                        <label className="block text-xs font-medium text-slate-400 mb-1">{t('settings.model.apiKey', 'API Key')}</label>
+                        <label className="block text-xs font-medium text-slate-600 mb-1 dark:text-slate-400">{t('settings.model.apiKey', 'API Key')}</label>
                         <PasswordInput
                           value={apiKey}
                           onChange={(event) => setApiKey(event.target.value)}
                           placeholder={t('common.pasteApiKey', 'Paste your API Key...')}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-brand-500 focus:outline-none"
+                          className="w-full rounded-lg border border-slate-300/80 bg-white/80 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                         />
                       </div>
                     )}
                   </div>
 
-                  <div className="rounded-2xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
+                  <div className="rounded-2xl border border-slate-200/80 bg-white/60 p-4 space-y-3 dark:border-slate-700 dark:bg-slate-900/40">
                     <button
                       type="button"
                       onClick={() => setShowAdvanced((value) => !value)}
                       className="flex w-full items-center justify-between text-left"
                     >
                       <div>
-                        <div className="text-sm font-medium text-slate-100">{t('models.advanced', 'Advanced Settings')}</div>
-                        <div className="mt-1 text-xs text-slate-500">{t('models.advancedHint', 'Override the generated provider key or enter a protocol name that is not in the preset list.')}</div>
+                        <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{t('models.advanced', 'Advanced Settings')}</div>
+                        <div className="mt-1 text-xs text-slate-600 dark:text-slate-500">{t('models.advancedHint', 'Override the generated provider key or enter a protocol name that is not in the preset list.')}</div>
                       </div>
-                      <span className="text-xs text-slate-400">{showAdvanced ? t('models.hideAdvanced', 'Hide') : t('models.showAdvanced', 'Show')}</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">{showAdvanced ? t('models.hideAdvanced', 'Hide') : t('models.showAdvanced', 'Show')}</span>
                     </button>
 
                     {showAdvanced && (
                       <div className="grid gap-4 md:grid-cols-2">
                         <div>
-                          <label htmlFor="models-provider-key" className="block text-xs font-medium text-slate-400 mb-1">{t('models.providerKey', 'Provider Key')}</label>
+                          <label htmlFor="models-provider-key" className="block text-xs font-medium text-slate-600 mb-1 dark:text-slate-400">{t('models.providerKey', 'Provider Key')}</label>
                           <input
                             id="models-provider-key"
                             type="text"
                             value={providerKeyInput}
                             onChange={(event) => setProviderKeyInput(event.target.value)}
                             disabled={!customMode}
-                            className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-brand-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                            className="w-full rounded-lg border border-slate-300/80 bg-white/80 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                             placeholder={t('models.providerKeyPlaceholder', 'custom-openai')}
                           />
                         </div>
 
                         <div>
-                          <label htmlFor="models-api-type-custom" className="block text-xs font-medium text-slate-400 mb-1">{t('models.apiTypeCustom', 'Custom API type')}</label>
+                          <label htmlFor="models-api-type-custom" className="block text-xs font-medium text-slate-600 mb-1 dark:text-slate-400">{t('models.apiTypeCustom', 'Custom API type')}</label>
                           <input
                             id="models-api-type-custom"
                             type="text"
                             value={apiType}
                             onChange={(event) => setApiType(event.target.value)}
-                            className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-brand-500 focus:outline-none"
+                            className="w-full rounded-lg border border-slate-300/80 bg-white/80 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                             placeholder={t('models.apiTypeCustomPlaceholder', 'Enter the exact protocol value expected by OpenClaw')}
                           />
                         </div>
@@ -874,16 +868,16 @@ export default function Models() {
                 </div>
 
                 <div className="space-y-5">
-                  <div className="rounded-2xl border border-slate-700 bg-slate-900/50 p-4 space-y-4">
+                  <div className="rounded-2xl border border-slate-200/80 bg-white/70 p-4 space-y-4 dark:border-slate-700 dark:bg-slate-900/50">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <div className="text-sm font-medium text-slate-100">{t('models.catalog', 'Model Catalog')}</div>
-                        <div className="mt-1 text-xs text-slate-500">{t('models.catalogHint', 'Pick the active model, refresh from OpenClaw, and keep any manual model IDs you add.')}</div>
+                        <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{t('models.catalog', 'Model Catalog')}</div>
+                        <div className="mt-1 text-xs text-slate-600 dark:text-slate-500">{t('models.catalogHint', 'Pick the active model, refresh from OpenClaw, and keep any manual model IDs you add.')}</div>
                       </div>
                       <button
                         onClick={() => { void discoverModels(); }}
                         disabled={discovering || !baseUrl.trim() || !effectiveProviderKey || (needsKey && !apiKey.trim())}
-                        className="inline-flex items-center gap-2 rounded-lg bg-slate-800 px-3 py-2 text-xs text-slate-200 transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-700 transition-colors hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                       >
                         {discovering ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
                         {t('models.discover', 'Refresh from OpenClaw')}
@@ -891,27 +885,27 @@ export default function Models() {
                     </div>
 
                     {discoverState === 'success' && (
-                      <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+                      <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-200">
                         {t('models.discoverSuccess', 'Model list refreshed. Custom model IDs were kept.')}
                       </div>
                     )}
                     {hasCrossVendorDiscoveries && (
-                      <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                      <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-100">
                         {t('models.discoverCrossVendor', 'This endpoint also returned models from other vendors. They stay visible for manual use, but OCT will not switch to them automatically.')}
                       </div>
                     )}
                     {selectionNeedsReview && (
-                      <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                      <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-100">
                         {t('models.discoverSelectionReview', 'Your previous selection is no longer in this refreshed catalog. Pick a model explicitly before saving.')}
                       </div>
                     )}
                     {discoverState === 'error' && (
-                      <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+                      <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
                         {t('models.discoverFailed', 'OpenClaw could not fetch models. Check the provider key, base URL, and API key.')}
                       </div>
                     )}
                     {selectedModelCrossVendor && selectedModel?.source === 'detected' && (
-                      <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 px-3 py-2 text-xs text-sky-100">
+                      <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 px-3 py-2 text-xs text-sky-700 dark:text-sky-100">
                         {t('models.selectedCrossVendor', 'This model comes from the endpoint\'s mixed vendor pool. Desktop keeps it opt-in and never auto-selects it for you.')}
                       </div>
                     )}
@@ -920,10 +914,10 @@ export default function Models() {
                       {models.map((model) => (
                         <div
                           key={model.id}
-                          className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-3 ${selectedModelId === model.id ? 'border-brand-500 bg-brand-600/10' : 'border-slate-700 bg-slate-900/70'}`}
+                          className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-3 ${selectedModelId === model.id ? 'border-brand-500 bg-brand-600/10' : 'border-slate-200 bg-white/80 dark:border-slate-700 dark:bg-slate-900/70'}`}
                         >
                           <button onClick={() => setSelectedModelId(model.id)} className="min-w-0 flex-1 text-left">
-                            <div className="text-sm font-medium text-slate-100 truncate">{model.label}</div>
+                            <div className="text-sm font-medium text-slate-900 truncate dark:text-slate-100">{model.label}</div>
                             <div className="mt-1 text-[10px] uppercase tracking-wide text-slate-500">
                               {model.source === 'catalog'
                                 ? t('models.source.catalog', 'Built-in')
@@ -936,7 +930,7 @@ export default function Models() {
                           </button>
                           <button
                             onClick={() => removeModel(model.id)}
-                            className="text-slate-500 transition-colors hover:text-rose-300"
+                            className="text-slate-500 transition-colors hover:text-rose-600 dark:hover:text-rose-300"
                             aria-label={t('common.delete', 'Delete')}
                             title={t('common.delete', 'Delete')}
                           >
@@ -947,7 +941,7 @@ export default function Models() {
                     </div>
 
                     {!models.length && (
-                      <div className="rounded-lg border border-dashed border-slate-700 px-3 py-3 text-xs text-slate-500">
+                      <div className="rounded-lg border border-dashed border-slate-300 px-3 py-3 text-xs text-slate-500 dark:border-slate-700">
                         {t('models.catalogEmpty', 'No models yet. Add a model ID manually or use Refresh from OpenClaw.')}
                       </div>
                     )}
@@ -963,7 +957,7 @@ export default function Models() {
                             addCustomModel();
                           }
                         }}
-                        className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-brand-500 focus:outline-none"
+                        className="flex-1 rounded-lg border border-slate-300/80 bg-white/80 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                         placeholder={t('models.customModelPlaceholder', 'Add model ID, for example gpt-4.1-mini')}
                       />
                       <button

@@ -149,9 +149,9 @@ export function ChatComposer({
         </div>
       )}
 
-      <div className="px-4 py-3">
+      <div className="px-5 py-3.5">
         <div className="max-w-3xl mx-auto">
-          <div className="relative bg-slate-800 rounded-2xl border border-slate-700/60 focus-within:border-brand-500/50 focus-within:ring-1 focus-within:ring-brand-500/20 transition-all">
+          <div className="relative bg-slate-800/80 backdrop-blur-sm rounded-2xl border border-slate-700/50 focus-within:border-brand-500/40 focus-within:ring-2 focus-within:ring-brand-500/15 transition-all duration-200 shadow-lg shadow-black/20">
             {/* @agent mention autocomplete popup */}
             {(() => {
               // Detect if user just typed @ at the start or after a space
@@ -165,7 +165,7 @@ export function ChatComposer({
               if (filteredAgents.length === 0) return null;
 
               return (
-                <div className="absolute bottom-full left-4 mb-1 w-56 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden z-20 animate-in fade-in slide-in-from-bottom-2">
+                <div className="absolute bottom-full left-4 mb-2 w-56 bg-slate-900/95 backdrop-blur-xl border border-slate-700/60 rounded-2xl shadow-2xl shadow-black/40 overflow-hidden z-20 animate-in fade-in slide-in-from-bottom-2">
                   <div className="px-3 py-1.5 text-[10px] text-slate-500 border-b border-slate-800">
                     {t('chat.mention.hint', 'Type @agent to delegate a task')}
                   </div>
@@ -181,7 +181,7 @@ export function ChatComposer({
                         onInputChange(newInput);
                         textareaRef.current?.focus();
                       }}
-                      className="w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-800 transition-colors text-left"
+                      className="w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-800/60 transition-all duration-150 text-left"
                     >
                       <AgentAvatar name={agent.name} emoji={agent.emoji} size={16} className="flex-shrink-0" />
                       <div>
@@ -243,7 +243,7 @@ export function ChatComposer({
                     }`} />
                   </button>
                   {showPermissionMenu && (
-                    <div className="absolute bottom-full left-0 mb-1 w-52 bg-slate-800/95 backdrop-blur-sm border border-slate-700/80 rounded-xl shadow-xl overflow-hidden z-50">
+                    <div className="absolute bottom-full left-0 mb-2 w-52 bg-slate-900/95 backdrop-blur-xl border border-slate-700/60 rounded-2xl shadow-2xl shadow-black/40 overflow-hidden z-50">
                       <div className="px-3 py-1.5 text-[10px] text-slate-500 uppercase tracking-wider border-b border-slate-700/50">{t('chat.permissions.switch', 'Permissions')}</div>
                       {permissionOptions.map((option) => (
                         <button
@@ -286,7 +286,7 @@ export function ChatComposer({
                       <ChevronDown size={10} />
                     </button>
                     {showAgentMenu && (
-                      <div className="absolute bottom-full left-0 mb-1 w-48 bg-slate-800/95 backdrop-blur-sm border border-slate-700/80 rounded-xl shadow-xl overflow-hidden z-50">
+                      <div className="absolute bottom-full left-0 mb-2 w-48 bg-slate-900/95 backdrop-blur-xl border border-slate-700/60 rounded-2xl shadow-2xl shadow-black/40 overflow-hidden z-50">
                         <div className="px-3 py-1.5 text-[10px] text-slate-500 uppercase tracking-wider border-b border-slate-700/50">{t('chat.agent.switch', 'Agents')}</div>
                         {agents.map((agent) => (
                           <button
@@ -329,7 +329,7 @@ export function ChatComposer({
                   disabled={!canSendCurrentMessage}
                   title={isRunning ? t('chat.queue', 'Queue message') : t('chat.send', 'Send')}
                   aria-label={isRunning ? t('chat.queue', 'Queue message') : t('chat.send', 'Send')}
-                  className="p-1.5 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg transition-colors"
+                  className="p-1.5 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700/60 disabled:text-slate-500 text-white rounded-lg transition-all duration-150 shadow-sm shadow-brand-900/30"
                 >
                   <Send size={14} />
                 </button>

@@ -418,7 +418,7 @@ export default function Memory() {
           bottom-right "Auto-fix in progress" toast that wouldn't dismiss. */}
 
       {/* Header */}
-      <div className="px-6 py-4 border-b border-slate-800">
+      <div className="px-6 py-4 border-b border-slate-800/60 backdrop-blur-sm bg-slate-900/20">
         <div className="flex items-center justify-between mb-3">
           <div>
             <h1 className="flex items-center gap-2 text-lg font-semibold">
@@ -442,7 +442,7 @@ export default function Memory() {
               onClick={() => setScanSettingsOpen(true)}
               title={t('scanSettings.open')}
               aria-label={t('scanSettings.open')}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800/60 border border-slate-700/40 hover:border-slate-600/60 rounded-lg transition-all duration-150"
             >
               <Settings2 size={12} />
               {t('scanSettings.open')}
@@ -450,7 +450,7 @@ export default function Memory() {
             <button
               onClick={handleRefresh}
               disabled={loading}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800/60 border border-slate-700/40 hover:border-slate-600/60 rounded-lg transition-all duration-150"
             >
               {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
               {t('common.refresh')}
@@ -516,7 +516,7 @@ export default function Memory() {
               onChange={(e) => { setSearchQuery(e.target.value); if (!e.target.value) setSearchResults(null); }}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
               placeholder={t('memory.searchHint')}
-              className="w-full rounded-2xl border border-slate-700/60 bg-slate-900/50 py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+              className="w-full rounded-2xl border border-slate-700/50 bg-slate-800/50 backdrop-blur-sm py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500/30 transition-all duration-150"
             />
             {searching && <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-brand-400" />}
           </div>
@@ -669,7 +669,7 @@ export default function Memory() {
             {/* ── Settings Tab ────────────────────────────────── */}
             {activeTab === 'settings' && (
               <div className="p-6 space-y-4">
-                <div className="rounded-[24px] border border-slate-700/60 bg-slate-900/55 p-5">
+                <div className="rounded-[24px] border border-slate-700/50 bg-slate-900/60 backdrop-blur-sm p-5">
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
                       <div className="text-xs uppercase tracking-[0.2em] text-slate-500">{t('memory.settingsTab', 'Settings')}</div>
@@ -679,15 +679,15 @@ export default function Memory() {
                       </p>
                     </div>
                     <div className="grid min-w-[220px] gap-2 sm:grid-cols-3">
-                      <div className="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3">
+                      <div className="rounded-2xl border border-slate-700/50 bg-slate-800/40 px-4 py-3">
                         <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{t('memory.settings.activeMode', 'Active mode')}</div>
                         <div className="mt-1 text-sm font-medium text-slate-100">{activeModeText}</div>
                       </div>
-                      <div className="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3">
+                      <div className="rounded-2xl border border-slate-700/50 bg-slate-800/40 px-4 py-3">
                         <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{t('settings.memory.recallCount')}</div>
                         <div className="mt-1 text-sm font-medium text-slate-100">{config.recallLimit}</div>
                       </div>
-                      <div className="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3">
+                      <div className="rounded-2xl border border-slate-700/50 bg-slate-800/40 px-4 py-3">
                         <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{t('memory.settings.cloudState', 'Cloud state')}</div>
                         <div className="mt-1 text-sm font-medium text-slate-100">{cloudStateText}</div>
                       </div>

@@ -161,12 +161,12 @@ export function WikiOverviewView({
 
 function StatCard({ label, value, icon }: { label: string; value: number; icon: ReactNode }) {
   return (
-    <div className="rounded-xl border border-slate-700/50 bg-slate-800/40 p-3">
-      <div className="flex items-center gap-2 text-slate-500 mb-1">
+    <div className="rounded-2xl border border-slate-700/40 bg-slate-800/30 backdrop-blur-sm p-4 shadow-sm">
+      <div className="flex items-center gap-2 text-slate-500 mb-1.5">
         {icon}
         <span className="text-[11px] uppercase tracking-wider">{label}</span>
       </div>
-      <p className="text-lg font-semibold text-slate-100">{value}</p>
+      <p className="text-xl font-semibold text-slate-100">{value}</p>
     </div>
   );
 }
@@ -186,7 +186,7 @@ function CardRow({
     <button
       type="button"
       onClick={() => onSelect({ type: 'card', id: card.id })}
-      className="flex w-full items-start gap-3 p-3 text-left hover:bg-slate-800/50 transition-colors"
+      className="flex w-full items-start gap-3 p-3 text-left hover:bg-slate-800/40 transition-all duration-150 rounded-xl"
     >
       <span className="text-sm shrink-0 mt-0.5">{growthIcon}</span>
       <div className="min-w-0 flex-1">

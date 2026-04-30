@@ -221,35 +221,35 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col relative z-0">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-slate-800">
-        <div className="flex items-center justify-between mb-2">
+      <div className="px-8 py-6 border-b border-white/[0.04] bg-slate-950/20">
+        <div className="flex items-center justify-between mb-1">
           <div>
-            <h1 className="text-lg font-semibold">🤖 {t('agents.title')}</h1>
-            <p className="text-xs text-slate-500">{t('agents.subtitle')}</p>
+            <h1 className="text-xl font-bold tracking-tight text-white mb-1">🤖 {t('agents.title')}</h1>
+            <p className="text-[13px] text-slate-400">{t('agents.subtitle')}</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <button onClick={() => setShowMarketplace(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors"
+              className="flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold uppercase tracking-wider bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 rounded-full transition-colors"
               title={t('agents.marketplace.title', 'Browse Agent Marketplace')}>
-              <ShoppingBag size={12} />
+              <ShoppingBag size={14} />
               {t('agents.marketplace.entry', '浏览集市')}
             </button>
             <button onClick={() => setShowWizard(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-brand-600 hover:bg-brand-500 text-white rounded-lg transition-colors">
-              <Plus size={12} />
+              className="flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold uppercase tracking-wider bg-brand-500 hover:bg-brand-400 text-white rounded-full transition-colors shadow-sm shadow-brand-500/20">
+              <Plus size={14} />
               {t('agents.createAgent')}
             </button>
             <button onClick={loadAgents} disabled={loading}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 rounded-lg">
-              {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              className="flex items-center justify-center gap-1.5 p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-full transition-colors">
+              {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
             </button>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+      <div className="flex-1 overflow-y-auto p-8 space-y-6">
         {/* Error */}
         {error && (
           <div className="flex items-center gap-2 p-3 bg-red-600/10 border border-red-600/20 rounded-xl text-xs text-red-400">
@@ -281,34 +281,37 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
         {loading ? (
           <div className="flex items-center justify-center py-12"><Loader2 size={24} className="animate-spin text-brand-500" /></div>
         ) : agents.length === 0 ? (
-          <div className="text-center py-12 text-slate-500 text-sm">{t('agents.empty')}</div>
+          <div className="text-center py-12 bg-slate-900/20 rounded-3xl border border-white/[0.04]">
+            <Bot size={32} className="mx-auto mb-4 text-slate-600" />
+            <p className="text-sm font-medium text-slate-300">{t('agents.empty')}</p>
+          </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-4">
             {agents.map((agent) => (
-              <div key={agent.id} className="bg-slate-800/50 border border-slate-700/50 rounded-xl overflow-hidden">
+              <div key={agent.id} className="bg-slate-900/60 backdrop-blur-xl border border-white/[0.06] rounded-3xl overflow-hidden hover:border-white/[0.1] hover:bg-slate-900/80 transition-colors">
                 {/* Agent header */}
-                <div className="p-4 space-y-3">
+                <div className="p-5 space-y-4">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <AgentAvatar name={agent.name || agent.id} emoji={agent.emoji} size={28} fallback="logo" className="text-2xl" />
+                    <div className="flex items-center gap-3.5">
+                        <AgentAvatar name={agent.name || agent.id} emoji={agent.emoji} size={40} fallback="logo" className="text-2xl" />
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium">{agent.name || agent.id}</span>
-                          {agent.isDefault && <span className="px-1.5 py-0.5 text-[10px] bg-brand-600/20 text-brand-400 rounded">{t('agents.default', 'Default')}</span>}
+                          <span className="text-base font-semibold text-slate-200">{agent.name || agent.id}</span>
+                          {agent.isDefault && <span className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider bg-brand-500/20 text-brand-400 rounded-full">{t('agents.default', 'Default')}</span>}
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5">
                           {t('agents.idLabel', 'ID')}: {agent.id}{agent.model && <span className="ml-2">{t('agents.modelLabel', 'Model')}: {agent.model}</span>}
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5">
                       <button onClick={() => handleOpenFiles(agent.id)}
-                        className={`p-1.5 rounded transition-colors ${fileEditAgentId === agent.id ? 'text-brand-400 bg-brand-600/10' : 'text-slate-500 hover:text-slate-300'}`}
+                        className={`p-2 rounded-full transition-colors ${fileEditAgentId === agent.id ? 'text-brand-400 bg-brand-500/20 shadow-sm' : 'text-slate-500 hover:text-white hover:bg-white/10'}`}
                         title={t('agents.editDefinition')}>
-                        <FileText size={14} />
+                        <FileText size={16} />
                       </button>
                       <button onClick={() => { setEditingId(agent.id); setEditName(agent.name || ''); setEditEmoji(agent.emoji || ''); setEditAvatar(''); setEditTheme(''); }}
-                        className="p-1.5 text-slate-500 hover:text-slate-300 rounded" title={t('agents.editIdentity', 'Edit identity')}><Edit3 size={14} /></button>
+                        className="p-2 text-slate-500 hover:text-white hover:bg-white/10 rounded-full transition-colors" title={t('agents.editIdentity', 'Edit identity')}><Edit3 size={16} /></button>
                       {/* "Add binding" button removed 2026-04-08 — channel routing is now
                           managed on the Channels page via per-channel "Replied by" dropdown. */}
                       {!agent.isDefault && (
@@ -316,9 +319,9 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
                           onClick={() => setShareAgentId(agent.id)}
                           title={t('agents.share', '分享到集市')}
                           aria-label={t('agents.share', '分享到集市')}
-                          className="p-1.5 rounded text-slate-500 hover:text-violet-400 hover:bg-violet-600/10"
+                          className="p-2 rounded-full text-slate-500 hover:text-violet-400 hover:bg-violet-600/10 transition-colors"
                         >
-                          <Share2 size={14} />
+                          <Share2 size={16} />
                         </button>
                       )}
                       {!agent.isDefault && (
@@ -326,9 +329,9 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
                           onClick={() => handleDelete(agent.id)}
                           disabled={deletingId === agent.id}
                           title={t('common.delete', 'Delete')}
-                          className="p-1.5 text-slate-500 hover:text-red-400 rounded disabled:opacity-50"
+                          className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-full disabled:opacity-50 transition-colors"
                         >
-                          {deletingId === agent.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                          {deletingId === agent.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
                         </button>
                       )}
                     </div>
@@ -337,14 +340,14 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
                   {/* Bindings (read-only): which channels currently route to this agent.
                       Managed exclusively on the Channels page; this is just a status pill. */}
                   {agent.bindings && agent.bindings.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 pl-11">
+                    <div className="flex flex-wrap gap-2 pl-[3.25rem] -mt-2">
                       {agent.bindings.map((b, i) => (
                         <span
                           key={i}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] bg-emerald-600/15 text-emerald-400 rounded-full"
+                          className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] uppercase tracking-wider font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full"
                           title={t('agents.bindingReadOnlyHint', 'Manage channel routing on the Channels page')}
                         >
-                          <Link size={9} />{b}
+                          <Link size={10} />{b}
                         </span>
                       ))}
                     </div>
@@ -352,26 +355,26 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
 
                   {/* Inline identity edit */}
                   {editingId === agent.id && (
-                    <div className="space-y-2 pl-11 pt-2 border-t border-slate-700/30">
+                    <div className="space-y-3 pl-[3.25rem] pt-3 pb-1 border-t border-white/[0.04]">
                       <AgentEmojiPicker
                         value={editEmoji}
                         onChange={setEditEmoji}
                         size="sm"
                       />
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2.5">
                         <input value={editEmoji} onChange={(e) => setEditEmoji(e.target.value)} placeholder={t('agents.emojiOptional', 'Optional')}
-                          className="w-10 px-1 py-1 bg-slate-900 border border-slate-600 rounded text-center text-sm" maxLength={4} />
+                          className="w-12 px-2 py-1.5 bg-slate-950/40 border border-white/[0.08] hover:border-white/[0.12] rounded-xl text-center text-sm focus:outline-none focus:border-brand-500 transition-colors text-slate-200" maxLength={4} />
                         <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder={t('agents.namePlaceholder', 'Name')}
-                          className="flex-1 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-sm" />
-                        <button onClick={() => handleSetIdentity(agent.id)} title={t('common.save', 'Save')} aria-label={t('common.save', 'Save')} className="p-1 text-emerald-400 hover:text-emerald-300"><Check size={14} /></button>
-                        <button onClick={() => setEditingId(null)} title={t('common.cancel', 'Cancel')} aria-label={t('common.cancel', 'Cancel')} className="p-1 text-slate-500 hover:text-slate-300"><X size={14} /></button>
+                          className="flex-1 px-3 py-1.5 bg-slate-950/40 border border-white/[0.08] hover:border-white/[0.12] rounded-xl text-sm focus:outline-none focus:border-brand-500 transition-colors text-slate-200" />
+                        <button onClick={() => handleSetIdentity(agent.id)} title={t('common.save', 'Save')} aria-label={t('common.save', 'Save')} className="p-2 bg-brand-500/20 text-brand-400 hover:text-brand-300 hover:bg-brand-500/30 rounded-full transition-colors"><Check size={16} /></button>
+                        <button onClick={() => setEditingId(null)} title={t('common.cancel', 'Cancel')} aria-label={t('common.cancel', 'Cancel')} className="p-2 bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700/80 rounded-full transition-colors"><X size={16} /></button>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2.5 opacity-50"> {/* Muting these for now since they are rarely used */}
                         <input value={editAvatar} onChange={(e) => setEditAvatar(e.target.value)}
                           placeholder={t('agents.avatarPlaceholder', 'Avatar URL (optional)')}
-                          className="flex-1 px-2 py-1 bg-slate-900 border border-slate-600 rounded text-xs text-slate-400" />
+                          className="flex-1 px-3 py-1.5 bg-slate-950/40 border border-white/[0.08] rounded-xl text-xs text-slate-400 focus:outline-none" />
                         <select value={editTheme} onChange={(e) => setEditTheme(e.target.value)} aria-label={t('agents.theme', 'Theme')}
-                          className="px-2 py-1 bg-slate-900 border border-slate-600 rounded text-xs text-slate-400">
+                          className="px-3 py-1.5 bg-slate-950/40 border border-white/[0.08] rounded-xl text-xs text-slate-400 focus:outline-none">
                           <option value="">{t('agents.theme', 'Theme')}</option>
                           <option value="dark">{t('agents.themeDark', 'Dark')}</option>
                           <option value="light">{t('agents.themeLight', 'Light')}</option>
@@ -385,16 +388,16 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
 
                 {/* Workspace file editor (expanded) */}
                 {fileEditAgentId === agent.id && (
-                  <div className="border-t border-slate-700/50 bg-slate-900/50">
+                  <div className="border-t border-white/[0.06] bg-slate-950/30">
                     {/* File tabs */}
-                    <div className="grid grid-cols-2 gap-1 border-b border-slate-700/30 p-2 sm:grid-cols-3 xl:grid-cols-6">
+                    <div className="grid grid-cols-2 gap-1.5 border-b border-white/[0.04] p-3 sm:grid-cols-3 xl:grid-cols-6">
                       {workspaceFiles.map((fileName) => (
                         <button key={fileName}
                           onClick={() => { setActiveFile(fileName); void loadFile(agent.id, fileName); }}
-                          className={`rounded-lg px-3 py-2 text-[11px] text-left transition-colors ${
+                          className={`rounded-xl px-3 py-2 text-[11px] font-medium text-left transition-colors ${
                             activeFile === fileName
-                              ? 'bg-brand-600/10 text-brand-400 ring-1 ring-brand-500/40'
-                              : 'text-slate-500 hover:bg-slate-800/70 hover:text-slate-300'
+                              ? 'bg-brand-500/20 text-brand-300 ring-1 ring-brand-500/40 shadow-sm'
+                              : 'text-slate-500 hover:bg-slate-800/60 hover:text-slate-300'
                           }`}>
                           {fileName}
                         </button>
@@ -402,8 +405,8 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
                     </div>
 
                     {/* File description */}
-                    <div className="px-4 pt-2">
-                      <p className="text-[10px] text-slate-500">
+                    <div className="px-5 pt-4">
+                      <p className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
                         {activeFile
                           ? t(WORKSPACE_FILE_META[activeFile] || 'agents.file.defaultDesc', WORKSPACE_FILE_META[activeFile] ? undefined : 'OpenClaw workspace file: {file}').replace('{file}', activeFile)
                           : t('agents.noWorkspaceFiles', 'No markdown workspace files found for this agent.')}
@@ -411,13 +414,13 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
                     </div>
 
                     {/* Editor */}
-                    <div className="p-4">
+                    <div className="p-5">
                       {fileListLoading || fileLoading ? (
-                        <div className="flex items-center justify-center py-8">
-                          <Loader2 size={16} className="animate-spin text-slate-500" />
+                        <div className="flex items-center justify-center py-12">
+                          <Loader2 size={24} className="animate-spin text-slate-600" />
                         </div>
                       ) : !activeFile ? (
-                        <div className="rounded-lg border border-dashed border-slate-700 px-4 py-8 text-sm text-slate-500">
+                        <div className="rounded-2xl border border-dashed border-white/[0.08] bg-slate-900/40 px-6 py-12 text-sm text-center text-slate-500">
                           {t('agents.noTopLevelFiles', 'This agent does not expose any top-level markdown workspace files yet.')}
                         </div>
                       ) : (
@@ -425,7 +428,7 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
                           value={fileContent}
                           onChange={(e) => setFileContent(e.target.value)}
                           rows={20}
-                          className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-slate-300 font-mono leading-relaxed focus:outline-none focus:border-brand-500 resize-y min-h-[300px]"
+                          className="w-full px-4 py-3 bg-slate-950/60 backdrop-blur-md border border-white/[0.08] hover:border-white/[0.12] rounded-2xl text-sm text-slate-300 font-mono leading-relaxed focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/50 resize-y min-h-[300px] transition-colors"
                           placeholder={activeFile === 'SOUL.md'
                             ? t('agents.placeholder.soul', 'You are a helpful assistant specialized in...\n\n# Personality\n- Friendly and professional\n- Always explain your reasoning\n\n# Rules\n- Never share private information\n- Always cite sources')
                             : activeFile === 'TOOLS.md'
@@ -436,21 +439,21 @@ export default function Agents({ onNavigate }: { onNavigate?: (page: Page) => vo
                       )}
 
                       {/* Save button */}
-                      <div className="flex items-center justify-between mt-2">
-                        <span className="text-[10px] text-slate-600">
+                      <div className="flex items-center justify-between mt-3">
+                        <span className="text-[11px] font-medium text-slate-500">
                           {fileDirty ? t('agents.unsavedChanges', 'Unsaved changes') : ''}
                         </span>
                         <button onClick={handleSaveFile}
                           disabled={!fileDirty || fileSaving}
-                          className={`px-3 py-1.5 text-xs rounded-lg flex items-center gap-1.5 transition-colors ${
+                          className={`px-4 py-2 text-xs font-medium rounded-full flex items-center gap-2 transition-colors ${
                             fileSaved
-                              ? 'bg-emerald-600/20 text-emerald-400'
+                              ? 'bg-emerald-500/20 text-emerald-400'
                               : fileDirty
-                              ? 'bg-brand-600 hover:bg-brand-500 text-white'
-                              : 'bg-slate-800 text-slate-600 cursor-not-allowed'
+                              ? 'bg-brand-500 text-white shadow-md shadow-brand-500/20 hover:bg-brand-400'
+                              : 'bg-slate-800 text-slate-500 cursor-not-allowed'
                           }`}>
-                          {fileSaving ? <Loader2 size={12} className="animate-spin" /> :
-                           fileSaved ? <Check size={12} /> : <Save size={12} />}
+                          {fileSaving ? <Loader2 size={14} className="animate-spin" /> :
+                           fileSaved ? <Check size={14} /> : <Save size={14} />}
                           {fileSaved ? t('agents.saved') : t('agents.save')}
                         </button>
                       </div>
@@ -571,47 +574,53 @@ function RecommendedAgentsSection({
   if (loading || recs.length === 0) return null;
 
   return (
-    <div className="mt-8 rounded-xl border border-violet-800/40 bg-violet-950/10 p-4">
-      <div className="flex items-center justify-between mb-3">
+    <div className="mt-8 rounded-3xl border border-violet-500/20 bg-violet-500/5 p-6 backdrop-blur-xl">
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h2 className="text-sm font-semibold text-violet-300">✨ 推荐给你</h2>
-          <p className="text-[11px] text-slate-500 mt-0.5">这些精选 agent 可能对你有用,一键就能添加</p>
+          <h2 className="text-sm font-semibold text-violet-300 flex items-center gap-2">
+            <Sparkles size={16} className="text-violet-400" />
+            ✨ 推荐给你
+          </h2>
+          <p className="text-[12px] text-slate-400 mt-1">这些精选 agent 可能对你有用,一键就能添加</p>
         </div>
         <button
           onClick={onBrowseAll}
-          className="text-[11px] px-2.5 py-1 rounded border border-violet-700 text-violet-300 hover:bg-violet-900/30"
+          className="text-[12px] px-4 py-2 font-medium rounded-full border border-violet-500/30 text-violet-300 hover:bg-violet-500/20 transition-colors"
         >
           查看更多 →
         </button>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {recs.map(agent => {
           const stage = installing.get(agent.slug);
           const isInstalling = !!stage;
           return (
             <div
               key={agent.slug}
-              className="rounded-lg border border-slate-700/50 bg-slate-800/40 p-3 flex flex-col"
+              className="rounded-2xl border border-white/[0.06] bg-slate-900/60 backdrop-blur-md p-4 flex flex-col hover:border-white/[0.12] transition-colors"
             >
-              <div className="flex items-start gap-2 mb-2">
-                <span className="text-2xl">{agent.emoji}</span>
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-xs font-medium truncate">{agent.name_zh || agent.name}</h3>
-                  <p className="text-[10px] text-slate-500 mt-0.5">📥 {agent.install_count}</p>
+              <div className="flex items-start gap-4 mb-3">
+                <span className="text-3xl drop-shadow-sm">{agent.emoji}</span>
+                <div className="flex-1 min-w-0 pt-1">
+                  <h3 className="text-sm font-semibold text-slate-200 truncate">{agent.name_zh || agent.name}</h3>
+                  <p className="text-[11px] font-medium text-slate-500 mt-0.5 flex items-center gap-1">
+                    <ShoppingBag size={10} className="text-slate-600" />
+                    {agent.install_count} 次安装
+                  </p>
                 </div>
               </div>
-              <p className="text-[11px] text-slate-400 line-clamp-2 mb-2 flex-1">
+              <p className="text-[12px] text-slate-400 leading-relaxed line-clamp-2 mb-4 flex-1">
                 {agent.description_zh || agent.description}
               </p>
               {isInstalling ? (
-                <div className="flex items-center gap-1.5 text-[10px] text-violet-300">
-                  <Loader2 size={10} className="animate-spin" />
+                <div className="flex items-center justify-center gap-2 text-[11px] font-medium text-violet-400 bg-violet-500/10 py-2 rounded-xl">
+                  <Loader2 size={14} className="animate-spin" />
                   {STAGE_LABELS_LITE[stage!]}
                 </div>
               ) : (
                 <button
                   onClick={() => handleInstall(agent.slug)}
-                  className="text-[11px] py-1 rounded bg-violet-600 hover:bg-violet-500 text-white transition-colors"
+                  className="w-full text-[12px] font-medium py-2 rounded-xl bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 transition-colors border border-violet-500/30"
                 >
                   + 一键安装
                 </button>

@@ -347,7 +347,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
     : null;
 
   return (
-    <div className="h-screen flex flex-col bg-slate-900">
+    <div className="h-screen flex flex-col oct-hero-bg">
       {/* macOS title bar */}
       <div className="titlebar-drag h-8 flex-shrink-0" />
 
@@ -366,7 +366,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
         </button>
       </div>
 
-      {/* Progress bar — 7 steps */}
+      {/* Progress bar */}
       <div className="px-8 pt-2">
         <div className="flex gap-2">
           {(['welcome', 'installing', 'model', 'workspace', 'memory', 'cloudauth', 'done'] as Step[]).map((s, i) => (
@@ -375,7 +375,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
               className={`h-1 flex-1 rounded-full transition-colors duration-500 ${
                 (['welcome', 'installing', 'model', 'workspace', 'memory', 'cloudauth', 'done'] as Step[]).indexOf(step) >= i
                   ? 'bg-brand-500'
-                  : 'bg-slate-700'
+                  : 'bg-slate-800'
               }`}
             />
           ))}
@@ -384,29 +384,67 @@ export default function SetupWizard({ onComplete }: SetupProps) {
 
       {/* Content */}
       <div className="flex-1 flex items-center justify-center p-8">
-        <div className="w-full max-w-2xl animate-fade-in">
+        <div className="w-full max-w-2xl animate-fade-in oct-welcome-card backdrop-blur-3xl rounded-3xl p-10 flex flex-col relative overflow-hidden">
 
           {/* ===== WELCOME ===== */}
           {step === 'welcome' && (
-            <div className="text-center space-y-8">
-              <img src={logoUrl} alt="OCT" className="w-20 h-20 mx-auto animate-pulse-soft" />
+            <div className="text-center space-y-7">
+              {/* OCT logo with bioluminescent glow */}
+              <div className="relative mx-auto w-24 h-24 flex items-center justify-center">
+                {/* Glow orb background */}
+                <div className="absolute inset-0 oct-glow-orb opacity-40" style={{ borderRadius: '50%', width: '96px', height: '96px' }} />
+                <div className="oct-logo-wrap p-3 rounded-[22px] relative z-10">
+                  <img src={logoUrl} alt="OCT Agent" className="w-14 h-14 rounded-2xl object-cover" />
+                </div>
+              </div>
+
               <div>
-                <h1 className="text-3xl font-bold mb-3">
+                <div className="oct-stat-pill mx-auto mb-3">OCT Agent</div>
+                <h1 className="text-4xl font-bold mb-3 tracking-tight oct-brand-text">
                   {t('setup.welcome.title')}
                 </h1>
-                <p className="text-lg text-slate-400">
+                <p className="text-base text-slate-400 max-w-md mx-auto leading-relaxed">
                   {t('setup.welcome.subtitle')}
                 </p>
               </div>
-              <div className="flex flex-col items-center gap-4">
+
+              {/* Hermes-style stats marquee */}
+              <div className="oct-marquee-wrap py-2">
+                <div className="oct-marquee-track gap-6">
+                  {[
+                    '95.6% Recall@5 / LongMemEval',
+                    'Persistent Memory',
+                    '8 parallel agents',
+                    '0 LLM calls on recall',
+                    'Windows / macOS / Linux',
+                    '247K+ OpenClaw Stars',
+                    '95.6% Recall@5 / LongMemEval',
+                    'Persistent Memory',
+                    '8 parallel agents',
+                    '0 LLM calls on recall',
+                    'Windows / macOS / Linux',
+                    '247K+ OpenClaw Stars',
+                  ].map((item, i) => (
+                    <span key={i} className="oct-stat-pill whitespace-nowrap flex-shrink-0">{item}</span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex flex-col items-center gap-3">
                 <button
                   onClick={() => runInstallation()}
-                  className="px-8 py-3 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-lg font-medium transition-colors flex items-center gap-2"
+                  className="px-8 py-3.5 rounded-xl text-base font-semibold transition-all duration-200 flex items-center gap-2 text-white"
+                  style={{
+                    background: 'linear-gradient(135deg, #7B5FFF 0%, #4F9EFF 100%)',
+                    boxShadow: '0 4px 24px rgb(123 95 255 / 0.4), 0 0 0 1px rgb(184 126 255 / 0.2)',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 6px 32px rgb(123 95 255 / 0.55), 0 0 0 1px rgb(184 126 255 / 0.35)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.boxShadow = '0 4px 24px rgb(123 95 255 / 0.4), 0 0 0 1px rgb(184 126 255 / 0.2)'; }}
                 >
                   {t('setup.welcome.start')}
                   <ChevronRight size={20} />
                 </button>
-                <p className="text-sm text-slate-500">
+                <p className="text-xs text-slate-600">
                   {t('setup.welcome.time')}
                 </p>
               </div>

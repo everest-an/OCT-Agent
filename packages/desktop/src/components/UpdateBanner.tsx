@@ -202,8 +202,8 @@ export default function UpdateBanner() {
 
       {/* Strong reminder: modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100] p-8">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-8">
+          <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-700/60 rounded-3xl w-full max-w-md shadow-2xl shadow-black/60">
             <div className="p-6 space-y-4">
               <div className="text-center">
                 <div className="text-3xl mb-3">🆕</div>
@@ -212,7 +212,7 @@ export default function UpdateBanner() {
 
               <div className="space-y-2">
                 {updates.map((u, i) => (
-                  <div key={i} className="p-3 bg-slate-800 rounded-xl">
+                  <div key={i} className="p-3.5 bg-slate-800/60 border border-slate-700/40 rounded-2xl">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         {upgrading === u.component ? (

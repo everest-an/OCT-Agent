@@ -237,17 +237,17 @@ export default function ShareAgentForm({ preselectedAgentId, onClose, onSubmitte
 
   return (
     <div
-      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
       onClick={submitting ? undefined : onClose}
       role="dialog"
       aria-modal="true"
       aria-label={t('share.title')}
     >
       <div
-        className="bg-slate-900 rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-slate-700"
+        className="bg-slate-900/80 backdrop-blur-3xl rounded-3xl shadow-[0_24px_48px_rgba(0,0,0,0.5)] max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-white/[0.08]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+        <div className="p-6 border-b border-white/[0.08] flex items-center justify-between">
           <h2 className="font-semibold text-slate-100">
             🔗 {t('share.title')}
             {composed && <span className="ml-2 text-slate-400 font-normal">— {composed.name}</span>}

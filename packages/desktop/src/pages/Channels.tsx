@@ -25,7 +25,7 @@ function DynamicConfigForm({ channelId, fields, values, onChange, t }: {
   t: (key: string, fallback?: string) => string;
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const inputClass = 'w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500';
+  const inputClass = 'w-full px-4 py-2.5 bg-white/80 dark:bg-slate-800 border border-slate-300/80 dark:border-slate-600 rounded-lg text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500';
 
   const normalFields = fields.filter(f => !f.advanced);
   const advancedFields = fields.filter(f => f.advanced);
@@ -36,9 +36,9 @@ function DynamicConfigForm({ channelId, fields, values, onChange, t }: {
       : t(field.label, field.label);
     const fieldId = `channel-config-${channelId || 'generic'}-${field.key}`;
 
-    return (
+  return (
     <div key={field.key}>
-      <label htmlFor={fieldId} className="block text-sm font-medium text-slate-300 mb-2">
+      <label htmlFor={fieldId} className="block text-[13px] font-medium text-slate-700 dark:text-slate-300 mb-2">
         {fieldLabel}
       </label>
       {field.type === 'select' && field.options ? (
@@ -47,7 +47,7 @@ function DynamicConfigForm({ channelId, fields, values, onChange, t }: {
           onChange={(e) => onChange(field.key, e.target.value)}
           aria-label={fieldLabel}
           title={fieldLabel}
-          className={inputClass + ' appearance-none cursor-pointer'}>
+          className={inputClass + ' appearance-none cursor-pointer bg-white/80 dark:bg-slate-900/60 border border-black/[0.06] dark:border-white/[0.08] backdrop-blur-xl transition-all focus:border-brand-500/50 focus:bg-white dark:focus:bg-slate-900/80 rounded-xl'}>
           {field.options.map(opt => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
@@ -59,46 +59,46 @@ function DynamicConfigForm({ channelId, fields, values, onChange, t }: {
             placeholder={t('channels.gchat.noFile', 'No file selected')}
             aria-label={fieldLabel}
             title={fieldLabel}
-            className="flex-1 px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-400" />
+            className="flex-1 px-4 py-2.5 bg-white/80 dark:bg-slate-900/60 border border-black/[0.06] dark:border-white/[0.08] backdrop-blur-xl rounded-xl text-[13px] text-slate-600 dark:text-slate-400" />
           <button onClick={async () => {
             if (window.electronAPI) {
               const result = await (window.electronAPI as any).selectFile?.({ filters: [{ name: 'JSON', extensions: ['json'] }] });
               if (result?.filePath) onChange(field.key, result.filePath);
             }
-          }} className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm text-slate-100 whitespace-nowrap">
+          }} className="px-4 py-2.5 font-medium bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/80 dark:hover:bg-slate-700/80 rounded-xl text-[13px] text-slate-700 dark:text-slate-200 whitespace-nowrap transition-colors border border-black/[0.06] dark:border-white/[0.06]">
             {t('channels.gchat.browse', 'Browse...')}
           </button>
         </div>
       ) : field.type === 'password' ? (
         <PasswordInput value={values[field.key] || ''} onChange={(e) => onChange(field.key, e.target.value)}
-          placeholder={field.placeholder || ''} className={inputClass} id={fieldId} ariaLabel={fieldLabel} title={fieldLabel} />
+          placeholder={field.placeholder || ''} className={inputClass + ' bg-white/80 dark:bg-slate-900/60 border-black/[0.06] dark:border-white/[0.08] backdrop-blur-xl transition-all focus:border-brand-500/50 focus:bg-white dark:focus:bg-slate-900/80 rounded-xl text-[13px]'} id={fieldId} ariaLabel={fieldLabel} title={fieldLabel} />
       ) : (
         <input id={fieldId}
           value={values[field.key] || ''} onChange={(e) => onChange(field.key, e.target.value)}
-          placeholder={field.placeholder || ''} aria-label={fieldLabel} title={fieldLabel} className={inputClass} />
+          placeholder={field.placeholder || ''} aria-label={fieldLabel} title={fieldLabel} className={inputClass + ' bg-white/80 dark:bg-slate-900/60 border-black/[0.06] dark:border-white/[0.08] backdrop-blur-xl transition-all focus:border-brand-500/50 focus:bg-white dark:focus:bg-slate-900/80 rounded-xl text-[13px]'} />
       )}
       {field.hint && (
-        <p className="mt-1.5 text-xs text-slate-500">{t(field.hint, field.hint)}</p>
+        <p className="mt-2 text-[11px] text-slate-500 leading-relaxed">{t(field.hint, field.hint)}</p>
       )}
     </div>
   );
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {normalFields.map(renderField)}
       {advancedFields.length > 0 && (
         <>
           <button
             type="button"
             onClick={() => setShowAdvanced(!showAdvanced)}
-            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors mt-2"
+            className="flex items-center gap-1.5 text-[12px] font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 transition-colors mt-2"
           >
-            {showAdvanced ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            {showAdvanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             {t('channels.advanced', 'Advanced Settings')}
           </button>
           {showAdvanced && (
-            <div className="space-y-4 pl-3 border-l-2 border-slate-700">
+            <div className="space-y-5 pl-4 ml-1.5 border-l-2 border-black/[0.06] dark:border-white/[0.04]">
               {advancedFields.map(renderField)}
             </div>
           )}
@@ -591,8 +591,8 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
         : t('channels.pairing.help', 'Received a pairing prompt? Paste the 8-character code or the full "openclaw pairing approve ..." line here.');
 
     return (
-      <div className="p-3 bg-slate-800/50 border border-slate-700 rounded-lg space-y-2">
-        <p className="text-xs text-slate-300">
+      <div className="p-3 bg-slate-100/70 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200/80 dark:border-slate-700/40 rounded-xl space-y-2">
+        <p className="text-xs text-slate-600 dark:text-slate-300">
           {pairingHelpText}
         </p>
         <div className="flex gap-2">
@@ -604,21 +604,21 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
               setPairingCode(detected || incoming);
             }}
             placeholder={t('channels.pairing.placeholder', 'Paste code or full approve line')}
-            className="flex-1 px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm focus:outline-none focus:border-brand-500"
+            className="flex-1 px-3 py-2 bg-white/80 dark:bg-slate-900 border border-slate-300/80 dark:border-slate-600 rounded-lg text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
           />
           <button
             onClick={handleApprovePairing}
             disabled={pairingApproving || !pairingCode.trim()}
-            className="px-3 py-2 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 disabled:text-slate-500 rounded-lg text-xs font-medium text-white"
+            className="px-3 py-2 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-200 disabled:text-slate-400 dark:disabled:bg-slate-700 dark:disabled:text-slate-500 rounded-lg text-xs font-medium text-white"
           >
             {pairingApproving ? <Loader2 size={12} className="animate-spin" /> : t('channels.pairing.approveBtn', 'Approve')}
           </button>
         </div>
         {pairingNotice && (
-          <p className="text-[11px] text-emerald-400 bg-emerald-900/20 rounded px-2 py-1">{pairingNotice}</p>
+          <p className="text-[11px] text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 dark:bg-emerald-900/20 rounded px-2 py-1">{pairingNotice}</p>
         )}
         {pairingError && (
-          <p className="text-[11px] text-red-400 bg-red-900/20 rounded px-2 py-1">{pairingError}</p>
+          <p className="text-[11px] text-red-700 dark:text-red-400 bg-red-500/10 dark:bg-red-900/20 rounded px-2 py-1">{pairingError}</p>
         )}
       </div>
     );
@@ -628,7 +628,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
     if (activeWizard !== 'telegram' || testStatus !== 'success') return null;
 
     return (
-      <div className="px-3 py-3 bg-brand-900/20 border border-brand-700/30 rounded-xl text-xs text-brand-100 text-left leading-relaxed space-y-1.5">
+      <div className="px-3 py-3 bg-brand-600/10 dark:bg-brand-900/20 border border-brand-500/20 dark:border-brand-700/30 rounded-xl text-xs text-brand-700 dark:text-brand-100 text-left leading-relaxed space-y-1.5">
         <span className="font-semibold block">{t('channels.telegram.nextStepTitle', 'Telegram still needs one more step')}</span>
         <p>{t('channels.telegram.nextStep.one', '1. Open Telegram and send your bot a first direct message.')}</p>
         <p>{t('channels.telegram.nextStep.two', '2. If OpenClaw creates a pairing code, approve it below and replies will unlock.')}</p>
@@ -641,7 +641,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
   const oneClickGuide = (steps: (string | React.ReactNode)[]) => (
     <div className="space-y-2 text-sm">
       {steps.map((step, i) => (
-        <div key={i} className="flex items-start gap-3 p-3 bg-slate-800/50 rounded-lg">
+        <div key={i} className="flex items-start gap-3 p-3 bg-slate-100/80 dark:bg-slate-800/50 rounded-lg">
           <span className="text-brand-400 font-bold">{i + 1}</span>
           <p>{step}</p>
         </div>
@@ -689,8 +689,8 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
         const guideText = t(`channels.guide.${activeWizard}`, '') || activeChannel.description || t('channels.guide.default', 'Follow the steps below to connect this channel.');
         const docsSlug = activeChannel.docsSlug || activeChannel.openclawId;
         return (
-          <div className="p-4 bg-slate-800/50 rounded-xl">
-            <p className="text-sm text-slate-300">{guideText}</p>
+          <div className="p-4 bg-slate-100/80 dark:bg-slate-800/50 rounded-xl">
+            <p className="text-sm text-slate-600 dark:text-slate-300">{guideText}</p>
             <button onClick={() => {
               void openExternal(`https://docs.openclaw.ai/channels/${docsSlug}`, `channel-guide-${docsSlug}`);
             }}
@@ -724,49 +724,54 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="px-6 py-4 border-b border-slate-800">
-        <h1 className="text-lg font-semibold inline-flex items-center gap-2">
-          <Radio size={18} className="text-sky-300" />
+      <div className="ui-page-header">
+        <h1 className="ui-page-title">
+          <span className="ui-title-icon">
+            <Radio size={16} />
+          </span>
           {t('channels.title')}
         </h1>
-        <p className="text-xs text-slate-500">{t('channels.subtitleConnected')}</p>
+        <p className="ui-page-subtitle">{t('channels.subtitleConnected')}</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-8">
         {loadingChannels && (
-          <div className="flex items-center gap-2 mb-4 p-3 bg-slate-800/30 rounded-lg text-xs text-slate-400">
-            <Loader2 size={12} className="animate-spin" />
+          <div className="flex items-center justify-center gap-2 mb-6 py-6 border border-black/[0.04] dark:border-white/[0.04] bg-white/50 dark:bg-slate-900/40 backdrop-blur-xl rounded-2xl text-[13px] font-medium text-slate-500 dark:text-slate-400">
+            <Loader2 size={16} className="animate-spin text-brand-400" />
             {t('channels.loading', 'Loading channel status...')}
           </div>
         )}
 
         {/* Connected */}
-        <div className="mb-6">
-          <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">{t('channels.connected')}</h3>
-          <div className="grid grid-cols-2 gap-3">
+        <div className="mb-10">
+          <h3 className="text-[11px] font-semibold text-emerald-400/80 uppercase tracking-widest px-2 mb-4">{t('channels.connected')}</h3>
+          <div className="grid grid-cols-2 gap-4">
             {channels.filter((c) => c.id === 'local' || configuredChannels.has(c.id)).map((ch) => (
-              <div key={ch.id} className={`p-4 bg-emerald-600/10 border border-emerald-600/30 rounded-xl text-left ${ch.id !== 'local' ? 'hover:border-emerald-500/50' : ''} transition-colors`}>
-                <div className="flex items-center gap-3">
+              <div key={ch.id} className={`ui-surface ui-card-interactive p-5 text-left ${ch.id !== 'local' ? 'hover:border-emerald-500/30' : ''} group relative overflow-hidden`}>
+                {ch.id !== 'local' && (
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 blur-[40px] rounded-full pointer-events-none" />
+                )}
+                <div className="flex items-start justify-between relative z-10 mb-2">
                   <button onClick={() => ch.id !== 'local' && openWizard(ch.id)} disabled={ch.id === 'local'}
-                    className="flex items-center gap-3 flex-1 min-w-0 text-left">
-                    <ChannelIcon channelId={ch.id} size={28} />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm">{getChannelLabel(ch)}</div>
-                      <div className="text-xs text-emerald-400 inline-flex items-center gap-1.5">
+                    className="flex items-center gap-4 flex-1 min-w-0 text-left">
+                    <ChannelIcon channelId={ch.id} size={36} className="drop-shadow-md" />
+                    <div className="flex-1 min-w-0 pt-0.5">
+                      <div className="font-semibold text-slate-900 dark:text-slate-200 text-sm mb-1">{getChannelLabel(ch)}</div>
+                      <div className="text-[12px] font-medium text-emerald-400 inline-flex items-center gap-1.5 bg-emerald-500/10 px-2 py-0.5 rounded-full">
                         <CheckCircle2 size={12} />
                         {ch.id === 'local' ? t('channels.builtIn') : t('channels.configured')}
                       </div>
                     </div>
                   </button>
                   {ch.id !== 'local' && (
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button onClick={() => openWizard(ch.id)} className="p-1 text-slate-600 hover:text-slate-300 transition-colors" title={t('channels.editingBadge', 'Edit')}>
-                        <ChevronRight size={14} />
+                    <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => openWizard(ch.id)} className="p-2 text-slate-500 hover:text-slate-900 dark:hover:text-white bg-slate-100/80 dark:bg-slate-800/50 hover:bg-slate-200 dark:hover:bg-slate-700/80 rounded-full transition-colors" title={t('channels.editingBadge', 'Edit')}>
+                        <Pencil size={14} />
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); setConfirmRemove(ch.id); }}
                         disabled={removingChannel === ch.id}
-                        className="p-1 text-slate-600 hover:text-red-400 transition-colors"
+                        className="p-2 text-slate-500 hover:text-red-500 dark:hover:text-red-400 bg-slate-100/80 dark:bg-slate-800/50 hover:bg-red-500/20 rounded-full transition-colors"
                         title={t('channels.disconnect', 'Disconnect')}
                       >
                         {removingChannel === ch.id ? <Loader2 size={14} className="animate-spin" /> : <Unplug size={14} />}
@@ -779,39 +784,40 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                   const def = getChannel(ch.id);
                   const openclawId = def?.openclawId || ch.id;
                   const currentAgent = channelInboundAgent[ch.id] ?? null;
-                  // Fall back to 'main' display value if binding not yet loaded or empty —
-                  // new channels auto-bind to main via ensureDefaultChannelBinding on setup.
                   const selectValue = currentAgent || 'main';
                   const saving = Boolean(inboundAgentSaving[ch.id]);
                   return (
-                    <div className="mt-3 pt-3 border-t border-emerald-700/20 flex items-center gap-2 text-xs">
-                      <span className="text-slate-400 shrink-0">
+                    <div className="mt-4 pt-3 border-t border-black/[0.04] dark:border-white/[0.04] flex items-center gap-3 relative z-10">
+                      <span className="text-slate-500 text-[12px] font-medium pl-1 shrink-0">
                         {t('channels.repliedBy', 'Replied by')}
                       </span>
-                      <select
-                        value={selectValue}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          void handleInboundAgentChange(ch.id, e.target.value);
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                        disabled={saving}
-                        className="flex-1 min-w-0 px-2 py-1 bg-slate-900/60 border border-slate-700 rounded text-slate-200 text-xs disabled:opacity-50"
-                        aria-label={t('channels.repliedBy', 'Replied by')}
-                      >
-                        {/* If the current binding targets an agent we don't know about (e.g. manually
-                            edited openclaw.json), show it as a read-only option so the dropdown
-                            reflects reality instead of silently flipping it to main. */}
-                        {currentAgent && !availableAgents.some((a) => a.id === currentAgent) && (
-                          <option value={currentAgent}>{`⚠️ ${currentAgent}`}</option>
-                        )}
-                        {availableAgents.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.emoji ? `${a.emoji} ` : ''}{a.name || a.id}{a.isDefault ? ' (default)' : ''}
-                          </option>
-                        ))}
-                      </select>
-                      {saving && <Loader2 size={12} className="animate-spin text-slate-500 shrink-0" />}
+                      <div className="relative flex-1 min-w-0">
+                        <select
+                          value={selectValue}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            void handleInboundAgentChange(ch.id, e.target.value);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          disabled={saving}
+                          className="w-full px-3 py-1.5 bg-white/70 dark:bg-slate-950/40 border border-black/[0.08] dark:border-white/[0.08] hover:bg-white dark:hover:bg-slate-900/60 rounded-lg text-slate-700 dark:text-slate-300 text-[12px] font-medium appearance-none cursor-pointer disabled:opacity-50 transition-all focus:border-brand-500/50"
+                          aria-label={t('channels.repliedBy', 'Replied by')}
+                        >
+                          {/* If the current binding targets an agent we don't know about (e.g. manually
+                              edited openclaw.json), show it as a read-only option so the dropdown
+                              reflects reality instead of silently flipping it to main. */}
+                          {currentAgent && !availableAgents.some((a) => a.id === currentAgent) && (
+                            <option value={currentAgent}>{`⚠️ ${currentAgent}`}</option>
+                          )}
+                          {availableAgents.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.emoji ? `${a.emoji} ` : ''}{a.name || a.id}{a.isDefault ? ' (default)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronRight size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none rotate-90" />
+                      </div>
+                      {saving && <Loader2 size={16} className="animate-spin text-brand-400 shrink-0" />}
                       <span className="sr-only">{openclawId}</span>
                     </div>
                   );
@@ -822,17 +828,18 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
         </div>
 
         {/* Disconnected */}
-        <div className="mb-6">
-          <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">{t('channels.disconnected', 'Disconnected')}</h3>
-          <div className="grid grid-cols-2 gap-3">
+        <div className="mb-10">
+          <h3 className="text-[11px] font-semibold text-orange-400/80 uppercase tracking-widest px-2 mb-4">{t('channels.disconnected', 'Disconnected')}</h3>
+          <div className="grid grid-cols-2 gap-4">
             {channels.filter((c) => c.id !== 'local' && disconnectedChannels.has(c.id) && !configuredChannels.has(c.id)).map((ch) => (
-              <div key={ch.id} className="p-4 bg-orange-600/10 border border-orange-600/30 rounded-xl text-left hover:border-orange-500/50 transition-colors">
-                <div className="flex items-center gap-3">
-                  <button onClick={() => openWizard(ch.id)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
-                    <ChannelIcon channelId={ch.id} size={28} />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm">{getChannelLabel(ch)}</div>
-                      <div className="text-xs text-orange-300 inline-flex items-center gap-1.5">
+              <div key={ch.id} className="ui-surface ui-card-interactive p-5 text-left border-orange-500/20 hover:border-orange-500/40 relative overflow-hidden group">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/5 blur-[40px] rounded-full pointer-events-none group-hover:bg-orange-500/10 transition-colors" />
+                <div className="flex items-center gap-4 relative z-10">
+                  <button onClick={() => openWizard(ch.id)} className="flex items-center gap-4 flex-1 min-w-0 text-left">
+                    <ChannelIcon channelId={ch.id} size={36} className="drop-shadow-md grayscale opacity-70 group-hover:grayscale-0 group-hover:opacity-100 transition-all" />
+                    <div className="flex-1 min-w-0 pt-0.5">
+                      <div className="font-semibold text-slate-900 dark:text-slate-200 text-sm mb-1">{getChannelLabel(ch)}</div>
+                      <div className="text-[12px] font-medium text-orange-400 inline-flex items-center gap-1.5 bg-orange-500/10 px-2 py-0.5 rounded-full">
                         <Unplug size={12} />
                         {t('channels.disconnected', 'Disconnected')}
                       </div>
@@ -840,7 +847,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                   </button>
                   <button
                     onClick={() => openWizard(ch.id)}
-                    className="px-2 py-1 text-xs bg-orange-500/20 border border-orange-500/30 rounded text-orange-200 hover:bg-orange-500/30 transition-colors"
+                    className="px-4 py-2 text-[12px] font-medium bg-orange-500/10 border border-orange-500/20 rounded-full text-orange-600 hover:bg-orange-500/20 hover:text-orange-700 dark:text-orange-300 dark:hover:text-orange-200 hover:scale-105 active:scale-95 transition-all shadow-sm"
                   >
                     {t('channels.reconnect', 'Reconnect')}
                   </button>
@@ -852,18 +859,20 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
 
         {/* Available */}
         <div>
-          <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">{t('channels.available')}</h3>
-          <div className="grid grid-cols-2 gap-3">
+          <h3 className="text-[11px] font-semibold text-slate-500 dark:text-slate-400/80 uppercase tracking-widest px-2 mb-4">{t('channels.available')}</h3>
+          <div className="grid grid-cols-2 gap-4">
             {channels.filter((c) => c.id !== 'local' && !configuredChannels.has(c.id) && !disconnectedChannels.has(c.id)).map((ch) => (
               <button key={ch.id} onClick={() => openWizard(ch.id)}
-                className="p-4 bg-slate-800/50 border border-slate-700 rounded-xl hover:border-slate-600 transition-colors text-left group">
-                <div className="flex items-center gap-3">
-                  <ChannelIcon channelId={ch.id} size={28} />
+                className="ui-surface ui-card-interactive p-5 text-left group">
+                <div className="flex items-center gap-4">
+                  <ChannelIcon channelId={ch.id} size={36} className="drop-shadow-md opacity-80 group-hover:opacity-100 transition-opacity" />
                   <div className="flex-1">
-                    <div className="font-medium text-sm">{getChannelLabel(ch)}</div>
-                    <div className="text-xs text-slate-500">{getChannelDesc(ch)}</div>
+                    <div className="font-semibold text-slate-900 dark:text-slate-200 text-sm mb-1">{getChannelLabel(ch)}</div>
+                    <div className="text-[12px] text-slate-500 dark:text-slate-400 line-clamp-1">{getChannelDesc(ch)}</div>
                   </div>
-                  <ChevronRight size={16} className="text-slate-600 group-hover:text-slate-400 transition-colors" />
+                  <div className="w-8 h-8 rounded-full bg-slate-100/80 dark:bg-white/[0.04] flex items-center justify-center group-hover:bg-slate-200 dark:group-hover:bg-white/[0.08] transition-colors">
+                    <ChevronRight size={16} className="text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white transition-colors translate-x-0 group-hover:translate-x-0.5" />
+                  </div>
                 </div>
               </button>
             ))}
@@ -876,17 +885,17 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
         const ch = getChannel(confirmRemove);
         return (
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-8">
-            <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="bg-white/95 dark:bg-slate-900/95 border border-slate-200/80 dark:border-slate-700/60 backdrop-blur-xl rounded-3xl w-full max-w-sm p-6 space-y-4 shadow-2xl shadow-slate-900/10 dark:shadow-black/60">
               <div className="flex items-center gap-3">
                 {ch && <ChannelIcon channelId={confirmRemove} size={24} />}
-                <h3 className="text-base font-semibold">{t('channels.confirmRemoveTitle', 'Disconnect Channel')}</h3>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-white">{t('channels.confirmRemoveTitle', 'Disconnect Channel')}</h3>
               </div>
-              <p className="text-sm text-slate-400">
+              <p className="text-sm text-slate-600 dark:text-slate-400">
                 {t('channels.confirmDisconnectMsg', 'This will stop the channel bot worker and disable message delivery. Your configuration is kept — you can reconnect anytime without re-scanning the QR code.')}
               </p>
               <div className="flex justify-end gap-3">
                 <button onClick={() => setConfirmRemove(null)}
-                  className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 transition-colors">
+                  className="px-4 py-2 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60 rounded-lg transition-colors">
                   {t('channels.cancel', 'Cancel')}
                 </button>
                 <button onClick={() => handleRemove(confirmRemove)}
@@ -901,10 +910,10 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
 
       {/* Wizard Modal */}
       {activeWizard && activeChannel && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-8">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-5 border-b border-slate-800">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-8">
+          <div className="bg-white/95 dark:bg-slate-900/95 border border-slate-200/80 dark:border-slate-700/60 backdrop-blur-xl rounded-3xl w-full max-w-lg max-h-[80vh] overflow-y-auto shadow-2xl shadow-slate-900/10 dark:shadow-black/60">
+            <div className="flex items-center justify-between p-5 border-b border-slate-200/80 dark:border-slate-800">
+              <h2 className="text-lg font-semibold flex items-center gap-2 text-slate-900 dark:text-white">
                 <ChannelIcon channelId={activeWizard} size={24} />
                 {t('channels.connectPrefix')} {getChannelLabel(activeChannel)}
                 {configuredChannels.has(activeWizard) && (
@@ -916,7 +925,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                   </span>
                 )}
                 {!configuredChannels.has(activeWizard) && disconnectedChannels.has(activeWizard) && (
-                  <span className="text-xs font-normal px-2 py-0.5 bg-orange-600/20 border border-orange-600/30 text-orange-300 rounded-full">
+                  <span className="text-xs font-normal px-2 py-0.5 bg-orange-600/10 dark:bg-orange-600/20 border border-orange-600/20 dark:border-orange-600/30 text-orange-700 dark:text-orange-300 rounded-full">
                     {t('channels.disconnected', 'Disconnected')}
                   </span>
                 )}
@@ -924,7 +933,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
               <button
                 onClick={closeWizard}
                 aria-label={t('common.close', 'Close')}
-                className="text-slate-500 hover:text-slate-300"
+                className="text-slate-500 hover:text-slate-900 dark:hover:text-slate-300"
               >
                 <X size={20} />
               </button>
@@ -937,11 +946,11 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                   {getGuide()}
 
                   {configuredChannels.has(activeWizard) && (
-                    <div className="p-3 bg-amber-600/10 border border-amber-600/20 rounded-lg text-xs text-amber-400 space-y-1.5">
+                    <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-700 dark:text-amber-400 space-y-1.5">
                       <div className="font-semibold">
                         {t('channels.alreadyConnected', '✅ Already connected')}
                       </div>
-                      <div className="text-amber-300/80">
+                      <div className="text-amber-700/80 dark:text-amber-300/80">
                         {isOneClick
                           ? t(
                               'channels.alreadyConnectedRelinkHint',
@@ -953,7 +962,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                   )}
 
                   {!configuredChannels.has(activeWizard) && disconnectedChannels.has(activeWizard) && (
-                    <div className="p-3 bg-orange-600/10 border border-orange-600/20 rounded-lg text-xs text-orange-300">
+                    <div className="p-3 bg-orange-600/10 border border-orange-600/20 rounded-lg text-xs text-orange-700 dark:text-orange-300">
                       {t('channels.savedButDisconnected', 'This channel is saved but currently disconnected. Click Connect to resume it.')}
                     </div>
                   )}
@@ -964,7 +973,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                     {configuredChannels.has(activeWizard) && (
                       <button
                         onClick={closeWizard}
-                        className="px-5 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl text-sm font-medium transition-colors"
+                        className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-200 rounded-xl text-sm font-medium transition-colors"
                       >
                         {t('channels.closeBtn', 'Close')}
                       </button>
@@ -994,23 +1003,23 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
               {wizardStep === 'token' && (
                 <>
                   {lastError && (
-                    <div className="p-3 bg-red-900/20 border border-red-600/30 rounded-lg text-xs text-red-400 break-words">
+                    <div className="p-3 bg-red-500/10 dark:bg-red-900/20 border border-red-500/20 dark:border-red-600/30 rounded-lg text-xs text-red-700 dark:text-red-400 break-words">
                       <span className="font-medium">{t('channels.lastErrorPrefix', 'Last attempt failed:')}</span>{' '}
                       {lastError}
                       {!lastError.trim() || lastError === t('channels.setupFailed', 'Setup failed. Check Gateway in Settings.') ? null : (
-                        <span className="block mt-1 text-red-400/70">{t('channels.checkGatewayHint', 'If the issue persists, check Gateway in Settings.')}</span>
+                        <span className="block mt-1 text-red-700/70 dark:text-red-400/70">{t('channels.checkGatewayHint', 'If the issue persists, check Gateway in Settings.')}</span>
                       )}
                     </div>
                   )}
                   {getTokenForm()}
                   {renderPairingApprovalPanel()}
                   <div className="flex justify-between">
-                    <button onClick={() => setWizardStep('intro')} className="px-4 py-2 text-slate-400 hover:text-slate-200 flex items-center gap-1 text-sm">
+                    <button onClick={() => setWizardStep('intro')} className="px-4 py-2 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center gap-1 text-sm">
                       <ChevronLeft size={14} /> {t('channels.back')}
                     </button>
                     <button onClick={() => { handleConnect(); setWizardStep('test'); }}
                       disabled={!isFormValid()}
-                      className="px-5 py-2.5 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 text-white rounded-xl text-sm font-medium transition-colors">
+                      className="px-5 py-2.5 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-200 disabled:text-slate-400 dark:disabled:bg-slate-700 text-white rounded-xl text-sm font-medium transition-colors">
                       {t('channels.connectBtn', 'Connect')}
                     </button>
                   </div>
@@ -1025,7 +1034,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                       <div>
                         {asciiQR ? (
                           <div className="space-y-3">
-                            <p className="text-sm text-slate-300 text-center font-medium">
+                            <p className="text-sm text-slate-700 dark:text-slate-300 text-center font-medium">
                               {activeWizard === 'whatsapp'
                                 ? t('channels.whatsapp.scanHint', 'Open WhatsApp → Linked Devices → Link a Device')
                                 : activeWizard === 'wechat'
@@ -1048,7 +1057,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                           <div className="text-center space-y-4">
                             <div className="w-10 h-10 mx-auto border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
                             <div className="space-y-2">
-                              <p className="text-slate-300">{t('channels.testing')}</p>
+                              <p className="text-slate-700 dark:text-slate-300">{t('channels.testing')}</p>
                               {isOneClick && (
                                 <p className="text-xs text-slate-500 animate-pulse">{channelProgress ? translateStatus(channelProgress) : t('channels.oneclick.wait', 'Initializing...')}</p>
                               )}
@@ -1067,9 +1076,9 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                         <div className="w-16 h-16 mx-auto bg-emerald-600/20 rounded-full flex items-center justify-center">
                           <Check size={32} className="text-emerald-400" />
                         </div>
-                        <p className="text-emerald-300 font-medium">{t('channels.success')}</p>
+                        <p className="text-emerald-700 dark:text-emerald-300 font-medium">{t('channels.success')}</p>
                         {testNotice && (
-                          <p className="text-xs text-slate-400 bg-slate-800/60 rounded-lg px-3 py-2 max-w-sm mx-auto">
+                          <p className="text-xs text-slate-600 dark:text-slate-400 bg-slate-100/80 dark:bg-slate-800/60 rounded-lg px-3 py-2 max-w-sm mx-auto">
                             {testNotice}
                           </p>
                         )}
@@ -1088,7 +1097,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                           </p>
                         )}
                         {testError && (
-                          <p className="text-xs text-red-400/70 bg-red-900/20 rounded-lg px-3 py-2 text-left break-words max-h-24 overflow-y-auto">
+                          <p className="text-xs text-red-700/80 dark:text-red-400/70 bg-red-500/10 dark:bg-red-900/20 rounded-lg px-3 py-2 text-left break-words max-h-24 overflow-y-auto">
                             {testError}
                           </p>
                         )}
@@ -1107,7 +1116,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                   {testStatus === 'success' && (
                     <div className="flex flex-col gap-3">
                       {activeWizard && EXTERNAL_CHANNELS.has(activeWizard) && (
-                        <div className="px-3 py-3 bg-emerald-900/20 border border-emerald-700/30 rounded-xl text-xs text-emerald-300 text-left leading-relaxed">
+                        <div className="px-3 py-3 bg-emerald-500/10 dark:bg-emerald-900/20 border border-emerald-500/20 dark:border-emerald-700/30 rounded-xl text-xs text-emerald-700 dark:text-emerald-300 text-left leading-relaxed">
                           <span className="font-semibold block mb-1">{t('channels.postConnect.nextStep', 'What\'s next?')}</span>
                           {getPostConnectHint()}
                         </div>
@@ -1116,7 +1125,7 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
                       {supportsPairingApproval && renderPairingApprovalPanel()}
                       <div className="flex justify-end gap-2">
                         <button onClick={closeWizard}
-                          className="px-5 py-2 border border-slate-600 hover:border-slate-400 text-slate-300 hover:text-white rounded-xl text-sm font-medium transition-colors">
+                          className="px-5 py-2 border border-slate-300 hover:border-slate-400 text-slate-700 hover:text-slate-900 dark:border-slate-600 dark:hover:border-slate-400 dark:text-slate-300 dark:hover:text-white rounded-xl text-sm font-medium transition-colors">
                           {t('channels.done')}
                         </button>
                         <button onClick={() => {
