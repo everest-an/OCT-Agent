@@ -1,7 +1,7 @@
-# AwarenessClaw Desktop 手工冒烟清单
+# OCT-Agent Desktop 手工冒烟清单
 
 最后更新：2026-04-07
-适用范围：`AwarenessClaw/packages/desktop/electron/main.ts` 及当前已拆出的主进程模块
+适用范围：`OCT-Agent/packages/desktop/electron/main.ts` 及当前已拆出的主进程模块
 
 ## 1. 目的
 
@@ -23,7 +23,7 @@
 ## 2. 执行前提
 
 - 本机已安装 OpenClaw，且版本基线为 `OpenClaw 2026.3.31 (213a704)` 或更新兼容版本
-- Desktop 当前 build 通过：`cd AwarenessClaw/packages/desktop && npm run build`
+- Desktop 当前 build 通过：`cd OCT-Agent/packages/desktop && npm run build`
 - 已知本地噪音允许存在：
   - `plugins.entries.signal` duplicate plugin override
   - `plugins.entries.qwen-portal-auth` stale config entry

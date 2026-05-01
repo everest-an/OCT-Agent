@@ -2,7 +2,7 @@
 
 ## 问题现象
 
-安装 AwarenessClaw 后，可能出现以下问题：
+安装 OCT-Agent 后，可能出现以下问题：
 - ❌ 聊天功能无响应
 - ❌ 记忆功能无法加载
 - ❌ 应用显示 "Connecting to local Gateway..."
@@ -10,7 +10,7 @@
 
 ## 根本原因
 
-AwarenessClaw 依赖两个后台服务：
+OCT-Agent 依赖两个后台服务：
 
 1. **OpenClaw Gateway** (端口 18789)
    - 处理 AI 聊天、工具调用
@@ -99,7 +99,7 @@ Start-Process powershell -Verb RunAs -ArgumentList "-ExecutionPolicy Bypass -Fil
 
 ### 方法 2：应用内修复
 
-1. 打开 AwarenessClaw
+1. 打开 OCT-Agent
 2. 进入 **Settings** → **Health**
 3. 点击 **Run Doctor**
 4. 点击 **Fix All**
@@ -253,12 +253,12 @@ $cleanupScript | Out-File "$env:USERPROFILE\.openclaw\cleanup-zombies.ps1"
 $action = New-ScheduledTaskAction -Execute "powershell.exe" `
   -Argument "-ExecutionPolicy Bypass -File `"$env:USERPROFILE\.openclaw\cleanup-zombies.ps1`""
 $trigger = New-ScheduledTaskTrigger -Daily -At 3am
-Register-ScheduledTask -TaskName "AwarenessClaw Cleanup" -Action $action -Trigger $trigger
+Register-ScheduledTask -TaskName "OCT-Agent Cleanup" -Action $action -Trigger $trigger
 ```
 
 ### 3. 应用退出时清理
 
-AwarenessClaw 应用会在退出时自动清理子进程，但如果强制关闭（任务管理器），可能留下僵尸进程。
+OCT-Agent 应用会在退出时自动清理子进程，但如果强制关闭（任务管理器），可能留下僵尸进程。
 
 建议：
 - 使用应用内的退出按钮
@@ -375,7 +375,7 @@ npx @awareness-sdk/local start --port 37800 --background
 ### 进程依赖关系
 
 ```
-AwarenessClaw.exe (主应用)
+OCT-Agent.exe (主应用)
 ├── node.exe (OpenClaw Gateway)
 │   └── 监听端口 18789
 ├── node.exe (Awareness Daemon)

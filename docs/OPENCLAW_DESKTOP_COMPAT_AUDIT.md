@@ -1,7 +1,7 @@
-# AwarenessClaw Desktop x OpenClaw 结合审计
+# OCT-Agent Desktop x OpenClaw 结合审计
 
 最后更新：2026-04-01
-适用范围：`AwarenessClaw/packages/desktop/electron/main.ts` 及其拆分后的主进程模块
+适用范围：`OCT-Agent/packages/desktop/electron/main.ts` 及其拆分后的主进程模块
 
 ## 1. 审计目的
 
@@ -118,7 +118,7 @@
 - OS：macOS
 - OpenClaw：`OpenClaw 2026.4.1 (da64a97)`
 - Desktop commit：`786faf09e0b086ffed344fda5120973f917b4d92`
-- Desktop build：已通过（`cd AwarenessClaw/packages/desktop && npm run build`）
+- Desktop build：已通过（`cd OCT-Agent/packages/desktop && npm run build`）
 - Chat tests：已通过（`npm test -- src/test/dashboard.test.tsx src/test/register-chat-handlers.test.ts`，20/20）
 - 自动化证据：`/tmp/openclaw-deep-smoke-20260402/*.json`
 
@@ -289,7 +289,7 @@
 结论：
 
 - 即使 `exec` 已进入 `tools.alsoAllow`，当前本机 OpenClaw Gateway 仍有第二层宿主审批策略
-- 在 AwarenessClaw 仓库当前可见代码和 `openclaw.json` 中，没有找到 Desktop 还能直接关闭的对应字段
+- 在 OCT-Agent 仓库当前可见代码和 `openclaw.json` 中，没有找到 Desktop 还能直接关闭的对应字段
 - 因此“默认权限”在当前阶段的正确边界应定义为：
   - Desktop 负责把最小可用 allowlist 写好
   - Desktop chat UI 负责把 `*.approval.requested` 事件明确展示给用户
@@ -452,7 +452,7 @@
 
 因此：
 
-- 当前不能把 AwarenessClaw Desktop 视为“已经符合 OpenClaw chat 的全部功能”
+- 当前不能把 OCT-Agent Desktop 视为“已经符合 OpenClaw chat 的全部功能”
 - 只能说它已经接近基础聊天能力对齐，但在 approval、memory、workspace、browser 这些高阶链路上仍存在未闭环缺口
 
 ### 11.8 本轮测试闭环结论（可作为当前最终判定）

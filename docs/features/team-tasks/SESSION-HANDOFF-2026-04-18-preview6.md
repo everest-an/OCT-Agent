@@ -84,12 +84,12 @@ c2bbec5 refactor(f-team-tasks): chat-first redesign baseline — remove TaskCent
    }
    EOF'
    ```
-4. **手动验证**：关闭当前 AwarenessClaw，从 DMG 安装 preview.6，手测：
+4. **手动验证**：关闭当前 OCT-Agent，从 DMG 安装 preview.6，手测：
    - 侧栏没有 Tasks 图标 ✓
    - 普通聊天一切正常（thinking 显示在一个 UI 里、tool call 正常、markdown 渲染顺滑）
    - 长文本流式不卡顿、不重复
    - 让 AI 做个多步骤任务，看是否自动调 sessions_spawn 且结果内嵌
-5. **主仓 SDK 同步**：本轮没改 `sdks/*`，不需要 SDK 同步。主仓 Awareness 自己的 `docs/features/team-tasks/` 是在 `AwarenessClaw` 仓库内，不走主仓 CI sync。
+5. **主仓 SDK 同步**：本轮没改 `sdks/*`，不需要 SDK 同步。主仓 Awareness 自己的 `docs/features/team-tasks/` 是在 `OCT-Agent` 仓库内，不走主仓 CI sync。
 
 ---
 

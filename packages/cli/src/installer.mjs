@@ -35,7 +35,7 @@ function checkOpenClawBeyondPath() {
     }
   } catch {}
 
-  // Check managed prefix (installed by AwarenessClaw Desktop previously)
+  // Check managed prefix (installed by OCT-Agent Desktop previously)
   const managedCandidates = [
     join(home, '.awareness-claw', 'openclaw-runtime', 'lib', 'node_modules', 'openclaw', 'openclaw.mjs'),
     join(home, '.awareness-claw', 'openclaw-runtime', 'node_modules', 'openclaw', 'openclaw.mjs'),

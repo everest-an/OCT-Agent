@@ -105,7 +105,7 @@
 
 **schema 版本迁移**：
 - `version: 1` 是 S1-S3 版
-- 如果读到 `version` 大于代码支持的版本：提示"该 mission 由更新版本创建，请升级 AwarenessClaw"
+- 如果读到 `version` 大于代码支持的版本：提示"该 mission 由更新版本创建，请升级 OCT-Agent"
 - 如果读到更旧 version：走 `migrateMission(data, fromVersion)` 函数
 
 ### 3.2 `plan.md`

@@ -1,7 +1,7 @@
 /**
  * @type {import('@stryker-mutator/api/core').PartialStrykerOptions}
  *
- * L5 Mutation Testing configuration for AwarenessClaw memory save.
+ * L5 Mutation Testing configuration for OCT-Agent memory save.
  *
  * Run: npx stryker run stryker.memory.conf.mjs
  * Target: ≥ 80% mutation score on memory-related files.

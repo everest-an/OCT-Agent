@@ -2,7 +2,7 @@
 
 > **更新日期**：2026-04-17（Lobster-first 重排版）
 > **当前 Stage**：S1 未开工
-> **核心决策**：用 Lobster + OpenClaw subagents 原生能力，AwarenessClaw 只写薄 wrapper + 充分测试
+> **核心决策**：用 Lobster + OpenClaw subagents 原生能力，OCT-Agent 只写薄 wrapper + 充分测试
 > **约定**：完成一条 → 在 checkbox 打 ✅ + 追加 commit hash + 完成日期
 > **前置阅读**：[01-DESIGN.md](./01-DESIGN.md) · [06-RESEARCH.md](./06-RESEARCH.md)
 
@@ -27,7 +27,7 @@
 ### 核心思路
 
 1. **不装 Lobster**（零新依赖）
-2. AwarenessClaw 写薄 Planner（输出 JSON 任务序列）
+2. OCT-Agent 写薄 Planner（输出 JSON 任务序列）
 3. 逐个调用 **Gateway WS 的 `sessions_spawn` 工具** 派发 subagent
 4. **订阅 Gateway WS 事件流**，每个 token / tool 调用都实时推给 Kanban UI（streaming）
 5. OpenClaw TaskFlow 自动 durable 持久化（我们不管 PID / HEARTBEAT）
@@ -377,7 +377,7 @@
   - [README.md](./README.md) 表格 S1 改 ✅ + 完成日期
   - [04-STAGES.md](./04-STAGES.md) S1 加 "实际工期"
   - [00-PROBLEM.md](./00-PROBLEM.md) 4 大缺口 → 对应 S1 解决的部分标"已解决"
-  - `AwarenessClaw/TASKS.md` P2 对应条目打 ✅ S1
+  - `OCT-Agent/TASKS.md` P2 对应条目打 ✅ S1
   - `packages/desktop/CHANGELOG.md` 加条目（含"支持 streaming"亮点）
 
 - [ ] **S1-T22 · PR + review** [CC] · 2h · 依赖所有
@@ -405,7 +405,7 @@
 
 > 详细 task 等 S1 完成后再细化。先列出大块：
 
-- [ ] S2-T0 · 决定 daemon 架构（独立 npm 包 vs 内嵌 AwarenessClaw）
+- [ ] S2-T0 · 决定 daemon 架构（独立 npm 包 vs 内嵌 OCT-Agent）
 - [ ] S2-T1 · Runner daemon 进程 + PID 管理
 - [ ] S2-T2 · HEARTBEAT 心跳 + crash 检测
 - [ ] S2-T3 · Electron app 关闭时 graceful handoff 到 daemon

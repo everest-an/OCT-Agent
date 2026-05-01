@@ -1,12 +1,12 @@
-# AwarenessClaw Desktop 安装与升级说明
+# OCT-Agent Desktop 安装与升级说明
 
 本说明面向普通用户，不需要了解命令行、Node.js、npm 或配置文件。
 
 ## 1. Windows 安装
 
-1. 下载 `AwarenessClaw Setup x.x.x.exe`。
+1. 下载 `OCT-Agent Setup x.x.x.exe`。
 2. 双击安装包，按提示完成安装。
-3. 安装完成后，直接打开 AwarenessClaw。
+3. 安装完成后，直接打开 OCT-Agent。
 4. 第一次启动时，应用会自动完成环境检查和必要组件准备。
 5. 几分钟后进入主界面，即可开始使用。
 
@@ -22,7 +22,7 @@
 
 ## 2. macOS 安装
 
-1. 下载 `AwarenessClaw.dmg` 或 `AwarenessClaw.zip`。
+1. 下载 `AwarenessClaw.dmg` 或 `OCT-Agent.zip`。
 2. 按提示拖到“应用程序”文件夹，或直接解压后打开。
 3. 第一次启动时，如果系统提示来源验证，请在系统允许后继续打开。
 4. 应用会自动完成环境检查和必要组件准备。

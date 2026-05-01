@@ -1,4 +1,4 @@
-# AwarenessClaw WhatsApp 真机手工冒烟脚本
+# OCT-Agent WhatsApp 真机手工冒烟脚本
 
 最后更新：2026-04-05
 适用范围：Desktop Channels 一键连接、WhatsApp DM 策略、配对审批、重连稳定性

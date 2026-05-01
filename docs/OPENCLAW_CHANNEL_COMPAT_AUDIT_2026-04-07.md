@@ -2,18 +2,18 @@
 
 ## Goal
 
-This audit reviews whether AwarenessClaw Desktop can safely keep supporting official OpenClaw chat channels after customer upgrades on Windows, macOS, and Linux.
+This audit reviews whether OCT-Agent Desktop can safely keep supporting official OpenClaw chat channels after customer upgrades on Windows, macOS, and Linux.
 
 Sources used:
 
 - Official OpenClaw channel docs
 - OpenClaw GitHub issues / regressions visible on 2026-04-07
-- Local AwarenessClaw runtime and Doctor behavior
+- Local OCT-Agent runtime and Doctor behavior
 
 ## Executive Summary
 
 - Upstream desktop-safe defaults in official docs: Telegram, WhatsApp, Discord, Slack
-- AwarenessClaw release-gate minimum matrix: Telegram, WhatsApp, Discord, WeChat
+- OCT-Agent release-gate minimum matrix: Telegram, WhatsApp, Discord, WeChat
 - Supported but currently higher risk: Feishu
 - Supported with extra host dependency: Signal
 - Supported with extra infrastructure requirement: LINE
@@ -84,7 +84,7 @@ Product decision:
 
 ### WeChat
 
-- AwarenessClaw uses the official plugin path `@tencent-weixin/openclaw-weixin`, not a forked channel implementation.
+- OCT-Agent uses the official plugin path `@tencent-weixin/openclaw-weixin`, not a forked channel implementation.
 - Current plugin docs state the active `2.x` line requires OpenClaw `>=2026.3.22` and uses QR login through `openclaw channels login --channel openclaw-weixin`.
 - Desktop viability is good on all three OSes when plugin version matches the host version and gateway is restarted after login.
 - Main product risks worth tracking:
@@ -94,7 +94,7 @@ Product decision:
 
 Product decision:
 
-- Treat WeChat as a release-gate tier-1 channel for AwarenessClaw because it is customer-critical and already first-class in the Desktop Channels UX.
+- Treat WeChat as a release-gate tier-1 channel for OCT-Agent because it is customer-critical and already first-class in the Desktop Channels UX.
 - Minimum smoke coverage must include Windows, macOS, and Linux login + first reply + restart persistence.
 
 ### Slack
@@ -178,7 +178,7 @@ Product decision:
 
 ## Cross-Platform Release Policy
 
-### Tier 1: release-gate minimum for AwarenessClaw desktop
+### Tier 1: release-gate minimum for OCT-Agent desktop
 
 - Telegram
 - WhatsApp
@@ -215,7 +215,7 @@ Requirement:
 - macOS-only warning
 - recommend BlueBubbles instead
 
-## AwarenessClaw Changes Implemented In This Round
+## OCT-Agent Changes Implemented In This Round
 
 1. Added a lightweight Doctor `channel-compatibility` audit.
 2. Auto-repair now fixes upgrade-sensitive stale channel plugin config:

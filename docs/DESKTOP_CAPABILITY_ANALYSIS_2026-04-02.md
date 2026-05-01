@@ -1,12 +1,12 @@
-# AwarenessClaw Desktop 能力分析
+# OCT-Agent Desktop 能力分析
 
 日期：2026-04-02
 
-范围：基于当前仓库代码与文档，对 AwarenessClaw 桌面版是否具备 `computer use` / `browser use` 能力进行代码级分析，并区分“已经可用的 OpenClaw 工具能力”与“尚不能严谨宣称的标准化能力”。
+范围：基于当前仓库代码与文档，对 OCT-Agent 桌面版是否具备 `computer use` / `browser use` 能力进行代码级分析，并区分“已经可用的 OpenClaw 工具能力”与“尚不能严谨宣称的标准化能力”。
 
 ## 结论
 
-当前的 AwarenessClaw 桌面版，已经能够通过 OpenClaw 底层使用以下能力：
+当前的 OCT-Agent 桌面版，已经能够通过 OpenClaw 底层使用以下能力：
 
 - 浏览器自动化能力
 - Shell / Code 执行能力
@@ -18,7 +18,7 @@
 
 因此，当前最准确的产品表述应为：
 
-> AwarenessClaw Desktop 已通过 OpenClaw 暴露浏览器、Shell、文件系统、图片分析等内置工具能力，并可在 chat 流程中实际调用与审批；但暂不应对外宣称已经具备标准化的 desktop computer use 能力。
+> OCT-Agent Desktop 已通过 OpenClaw 暴露浏览器、Shell、文件系统、图片分析等内置工具能力，并可在 chat 流程中实际调用与审批；但暂不应对外宣称已经具备标准化的 desktop computer use 能力。
 
 ## 术语区分
 
@@ -184,7 +184,7 @@ config.tools = {
 
 如果需要对外描述当前产品能力，建议使用如下说法：
 
-> AwarenessClaw Desktop 通过 OpenClaw 底层提供浏览器、Shell、文件系统、图片分析等内置工具能力，并已在聊天界面中支持工具调用展示与审批。
+> OCT-Agent Desktop 通过 OpenClaw 底层提供浏览器、Shell、文件系统、图片分析等内置工具能力，并已在聊天界面中支持工具调用展示与审批。
 
 不建议直接使用如下说法：
 
@@ -254,7 +254,7 @@ config.tools = {
 
 基于当前仓库代码，可以明确确认：
 
-1. AwarenessClaw Desktop 已接入 OpenClaw 的浏览器、Shell、文件系统、图片分析等工具能力。
+1. OCT-Agent Desktop 已接入 OpenClaw 的浏览器、Shell、文件系统、图片分析等工具能力。
 2. 这些能力已经接进聊天链路，而不是仅存在于配置或文案层。
 3. 用户已经可以在聊天 UI 中看到工具调用与审批状态。
 
@@ -265,4 +265,4 @@ config.tools = {
 
 因此，现阶段最准确的内部结论是：
 
-> AwarenessClaw Desktop 已具备基于 OpenClaw 的 browser automation 与通用工具调用能力，但尚不能仅凭仓库代码宣称已具备标准化 desktop computer use。
+> OCT-Agent Desktop 已具备基于 OpenClaw 的 browser automation 与通用工具调用能力，但尚不能仅凭仓库代码宣称已具备标准化 desktop computer use。

@@ -1,5 +1,5 @@
 /**
- * AwarenessClaw CLI — Main entry point
+ * OCT-Agent CLI — Main entry point
  *
  * Zero-dependency installer that:
  * 1. Detects / installs OpenClaw
@@ -72,7 +72,7 @@ export async function main(argv) {
 
 function printHelp() {
   console.log(`
-AwarenessClaw — One-click AI agent with persistent memory
+OCT-Agent — One-click AI agent with persistent memory
 
 Usage:
   npx @awareness-sdk/claw              Interactive setup wizard

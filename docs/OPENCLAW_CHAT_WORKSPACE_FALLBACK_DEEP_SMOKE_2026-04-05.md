@@ -1,4 +1,4 @@
-# AwarenessClaw Chat Workspace Fallback 深度手工脚本
+# OCT-Agent Chat Workspace Fallback 深度手工脚本
 
 最后更新：2026-04-05
 适用范围：Desktop Chat 中 Project Folder 失效后的连续对话、降级提示、自愈清理、恢复文件编辑链路

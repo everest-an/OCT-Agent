@@ -104,7 +104,7 @@ S4 (5-7 天)   ┌──────── 长任务 checkpoint + 人类介入 +
 
 文档：
 - 本目录文档更新（标 ✅ Stage 状态）
-- `AwarenessClaw/packages/desktop/CHANGELOG.md` 加条目
+- `OCT-Agent/packages/desktop/CHANGELOG.md` 加条目
 - 主仓 `Awareness/docs/prd/deployment-log.md` 加一行（如果涉及 desktop 发布）
 
 ---
@@ -128,13 +128,13 @@ S4 (5-7 天)   ┌──────── 长任务 checkpoint + 人类介入 +
 
 - [03-ACCEPTANCE.md](./03-ACCEPTANCE.md) Journey 6-7 通过
 - Failure 6-7 通过
-- 升级 AwarenessClaw 时 mission 不丢（daemon 先 graceful shutdown）
+- 升级 OCT-Agent 时 mission 不丢（daemon 先 graceful shutdown）
 
 ## 开工前要先定
 
-- [ ] Runner daemon 是独立 npm 包还是 AwarenessClaw 内嵌？
+- [ ] Runner daemon 是独立 npm 包还是 OCT-Agent 内嵌？
 - [ ] daemon 如何升级（用户不手动操作情况下）？
-- [ ] 多个 AwarenessClaw app 实例（理论上单例但 macOS 可能开多个）怎么处理？
+- [ ] 多个 OCT-Agent app 实例（理论上单例但 macOS 可能开多个）怎么处理？
 
 ---
 

@@ -3,7 +3,7 @@
 ## 1. 文档信息
 - 日期：2026-04-07
 - 使用对象：CTO 审查
-- 仓库：AwarenessClaw（packages/desktop）
+- 仓库：OCT-Agent（packages/desktop）
 - 范围：Windows 下 Gateway 启动与设置页反复“修复失败”问题
 
 ## 2. 执行摘要

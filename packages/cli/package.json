@@ -1,7 +1,7 @@
 {
   "name": "@awareness-sdk/claw",
   "version": "0.1.0",
-  "description": "AwarenessClaw CLI — One-click setup for OpenClaw with Awareness memory",
+  "description": "OCT-Agent CLI — One-click setup for OpenClaw with Awareness memory",
   "type": "module",
   "bin": {
     "awareness-claw": "./bin/awareness-claw.mjs"

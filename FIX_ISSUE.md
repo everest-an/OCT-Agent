@@ -1,4 +1,4 @@
-# AwarenessClaw 问题修复指南
+# OCT-Agent 问题修复指南
 
 如果您遇到了以下错误信息：
 
@@ -11,10 +11,10 @@ plugins.slots.memory: plugin not found: openclaw-memory Run: openclaw doctor --f
 
 ## 方法一：使用一键修复脚本（推荐）
 
-如果您是在命令行中运行 AwarenessClaw，可以使用内置的修复脚本：
+如果您是在命令行中运行 OCT-Agent，可以使用内置的修复脚本：
 
 ```bash
-# 在 AwarenessClaw 项目目录中运行
+# 在 OCT-Agent 项目目录中运行
 npm run fix-openclaw
 ```
 
@@ -50,14 +50,14 @@ openclaw gateway restart
 
 ## 为什么会发生这个问题？
 
-这个问题通常发生在 AwarenessClaw 更新后，旧版本的 `openclaw-memory` 插件与新版本不兼容。通过重新安装最新版插件，可以解决此问题。
+这个问题通常发生在 OCT-Agent 更新后，旧版本的 `openclaw-memory` 插件与新版本不兼容。通过重新安装最新版插件，可以解决此问题。
 
 ## 如果问题仍然存在
 
 如果上述方法都无法解决问题，请尝试：
 
-1. 完全关闭 AwarenessClaw 应用
+1. 完全关闭 OCT-Agent 应用
 2. 重启您的计算机
-3. 再次启动 AwarenessClaw
+3. 再次启动 OCT-Agent
 
 如果问题依然存在，请联系技术支持或在 GitHub 上提交 issue。

@@ -171,7 +171,7 @@ OpenClaw 官方推崇的多 agent 模式：
 **需要验证**：
 - [ ] Lobster YAML 能不能让 sub-step 在 sub-agent session 里跑（而不是命令行）
 - [ ] Lobster resume token 是持久化到哪里的（文件？还是 OpenClaw session state？）
-- [ ] Lobster 输出事件流（stdout / events）我们在 AwarenessClaw 前端怎么订阅
+- [ ] Lobster 输出事件流（stdout / events）我们在 OCT-Agent 前端怎么订阅
 
 **S1-T0 的真正任务**：读完 [github.com/openclaw/lobster](https://github.com/openclaw/lobster) 源码后定：走 Lobster 还是自建。
 
@@ -277,7 +277,7 @@ OpenAI SDK 的 **handoff pattern** 和我们的"step N 读 step N-1 的 artifact
 
 | 问题 | 答案 | 影响 |
 |---|---|---|
-| Lobster 能否在 AwarenessClaw 内嵌运行 | **❌ 不内嵌**；Lobster 是独立 npm `@openclaw/lobster@2026.3.13`，要 `npm install -g` 装 | 装 Lobster 有失败风险，违反小白友好 |
+| Lobster 能否在 OCT-Agent 内嵌运行 | **❌ 不内嵌**；Lobster 是独立 npm `@openclaw/lobster@2026.3.13`，要 `npm install -g` 装 | 装 Lobster 有失败风险，违反小白友好 |
 | Lobster resume token 存在哪 | 文档说"under state dir"，但未指定路径；需要装包后才能看 | 待定 |
 | Lobster 能不能看到 sub-agent 的实时事件流 | **❌ 没有**；Lobster 只在结束时返回 JSON envelope | **影响 UI 实时性** — 是 Lobster 的致命缺陷 |
 | `agents.defaults.subagents.model` 具体配置路径 | ✅ 确认：`{agents: {defaults: {subagents: {model: "..."}}}}` + per-agent override | S1-T4 Planner 可以用这个配模型 |
@@ -362,7 +362,7 @@ $ openclaw hooks list
 | TaskFlow 怎么 **create**（不只是 inspect）？有没有 `tasks_flow_spawn` 工具？ | 抓真实 orchestrator 场景的 Gateway WS 事件 / 读 openclaw npm 包 dist 源码 | 高 | S1-T0 未完成 |
 | TaskFlow 能接受什么 goal schema？（纯字符串？JSON？YAML？） | 读源码 | 高 | S1-T0 未完成 |
 | TaskFlow 的 tasks[] 里每个 task 是 sessions_spawn 产生的，还是额外声明？ | 找 tasks 不为 0 的真实 flow 看 | 高 | S1-T0 未完成 |
-| orch-* session 前缀是如何触发的？某个 tool？某个配置？ | **部分答案**：[register-workflow-handlers.ts:953](../../../packages/desktop/electron/ipc/register-workflow-handlers.ts#L953) 显示 AwarenessClaw 本地手工构造 `orch-<last8>` 作为 sessionKey 传给 `chat.send`；Gateway 不强制使用 `orch-` 前缀 | 中 | ✅ 已解 |
+| orch-* session 前缀是如何触发的？某个 tool？某个配置？ | **部分答案**：[register-workflow-handlers.ts:953](../../../packages/desktop/electron/ipc/register-workflow-handlers.ts#L953) 显示 OCT-Agent 本地手工构造 `orch-<last8>` 作为 sessionKey 传给 `chat.send`；Gateway 不强制使用 `orch-` 前缀 | 中 | ✅ 已解 |
 | Gateway `event:chat` 有 `state=delta` 逐字输出 | **✅ 真实存在**，已通过 S1-T1 POC 验证：Gateway 确实发 delta 事件，payload 形状多样但能 defensive 解析 | 高 | ✅ S1-T1 已验证 |
 | `agents.defaults.subagents.maxSpawnDepth=2` 能否用于让 subagent 再 spawn | 修改 config + 手工 spawn 测试 | 中（S4 用） | S4 再说 |
 | OpenClaw "autoCapture" 具体保存什么粒度？每个 agent turn？每个 subagent？ | 读 Awareness memory plugin hook 代码 | 低 | 待做 |

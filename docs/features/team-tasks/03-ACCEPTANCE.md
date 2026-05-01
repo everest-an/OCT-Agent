@@ -41,7 +41,7 @@
 ### Journey 4 · App 重启 mission 可见（S1 最小版）
 
 - **Given** Journey 1 执行完（mission 已创建，可能还在 running）
-- **When** 用户关闭 AwarenessClaw 并重新启动
+- **When** 用户关闭 OCT-Agent 并重新启动
 - **Then** Task Center 页面**能看到这个 mission 的卡片**（不管是 running / paused / failed）
 - **And** 点开能看到 plan / steps / 已完成的 artifacts
 - **Note**: S1 不保证能 "继续跑"（那是 S2），但必须 "看得到历史"

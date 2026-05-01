@@ -273,7 +273,7 @@ Resume =
 - **技术债**：docs/prd/active-features.md 加 "0.4.0 · 迁 orchestrator pattern"
 
 **收益**：5h 可完成，preview.6 可发。
-**缺点**：仍然重造轮子，只是"关 AwarenessClaw 能恢复" 解决 80% 场景。
+**缺点**：仍然重造轮子，只是"关 OCT-Agent 能恢复" 解决 80% 场景。
 
 ### 方案 C（推荐 · B 然后 A'）
 
@@ -302,14 +302,14 @@ Resume =
 
 ### 决策 1 · preview.6 立即做方案 B（5h）还是等方案 A'（~1.5 天）？
 
-- **方案 B**：快速 ship，覆盖 "关 AwarenessClaw 重启" 80% 场景，保留技术债到 0.4.0
+- **方案 B**：快速 ship，覆盖 "关 OCT-Agent 重启" 80% 场景，保留技术债到 0.4.0
 - **方案 A'**：慢但对齐 OpenClaw 生态，Gateway 重启也 durable（数据层），session 层仍有 upstream 限制
 - **推荐 C**：B → A'，但需要你确认 0.4.0 的 breaking change 窗口
 - ⚠ **注意**：原 prompt 写的"方案 A（tasks_flow_spawn 重写）"**不存在**，必须改为 A'
 
 ### 决策 2 · 如果走 A'，orchestrator agent 预设还是让用户自配？
 
-- **预设**：我们发包时 `AwarenessClaw/packages/desktop/config/orchestrator-agent.json` 加到 `~/.openclaw/agents/`，用户不用做任何事
+- **预设**：我们发包时 `OCT-Agent/packages/desktop/config/orchestrator-agent.json` 加到 `~/.openclaw/agents/`，用户不用做任何事
 - **让用户配**：给模板 + 文档，用户点 "Create Orchestrator" 按钮一键创建
 - **推荐预设**：和"零命令行、10 岁可用"原则一致；但要保证 agent 的 SOUL.md 写清 routing rules，避免 hallucinate agentId
 

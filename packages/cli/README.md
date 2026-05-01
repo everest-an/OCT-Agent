@@ -1,6 +1,6 @@
 # @awareness-sdk/claw
 
-**AwarenessClaw CLI** — one-click setup for [OpenClaw](https://openclaw.ai) with persistent [Awareness](https://awareness.market) memory.
+**OCT-Agent CLI** — one-click setup for [OpenClaw](https://openclaw.ai) with persistent [Awareness](https://awareness.market) memory.
 
 Installs OpenClaw, wires in the Awareness memory plugin, starts the local daemon, and walks you through model + channel configuration. Zero prior knowledge of Node, npm, or AI Agent tooling required.
 
@@ -38,7 +38,7 @@ npx @awareness-sdk/claw --help
 
 ## Prefer a GUI?
 
-Download the full **AwarenessClaw Desktop** app (Electron, macOS / Windows / Linux) from [awareness.market](https://awareness.market/) for a fully graphical experience.
+Download the full **OCT-Agent Desktop** app (Electron, macOS / Windows / Linux) from [awareness.market](https://awareness.market/) for a fully graphical experience.
 
 ## Requirements
 
@@ -53,5 +53,5 @@ Apache 2.0 — see [LICENSE](../../LICENSE) in the repository root.
 ## Links
 
 - Website: <https://awareness.market/>
-- Source: <https://github.com/edwin-hao-ai/AwarenessClaw>
+- Source: <https://github.com/edwin-hao-ai/OCT-Agent>
 - Memory cloud docs: <https://awareness.market/docs>

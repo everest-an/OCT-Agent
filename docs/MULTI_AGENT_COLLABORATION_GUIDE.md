@@ -1,7 +1,7 @@
-# AwarenessClaw 多 Agent 协作指南
+# OCT-Agent 多 Agent 协作指南
 
 > 日期：2026-04-05
-> 适用版本：AwarenessClaw + OpenClaw 2026.4.x
+> 适用版本：OCT-Agent + OpenClaw 2026.4.x
 > 目标读者：产品团队、开发者、高级用户
 
 ## 一、核心原理
@@ -25,7 +25,7 @@
 
 ### 1.2 OpenClaw 的三层协作架构
 
-AwarenessClaw 的多 Agent 协作 100% 基于 OpenClaw 原生能力，分三层：
+OCT-Agent 的多 Agent 协作 100% 基于 OpenClaw 原生能力，分三层：
 
 #### 第一层：Agent 隔离（已实现 ✅）
 
@@ -141,7 +141,7 @@ steps:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    AwarenessClaw 桌面端                       │
+│                    OCT-Agent 桌面端                       │
 │                                                              │
 │  ┌──────────┐    ┌───────────┐    ┌────────────────────┐    │
 │  │ 聊天页面  │    │ Task Center│    │ @agent 提及检测     │    │
@@ -175,7 +175,7 @@ steps:
                        │ WebSocket 实时推送
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  AwarenessClaw 看板自动更新：                                  │
+│  OCT-Agent 看板自动更新：                                  │
 │  Backlog → Queued → Running ⏳ → Done ✅ / Failed ❌         │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -483,7 +483,7 @@ openclaw plugins list | grep lobster
 ### 问题 4：Windows 上 Gateway 重启失败
 
 **已知问题**：Windows Scheduled Task 模式下 `gateway restart` 可能卡住。
-**AwarenessClaw 已修复**：使用 `gateway stop` + `gateway start` 代替 `restart`。
+**OCT-Agent 已修复**：使用 `gateway stop` + `gateway start` 代替 `restart`。
 
 ## 七、参考资料
 
@@ -491,7 +491,7 @@ openclaw plugins list | grep lobster
 - [OpenClaw Multi-Agent Routing](https://docs.openclaw.ai/concepts/multi-agent)
 - [OpenClaw Lobster 工作流引擎](https://docs.openclaw.ai/tools/lobster)
 - [OpenClaw Gateway Architecture](https://docs.openclaw.ai/concepts/architecture)
-- [AwarenessClaw Task Center 设计文档](../docs/prd/WORKFLOW_KANBAN_SPEC.md)
+- [OCT-Agent Task Center 设计文档](../docs/prd/WORKFLOW_KANBAN_SPEC.md)
 
 ## 八、See also · 持续执行的多 Agent 任务引擎（F-Team-Tasks）
 

@@ -51,10 +51,10 @@
 User goal
   │
   ▼
-AwarenessClaw 写的 Planner（读 goal + agents 列表 + Awareness recall）
+OCT-Agent 写的 Planner（读 goal + agents 列表 + Awareness recall）
   │ 输出 JSON 任务序列（不是 YAML）
   ▼
-AwarenessClaw 逐个调用 `sessions_spawn` 工具派发 subagent
+OCT-Agent 逐个调用 `sessions_spawn` 工具派发 subagent
   │  每个 spawn 自动登记为 TaskFlow 的一个 task
   ▼
 OpenClaw Gateway + TaskFlow 管理：
@@ -63,7 +63,7 @@ OpenClaw Gateway + TaskFlow 管理：
   • 事件流（Gateway WS）
   • runtime 分类（subagent）
   ▼
-AwarenessClaw UI 订阅 `openclaw tasks list --watch` + Gateway WS 事件
+OCT-Agent UI 订阅 `openclaw tasks list --watch` + Gateway WS 事件
   • Kanban 卡片状态来源 = OpenClaw task.status
   • artifact 来自 subagent 的 session transcript
 ```
@@ -93,7 +93,7 @@ AwarenessClaw UI 订阅 `openclaw tasks list --watch` + Gateway WS 事件
 User goal
   │
   ▼
-AwarenessClaw 只做一件事：
+OCT-Agent 只做一件事：
   openclaw agent --agent <orchestrator-agent-id> \
     --session-id mission-<id> \
     --message "<goal>"
@@ -106,14 +106,14 @@ OpenClaw 的 orchestrator agent（由用户在 AGENTS.md 配置 SOUL）：
   • TaskFlow 自动追踪
   │
   ▼
-AwarenessClaw UI 订阅：
+OCT-Agent UI 订阅：
   • openclaw tasks flow list
   • Gateway WS 事件
   • 展示为 Kanban
 ```
 
 **优点**：
-- ✅ **最不造轮子**：连 Planner 都是 OpenClaw agent，AwarenessClaw 只做 UI 层
+- ✅ **最不造轮子**：连 Planner 都是 OpenClaw agent，OCT-Agent 只做 UI 层
 - ✅ 用户能自己定制 orchestrator 的 SOUL.md（自己定义团队规则）
 - ✅ 和 OpenClaw 所有能力原生集成
 

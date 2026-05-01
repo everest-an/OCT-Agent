@@ -1,8 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(powershell -NoProfile -Command 'Get-CimInstance Win32_Process -Filter \"name='\\\\''AwarenessClaw.exe'\\\\'' or name='\\\\''openclaw.exe'\\\\''\" | Select-Object ProcessId,ParentProcessId,@{n='\\\\''MemMB'\\\\'';e={[math]::Round\\($_.WorkingSetSize/1MB,1\\)}},CommandLine | Format-Table -AutoSize -Wrap')",
-      "Bash(powershell -NoProfile -Command 'Get-CimInstance Win32_Process | Where-Object { $_.Name -eq '\\\\''AwarenessClaw.exe'\\\\'' -or \\($_.CommandLine -match '\\\\''openclaw'\\\\'' -and $_.CommandLine -notmatch '\\\\''EBWebView|yuanbao|claude.plugins'\\\\''\\) } | Select-Object ProcessId,ParentProcessId,Name,@{n='\\\\''MemMB'\\\\'';e={[math]::Round\\($_.WorkingSetSize/1MB,1\\)}},CommandLine | Format-Table -AutoSize -Wrap')",
+      "Bash(powershell -NoProfile -Command 'Get-CimInstance Win32_Process -Filter \"name='\\\\''OCT-Agent.exe'\\\\'' or name='\\\\''openclaw.exe'\\\\''\" | Select-Object ProcessId,ParentProcessId,@{n='\\\\''MemMB'\\\\'';e={[math]::Round\\($_.WorkingSetSize/1MB,1\\)}},CommandLine | Format-Table -AutoSize -Wrap')",
+      "Bash(powershell -NoProfile -Command 'Get-CimInstance Win32_Process | Where-Object { $_.Name -eq '\\\\''OCT-Agent.exe'\\\\'' -or \\($_.CommandLine -match '\\\\''openclaw'\\\\'' -and $_.CommandLine -notmatch '\\\\''EBWebView|yuanbao|claude.plugins'\\\\''\\) } | Select-Object ProcessId,ParentProcessId,Name,@{n='\\\\''MemMB'\\\\'';e={[math]::Round\\($_.WorkingSetSize/1MB,1\\)}},CommandLine | Format-Table -AutoSize -Wrap')",
       "Bash(git stash:*)",
       "Bash(git pull:*)",
       "Bash(du -b packages/desktop/resources/*)",

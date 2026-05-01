@@ -1,16 +1,16 @@
-# AwarenessClaw Tier-1 通道三端 Smoke Matrix（2026-04-07）
+# OCT-Agent Tier-1 通道三端 Smoke Matrix（2026-04-07）
 
 ## 1. 目标
 
 - 这份文档是 OpenClaw 升级后最小发布验证脚本，不替代全量 deep smoke。
-- 目标只覆盖 AwarenessClaw 当前必须守住的 tier-1 通道最小闭环：Telegram、WhatsApp、Discord、微信。
+- 目标只覆盖 OCT-Agent 当前必须守住的 tier-1 通道最小闭环：Telegram、WhatsApp、Discord、微信。
 - 每次升级 OpenClaw、升级 `@tencent-weixin/openclaw-weixin`、修改 channel setup/login/bind 逻辑后，都要重跑这份矩阵。
-- 这里的 tier-1 是 AwarenessClaw 的发布门槛，不等同于 upstream docs 的默认展示顺序。
+- 这里的 tier-1 是 OCT-Agent 的发布门槛，不等同于 upstream docs 的默认展示顺序。
 
 ## 2. 为什么最小集包含微信
 
 - Telegram、WhatsApp、Discord 都有 OpenClaw 官方通道文档，且是三端可跑的核心聊天通道。
-- 微信虽然不在 docs.openclaw.ai 的核心频道列表里，但 `@tencent-weixin/openclaw-weixin` 是当前实际官方插件路径，且已经是 AwarenessClaw Channels 页的一等入口。
+- 微信虽然不在 docs.openclaw.ai 的核心频道列表里，但 `@tencent-weixin/openclaw-weixin` 是当前实际官方插件路径，且已经是 OCT-Agent Channels 页的一等入口。
 - 对我们的客户来说，微信不是“高级附加通道”，而是必须跟 Telegram、WhatsApp、Discord 一起守住的升级回归面。
 - 因此发布前最小 smoke matrix 固定为 4 x 3，而不是只看 upstream docs 的默认 tier。
 

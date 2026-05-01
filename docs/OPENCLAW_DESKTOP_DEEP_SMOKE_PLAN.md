@@ -1,7 +1,7 @@
-# AwarenessClaw Desktop 深度 Smoke Test 计划
+# OCT-Agent Desktop 深度 Smoke Test 计划
 
 最后更新：2026-04-02
-适用范围：AwarenessClaw Desktop 与本机 OpenClaw / Gateway / 插件 / Skills / Channels / Memory 的端到端回归验证
+适用范围：OCT-Agent Desktop 与本机 OpenClaw / Gateway / 插件 / Skills / Channels / Memory 的端到端回归验证
 
 ## 1. 目的
 
@@ -31,7 +31,7 @@
 
 ### 3.1 环境基线
 
-- Desktop build 可通过：`cd AwarenessClaw/packages/desktop && npm run build`
+- Desktop build 可通过：`cd OCT-Agent/packages/desktop && npm run build`
 - 桌面 chat 相关测试通过：
   - `npm test -- src/test/dashboard.test.tsx src/test/register-chat-handlers.test.ts`
 - 本机已安装 OpenClaw

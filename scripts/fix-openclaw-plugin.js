@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * AwarenessClaw OpenClaw 插件修复脚本
+ * OCT-Agent OpenClaw 插件修复脚本
  * 用于自动修复 openclaw-memory 插件找不到的问题
  */
 
@@ -9,7 +9,7 @@ import fs from 'fs';
 import { execSync } from 'child_process';
 import path from 'path';
 
-console.log('🔧 AwarenessClaw OpenClaw 插件修复工具');
+console.log('🔧 OCT-Agent OpenClaw 插件修复工具');
 console.log('');
 
 try {
@@ -84,7 +84,7 @@ try {
   console.log('🎉 修复完成！');
   console.log('');
   console.log('您的 Awareness Memory 插件现在应该可以正常工作了。');
-  console.log('如果仍有问题，请重启 AwarenessClaw 应用程序。');
+  console.log('如果仍有问题，请重启 OCT-Agent 应用程序。');
   
 } catch (error) {
   console.error('❌ 修复过程中出现错误:');

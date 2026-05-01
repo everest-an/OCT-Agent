@@ -1,4 +1,4 @@
-name: AwarenessClaw CI
+name: OCT-Agent CI
 
 on:
   push:

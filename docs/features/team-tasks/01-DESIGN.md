@@ -21,7 +21,7 @@
 用户在 Dashboard 顶部输入框："帮我做一个博客系统，用 Next.js"
   │
   ▼
-┌─────────── AwarenessClaw (我们写的薄层) ───────────┐
+┌─────────── OCT-Agent (我们写的薄层) ───────────┐
 │                                                    │
 │  ① Planner（我们写的 Prompt）                      │
 │    • 挑一个 agent（用户可选或自动）                │
@@ -64,7 +64,7 @@
   │
   │ 每个 step 完成
   ▼
-┌─────────── AwarenessClaw 钩子（我们写） ───────────┐
+┌─────────── OCT-Agent 钩子（我们写） ───────────┐
 │                                                    │
 │  ④ Lobster pre-step / post-step hook（如支持）     │
 │    pre-step: awareness_recall → 注入到 prompt      │
@@ -105,7 +105,7 @@
 
 ### D0（最新）· 用 Lobster 作为执行引擎，不自己写 orchestrator
 
-**选择**：Planner 输出 Lobster YAML；执行由 `openclaw lobster run` 完成；AwarenessClaw 只做薄层 wrapper。
+**选择**：Planner 输出 Lobster YAML；执行由 `openclaw lobster run` 完成；OCT-Agent 只做薄层 wrapper。
 
 **理由**：
 - Lobster 已经有：`stdin: $prev.stdout` 接力 / resume token / approval / condition / step pause
@@ -134,7 +134,7 @@
 
 ### D3（推迟）· Daemon 化
 
-**新理解**：Lobster 本身由 OpenClaw 主 daemon 托管（Gateway / scheduled task / user session 里跑），已经不依赖 AwarenessClaw 进程存活。
+**新理解**：Lobster 本身由 OpenClaw 主 daemon 托管（Gateway / scheduled task / user session 里跑），已经不依赖 OCT-Agent 进程存活。
 
 **具体行为待验证（S1-T0）**：
 - Lobster run 一旦启动，是不是 OpenClaw Gateway 接管生命周期？
@@ -439,7 +439,7 @@ same command / path that failed.
    - Worker 执行 step 时 → 卡片可展开看**实时 stdout stream**
    - tool 调用 → inline chip 即时显示（"📖 reading file..."）
    - 零等待感：首个 token 必须 3s 内可见
-   - 背景原因：AwarenessClaw 的普通 chat 已经有 streaming（[CLAUDE.md](../../../CLAUDE.md) 强调）。mission 没有 streaming 会显得比 chat 还慢，体验崩
+   - 背景原因：OCT-Agent 的普通 chat 已经有 streaming（[CLAUDE.md](../../../CLAUDE.md) 强调）。mission 没有 streaming 会显得比 chat 还慢，体验崩
 
 ### 8.1·补 · Streaming 实现约定
 

@@ -1,4 +1,4 @@
-name: AwarenessClaw Package macOS arm64
+name: OCT-Agent Package macOS arm64
 
 on:
   workflow_dispatch:

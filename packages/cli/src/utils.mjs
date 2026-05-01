@@ -32,7 +32,7 @@ export function printBanner() {
   console.log(`
 ╔═══════════════════════════════════════════════════════╗
 ║                                                       ║
-║   🧠 AwarenessClaw                                    ║
+║   🧠 OCT-Agent                                    ║
 ║   One-click AI agent with persistent memory           ║
 ║                                                       ║
 ║   Built on OpenClaw + Awareness Memory                ║
@@ -45,7 +45,7 @@ export function printSuccess() {
   console.log(`
 ╔═══════════════════════════════════════════════════════╗
 ║                                                       ║
-║   ✅ AwarenessClaw is ready!                          ║
+║   ✅ OCT-Agent is ready!                          ║
 ║                                                       ║
 ║   Start chatting:  openclaw chat                      ║
 ║   Open dashboard:  openclaw dashboard                 ║

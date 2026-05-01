@@ -1,4 +1,4 @@
-# AwarenessClaw Desktop 未闭环问题修复方案
+# OCT-Agent Desktop 未闭环问题修复方案
 
 最后更新：2026-04-02
 
@@ -6,7 +6,7 @@
 
 这份文档只回答一个问题：
 
-> 当前还没闭环的能力，要怎么修，才能最终把 AwarenessClaw Desktop 推到“接近 OpenClaw chat 全功能对齐”的状态。
+> 当前还没闭环的能力，要怎么修，才能最终把 OCT-Agent Desktop 推到“接近 OpenClaw chat 全功能对齐”的状态。
 
 这里不再重复“哪些没闭环”，只给对应的解决路径、优先级、修复方式和验收标准。
 
@@ -35,8 +35,8 @@ Desktop 只是把项目路径作为提示词注入，而不是真正把 OpenClaw
 
 相关代码：
 
-- [Dashboard.tsx](/Users/edwinhao/Awareness/AwarenessClaw/packages/desktop/src/pages/Dashboard.tsx#L762)
-- [register-chat-handlers.ts](/Users/edwinhao/Awareness/AwarenessClaw/packages/desktop/electron/ipc/register-chat-handlers.ts#L103)
+- [Dashboard.tsx](/Users/edwinhao/Awareness/OCT-Agent/packages/desktop/src/pages/Dashboard.tsx#L762)
+- [register-chat-handlers.ts](/Users/edwinhao/Awareness/OCT-Agent/packages/desktop/electron/ipc/register-chat-handlers.ts#L103)
 
 现在的实现只是：
 
@@ -86,9 +86,9 @@ UI 已经能显示 approval，但真实链路没有稳定闭成：
 
 相关代码：
 
-- [register-chat-handlers.ts](/Users/edwinhao/Awareness/AwarenessClaw/packages/desktop/electron/ipc/register-chat-handlers.ts#L137)
-- [register-chat-handlers.ts](/Users/edwinhao/Awareness/AwarenessClaw/packages/desktop/electron/ipc/register-chat-handlers.ts#L352)
-- [Dashboard.tsx](/Users/edwinhao/Awareness/AwarenessClaw/packages/desktop/src/pages/Dashboard.tsx#L809)
+- [register-chat-handlers.ts](/Users/edwinhao/Awareness/OCT-Agent/packages/desktop/electron/ipc/register-chat-handlers.ts#L137)
+- [register-chat-handlers.ts](/Users/edwinhao/Awareness/OCT-Agent/packages/desktop/electron/ipc/register-chat-handlers.ts#L352)
+- [Dashboard.tsx](/Users/edwinhao/Awareness/OCT-Agent/packages/desktop/src/pages/Dashboard.tsx#L809)
 
 现在的实现本质上是：
 
@@ -113,8 +113,8 @@ UI 已经能显示 approval，但真实链路没有稳定闭成：
 
 目前已经有：
 
-- [register-chat-handlers.ts](/Users/edwinhao/Awareness/AwarenessClaw/packages/desktop/electron/ipc/register-chat-handlers.ts#L61)
-- [preload.ts](/Users/edwinhao/Awareness/AwarenessClaw/packages/desktop/electron/preload.ts#L33)
+- [register-chat-handlers.ts](/Users/edwinhao/Awareness/OCT-Agent/packages/desktop/electron/ipc/register-chat-handlers.ts#L61)
+- [preload.ts](/Users/edwinhao/Awareness/OCT-Agent/packages/desktop/electron/preload.ts#L33)
 
 说明 Desktop 已经准备了 `chat:approve` 接口，但前端没有主用它，而是继续走 `/approve ...` 文本消息。
 
@@ -157,8 +157,8 @@ UI 已经能显示 approval，但真实链路没有稳定闭成：
 
 相关代码接触面：
 
-- [register-memory-handlers.ts](/Users/edwinhao/Awareness/AwarenessClaw/packages/desktop/electron/ipc/register-memory-handlers.ts#L121)
-- [register-memory-handlers.ts](/Users/edwinhao/Awareness/AwarenessClaw/packages/desktop/electron/ipc/register-memory-handlers.ts#L133)
+- [register-memory-handlers.ts](/Users/edwinhao/Awareness/OCT-Agent/packages/desktop/electron/ipc/register-memory-handlers.ts#L121)
+- [register-memory-handlers.ts](/Users/edwinhao/Awareness/OCT-Agent/packages/desktop/electron/ipc/register-memory-handlers.ts#L133)
 
 Desktop 当前：
 
@@ -215,7 +215,7 @@ Browser 这块当前是两层问题：
 
 相关代码：
 
-- [Settings.tsx](/Users/edwinhao/Awareness/AwarenessClaw/packages/desktop/src/pages/Settings.tsx#L678)
+- [Settings.tsx](/Users/edwinhao/Awareness/OCT-Agent/packages/desktop/src/pages/Settings.tsx#L678)
 
 ### 最小修复方案
 

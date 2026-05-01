@@ -1,4 +1,4 @@
-# AwarenessClaw No-Emoji Content Guideline v1.0
+# OCT-Agent No-Emoji Content Guideline v1.0
 
 Last Updated: 2026-04-05
 Owner: Product + Design + Frontend
@@ -6,7 +6,7 @@ Scope: Desktop UI text, labels, badges, alerts, empty states, action copy
 
 ## 1. Why This Guideline Exists
 
-This guideline defines a unified no-emoji writing system for AwarenessClaw product surfaces.
+This guideline defines a unified no-emoji writing system for OCT-Agent product surfaces.
 
 Goals:
 - Keep the product tone professional and stable in business contexts

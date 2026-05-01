@@ -10,7 +10,7 @@
 
 ## 一句话定义
 
-用户给一个高层目标（"做一个博客系统"），薄 Planner 输出 JSON plan，AwarenessClaw 调用 **OpenClaw Gateway 的 `sessions_spawn`** 依次派发 subagent（每个 step 一个），**订阅 Gateway WS 事件流**把 agent 的 token / tool / 完成事件实时 stream 到 Kanban UI；OpenClaw 内置 TaskFlow 自动 durable 持久化；Awareness memory plugin 已自动 autoRecall/autoCapture。
+用户给一个高层目标（"做一个博客系统"），薄 Planner 输出 JSON plan，OCT-Agent 调用 **OpenClaw Gateway 的 `sessions_spawn`** 依次派发 subagent（每个 step 一个），**订阅 Gateway WS 事件流**把 agent 的 token / tool / 完成事件实时 stream 到 Kanban UI；OpenClaw 内置 TaskFlow 自动 durable 持久化；Awareness memory plugin 已自动 autoRecall/autoCapture。
 
 ## 为什么做
 

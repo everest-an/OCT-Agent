@@ -83,13 +83,13 @@ b884cab feat: Mission Flow Phase 4 + L1-L5 pyramid · +130 tests
 ### 新会话开工 prompt（直接粘贴用）
 
 ```
-继续 AwarenessClaw 的 F-Team-Tasks — 做 Mission Flow Resume / Durability。
+继续 OCT-Agent 的 F-Team-Tasks — 做 Mission Flow Resume / Durability。
 
 **先读这 4 个文件（必须，按顺序）**：
-1. AwarenessClaw/docs/features/team-tasks/SESSION-HANDOFF-2026-04-18.md — 上轮完整进度（本文件）
-2. AwarenessClaw/docs/features/team-tasks/RESUME_DESIGN.md — v2 设计（含 OpenClaw 调研结论 + Sources 列表）
-3. AwarenessClaw/docs/features/team-tasks/07-DECISION-LOBSTER-VS-TASKFLOW.md — S1 原始拍板（TaskFlow 为目标，但代码没落地）
-4. AwarenessClaw/packages/desktop/electron/mission/mission-runner.ts — 现状主文件（用 chat.send，不是 TaskFlow）
+1. OCT-Agent/docs/features/team-tasks/SESSION-HANDOFF-2026-04-18.md — 上轮完整进度（本文件）
+2. OCT-Agent/docs/features/team-tasks/RESUME_DESIGN.md — v2 设计（含 OpenClaw 调研结论 + Sources 列表）
+3. OCT-Agent/docs/features/team-tasks/07-DECISION-LOBSTER-VS-TASKFLOW.md — S1 原始拍板（TaskFlow 为目标，但代码没落地）
+4. OCT-Agent/packages/desktop/electron/mission/mission-runner.ts — 现状主文件（用 chat.send，不是 TaskFlow）
 
 **重要背景（上一会话 web search 结论，别重复调研）**：
 - OpenClaw 2026.4.2 已提供 TaskFlow durable state + `openclaw flows recover` CLI
@@ -129,7 +129,7 @@ b884cab feat: Mission Flow Phase 4 + L1-L5 pyramid · +130 tests
 - 保留 chat.send 架构，只修最大用户痛点
 - L1 · 重启时 re-attach live Gateway session（~3h）：
   - mission-runner.ts::resumeMission(id) 用 gateway.chatHistory + subscribe 接续
-  - 仅解决 "AwarenessClaw 重启、Gateway 活着" 80% 场景
+  - 仅解决 "OCT-Agent 重启、Gateway 活着" 80% 场景
   - 明确限制：Gateway 重启 session 就死，我们修不了（upstream issue）
 - L2 · network/5xx/timeout 自动 backoff retry 3 次（~2h）
 - **必记录技术债**：docs/prd/active-features.md 加一条 "0.4.0 必须迁 TaskFlow"
@@ -145,7 +145,7 @@ b884cab feat: Mission Flow Phase 4 + L1-L5 pyramid · +130 tests
 4. **不造新轮子** — 自己实现前先确认上游没做过
 
 **验证 preview.5 代码还活着（新会话第一步）**：
-cd /Users/edwinhao/Awareness/AwarenessClaw/packages/desktop
+cd /Users/edwinhao/Awareness/OCT-Agent/packages/desktop
 npx vitest run src/test/mission-*.test.ts src/test/mission-*.test.tsx
 # 预期 375 tests pass
 npm run verify:mission-all
@@ -168,7 +168,7 @@ node scripts/e2e-mission-smoke.mjs
 4. Gateway 重启 session 丢失（issue #62442 upstream 限制）—— 要不要 UI 提示用户"刚重启过 Gateway 请重发此 mission"？
 
 **验收标准**：
-- DMG 0.3.7-preview.6：用户关 AwarenessClaw 重开，上次 running mission 能看到真实进度（方案 A 或 B 都 OK）
+- DMG 0.3.7-preview.6：用户关 OCT-Agent 重开，上次 running mission 能看到真实进度（方案 A 或 B 都 OK）
 - 可选（方案 B 才有）：断网 10s 单 step 不 fail
 - vitest + 4 L1 + build + real E2E + new resume E2E 全绿
 
@@ -193,6 +193,6 @@ node scripts/e2e-mission-smoke.mjs
 | "不造轮子" | ⚠️ **违反了** — MissionRunner 是 TaskFlow 的山寨实现（chat.send 而非 tasks_flow_spawn） | **下轮修复**：阶段 0 调研 + 方案 A 迁 TaskFlow |
 | "Streaming 一等民" | planner/step delta 全链路 + UI elapsed 计时 | 保持，Flows streaming 格式待 verify |
 | "不能卡死" | idle timer 15min + sweep + hydrate + UI warmup 提示 | resume 新增：re-attach 不卡死 |
-| "持续进行（断网/关 openclaw/关 awarenessclaw）" | 上轮只做 sweep（标 failed）；真 resume 待阶段 0 决 A/B | **下轮**：方案 A 根治 / 方案 B 只补 "AwarenessClaw 重启" 场景 |
+| "持续进行（断网/关 openclaw/关 awarenessclaw）" | 上轮只做 sweep（标 failed）；真 resume 待阶段 0 决 A/B | **下轮**：方案 A 根治 / 方案 B 只补 "OCT-Agent 重启" 场景 |
 | "一定要确保功能都可用" | 真 E2E 55s 跑通证明基础 OK | 每次 merge 前真 E2E + real resume test 必跑 |
 | "openclaw 应该已经想到了吧" | ⚠️ **上轮漏查** — 这轮 web search 了 TaskFlow + sessions_spawn 限制 | 新 prompt + RESUME_DESIGN v2 已含全部调研 |

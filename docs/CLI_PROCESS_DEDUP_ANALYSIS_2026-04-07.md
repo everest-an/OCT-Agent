@@ -7,7 +7,7 @@
 
 ## 1. 问题现象
 
-AwarenessClaw 桌面端启动后，系统同时出现 4-6 个 `openclaw channels list`、2-3 个 `openclaw agents bindings --json`、多个 `openclaw gateway status` 等 CLI 进程。每个进程加载全部插件（feishu_doc/chat/wiki/drive、device-pair、phone-control、awareness-memory 等十几个），单次耗时 130 秒以上。多进程并发抢 CPU，导致系统卡顿。
+OCT-Agent 桌面端启动后，系统同时出现 4-6 个 `openclaw channels list`、2-3 个 `openclaw agents bindings --json`、多个 `openclaw gateway status` 等 CLI 进程。每个进程加载全部插件（feishu_doc/chat/wiki/drive、device-pair、phone-control、awareness-memory 等十几个），单次耗时 130 秒以上。多进程并发抢 CPU，导致系统卡顿。
 
 ---
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * AwarenessClaw CLI — One-click setup for OpenClaw with Awareness memory
+ * OCT-Agent CLI — One-click setup for OpenClaw with Awareness memory
  *
  * Usage:
  *   npx @awareness-sdk/claw           # Interactive setup wizard
@@ -12,6 +12,6 @@
 import { main } from '../src/index.mjs';
 
 main(process.argv.slice(2)).catch((err) => {
-  console.error('\n❌ AwarenessClaw setup failed:', err.message);
+  console.error('\n❌ OCT-Agent setup failed:', err.message);
   process.exit(1);
 });

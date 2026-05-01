@@ -49,7 +49,7 @@
 **表现**：
 - 用户开始一个长任务 → 关笔记本盖子休眠 → 打开 → 任务全 `failed`，前面 1 小时白跑
 - Electron 主进程 crash（OOM / 信号）→ 所有 running mission 丢失
-- 升级 AwarenessClaw 版本必然中断 mission
+- 升级 OCT-Agent 版本必然中断 mission
 
 **原因**：产品把 mission 设计成"一次性 session bound"，不是"长生命周期 job"。
 
@@ -64,7 +64,7 @@
 - 同一个用户同一个项目，第二次跑"做博客系统" → agent 从零开始问"用什么技术栈？"，上次选的 Next.js + Prisma 已经被遗忘
 - 踩过的坑（"记得在 Apple Silicon 上 sharp 要用 arm64 版本"）每次都要重新踩
 
-**原因**：AwarenessClaw 的定位是 "OpenClaw + Awareness Memory"，但 mission 这条线没接通 memory。
+**原因**：OCT-Agent 的定位是 "OpenClaw + Awareness Memory"，但 mission 这条线没接通 memory。
 
 ## 次要缺口（S4 再处理）
 

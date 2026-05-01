@@ -52,9 +52,9 @@ function check(label, ok) {
 // --- Check 2: daemon.mjs CORS allows the header ---
 {
   console.log('\n[2] daemon.mjs CORS + validation');
-  // Find daemon.mjs - try common locations relative to AwarenessClaw
+  // Find daemon.mjs - try common locations relative to OCT-Agent
   const candidates = [
-    path.resolve(root, '../../../sdks/local/src/daemon.mjs'),  // Awareness/AwarenessClaw/packages/desktop → Awareness/sdks/local/src
+    path.resolve(root, '../../../sdks/local/src/daemon.mjs'),  // Awareness/OCT-Agent/packages/desktop → Awareness/sdks/local/src
     path.resolve(root, '../../../../sdks/local/src/daemon.mjs'),
   ];
   const daemonPath = candidates.find(p => fs.existsSync(p));

@@ -62,7 +62,7 @@ const result = await ws.chatSend(key, prompt, {...});
 1. **完全没继承** OpenClaw TaskFlow 的 durable state
 2. **完全没享受** `openclaw flows recover` CLI
 3. **Mission Runner 是一个并行的 TaskFlow 山寨实现** — mission.json 存磁盘、step status 流转、idle timer … 全部是 OpenClaw 已经做了一遍的事
-4. 这违反 AwarenessClaw CLAUDE.md "核心原则 #1 套壳不复刻" 和 "#2 复用优先，不重复造轮子"
+4. 这违反 OCT-Agent CLAUDE.md "核心原则 #1 套壳不复刻" 和 "#2 复用优先，不重复造轮子"
 
 ---
 
@@ -101,10 +101,10 @@ const result = await ws.chatSend(key, prompt, {...});
 
 ### 阶段 2 · fallback：保留 chat.send，做薄 resume（~5h）
 
-**只做** "AwarenessClaw 重启，Gateway 活着" 这个最大用户场景（80%+ 场景）。
+**只做** "OCT-Agent 重启，Gateway 活着" 这个最大用户场景（80%+ 场景）。
 
 **L1 · re-attach live session**：
-- AwarenessClaw 启动时对 status=running 的 mission：
+- OCT-Agent 启动时对 status=running 的 mission：
   - 读 step 的 sessionKey + runId
   - `gateway.chatHistory(sessionKey)` 看历史
   - 末尾 `final` → writeArtifact + spawnNextStep
@@ -117,7 +117,7 @@ const result = await ws.chatSend(key, prompt, {...});
 
 **明确不做**：
 - ❌ Gateway 重启 session 恢复（上游限制 #62442）
-- ❌ 关 AwarenessClaw 继续跑（Electron main 死了，需要 daemon 化，见下）
+- ❌ 关 OCT-Agent 继续跑（Electron main 死了，需要 daemon 化，见下）
 
 ### 阶段 3 · 不做：Daemon 化（L3 原设计）
 
@@ -126,7 +126,7 @@ const result = await ws.chatSend(key, prompt, {...});
 **正确姿势**：
 - OpenClaw Gateway 已经是 daemon（Windows Scheduled Task / macOS launchd）
 - 我们的 mission 应该跑在 Gateway 的 TaskFlow 里 → Gateway 活着任务就活着
-- AwarenessClaw UI 只是 TaskFlow 的 viewer
+- OCT-Agent UI 只是 TaskFlow 的 viewer
 
 这正是阶段 1 的目标。**不要**写独立 daemon。
 

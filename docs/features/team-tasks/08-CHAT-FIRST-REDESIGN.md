@@ -100,7 +100,7 @@
 4. **推送内容**：纯文本 + `awarenessclaw://messages/<sessionKey>?message=<id>` deep link
 5. **文案**：
    ```
-   🤖 AwarenessClaw
+   🤖 OCT-Agent
    任务完成: 帮我写一封邀请邮件 (2 min 41s)
    [查看完整结果](awarenessclaw://...)
    ```
@@ -147,6 +147,6 @@
 5. `feat(chat): channel notify + openclaw sqlite resume`
 6. `refactor: full MissionFlow code removal + i18n cleanup`
 7. `chore: verify-chat L1 + chat chaos L3 + new E2E`
-8. `release: AwarenessClaw 0.3.7-preview.6`
+8. `release: OCT-Agent 0.3.7-preview.6`
 
 任一 step 破坏 vitest 或 chat UI → git reset 回上一 commit，不往前走。

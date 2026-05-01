@@ -1,4 +1,4 @@
-# AwarenessClaw Windows 首聊自动恢复 Smoke 脚本
+# OCT-Agent Windows 首聊自动恢复 Smoke 脚本
 
 最后更新：2026-04-05
 适用范围：Windows Desktop 首次安装后，daemon 仍在预热时的首聊恢复链路

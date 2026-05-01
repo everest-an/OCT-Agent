@@ -1,4 +1,4 @@
-# AwarenessClaw 任务清单
+# OCT-Agent 任务清单
 
 > 完成一项就打 ✅，附上完成日期。未完成的保持 ⬜。
 
@@ -165,7 +165,7 @@
 - [x] RAF 打字机在 app 隐藏时跳到最终状态
 
 ### 测试修复（✅ 已修复）
-- [x] dashboard.test.tsx / update-banner.test.tsx 的 `getByText('AwarenessClaw')` → `getByAltText`（头部 UI 改为 logo img）
+- [x] dashboard.test.tsx / update-banner.test.tsx 的 `getByText('OCT-Agent')` → `getByAltText`（头部 UI 改为 logo img）
 
 ### Chat 上下文连贯性（✅ 已调查 2026-03-31）
 - [x] **排查 `openclaw agent --local --session-id` 是否维护多轮对话历史**：确认 OpenClaw 在 `~/.openclaw/agents/main/sessions/<id>.jsonl` 中维护完整对话历史，session-id 相同时上下文连贯 ✅
@@ -453,7 +453,7 @@ OpenClaw 的 chat 质量依赖 `~/.openclaw/workspace/` 下的 MD 文档：
 - [x] **工具图标识别**：exec/bash/shell/command 类工具显示 Terminal 图标（2026-03-30）
 
 ### 测试质量提升（116 tests / 26 files — 2026-03-30）
-- [x] **AwarenessClaw 最小 CI**：新增 GitHub Actions workflow，针对 push / PR 运行 desktop build、CLI smoke build 和关键前端测试（agents/dashboard/settings/workspace），控制分钟消耗同时保证主链路回归（2026-04-02）
+- [x] **OCT-Agent 最小 CI**：新增 GitHub Actions workflow，针对 push / PR 运行 desktop build、CLI smoke build 和关键前端测试（agents/dashboard/settings/workspace），控制分钟消耗同时保证主链路回归（2026-04-02）
 - [x] **Skills 页端到端测试**：mock API 返回数据 → 验证技能列表渲染 + 搜索调用（2026-03-30）
 - [x] **Permissions 面板测试**：验证 profile 显示 + denied 命令移除调用 permissionsUpdate（2026-03-30）
 - [x] **Workspace 编辑器测试**：验证文件按钮显示 + 点击调用 workspaceReadFile（2026-03-30）
@@ -491,7 +491,7 @@ OpenClaw 的 chat 质量依赖 `~/.openclaw/workspace/` 下的 MD 文档：
 
 #### 设置页面
 - [x] **模型切换时 API Key 不应清空**：切回当前 provider 时从 config.apiKey 恢复，切到其他 provider 时清空（2026-03-30）
-- [x] **AwarenessClaw 版本号从 package.json 读取**：import pkg 动态读取（2026-03-30）
+- [x] **OCT-Agent 版本号从 package.json 读取**：import pkg 动态读取（2026-03-30）
 - [x] **Permissions 添加去重**：includes() 检查已有项（2026-03-30）
 - [x] **Permissions 空列表友好提示**："None" → "No extra tools added" / "No commands blocked"（2026-03-30）
 - [x] **Workspace 文件编辑保存成功提示**：fileSaveSuccess 状态 + "Saved ✓" 提示（2026-03-30）
@@ -645,7 +645,7 @@ OpenClaw 的 chat 质量依赖 `~/.openclaw/workspace/` 下的 MD 文档：
 - `~/.openclaw/agents/{id}/` 目录（agent/ + sessions/）
 - workspace 内容被清空但目录本身不删
 
-### 当前 AwarenessClaw 实现 vs 应该实现
+### 当前 OCT-Agent 实现 vs 应该实现
 
 | 功能 | 当前状态 | 需要修复 |
 |------|---------|---------|

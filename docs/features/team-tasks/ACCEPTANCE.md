@@ -7,14 +7,14 @@
 
 ## Journey 1: 普通用户发任务，AI 自己完成
 
-- **Given** 用户打开 AwarenessClaw，已连 Telegram 通道（默认配置），main agent 已配
+- **Given** 用户打开 OCT-Agent，已连 Telegram 通道（默认配置），main agent 已配
 - **When** 用户在 Chat 输入框输入 "帮我写一封邀请王总面谈的英文邮件" 并回车
 - **Then**
   - 聊天流出现用户消息气泡
   - 1-3 秒内出现 AI 气泡（⏳ 状态），开始逐字流式输出
   - 若 AI 判断需要拆子任务：Tool Call `sessions_spawn` 渲染为气泡内嵌 section（`🔧 agentId · 任务描述` + 子输出）
   - 若 AI 判断不需要拆：就是普通的流式回复
-  - 任务耗时 >30s 时，完成时 Telegram 收到一条 "🤖 AwarenessClaw 任务完成: ... " 通知
+  - 任务耗时 >30s 时，完成时 Telegram 收到一条 "🤖 OCT-Agent 任务完成: ... " 通知
   - 气泡底部显示 ✅ 用时 X min Y sec
 - **Assert**: `test/e2e/user-journeys/chat-sessions-spawn-happy.test.mjs`
 
@@ -30,8 +30,8 @@
 
 ## Journey 3: 关 app 再开，任务状态还在
 
-- **Given** 用户发完任务，关闭 AwarenessClaw，此时 `task_runs` 有 2 条 running 记录
-- **When** 用户 5 分钟后重新打开 AwarenessClaw
+- **Given** 用户发完任务，关闭 OCT-Agent，此时 `task_runs` 有 2 条 running 记录
+- **When** 用户 5 分钟后重新打开 OCT-Agent
 - **Then**
   - 进入原 Chat session（sessionKey 对上）
   - 对应 AI 气泡底部多一行："🔄 上次 2 个子任务还在进行，已重新订阅"

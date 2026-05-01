@@ -20,7 +20,7 @@
 
 ### Fixed — 桌面端洞察提取闭环（重大修复）
 
-- **问题**：本地 daemon 在 `awareness_record(action='remember')` 响应中返回 `_extraction_instruction`，期望 host LLM 据此提取知识卡片并通过 `awareness_record(action='submit_insights', insights={...})` 回传。AwarenessClaw 桌面端长期**完全丢弃这个字段** —— 用户聊天 → 事件入库 → 但 0 张知识卡片入库，向量召回质量永远停在 turn_brief 级别
+- **问题**：本地 daemon 在 `awareness_record(action='remember')` 响应中返回 `_extraction_instruction`，期望 host LLM 据此提取知识卡片并通过 `awareness_record(action='submit_insights', insights={...})` 回传。OCT-Agent 桌面端长期**完全丢弃这个字段** —— 用户聊天 → 事件入库 → 但 0 张知识卡片入库，向量召回质量永远停在 turn_brief 级别
 - **修复路径**：在 `electron/ipc/awareness-memory-utils.ts` 加入"待办提取中继"。收到 daemon 响应后把指令落盘到 `~/.awareness-claw/pending-extraction.json`，下一轮 chat 启动时由 `tryBuildDesktopMemoryBootstrapSection` 读取并注入到 LLM 的 bootstrap context 里，提示 LLM 在回应用户之前先调 `submit_insights`
 - **设计**：one-shot（读后删）+ 30 分钟 TTL（防陈旧），与今天云端 backend 的 `submit_insights` 修复联动 —— LLM 回传 JSON 走的就是云端新加的 dispatch 路径
 - **测试**：6 个新单测覆盖写入/读取/TTL/格式异常/section 渲染（`src/test/awareness-pending-extraction.test.ts`）

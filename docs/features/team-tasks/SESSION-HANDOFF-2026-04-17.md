@@ -56,7 +56,7 @@
 ## 验证命令（新会话第一步跑）
 
 ```bash
-cd /Users/edwinhao/Awareness/AwarenessClaw/packages/desktop
+cd /Users/edwinhao/Awareness/OCT-Agent/packages/desktop
 
 # 确认新增 8 个文件的 189 tests 仍全绿
 npx vitest run \
