@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.9] - 2026-05-01
+
+### Changed — Brand rename to OCT-Agent / 品牌更名为 OCT-Agent
+
+- App display name changed from `OCT` to `OCT-Agent` (visible in app menu, About dialog, .app filename, taskbar shortcut). Bundle identifier unchanged (`market.awareness.claw`) so existing installs upgrade in place.
+- DMG artifact renamed from `AwarenessClaw-<v>-arm64.dmg` to `OCT-Agent-<v>-arm64.dmg` via electron-builder `artifactName`.
+- Distribution moved to `edwin-hao-ai/OCT-Agent` GitHub Releases (was `everest-an/AwarenessClaw-Download`).
+
+- 桌面端显示名从 `OCT` 改为 `OCT-Agent`（应用菜单、关于对话框、.app 文件名、任务栏快捷方式可见）。Bundle identifier 保持 `market.awareness.claw` 不变，老用户原地升级。
+- DMG 产物文件名通过 electron-builder `artifactName` 改成 `OCT-Agent-<v>-arm64.dmg`。
+- 分发渠道从 `everest-an/AwarenessClaw-Download` 迁移到 `edwin-hao-ai/OCT-Agent` GitHub Releases。
+
+### Notes
+
+- macOS DMG built fresh in this release. Windows installer is the previous build re-uploaded as `OCT-Agent.Setup.exe` until colleague rebuilds on a Windows machine.
+- macOS DMG 本次重新打包构建。Windows 安装包暂时是之前的构建文件重命名为 `OCT-Agent.Setup.exe`，等同事在 Windows 机器重新打包后替换。
+
 ## [0.4.8] - 2026-05-01
 
 ### Fixed - Windows first-run memory module self-repair
