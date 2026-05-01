@@ -175,7 +175,7 @@ describe('Config sync (useAppConfig)', () => {
     expect(saveConfigMock).toHaveBeenCalledTimes(1);
     const payload = saveConfigMock.mock.calls[0][0];
     expect(payload.plugins.allow).toEqual(expect.arrayContaining(['openclaw-memory', 'browser']));
-    expect(payload.plugins.slots).toBeUndefined();
+    expect(payload.plugins.slots?.memory).toBe('openclaw-memory');
     expect(payload.models.providers['qwen']).toBeDefined();
     // baseUrl is always written (OpenClaw schema requires it)
     expect(payload.models.providers['qwen'].baseUrl).toBe('https://dashscope.aliyuncs.com/compatible-mode/v1');

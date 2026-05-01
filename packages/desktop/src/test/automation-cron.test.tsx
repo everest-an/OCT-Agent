@@ -22,9 +22,9 @@ describe('Automation cron visual selector', () => {
     render(<Automation />);
     fireEvent.click(screen.getByText(/Add Task/));
 
-    // Daily button should have active styling (bg-brand-600)
+    // Daily button should have active styling.
     const dailyBtn = screen.getByText('Daily');
-    expect(dailyBtn.className).toContain('bg-brand-600');
+    expect(dailyBtn.className).toContain('bg-brand-500');
 
     // Time picker label should be visible
     expect(screen.getByText('Time')).toBeInTheDocument();

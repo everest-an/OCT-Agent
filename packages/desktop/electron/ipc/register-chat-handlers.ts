@@ -392,9 +392,12 @@ export function registerChatHandlers(deps: {
     }
 
     const rawSid = sessionId || `ac-${Date.now()}`;
+    const sidForMainAgent = validated.wasStale && /^agent:[^:]+:webchat:/i.test(rawSid)
+      ? `session-${Date.now()}`
+      : rawSid;
     const sid = agentId !== 'main'
       ? `agent:${agentId}:webchat:${rawSid}`
-      : rawSid;
+      : sidForMainAgent;
     let workspacePathInvalid = false;
     let workspacePathIssue: 'missing' | 'not-directory' | undefined;
     let workspacePathOriginal: string | undefined;

@@ -293,15 +293,16 @@ export function applyDesktopAwarenessPluginConfig(
   };
 
   config.plugins.allow = Array.from(new Set([...(normalizePluginAllow(config.plugins.allow) || []), ...DESKTOP_REQUIRED_PLUGINS]));
+  config.plugins.entries['memory-core'] = {
+    ...(config.plugins.entries['memory-core'] || {}),
+    enabled: false,
+  };
 
-  // OpenClaw 2026.4.x rejects plugins.slots.memory=openclaw-memory even when the
-  // plugin is installed. Keep Awareness Memory enabled through plugins.entries +
-  // desktop daemon integration, but do not force a memory slot assignment.
-  if (config.plugins.slots?.memory === 'openclaw-memory') {
-    delete config.plugins.slots.memory;
-    if (Object.keys(config.plugins.slots).length === 0) {
-      delete config.plugins.slots;
-    }
+  if (options?.enableSlot) {
+    config.plugins.slots = {
+      ...(config.plugins.slots || {}),
+      memory: 'openclaw-memory',
+    };
   }
 }
 
@@ -400,7 +401,7 @@ export function sanitizeDesktopAwarenessPluginConfig(config: Record<string, any>
     delete config.plugins.slots.memory;
   }
 
-  if (config.plugins.slots?.memory === 'openclaw-memory') {
+  if (config.plugins.slots?.memory === 'openclaw-memory' && !hasAwarenessPluginInstalled(homedir)) {
     delete config.plugins.slots.memory;
   }
 

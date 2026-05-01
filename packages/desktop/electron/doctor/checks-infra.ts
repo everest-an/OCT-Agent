@@ -479,9 +479,10 @@ export async function checkPluginSpawnHandler(ctx: Ctx): Promise<CheckResult> {
     // The fix pattern is: child.on("error", ...); child.unref();
     
     // Look for the daemon auto-start spawn pattern
-    const hasVulnerablePattern = content.includes('child.unref()') && 
+    const hasVulnerablePattern = content.includes('child.unref()') &&
                                   !content.includes('child.on("error"') &&
                                   !content.includes("child.on('error'");
+    const hasBareNpxSpawn = ctx.deps.platform === 'win32' && /spawn\((["'])npx\1\s*,/.test(content);
     
     if (hasVulnerablePattern) {
       return {
@@ -494,6 +495,17 @@ export async function checkPluginSpawnHandler(ctx: Ctx): Promise<CheckResult> {
       };
     }
 
+    if (hasBareNpxSpawn) {
+      return {
+        id: 'plugin-spawn-handler',
+        label: 'Plugin Windows npx spawn',
+        status: 'fail',
+        message: 'Plugin uses bare npx spawn on Windows',
+        fixable: 'auto',
+        fixDescription: 'Use npx.cmd on Windows',
+      };
+    }
+
     return { id: 'plugin-spawn-handler', label: 'Plugin error handler', status: 'pass', message: 'Error handler present', fixable: 'none' };
   } catch (err: any) {
     return { id: 'plugin-spawn-handler', label: 'Plugin error handler', status: 'warn', message: `Could not check: ${err.message?.slice(0, 100)}`, fixable: 'none' };
@@ -501,7 +513,8 @@ export async function checkPluginSpawnHandler(ctx: Ctx): Promise<CheckResult> {
 }
 
 export async function fixPluginSpawnHandler(ctx: Ctx): Promise<FixResult> {
-  const pluginIndexPath = path.join(ctx.deps.homedir, '.openclaw', 'extensions', 'openclaw-memory', 'dist', 'index.js');
+  const pluginDistDir = path.join(ctx.deps.homedir, '.openclaw', 'extensions', 'openclaw-memory', 'dist');
+  const pluginIndexPath = path.join(pluginDistDir, 'index.js');
   
   if (!fs.existsSync(pluginIndexPath)) {
     return { id: 'plugin-spawn-handler', success: false, message: 'Plugin not installed' };
@@ -509,27 +522,49 @@ export async function fixPluginSpawnHandler(ctx: Ctx): Promise<FixResult> {
 
   try {
     let content = fs.readFileSync(pluginIndexPath, 'utf-8');
+    let changed = false;
     
     // Pattern 1: child.unref(); without preceding error handler
     // Replace with: child.on("error", () => {}); child.unref();
     const vulnerablePattern = /(\bchild\.unref\s*\(\s*\)\s*;)/g;
     
     // Check if already fixed
-    if (content.includes('child.on("error"') || content.includes("child.on('error'")) {
-      return { id: 'plugin-spawn-handler', success: true, message: 'Already fixed' };
+    if (!content.includes('child.on("error"') && !content.includes("child.on('error'")) {
+      const withErrorHandler = content.replace(vulnerablePattern, 'child.on("error", () => {}); $1');
+      if (withErrorHandler !== content) {
+        content = withErrorHandler;
+        changed = true;
+      }
     }
-    
-    // Apply fix: add error handler before each unref()
-    const fixedContent = content.replace(vulnerablePattern, 'child.on("error", () => {}); $1');
-    
-    if (fixedContent === content) {
+
+    for (const fileName of ['index.js', 'index.cjs']) {
+      const filePath = path.join(pluginDistDir, fileName);
+      if (!fs.existsSync(filePath)) continue;
+      const before = filePath === pluginIndexPath ? content : fs.readFileSync(filePath, 'utf-8');
+      const after = before.replace(
+        /spawn\((["'])npx\1\s*,/g,
+        'spawn(process.platform === "win32" ? "npx.cmd" : "npx",',
+      );
+      if (after !== before) {
+        if (filePath === pluginIndexPath) {
+          content = after;
+        } else {
+          fs.writeFileSync(filePath, after, 'utf-8');
+        }
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      if (content.includes('child.on("error"') || content.includes("child.on('error'")) {
+        return { id: 'plugin-spawn-handler', success: true, message: 'Already fixed' };
+      }
       return { id: 'plugin-spawn-handler', success: false, message: 'Could not locate vulnerable pattern' };
     }
+
+    fs.writeFileSync(pluginIndexPath, content, 'utf-8');
     
-    // Write the fixed content
-    fs.writeFileSync(pluginIndexPath, fixedContent, 'utf-8');
-    
-    return { id: 'plugin-spawn-handler', success: true, message: 'Added spawn error handler to prevent Gateway crash' };
+    return { id: 'plugin-spawn-handler', success: true, message: 'Patched plugin spawn handling for Windows compatibility' };
   } catch (err: any) {
     return { id: 'plugin-spawn-handler', success: false, message: err.message?.slice(0, 200) || 'Failed to patch plugin' };
   }

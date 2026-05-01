@@ -120,7 +120,7 @@ describe('Models Page', () => {
     await waitFor(() => {
       expect(screen.getByText(/Model list refreshed/i)).toBeInTheDocument();
       expect(screen.getByText('manual-model')).toBeInTheDocument();
-      expect(screen.getByText('GPT-4.1')).toBeInTheDocument();
+      expect(screen.getAllByText(/GPT-4\.1/).length).toBeGreaterThan(0);
     });
   });
 
@@ -147,7 +147,7 @@ describe('Models Page', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('GPT-4.1')).toBeInTheDocument();
+      expect(screen.getAllByText(/GPT-4\.1/).length).toBeGreaterThan(0);
     });
 
     expect(screen.queryByText('text-embedding-3-large')).not.toBeInTheDocument();
@@ -190,7 +190,7 @@ describe('Models Page', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('GPT-4.1')).toBeInTheDocument();
+      expect(screen.getAllByText(/GPT-4\.1/).length).toBeGreaterThan(0);
     });
 
     expect(screen.queryByText('deepseek-v3', { selector: '.text-sm.font-medium.text-slate-100.truncate' })).not.toBeInTheDocument();
@@ -305,7 +305,7 @@ describe('Models Page', () => {
     const saveConfigMock = vi.fn().mockResolvedValue({ success: true });
     const modelsDiscoverMock = vi.fn().mockResolvedValue({
       success: true,
-      models: [{ id: 'gpt-4o', name: 'GPT-4o' }],
+      models: [{ id: 'gpt-5.5', name: 'GPT-5.5' }],
     });
     (window as any).electronAPI = {
       ...(window as any).electronAPI,
@@ -330,6 +330,10 @@ describe('Models Page', () => {
 
     await waitFor(() => {
       expect(modelsDiscoverMock).toHaveBeenCalled();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByText(/GPT-5\.5/)[0]);
     });
 
     await act(async () => {

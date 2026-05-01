@@ -124,9 +124,7 @@ describe('Agents page', () => {
 
     await act(async () => { render(<Agents />); });
     await waitFor(() => {
-      // Agents page uses t('agents.empty') which defaults to empty state text
-      const container = document.querySelector('.text-slate-500.text-sm');
-      expect(container).toBeInTheDocument();
+      expect(screen.getByText(/No agents configured/i)).toBeInTheDocument();
     });
   });
 

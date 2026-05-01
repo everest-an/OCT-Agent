@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.8] - 2026-05-01
+
+### Fixed - Windows first-run memory module self-repair
+
+- Fixed first-run setup getting stuck at "Installing memory module" when a previous attempt left an empty `~/.openclaw/extensions/openclaw-memory` directory.
+- Setup now cleans invalid partial plugin installs before retrying, reinstalls Awareness Memory, and keeps recent installer errors in the UI message for diagnosis.
+- Awareness Memory is now explicitly selected via `plugins.slots.memory = "openclaw-memory"` and `memory-core` is disabled so OpenClaw 2026.4.x does not silently keep the default memory plugin active.
+- Patched Windows plugin daemon startup compatibility by rewriting bare `spawn("npx", ...)` calls to use `npx.cmd` on Windows.
+- Doctor can now auto-fix installed Awareness Memory plugins that still use the old bare `npx` spawn pattern.
+
+### Verified
+
+- Ran targeted setup/config/doctor regression tests: `setup-handlers`, `openclaw-capabilities`, `config-sync`, and `doctor`.
+- Confirmed `npm run build` succeeds.
+- Verified locally that OpenClaw loads `Awareness Memory` after repair.
+
 ## [0.4.7] - 2026-04-27
 
 ### Fixed — 桌面端洞察提取闭环（重大修复）

@@ -37,6 +37,34 @@ function hasAwarenessPluginPackage(home: string) {
   return fs.existsSync(path.join(home, '.openclaw', 'extensions', 'openclaw-memory', 'package.json'));
 }
 
+function isPathInside(parent: string, child: string) {
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
+  return !!relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+function removeAwarenessPluginExtensionIfInvalid(home: string) {
+  const extensionsDir = path.join(home, '.openclaw', 'extensions');
+  const extDir = path.join(extensionsDir, 'openclaw-memory');
+  const pkgPath = path.join(extDir, 'package.json');
+  if (!fs.existsSync(extDir) || fs.existsSync(pkgPath)) return;
+  if (!isPathInside(extensionsDir, extDir)) return;
+  fs.rmSync(extDir, { recursive: true, force: true });
+}
+
+function patchAwarenessPluginWindowsNpx(home: string) {
+  const distDir = path.join(home, '.openclaw', 'extensions', 'openclaw-memory', 'dist');
+  for (const fileName of ['index.js', 'index.cjs']) {
+    const filePath = path.join(distDir, fileName);
+    if (!fs.existsSync(filePath)) continue;
+    const before = fs.readFileSync(filePath, 'utf8');
+    const after = before.replace(
+      /spawn\((["'])npx\1\s*,/g,
+      'spawn(process.platform === "win32" ? "npx.cmd" : "npx",',
+    );
+    if (after !== before) fs.writeFileSync(filePath, after, 'utf8');
+  }
+}
+
 export function registerSetupHandlers(deps: {
   home: string;
   getEnhancedPath: () => string;
@@ -490,7 +518,13 @@ export function registerSetupHandlers(deps: {
     const extDir = path.join(extensionsDir, 'openclaw-memory');
     const nullDev = process.platform === 'win32' ? 'NUL' : '/dev/null';
     const setupRegistries = ['', '--registry=https://registry.npmmirror.com'];
+    const installErrors: string[] = [];
+    const recordInstallError = (stage: string, err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      installErrors.push(`${stage}: ${message.slice(0, 240)}`);
+    };
     let npmDirectOk = false;
+    removeAwarenessPluginExtensionIfInvalid(deps.home);
     for (const regFlag of setupRegistries) {
       try {
         fs.mkdirSync(extensionsDir, { recursive: true });
@@ -505,11 +539,15 @@ export function registerSetupHandlers(deps: {
         if (!hasAwarenessPluginPackage(deps.home)) {
           throw new Error('awareness plugin package.json missing after extract');
         }
+        patchAwarenessPluginWindowsNpx(deps.home);
         deps.persistAwarenessPluginConfig({ enableSlot: true });
         writeDesktopExecApprovalDefaults(deps.home);
         npmDirectOk = true;
         return { success: true, method: regFlag ? 'npm-direct-mirror' : 'npm-direct' };
-      } catch {}
+      } catch (err) {
+        recordInstallError(regFlag ? 'npm-direct-mirror' : 'npm-direct', err);
+        removeAwarenessPluginExtensionIfInvalid(deps.home);
+      }
     }
     if (!npmDirectOk) {}
 
@@ -519,10 +557,14 @@ export function registerSetupHandlers(deps: {
         if (!hasAwarenessPluginPackage(deps.home)) {
           throw new Error('awareness plugin package.json missing after openclaw plugins install');
         }
+        patchAwarenessPluginWindowsNpx(deps.home);
         deps.persistAwarenessPluginConfig({ enableSlot: true });
         writeDesktopExecApprovalDefaults(deps.home);
         return { success: true, method: 'openclaw-plugin' };
-      } catch {}
+      } catch (err) {
+        recordInstallError('openclaw-plugin', err);
+        removeAwarenessPluginExtensionIfInvalid(deps.home);
+      }
     }
 
     try {
@@ -531,6 +573,7 @@ export function registerSetupHandlers(deps: {
         if (!hasAwarenessPluginPackage(deps.home)) {
           throw new Error('awareness plugin package.json missing after bundled clawhub install');
         }
+        patchAwarenessPluginWindowsNpx(deps.home);
         deps.persistAwarenessPluginConfig({ enableSlot: true });
         writeDesktopExecApprovalDefaults(deps.home);
         return { success: true, method: 'clawhub-offline' };
@@ -540,10 +583,12 @@ export function registerSetupHandlers(deps: {
       if (!hasAwarenessPluginPackage(deps.home)) {
         throw new Error('awareness plugin package.json missing after clawhub install');
       }
+      patchAwarenessPluginWindowsNpx(deps.home);
       deps.persistAwarenessPluginConfig({ enableSlot: true });
       writeDesktopExecApprovalDefaults(deps.home);
       return { success: true, method: 'clawhub' };
-    } catch {
+    } catch (err) {
+      recordInstallError('clawhub', err);
       try {
         const configDir = path.join(deps.home, '.openclaw');
         const configPath = path.join(configDir, 'openclaw.json');
@@ -565,7 +610,7 @@ export function registerSetupHandlers(deps: {
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
         return {
           success: false,
-          error: 'Awareness Memory plugin could not be installed. The stale plugin config was removed to keep OpenClaw usable. Retry install after checking npm/network access.',
+          error: `Awareness Memory plugin could not be installed. OCT cleaned stale plugin state so Retry can self-repair. ${installErrors.slice(-3).join(' | ') || 'Please check npm/network access.'}`,
         };
       } catch (err) {
         return { success: false, error: String(err) };

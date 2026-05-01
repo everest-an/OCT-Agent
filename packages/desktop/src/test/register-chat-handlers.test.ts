@@ -257,7 +257,7 @@ describe('registerChatHandlers', () => {
   });
 
   // New comprehensive test: marketplace agent → invalid session → automatic CLI recovery
-  it('marketplace agent with invalid session triggers CLI fallback path', async () => {
+  it('marketplace agent missing from config is invalidated before Gateway fallback', async () => {
     const ws = new FakeGatewayClient();
     ws.chatSend = vi.fn(async () => {
       // Gateway rejects new marketplace agent
@@ -292,12 +292,19 @@ describe('registerChatHandlers', () => {
       // Expected to fail in test environment due to short timeout
     }
 
-    // Verify the critical path: error detected + user informed + CLI fallback triggered
+    expect(sendToRenderer).toHaveBeenCalledWith(
+      'chat:agent-invalidated',
+      expect.objectContaining({
+        requestedAgentId: 'meal-planner',
+        resolvedAgentId: 'main',
+        reason: 'agent-not-in-config',
+      }),
+    );
     expect(sendToRenderer).toHaveBeenCalledWith(
       'chat:status',
       expect.objectContaining({
         type: 'gateway',
-        message: expect.stringMatching(/not yet available via Gateway|CLI mode/),
+        message: expect.stringContaining('Switched to the default agent'),
       }),
     );
   });
@@ -341,7 +348,7 @@ describe('registerChatHandlers', () => {
     );
   });
 
-  it('triggers CLI fallback when invalid session appears as final assistant text for non-main agent', async () => {
+  it('invalidates a stale agent before handling final assistant text', async () => {
     const ws = new FakeGatewayClient();
     ws.chatSend = vi.fn(async () => {
       setTimeout(() => {
@@ -383,10 +390,11 @@ describe('registerChatHandlers', () => {
     }
 
     expect(sendToRenderer).toHaveBeenCalledWith(
-      'chat:status',
+      'chat:agent-invalidated',
       expect.objectContaining({
-        type: 'gateway',
-        message: expect.stringContaining('not yet available via Gateway'),
+        requestedAgentId: 'meal-planner',
+        resolvedAgentId: 'main',
+        reason: 'agent-not-in-config',
       }),
     );
   });

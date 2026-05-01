@@ -135,7 +135,7 @@ describe('Chat (user flows)', () => {
     localStorage.setItem('awareness-claw-config', JSON.stringify({
       language: 'en',
       providerKey: 'openai',
-      modelId: 'gpt-4o',
+      modelId: 'gpt-5.5',
       apiKey: 'sk-test',
     }));
     // Clear sessions so each test starts with a clean chat history
@@ -175,7 +175,7 @@ describe('Chat (user flows)', () => {
     await act(async () => { render(<Dashboard />); });
 
     // Open the model dropdown in the header
-    const modelBtn = screen.getAllByRole('button').find(b => b.textContent?.includes('gpt-4o'));
+    const modelBtn = screen.getAllByRole('button').find(b => b.textContent?.includes('GPT-5.5'));
     if (modelBtn) {
       await act(async () => { fireEvent.click(modelBtn); });
       // Active indicator should appear

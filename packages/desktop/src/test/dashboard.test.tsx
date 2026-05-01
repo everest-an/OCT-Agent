@@ -37,7 +37,7 @@ describe('Dashboard (Chat)', () => {
   it('renders OCT logo in header', async () => {
     await act(async () => { render(<Dashboard />); });
     // Header uses an img with alt="OCT" instead of visible text
-    expect(screen.getByAltText('OCT')).toBeInTheDocument();
+    expect(screen.getByAltText('OCT Agent')).toBeInTheDocument();
   });
 
   it('renders input area', async () => {
@@ -1083,7 +1083,7 @@ describe('Dashboard (Chat)', () => {
     });
 
     await act(async () => {
-      fireEvent.click(screen.getAllByText(/GPT-4o/i)[0]);
+      fireEvent.click(screen.getAllByText(/GPT-5\.5/i)[0]);
     });
 
     expect(onNavigate).toHaveBeenCalledWith('models');

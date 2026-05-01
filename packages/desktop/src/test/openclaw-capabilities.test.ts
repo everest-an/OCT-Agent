@@ -307,7 +307,7 @@ describe('desktop openclaw config merge', () => {
     expect(config.plugins.slots?.memory).toBeUndefined();
   });
 
-  it('removes stale openclaw-memory slot assignments even when the plugin exists on disk', () => {
+  it('keeps openclaw-memory slot assignments when the plugin exists on disk', () => {
     const config: Record<string, any> = {
       plugins: {
         allow: ['openclaw-memory', 'browser'],
@@ -327,7 +327,7 @@ describe('desktop openclaw config merge', () => {
 
     expect(config.plugins.entries['openclaw-memory']).toBeDefined();
     expect(config.plugins.allow).toEqual(expect.arrayContaining(['openclaw-memory', 'browser']));
-    expect(config.plugins.slots?.memory).toBeUndefined();
+    expect(config.plugins.slots?.memory).toBe('openclaw-memory');
   });
 
   it('detects Windows OpenClaw 2026.4.10 as legacy safe-mode target', () => {

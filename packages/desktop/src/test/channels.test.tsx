@@ -53,7 +53,7 @@ describe('Channels Page', () => {
     expect(disconnectBtns.length).toBeGreaterThanOrEqual(1);
     // Local Chat should NOT have a disconnect button — its parent has no such button
     const localText = screen.getByText('Local Chat');
-    const localCard = localText.closest('div[class*="rounded-xl"]');
+    const localCard = localText.closest('.ui-surface');
     expect(localCard).toBeTruthy();
     expect(localCard?.querySelector('button[title="Disconnect"]')).toBeNull();
   });

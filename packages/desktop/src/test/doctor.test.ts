@@ -1094,7 +1094,7 @@ describe('doctor — plugin-spawn-handler', () => {
     } finally { fs.rmSync(home, { recursive: true, force: true }); }
   });
 
-  it('reports already fixed when error handler exists', async () => {
+  it('patches bare npx spawn even when error handler exists', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-'));
     try {
       const pluginDir = path.join(home, '.openclaw', 'extensions', 'openclaw-memory', 'dist');
@@ -1108,7 +1108,7 @@ describe('doctor — plugin-spawn-handler', () => {
 
       const { doctor } = createDoctorWithMocks(home);
       const result = await doctor.runFix('plugin-spawn-handler');
-      expect(result).toMatchObject({ success: true, message: 'Already fixed' });
+      expect(result).toMatchObject({ success: true, message: 'Patched plugin spawn handling for Windows compatibility' });
     } finally { fs.rmSync(home, { recursive: true, force: true }); }
   });
 });
