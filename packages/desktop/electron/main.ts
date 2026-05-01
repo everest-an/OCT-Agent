@@ -1853,11 +1853,17 @@ const doctor = {
 // --- System Tray ---
 
 function createTray() {
-  const iconPath = path.join(__dirname, isDev ? '../resources/icon.png' : '../../resources/icon.png');
+  const trayIconFile = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
+  const iconPath = path.join(__dirname, isDev ? `../resources/${trayIconFile}` : `../../resources/${trayIconFile}`);
   let trayIcon;
   try {
-    trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 18, height: 18 });
-    trayIcon.setTemplateImage(true); // macOS dark/light mode support
+    trayIcon = nativeImage.createFromPath(iconPath);
+    if (process.platform === 'darwin') {
+      trayIcon = trayIcon.resize({ width: 18, height: 18 });
+      trayIcon.setTemplateImage(true); // macOS dark/light mode support
+    } else if (process.platform !== 'win32') {
+      trayIcon = trayIcon.resize({ width: 18, height: 18 });
+    }
   } catch {
     return; // Skip tray if icon not found
   }
