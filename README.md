@@ -1,185 +1,162 @@
 <p align="center">
-      <img src="assets/github banner.png" alt="OCT AGENT" style="max-width: 100%; height: auto;" />
+  <img src="assets/github banner.png" alt="OCT-Agent" style="max-width: 100%; height: auto;" />
 </p>
 
-# OCT Agent 🐙
+<p align="center">
+  <a href="#english">English</a>
+  &nbsp;|&nbsp;
+  <a href="#中文">中文</a>
+</p>
 
-[![Documentation](https://img.shields.io/badge/Documentation-Awareness-3B82F6?style=for-the-badge&logo=readthedocs&logoColor=white)](https://awareness.market)
-[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/awareness)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-22C55E?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](LICENSE)
-[![Built by Awareness](https://img.shields.io/badge/Built%20by-Awareness-A855F7?style=for-the-badge&logo=sparkles&logoColor=white)](https://awareness.market)
+<p align="center">
+  <a href="https://awareness.market"><img src="https://img.shields.io/badge/Documentation-Awareness-3B82F6?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Documentation" /></a>
+  <a href="https://discord.gg/awareness"><img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-22C55E?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="Apache 2.0 License" /></a>
+  <a href="https://awareness.market"><img src="https://img.shields.io/badge/Built%20by-Awareness-A855F7?style=for-the-badge&logo=sparkles&logoColor=white" alt="Built by Awareness" /></a>
+</p>
 
-> The AI agent that never forgets — and works with all its arms at once. Built by [Awareness](https://awareness.market).
+<h1 id="english" align="center">OCT-Agent</h1>
 
-**OCT** is named after the octopus — a creature with extraordinary memory and eight arms that act in parallel. That's exactly what OCT does: it remembers everything across your conversations, and coordinates multiple agents working simultaneously on complex tasks.
+<p align="center">
+  The AI agent that remembers your context and coordinates parallel work.
+</p>
 
-Powered by **Awareness Memory**, which achieves **95.6% Recall@5 on [LongMemEval](https://arxiv.org/abs/2410.10813)** (ICLR 2025) — the industry benchmark for long-term conversational memory. Built on [OpenClaw](https://openclaw.ai) (247K+ stars), the open-source AI agent framework.
+OCT-Agent is a desktop and CLI AI agent built on [OpenClaw](https://openclaw.ai), with persistent long-term memory powered by Awareness Memory. It is named after the octopus: strong memory, many arms, and parallel action.
 
----
+## Why OCT-Agent?
 
-## Why OCT?
-
-The octopus is nature's memory champion. Each arm has its own intelligence — they can act independently or in concert. OCT is built around the same idea:
-
-| Octopus | OCT Agent |
-|---------|-----------|
-| Remembers across long periods | Persistent memory across all conversations |
-| 8 arms working in parallel | Multiple agents collaborating simultaneously |
-| Adapts to any environment | Runs on Windows, macOS, Linux — talk via Telegram, WhatsApp, Slack |
-| No central bottleneck | Each agent has its own memory + context |
-
----
-
-## What Makes OCT Different
-
-| | OCT Agent | Other agents |
-|---|---|---|
-| **Memory** | 95.6% R@5 on LongMemEval (ICLR 2025) | No persistent memory, or basic summarization |
-| **Multi-agent** | Parallel agents with shared memory pool | Single agent only |
-| **Install** | One download, double-click — no terminal | Requires Node, Python, config files |
-| **Channels** | Telegram, WhatsApp, WeChat, Slack, Signal, Discord | CLI only |
-| **Benchmark** | Hybrid BM25+Vector, 0 LLM calls | LLM-dependent recall |
-
----
-
-## Features
-
-- **🧠 Persistent Memory** — Knowledge cards, perception signals (contradiction, pattern, resonance), and cross-session recall. Your AI remembers who you are, what you decided, and what you care about.
-- **🐙 Multi-Agent Collaboration** — Spawn isolated agents for parallel workstreams. Each arm works independently; all arms share the same long-term memory.
-- **⚡ One-Click Install** — Download, double-click, done. No terminal, no Node.js, no Git required.
-- **📱 Talk from Anywhere** — Connect Telegram, WhatsApp, WeChat, Slack, Signal, or Discord. Your agent works while you're away.
-- **🔍 Memory Benchmark Leader** — 95.6% Recall@5 on LongMemEval. Zero LLM calls. Hybrid BM25+Vector search.
-- **🌍 Cross-Platform** — Windows, macOS, Linux. One binary, three platforms.
-- **🔄 Auto Upgrade** — Follows OpenClaw releases automatically. No manual updates.
-
----
-
-## Memory Benchmark: LongMemEval (ICLR 2025)
-
-OCT's memory is powered by **Awareness Memory**, evaluated on the industry-standard [LongMemEval](https://arxiv.org/abs/2410.10813) benchmark.
-
-```
-╔══════════════════════════════════════════════════════════════╗
-║   Awareness Memory — LongMemEval Benchmark Results           ║
-║                                                              ║
-║   Recall@1    77.6%       Recall@5    95.6%  ◀ PRIMARY       ║
-║   Recall@3    91.8%       Recall@10   97.4%                  ║
-║                                                              ║
-║   Method:     Hybrid RRF (BM25 + Vector)                     ║
-║   LLM Calls:  0       Hardware:  M1 8GB, 14 min             ║
-╚══════════════════════════════════════════════════════════════╝
-```
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│          Long-Term Memory Retrieval — R@5 Leaderboard       │
-├─────────────────────────────────┬───────────┬───────────────┤
-│  System                         │  R@5      │  Note         │
-├─────────────────────────────────┼───────────┼───────────────┤
-│  MemPalace (ChromaDB raw)       │  96.6%    │  R@5 only *   │
-│  ★ Awareness Memory (Hybrid)    │  95.6%    │  Hybrid RRF   │
-│  OMEGA                          │  95.4%    │  QA Accuracy  │
-│  Supermemory                    │  81.6%    │  QA Accuracy  │
-│  Zep / Graphiti                 │  71.2%    │  QA Accuracy  │
-│  GPT-4o (full context)          │  60.6%    │  QA Accuracy  │
-├─────────────────────────────────┴───────────┴───────────────┤
-│  * MemPalace 96.6% is R@5 only, not QA Accuracy.           │
-└─────────────────────────────────────────────────────────────┘
-```
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│     R@5 by Question Type                                    │
-│                                                             │
-│  knowledge-update        ████████████████████████████ 100%  │
-│  multi-session           ███████████████████████████▋  98.5%│
-│  single-session-asst     ███████████████████████████▌  98.2%│
-│  temporal-reasoning      █████████████████████████▊    94.7%│
-│  single-session-user     ████████████████████████▎     88.6%│
-│  single-session-pref     ███████████████████████▏      86.7%│
-│                                                             │
-│  Overall                 █████████████████████████▉    95.6%│
-└─────────────────────────────────────────────────────────────┘
-```
-
-Zero LLM calls. Hybrid BM25+Vector retrieval. [Full benchmark details →](https://github.com/edwin-hao-ai/Awareness/tree/main/benchmarks/longmemeval)
-
----
-
-## Quick Start
-
-### Option 1: Desktop App (Recommended)
-
-Download from [awareness.market](https://awareness.market/) or [Releases](https://github.com/edwin-hao-ai/OCT-Agent/releases):
-
-| Platform | Download |
+| What you need | What OCT-Agent does |
 |---|---|
-| **macOS** | `OCT.dmg` |
-| **Windows** | `OCT-Setup.exe` |
-| **Linux** | `OCT.AppImage` |
+| Long-term memory | Remembers decisions, facts, preferences, and context across conversations |
+| Parallel work | Runs multiple agents for separate workstreams |
+| Easy setup | Desktop installer for Windows, macOS, and Linux |
+| Multiple channels | Works with local chat and channel integrations such as Telegram, WhatsApp, Slack, WeChat, Signal, and Discord |
+| Strong retrieval | Awareness Memory reaches 95.6% Recall@5 on LongMemEval with hybrid BM25 + vector search |
 
-Double-click to install. No terminal required.
+## Download
 
-### Option 2: CLI (Advanced)
+Download from [awareness.market](https://awareness.market/) or [GitHub Releases](https://github.com/edwin-hao-ai/OCT-Agent/releases).
+
+| Platform | Release asset |
+|---|---|
+| Windows | `OCT-Agent.Setup.exe` |
+| macOS | `OCT-Agent.dmg` |
+| Linux | `OCT-Agent.AppImage` |
+
+## CLI
 
 ```bash
 npx @awareness-sdk/claw
 ```
 
----
+The CLI package keeps a legacy `awareness-claw` command alias for compatibility, but `oct-agent` is the current brand-facing command.
 
-## How Memory Works
+## Memory
 
-Every conversation feeds OCT's memory loop:
+OCT-Agent uses Awareness Memory to build durable context from your conversations:
 
-```
-You talk to OCT
-      ↓
-OCT captures knowledge cards
-  (decisions, preferences, facts, contradictions)
-      ↓
-Awareness Memory indexes them
-  (BM25 + Vector hybrid, 0 LLM calls)
-      ↓
-Next conversation: OCT recalls relevant context
-  before you even ask
-      ↓
-Your AI gets smarter with every session
-```
-
-Memory types OCT tracks:
-- **Knowledge cards** — facts, decisions, preferences you've stated
-- **Perception signals** — contradictions, recurring patterns, strong resonance moments
-- **Temporal reasoning** — what you knew when, how your views changed over time
-- **Cross-session continuity** — picks up exactly where you left off
-
----
-
-## Architecture
-
-```
-OCT Agent (this project)
-  └── wraps OpenClaw (open-source AI agent, 247K+ stars)
-       └── pre-configured with Awareness Memory plugin
-            └── hybrid search (BM25 + Vector, Hybrid RRF)
-            └── perception signals (contradiction, pattern, resonance)
-            └── cross-device sync via Awareness cloud
-```
-
----
+- Knowledge cards for facts, decisions, preferences, and project details
+- Perception signals for contradictions, patterns, and important moments
+- Hybrid retrieval with BM25 + vector search
+- Zero LLM calls during recall
+- Cross-session continuity so new conversations can start with relevant context
 
 ## Development
 
 ```bash
-# CLI
-cd packages/cli && npm start
-
-# Desktop
-cd packages/desktop && npm run dev
+npm install
+npm run build:desktop
+npm run package:win
 ```
 
----
+Desktop development:
+
+```bash
+cd packages/desktop
+npm run dev
+```
+
+CLI development:
+
+```bash
+cd packages/cli
+npm start
+```
 
 ## License
 
-Apache 2.0 — Built by [Awareness](https://awareness.market).
+Apache-2.0. Built by [Awareness](https://awareness.market).
+
+---
+
+<h1 id="中文" align="center">OCT-Agent</h1>
+
+<p align="center">
+  一个能记住上下文、并行协作的 AI Agent。
+</p>
+
+OCT-Agent 是基于 [OpenClaw](https://openclaw.ai) 构建的桌面端与 CLI AI Agent，并接入 Awareness Memory 长期记忆能力。OCT 的名字来自 octopus：强记忆、多触手、并行行动。
+
+## 为什么选择 OCT-Agent？
+
+| 需求 | OCT-Agent 的能力 |
+|---|---|
+| 长期记忆 | 跨会话记住决策、事实、偏好和项目上下文 |
+| 并行工作 | 可启动多个 agent 处理不同工作流 |
+| 易安装 | 支持 Windows、macOS、Linux 的桌面安装包 |
+| 多渠道 | 支持本地聊天，以及 Telegram、WhatsApp、Slack、微信、Signal、Discord 等渠道集成 |
+| 高质量召回 | Awareness Memory 在 LongMemEval 上达到 95.6% Recall@5，使用 BM25 + Vector 混合检索 |
+
+## 下载
+
+可从 [awareness.market](https://awareness.market/) 或 [GitHub Releases](https://github.com/edwin-hao-ai/OCT-Agent/releases) 下载。
+
+| 平台 | Release 资产 |
+|---|---|
+| Windows | `OCT-Agent.Setup.exe` |
+| macOS | `OCT-Agent.dmg` |
+| Linux | `OCT-Agent.AppImage` |
+
+## CLI
+
+```bash
+npx @awareness-sdk/claw
+```
+
+CLI 包会暂时保留旧的 `awareness-claw` 命令别名，用于兼容老用户；当前品牌主入口为 `oct-agent`。
+
+## 记忆能力
+
+OCT-Agent 使用 Awareness Memory 从对话中沉淀长期上下文：
+
+- 用 knowledge cards 记录事实、决策、偏好和项目细节
+- 用 perception signals 捕捉矛盾、模式和重要时刻
+- 使用 BM25 + Vector 混合检索
+- 召回阶段 0 LLM 调用
+- 支持跨会话连续性，新对话也能带着相关上下文开始
+
+## 开发
+
+```bash
+npm install
+npm run build:desktop
+npm run package:win
+```
+
+桌面端开发：
+
+```bash
+cd packages/desktop
+npm run dev
+```
+
+CLI 开发：
+
+```bash
+cd packages/cli
+npm start
+```
+
+## 许可证
+
+Apache-2.0。由 [Awareness](https://awareness.market) 构建。
