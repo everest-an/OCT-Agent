@@ -140,7 +140,7 @@
     "publish": {
       "provider": "github",
       "owner": "edwin-hao-ai",
-      "repo": "AwarenessClaw"
+      "repo": "OCT-Agent"
     }
   },
   "license": "Apache-2.0"

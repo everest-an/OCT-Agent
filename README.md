@@ -110,7 +110,7 @@ Zero LLM calls. Hybrid BM25+Vector retrieval. [Full benchmark details →](https
 
 ### Option 1: Desktop App (Recommended)
 
-Download from [awareness.market](https://awareness.market/) or [Releases](https://github.com/edwin-hao-ai/AwarenessClaw/releases):
+Download from [awareness.market](https://awareness.market/) or [Releases](https://github.com/edwin-hao-ai/OCT-Agent/releases):
 
 | Platform | Download |
 |---|---|
