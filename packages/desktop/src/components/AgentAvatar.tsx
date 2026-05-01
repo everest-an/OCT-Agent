@@ -1,5 +1,5 @@
 import { Bot } from 'lucide-react';
-import logoUrl from '../assets/logo.svg';
+import logoUrl from '../assets/svg.png';
 
 function isLikelyEmoji(value: string): boolean {
   const trimmed = value.trim();

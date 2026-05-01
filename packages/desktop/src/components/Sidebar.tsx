@@ -1,5 +1,5 @@
 import { MessageCircle, Database, Cable, Puzzle, Settings, Workflow, Bot, Cpu } from 'lucide-react';
-import logoUrl from '../assets/logo.svg';
+import logoUrl from '../assets/svg.png';
 import { useI18n } from '../lib/i18n';
 
 export type Page = 'chat' | 'memory' | 'channels' | 'models' | 'skills' | 'automation' | 'agents' | 'settings';

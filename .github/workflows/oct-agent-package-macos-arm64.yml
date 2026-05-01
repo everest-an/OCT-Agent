@@ -9,7 +9,7 @@ on:
         default: main
 
 concurrency:
-  group: awarenessclaw-package-macos-arm64-${{ github.event.inputs.git_ref || github.ref }}
+  group: oct-agent-package-macos-arm64-${{ github.event.inputs.git_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -52,7 +52,7 @@ jobs:
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: awarenessclaw-macos-arm64-${{ github.run_number }}
+          name: oct-agent-macos-arm64-${{ github.run_number }}
           if-no-files-found: error
           path: |
             packages/desktop/release/*.dmg

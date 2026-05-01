@@ -25,7 +25,7 @@ import ProviderIcon from '../components/ProviderIcon';
 import WorkspaceStep from '../components/setup/WorkspaceStep';
 import CloudAuthStep from '../components/setup/CloudAuthStep';
 import { FolderOpen } from 'lucide-react';
-import logoUrl from '../assets/logo.svg';
+import logoUrl from '../assets/svg.png';
 
 interface SetupProps {
   onComplete: () => void;
@@ -396,7 +396,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
                 <img
                   src={logoUrl}
                   alt="OCT Agent"
-                  className="relative z-10 h-24 w-24 rounded-[24px] object-cover shadow-[0_0_0_1px_rgb(184_126_255_/_0.22),0_0_28px_rgb(123_95_255_/_0.32)]"
+                  className="relative z-10 h-24 w-24 rounded-[24px] object-cover shadow-[0_0_28px_rgb(123_95_255_/_0.32)]"
                 />
               </div>
 

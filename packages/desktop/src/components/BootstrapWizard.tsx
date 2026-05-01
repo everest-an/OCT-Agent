@@ -6,7 +6,7 @@
 import { useState } from 'react';
 import { ChevronRight, ChevronLeft, Sparkles, User, Bot, Zap, Feather, Briefcase, MessageSquare, Loader2 } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
-import logoUrl from '../assets/logo.svg';
+import logoUrl from '../assets/svg.png';
 
 type PersonalityStyle = 'friendly' | 'professional' | 'minimal' | 'creative';
 
@@ -119,7 +119,7 @@ export default function BootstrapWizard({ onComplete, onSkip }: BootstrapWizardP
       <div className="w-full max-w-lg">
         {/* Header */}
         <div className="text-center mb-8">
-          <img src={logoUrl} alt="logo" className="w-16 h-16 mx-auto mb-4 rounded-2xl" />
+          <img src={logoUrl} alt="logo" className="w-16 h-16 mx-auto mb-4 rounded-2xl object-cover" />
           <h1 className="text-2xl font-bold text-white mb-2">{t('bootstrap.title')}</h1>
           <p className="text-slate-400 text-sm">{t('bootstrap.subtitle')}</p>
         </div>

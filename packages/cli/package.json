@@ -4,14 +4,15 @@
   "description": "OCT-Agent CLI — One-click setup for OpenClaw with Awareness memory",
   "type": "module",
   "bin": {
-    "awareness-claw": "./bin/awareness-claw.mjs"
+    "oct-agent": "./bin/oct-agent.mjs",
+    "awareness-claw": "./bin/oct-agent.mjs"
   },
   "files": [
     "bin/",
     "src/"
   ],
   "scripts": {
-    "start": "node bin/awareness-claw.mjs",
+    "start": "node bin/oct-agent.mjs",
     "build": "echo 'No build step needed (pure ESM)'"
   },
   "keywords": [

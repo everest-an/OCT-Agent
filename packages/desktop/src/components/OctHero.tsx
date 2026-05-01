@@ -3,7 +3,7 @@
  * Used on empty state / first-load screens.
  */
 import { useState } from 'react';
-import logoUrl from '../assets/logo.svg';
+import logoUrl from '../assets/svg.png';
 
 // Attempt to import the hero image; gracefully fall back if it is not present.
 let heroImageUrl: string | null = null;

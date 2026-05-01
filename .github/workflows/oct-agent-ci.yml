@@ -9,7 +9,7 @@ on:
       - package-lock.json
       - packages/cli/**
       - packages/desktop/**
-      - .github/workflows/awarenessclaw-ci.yml
+      - .github/workflows/oct-agent-ci.yml
   pull_request:
     branches:
       - main
@@ -18,11 +18,11 @@ on:
       - package-lock.json
       - packages/cli/**
       - packages/desktop/**
-      - .github/workflows/awarenessclaw-ci.yml
+      - .github/workflows/oct-agent-ci.yml
   workflow_dispatch:
 
 concurrency:
-  group: awarenessclaw-ci-${{ github.workflow }}-${{ github.ref }}
+  group: oct-agent-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

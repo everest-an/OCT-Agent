@@ -1,7 +1,7 @@
 import { CheckCircle2, ChevronDown, ExternalLink, FolderOpen, KeyRound, Loader2 } from 'lucide-react';
 import { getProviderProfile, hasProviderCredentials } from '../../lib/store';
 import ProviderIcon from '../ProviderIcon';
-import appLogoUrl from '../../assets/logo.svg';
+import appLogoUrl from '../../assets/svg.png';
 
 type Provider = {
   key: string;
@@ -63,7 +63,7 @@ export function DashboardHeader({
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="1.5" rx="0.75" fill="currentColor"/><rect x="2" y="7.25" width="12" height="1.5" rx="0.75" fill="currentColor"/><rect x="2" y="11.5" width="12" height="1.5" rx="0.75" fill="currentColor"/></svg>
       </button>
 
-      <img src={appLogoUrl} alt="OCT Agent" className="h-5 w-5 object-contain opacity-90" />
+      <img src={appLogoUrl} alt="OCT Agent" className="h-5 w-5 rounded-md object-cover opacity-90" />
 
       <button
         onClick={onSelectProjectRoot}

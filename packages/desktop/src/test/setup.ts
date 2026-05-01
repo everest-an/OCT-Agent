@@ -2,7 +2,7 @@ import '@testing-library/jest-dom';
 import { vi } from 'vitest';
 
 // Mock image imports (vitest doesn't handle static assets)
-vi.mock('../assets/logo.svg', () => ({ default: 'logo.svg' }));
+vi.mock('../assets/svg.png', () => ({ default: 'svg.png' }));
 
 // Mock DOM APIs not available in jsdom
 Element.prototype.scrollIntoView = vi.fn();

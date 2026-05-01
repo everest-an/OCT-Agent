@@ -1,5 +1,5 @@
 {
-  "name": "awareness-claw",
+  "name": "oct-agent",
   "private": true,
   "description": "OCT-Agent — One-click AI agent with persistent memory. Built on OpenClaw.",
   "workspaces": [
