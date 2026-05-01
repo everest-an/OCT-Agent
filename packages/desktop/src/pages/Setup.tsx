@@ -393,9 +393,11 @@ export default function SetupWizard({ onComplete }: SetupProps) {
               <div className="relative mx-auto w-24 h-24 flex items-center justify-center">
                 {/* Glow orb background */}
                 <div className="absolute inset-0 oct-glow-orb opacity-40" style={{ borderRadius: '50%', width: '96px', height: '96px' }} />
-                <div className="oct-logo-wrap p-3 rounded-[22px] relative z-10">
-                  <img src={logoUrl} alt="OCT Agent" className="w-14 h-14 rounded-2xl object-cover" />
-                </div>
+                <img
+                  src={logoUrl}
+                  alt="OCT Agent"
+                  className="relative z-10 h-24 w-24 rounded-[24px] object-cover shadow-[0_0_0_1px_rgb(184_126_255_/_0.22),0_0_28px_rgb(123_95_255_/_0.32)]"
+                />
               </div>
 
               <div>

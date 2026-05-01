@@ -106,7 +106,7 @@ function summarizeMissing(skill: LocalSkillStatus) {
 }
 
 function getSkillStatusLabel(skill: Pick<LocalSkillStatus, 'eligible' | 'disabled' | 'blockedByAllowlist'>, t: TranslateFunc) {
-git status  if (skill.disabled) return { label: t('skills.status.disabled', 'Disabled'), className: 'text-slate-500 dark:text-slate-400 bg-slate-200/60 dark:bg-slate-700/60' };
+  if (skill.disabled) return { label: t('skills.status.disabled', 'Disabled'), className: 'text-slate-500 dark:text-slate-400 bg-slate-200/60 dark:bg-slate-700/60' };
   if (skill.blockedByAllowlist) return { label: t('skills.status.blocked', 'Blocked'), className: 'text-amber-600 dark:text-amber-300 bg-amber-500/10' };
   if (skill.eligible) return { label: t('skills.status.ready', 'Ready'), className: 'text-emerald-600 dark:text-emerald-300 bg-emerald-500/10' };
   return { label: t('skills.status.needsSetup', 'Needs Setup'), className: 'text-amber-600 dark:text-amber-300 bg-amber-500/10' };

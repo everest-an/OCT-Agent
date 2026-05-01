@@ -42,9 +42,9 @@ export default function OctHero({ showMarquee = true, subtitle, size = 'md' }: O
   const [imgError, setImgError] = useState(false);
 
   const sizeMap = {
-    sm: { container: 'w-16 h-16', logo: 'w-10 h-10', heading: 'text-xl', sub: 'text-xs' },
-    md: { container: 'w-28 h-28', logo: 'w-16 h-16', heading: 'text-3xl', sub: 'text-sm' },
-    lg: { container: 'w-40 h-40', logo: 'w-24 h-24', heading: 'text-5xl', sub: 'text-base' },
+    sm: { container: 'w-16 h-16', logo: 'w-full h-full', heading: 'text-xl', sub: 'text-xs' },
+    md: { container: 'w-28 h-28', logo: 'w-full h-full', heading: 'text-3xl', sub: 'text-sm' },
+    lg: { container: 'w-40 h-40', logo: 'w-full h-full', heading: 'text-5xl', sub: 'text-base' },
   };
   const sz = sizeMap[size];
 
@@ -70,15 +70,11 @@ export default function OctHero({ showMarquee = true, subtitle, size = 'md' }: O
                 onError={() => setImgError(true)}
               />
               {!imgLoaded && (
-                <div className="absolute inset-0 flex items-center justify-center oct-logo-wrap rounded-full">
-                  <img src={logoUrl} alt="OCT" className={`${sz.logo} rounded-2xl object-cover`} />
-                </div>
+                <img src={logoUrl} alt="OCT" className={`absolute inset-0 ${sz.logo} rounded-full object-cover`} />
               )}
             </>
           ) : (
-            <div className="w-full h-full oct-logo-wrap rounded-full flex items-center justify-center">
-              <img src={logoUrl} alt="OCT Agent" className={`${sz.logo} rounded-2xl object-cover`} />
-            </div>
+            <img src={logoUrl} alt="OCT Agent" className={`${sz.logo} rounded-full object-cover`} />
           )}
         </div>
       </div>
