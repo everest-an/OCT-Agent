@@ -187,10 +187,13 @@ export function ScanSettingsDialog({
       role="dialog"
       aria-modal="true"
       aria-labelledby="scan-settings-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      className="fixed inset-0 z-[60] overflow-y-auto bg-black/60"
     >
-      <div className="w-full max-w-xl max-h-[90vh] overflow-y-auto bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl">
+      <div
+        className="flex min-h-full items-center justify-center p-4"
+        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      >
+      <div className="w-full max-w-xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl">
         <header className="flex items-start justify-between gap-4 px-5 py-4 border-b border-slate-800">
           <div className="min-w-0">
             <h2 id="scan-settings-title" className="text-base font-semibold text-slate-100">
@@ -343,6 +346,7 @@ export function ScanSettingsDialog({
             </button>
           </div>
         </footer>
+      </div>
       </div>
     </div>
   );

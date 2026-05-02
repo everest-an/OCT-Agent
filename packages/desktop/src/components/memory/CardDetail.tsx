@@ -32,8 +32,9 @@ export function CardDetail({ card, onClose, backlinksCount = 0 }: CardDetailProp
   const outbound = card.link_count_outgoing ?? 0;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-6">
-      <div className="relative flex max-h-[90vh] w-full max-w-3xl flex-col overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
+    <div className="fixed inset-0 z-[60] overflow-y-auto bg-black/40">
+      <div className="flex min-h-full items-center justify-center p-6">
+      <div className="relative flex w-full max-w-3xl flex-col rounded-xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
         {onClose && (
           <button
             type="button"
@@ -79,6 +80,7 @@ export function CardDetail({ card, onClose, backlinksCount = 0 }: CardDetailProp
             <span>Last touched: {new Date(card.last_touched_at).toLocaleString()}</span>
           )}
         </footer>
+      </div>
       </div>
     </div>
   );
