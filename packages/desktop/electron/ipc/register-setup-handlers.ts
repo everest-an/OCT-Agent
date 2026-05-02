@@ -516,6 +516,8 @@ export function registerSetupHandlers(deps: {
 
     const extensionsDir = path.join(deps.home, '.openclaw', 'extensions');
     const extDir = path.join(extensionsDir, 'openclaw-memory');
+    const stageRoot = path.join(extensionsDir, '.openclaw-memory-setup-stage');
+    const backupDir = path.join(extensionsDir, '.openclaw-memory-setup-backup');
     const nullDev = process.platform === 'win32' ? 'NUL' : '/dev/null';
     const setupRegistries = ['', '--registry=https://registry.npmmirror.com'];
     const installErrors: string[] = [];
@@ -524,20 +526,54 @@ export function registerSetupHandlers(deps: {
       installErrors.push(`${stage}: ${message.slice(0, 240)}`);
     };
     let npmDirectOk = false;
+
+    const resetSetupStageDirs = () => {
+      try { fs.rmSync(stageRoot, { recursive: true, force: true }); } catch {}
+      try { fs.rmSync(backupDir, { recursive: true, force: true }); } catch {}
+      fs.mkdirSync(stageRoot, { recursive: true });
+    };
+
+    const commitSetupStagePlugin = (stagedDir: string): void => {
+      const oldExists = fs.existsSync(extDir);
+      try {
+        if (oldExists) {
+          try { fs.rmSync(backupDir, { recursive: true, force: true }); } catch {}
+          fs.renameSync(extDir, backupDir);
+        }
+        fs.renameSync(stagedDir, extDir);
+        if (oldExists) {
+          try { fs.rmSync(backupDir, { recursive: true, force: true }); } catch {}
+        }
+      } catch (err) {
+        try {
+          if (!fs.existsSync(extDir) && fs.existsSync(backupDir)) {
+            fs.renameSync(backupDir, extDir);
+          }
+        } catch {}
+        throw err;
+      }
+    };
+
     removeAwarenessPluginExtensionIfInvalid(deps.home);
     for (const regFlag of setupRegistries) {
       try {
+        resetSetupStageDirs();
         fs.mkdirSync(extensionsDir, { recursive: true });
         const packOut = await deps.runAsync(`cd "${extensionsDir}" && npm pack @awareness-sdk/openclaw-memory@latest ${regFlag} 2>${nullDev}`, 120000);
         const tgzName = packOut.trim().split('\n').pop()?.trim() || '';
         if (!tgzName || !tgzName.endsWith('.tgz')) throw new Error('npm pack failed');
         const tgzPath = path.join(extensionsDir, tgzName);
-        if (fs.existsSync(extDir)) fs.rmSync(extDir, { recursive: true, force: true });
-        fs.mkdirSync(extDir, { recursive: true });
-        await deps.runAsync(`tar -xzf "${tgzPath}" -C "${extDir}" --strip-components=1`, 30000);
+        const stagedExtDir = path.join(stageRoot, `attempt-${Date.now()}`);
+        fs.mkdirSync(stagedExtDir, { recursive: true });
+        await deps.runAsync(`tar -xzf "${tgzPath}" -C "${stagedExtDir}" --strip-components=1`, 30000);
         try { fs.unlinkSync(tgzPath); } catch {}
-        if (!hasAwarenessPluginPackage(deps.home)) {
+        const stagedPkg = path.join(stagedExtDir, 'package.json');
+        if (!fs.existsSync(stagedPkg)) {
           throw new Error('awareness plugin package.json missing after extract');
+        }
+        commitSetupStagePlugin(stagedExtDir);
+        if (!hasAwarenessPluginPackage(deps.home)) {
+          throw new Error('awareness plugin package.json missing after commit');
         }
         patchAwarenessPluginWindowsNpx(deps.home);
         deps.persistAwarenessPluginConfig({ enableSlot: true });

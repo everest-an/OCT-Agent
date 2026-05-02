@@ -445,13 +445,43 @@ export function registerAppRuntimeHandlers(deps: {
         progress('complete', 'done');
         return { success: true, version: newSemver, previousVersion: preSemver };
       } else if (component === 'plugin') {
-        progress('plugin:cleanup', 'running');
         const extDir = path.join(deps.home, '.openclaw', 'extensions', 'openclaw-memory');
-        if (fs.existsSync(extDir)) {
-          fs.rmSync(extDir, { recursive: true, force: true });
-        }
         const extensionsDir = path.join(deps.home, '.openclaw', 'extensions');
         fs.mkdirSync(extensionsDir, { recursive: true });
+
+        const stageRoot = path.join(extensionsDir, '.openclaw-memory-upgrade-stage');
+        const backupDir = path.join(extensionsDir, '.openclaw-memory-upgrade-backup');
+
+        const resetUpgradeDirs = () => {
+          try { fs.rmSync(stageRoot, { recursive: true, force: true }); } catch {}
+          try { fs.rmSync(backupDir, { recursive: true, force: true }); } catch {}
+          fs.mkdirSync(stageRoot, { recursive: true });
+        };
+
+        const commitStagedPlugin = (stagedDir: string): void => {
+          const oldExists = fs.existsSync(extDir);
+          try {
+            if (oldExists) {
+              try { fs.rmSync(backupDir, { recursive: true, force: true }); } catch {}
+              fs.renameSync(extDir, backupDir);
+            }
+            fs.renameSync(stagedDir, extDir);
+            if (oldExists) {
+              try { fs.rmSync(backupDir, { recursive: true, force: true }); } catch {}
+            }
+          } catch (err) {
+            // Roll back so partial upgrades never wipe the user's existing plugin.
+            try {
+              if (!fs.existsSync(extDir) && fs.existsSync(backupDir)) {
+                fs.renameSync(backupDir, extDir);
+              }
+            } catch {}
+            throw err;
+          }
+        };
+
+        progress('plugin:cleanup', 'running');
+        resetUpgradeDirs();
         progress('plugin:cleanup', 'done');
 
         const nullDev = process.platform === 'win32' ? 'NUL' : '/dev/null';
@@ -490,22 +520,24 @@ export function registerAppRuntimeHandlers(deps: {
             }
             progress('plugin:npm-pack', 'done');
 
+            const stagedExtDir = path.join(stageRoot, `attempt-${Date.now()}`);
+
             progress('plugin:extract', 'running');
             const tgzPath = path.join(extensionsDir, tgzName);
-            if (fs.existsSync(extDir)) fs.rmSync(extDir, { recursive: true, force: true });
-            fs.mkdirSync(extDir, { recursive: true });
-            await deps.runAsync(`tar -xzf "${tgzPath}" -C "${extDir}" --strip-components=1`, 30000);
+            fs.mkdirSync(stagedExtDir, { recursive: true });
+            await deps.runAsync(`tar -xzf "${tgzPath}" -C "${stagedExtDir}" --strip-components=1`, 30000);
             try { fs.unlinkSync(tgzPath); } catch {}
             progress('plugin:extract', 'done');
 
             progress('plugin:npm-install', 'running');
-            await deps.runAsyncWithProgress(`cd "${extDir}" && npm install --omit=dev --no-audit --no-fund`, 300000, (line) => {
+            await deps.runAsyncWithProgress(`cd "${stagedExtDir}" && npm install --omit=dev --no-audit --no-fund`, 300000, (line) => {
               progress('plugin:npm-install', 'running', line.slice(0, 120));
             });
             progress('plugin:npm-install', 'done');
 
             progress('plugin:finalize', 'running');
-            const newVer = finalizePluginUpgrade(extDir);
+            const newVer = finalizePluginUpgrade(stagedExtDir);
+            commitStagedPlugin(stagedExtDir);
             progress('plugin:finalize', 'done', newVer);
             progress('complete', 'done');
             return { success: true, version: newVer, method: regFlag ? 'npm-direct-mirror' : 'npm-direct' };
@@ -514,6 +546,7 @@ export function registerAppRuntimeHandlers(deps: {
 
         progress('plugin:fallback-openclaw', 'running');
         try {
+          resetUpgradeDirs();
           await deps.runAsyncWithProgress(`cd "${deps.home}" && openclaw plugins install @awareness-sdk/openclaw-memory`, 120000, (line) => {
             progress('plugin:fallback-openclaw', 'running', line.slice(0, 120));
           });
@@ -527,6 +560,7 @@ export function registerAppRuntimeHandlers(deps: {
 
         progress('plugin:fallback-clawhub', 'running');
         try {
+          resetUpgradeDirs();
           await deps.runAsyncWithProgress(`cd "${deps.home}" && npx -y clawhub@latest install awareness-memory --force`, 120000, (line) => {
             progress('plugin:fallback-clawhub', 'running', line.slice(0, 120));
           });

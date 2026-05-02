@@ -133,6 +133,7 @@
     "nsis": {
       "oneClick": false,
       "perMachine": false,
+      "deleteAppDataOnUninstall": false,
       "createDesktopShortcut": "always",
       "shortcutName": "OCT-Agent",
       "allowToChangeInstallationDirectory": false,

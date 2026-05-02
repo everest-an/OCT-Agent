@@ -11,6 +11,12 @@
 !macroend
 
 !macro customUnInstall
+  ; Data-retention hard rule:
+  ; - Never delete user profile data during uninstall.
+  ; - Keep chat/memory/model config/API keys/skills in home dirs such as:
+  ;   ~/.openclaw, ~/.awareness, ~/.awarenessclaw, ~/.awareness-claw and legacy Lobster data.
+  ; NSIS default behavior only removes app install files under $INSTDIR.
+
   ; Stop the desktop app first so tray-hidden instances do not keep gateway/daemon alive.
   ; Try both process names: new brand (OCT.exe) and legacy brand (AwarenessClaw.exe).
   ExecWait `"$SYSDIR\taskkill.exe" /F /T /IM OCT.exe`
