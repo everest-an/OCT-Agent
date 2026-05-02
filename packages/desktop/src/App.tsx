@@ -133,7 +133,7 @@ export default function App() {
   useEffect(() => {
     const api = window.electronAPI;
     if (!api?.onChatAgentInvalidated) return;
-    api.onChatAgentInvalidated((info) => {
+    const cleanup = api.onChatAgentInvalidated((info) => {
       // Only react if the dead id is the one we still hold. Avoids fighting
       // a Settings/Agents page that may have already swapped the selection.
       // Read from localStorage rather than the closured `config` so we always
@@ -148,9 +148,7 @@ export default function App() {
         updateConfig({ selectedAgentId: info.resolvedAgentId || 'main' });
       }
     });
-    // ipcRenderer.on listeners persist for the lifetime of the renderer
-    // process — there is no off() exposed via preload, and App is
-    // mounted exactly once, so this is fine.
+    return () => cleanup?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // ───────────────────────────────────────────────────────────────────────

@@ -657,8 +657,9 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
   useEffect(() => {
     if (!window.electronAPI) return;
     const api = window.electronAPI as any;
+    const cleanups: Array<() => void> = [];
 
-    api.onChatEvent?.((event: {
+    const cleanupChatEvent = api.onChatEvent?.((event: {
       stream?: string;
       phase?: string;
       toolCallId?: string;
@@ -751,14 +752,16 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         });
       }
     });
+    if (typeof cleanupChatEvent === 'function') cleanups.push(cleanupChatEvent);
 
-    api.onChatDebug?.((msg: string) => {
+    const cleanupChatDebug = api.onChatDebug?.((msg: string) => {
       if (!activeRunRef.current) return;
       resetChatActivityTimeout();
     });
+    if (typeof cleanupChatDebug === 'function') cleanups.push(cleanupChatDebug);
 
     // Thinking content from agent reasoning
-    api.onChatThinking?.((text: string) => {
+    const cleanupChatThinking = api.onChatThinking?.((text: string) => {
       if (!activeRunRef.current) return;
       const hadThinking = !!thinkingRef.current;
       thinkingRef.current = text;
@@ -773,9 +776,10 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         mergeKey: 'live-thinking',
       });
     });
+    if (typeof cleanupChatThinking === 'function') cleanups.push(cleanupChatThinking);
 
     // Stream text chunks from agent response
-    api.onChatStream?.((chunk: string) => {
+    const cleanupChatStream = api.onChatStream?.((chunk: string) => {
       if (!activeRunRef.current) return;
       setStreamClosed(false);
       streamingRef.current += chunk;
@@ -793,8 +797,9 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         mergeKey: 'live-stream',
       });
     });
+    if (typeof cleanupChatStream === 'function') cleanups.push(cleanupChatStream);
 
-    api.onChatStreamEnd?.(() => {
+    const cleanupChatStreamEnd = api.onChatStreamEnd?.(() => {
       if (!activeRunRef.current) return;
       setStreamClosed(true);
       recordTraceEvent({
@@ -807,9 +812,10 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
       });
       setAgentStatus((current) => current === 'generating' ? 'thinking' : current);
     });
+    if (typeof cleanupChatStreamEnd === 'function') cleanups.push(cleanupChatStreamEnd);
 
     // Status events (agent lifecycle + tool calls + gateway auto-start)
-    api.onChatStatus?.((status: { type: string; tool?: string; toolStatus?: string; toolId?: string; message?: string; detail?: string; approvalRequestId?: string; approvalCommand?: string }) => {
+    const cleanupChatStatus = api.onChatStatus?.((status: { type: string; tool?: string; toolStatus?: string; toolId?: string; message?: string; detail?: string; approvalRequestId?: string; approvalCommand?: string }) => {
       if (!activeRunRef.current) return;
       resetChatActivityTimeout();
       if (status.type === 'gateway') {
@@ -879,6 +885,11 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         });
       }
     });
+    if (typeof cleanupChatStatus === 'function') cleanups.push(cleanupChatStatus);
+
+    return () => {
+      cleanups.forEach((cleanup) => cleanup());
+    };
   }, [recordTraceEvent, resetChatActivityTimeout, t]);
 
   useEffect(() => {
@@ -891,19 +902,22 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
   // Listen for tray "New Chat" action
   useEffect(() => {
     if (!window.electronAPI) return;
-    (window.electronAPI as any).onTrayNewChat?.(() => handleNewSession());
+    const cleanup = (window.electronAPI as any).onTrayNewChat?.(() => handleNewSession());
+    return () => cleanup?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Listen for memory-warning events from main process
   useEffect(() => {
     if (!window.electronAPI) return;
     const api = window.electronAPI as any;
-    api.onMemoryWarning?.((payload: { type: string; message: string }) => {
+    const cleanup = api.onMemoryWarning?.((payload: { type: string; message: string }) => {
       setMemoryWarning(payload.message || t('chat.memoryWarning', 'Memory save failed'));
       if (memoryWarningTimerRef.current) clearTimeout(memoryWarningTimerRef.current);
       memoryWarningTimerRef.current = setTimeout(() => setMemoryWarning(null), 3000);
     });
     return () => {
+      cleanup?.();
       if (memoryWarningTimerRef.current) clearTimeout(memoryWarningTimerRef.current);
     };
   }, [t]);
@@ -959,7 +973,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     }).catch(() => {});
 
     // Real-time channel message listener
-    api.onChannelMessage?.((msg: { sessionKey: string; message: any }) => {
+    const cleanupChannelMessage = api.onChannelMessage?.((msg: { sessionKey: string; message: any }) => {
       if (!msg.sessionKey) return;
       let knownSession = false;
       // Update channel sessions list (bump updatedAt) or fetch the new session if this is the first inbound message.
@@ -994,6 +1008,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         return currentKey;
       });
     });
+    return () => cleanupChannelMessage?.();
   }, []);
 
   // Load channel history when a channel session is selected

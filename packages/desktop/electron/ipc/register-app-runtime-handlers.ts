@@ -458,6 +458,24 @@ export function registerAppRuntimeHandlers(deps: {
           fs.mkdirSync(stageRoot, { recursive: true });
         };
 
+        // Clean only staging area. Called in fallbacks so backupDir is preserved
+        // until the new install succeeds — ensuring extDir can always be restored.
+        const cleanStageOnly = () => {
+          try { fs.rmSync(stageRoot, { recursive: true, force: true }); } catch {}
+          fs.mkdirSync(stageRoot, { recursive: true });
+        };
+
+        // If a prior commitStagedPlugin failed at the rename step, extDir may be
+        // missing while backupDir still holds the old plugin. Restore it before
+        // attempting any fallback so we never start from a completely empty state.
+        const restoreFromBackupIfNeeded = () => {
+          try {
+            if (!fs.existsSync(extDir) && fs.existsSync(backupDir)) {
+              fs.renameSync(backupDir, extDir);
+            }
+          } catch {}
+        };
+
         const commitStagedPlugin = (stagedDir: string): void => {
           const oldExists = fs.existsSync(extDir);
           try {
@@ -546,29 +564,35 @@ export function registerAppRuntimeHandlers(deps: {
 
         progress('plugin:fallback-openclaw', 'running');
         try {
-          resetUpgradeDirs();
+          restoreFromBackupIfNeeded();
+          cleanStageOnly();
           await deps.runAsyncWithProgress(`cd "${deps.home}" && openclaw plugins install @awareness-sdk/openclaw-memory`, 120000, (line) => {
             progress('plugin:fallback-openclaw', 'running', line.slice(0, 120));
           });
           const newVer = finalizePluginUpgrade(extDir);
+          try { fs.rmSync(backupDir, { recursive: true, force: true }); } catch {}
           progress('plugin:fallback-openclaw', 'done');
           progress('complete', 'done');
           return { success: true, version: newVer, method: 'openclaw-plugin' };
         } catch {
+          restoreFromBackupIfNeeded();
           progress('plugin:fallback-openclaw', 'skipped');
         }
 
         progress('plugin:fallback-clawhub', 'running');
         try {
-          resetUpgradeDirs();
+          restoreFromBackupIfNeeded();
+          cleanStageOnly();
           await deps.runAsyncWithProgress(`cd "${deps.home}" && npx -y clawhub@latest install awareness-memory --force`, 120000, (line) => {
             progress('plugin:fallback-clawhub', 'running', line.slice(0, 120));
           });
           const newVer = finalizePluginUpgrade(extDir);
+          try { fs.rmSync(backupDir, { recursive: true, force: true }); } catch {}
           progress('plugin:fallback-clawhub', 'done');
           progress('complete', 'done');
           return { success: true, version: newVer, method: 'clawhub' };
         } catch (e: any) {
+          restoreFromBackupIfNeeded();
           progress('failed', 'error');
           throw new Error(`Plugin upgrade failed: ${e.message?.slice(0, 200)}`);
         }

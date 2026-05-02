@@ -14,7 +14,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   appZoomReset: () => ipcRenderer.invoke('app:zoom:reset'),
   startupEnsureRuntime: () => ipcRenderer.invoke('app:startup-ensure-runtime'),
   onStartupStatus: (callback: (status: { message: string; progress?: number }) => void) => {
-    ipcRenderer.on('app:startup-status', (_e: any, status: { message: string; progress?: number }) => callback(status));
+    const listener = (_e: any, status: { message: string; progress?: number }) => callback(status);
+    ipcRenderer.on('app:startup-status', listener);
+    return () => ipcRenderer.removeListener('app:startup-status', listener);
   },
   checkUpdates: () => ipcRenderer.invoke('app:check-updates'),
   upgradeComponent: (component: string) => ipcRenderer.invoke('app:upgrade-component', component),
@@ -52,29 +54,43 @@ contextBridge.exposeInMainWorld('electronAPI', {
   chatLoadHistory: (sessionId: string) => ipcRenderer.invoke('chat:load-history', sessionId),
   chatApprove: (sessionId: string, approvalRequestId: string) => ipcRenderer.invoke('chat:approve', sessionId, approvalRequestId, 'allow-once'),
   onChatStream: (callback: (chunk: string) => void) => {
-    ipcRenderer.on('chat:stream', (_e: any, chunk: string) => callback(chunk));
+    const listener = (_e: any, chunk: string) => callback(chunk);
+    ipcRenderer.on('chat:stream', listener);
+    return () => ipcRenderer.removeListener('chat:stream', listener);
   },
   onChatStreamEnd: (callback: () => void) => {
-    ipcRenderer.on('chat:stream-end', () => callback());
+    const listener = () => callback();
+    ipcRenderer.on('chat:stream-end', listener);
+    return () => ipcRenderer.removeListener('chat:stream-end', listener);
   },
   onChatStatus: (callback: (status: { type: string; tool?: string; toolStatus?: string; toolId?: string; detail?: string; approvalRequestId?: string; approvalCommand?: string }) => void) => {
-    ipcRenderer.on('chat:status', (_e: any, status: any) => callback(status));
+    const listener = (_e: any, status: any) => callback(status);
+    ipcRenderer.on('chat:status', listener);
+    return () => ipcRenderer.removeListener('chat:status', listener);
   },
   onChatThinking: (callback: (text: string) => void) => {
-    ipcRenderer.on('chat:thinking', (_e: any, text: string) => callback(text));
+    const listener = (_e: any, text: string) => callback(text);
+    ipcRenderer.on('chat:thinking', listener);
+    return () => ipcRenderer.removeListener('chat:thinking', listener);
   },
   onChatDebug: (callback: (msg: string) => void) => {
-    ipcRenderer.on('chat:debug', (_e: any, msg: string) => callback(msg));
+    const listener = (_e: any, msg: string) => callback(msg);
+    ipcRenderer.on('chat:debug', listener);
+    return () => ipcRenderer.removeListener('chat:debug', listener);
   },
   onChatEvent: (callback: (event: any) => void) => {
-    ipcRenderer.on('chat:event', (_e: any, event: any) => callback(event));
+    const listener = (_e: any, event: any) => callback(event);
+    ipcRenderer.on('chat:event', listener);
+    return () => ipcRenderer.removeListener('chat:event', listener);
   },
   // Fired by main when a chat:send arrives with an agentId that no longer exists in
   // openclaw.json (deleted, failed-creation orphan, or pre-upgrade ghost). Renderer
   // should clear that id from persisted store so the user is not left in a stuck
   // state where every send re-triggers the same downgrade warning.
   onChatAgentInvalidated: (callback: (info: { requestedAgentId: string; resolvedAgentId: string; reason?: string }) => void) => {
-    ipcRenderer.on('chat:agent-invalidated', (_e: any, info: any) => callback(info));
+    const listener = (_e: any, info: any) => callback(info);
+    ipcRenderer.on('chat:agent-invalidated', listener);
+    return () => ipcRenderer.removeListener('chat:agent-invalidated', listener);
   },
 
   // Channel management
@@ -104,7 +120,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   channelHistory: (sessionKey: string) => ipcRenderer.invoke('channel:history', sessionKey),
   channelReply: (sessionKey: string, text: string) => ipcRenderer.invoke('channel:reply', sessionKey, text),
   onChannelMessage: (callback: (msg: { sessionKey: string; message: any }) => void) => {
-    ipcRenderer.on('channel:message', (_e: any, msg: any) => callback(msg));
+    const listener = (_e: any, msg: any) => callback(msg);
+    ipcRenderer.on('channel:message', listener);
+    return () => ipcRenderer.removeListener('channel:message', listener);
   },
 
   // Cron management
@@ -137,7 +155,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Tray events
   onTrayNewChat: (callback: () => void) => {
-    ipcRenderer.on('tray:new-chat', () => callback());
+    const listener = () => callback();
+    ipcRenderer.on('tray:new-chat', listener);
+    return () => ipcRenderer.removeListener('tray:new-chat', listener);
   },
 
   // Skills / ClawHub
@@ -331,7 +351,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Memory warning (fire-and-forget from main process)
   onMemoryWarning: (callback: (payload: { type: string; message: string }) => void) => {
-    ipcRenderer.on('chat:memory-warning', (_e: any, payload: { type: string; message: string }) => callback(payload));
+    const listener = (_e: any, payload: { type: string; message: string }) => callback(payload);
+    ipcRenderer.on('chat:memory-warning', listener);
+    return () => ipcRenderer.removeListener('chat:memory-warning', listener);
   },
 
   // Daemon watchdog
