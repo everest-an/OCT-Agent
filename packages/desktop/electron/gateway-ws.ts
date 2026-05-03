@@ -169,7 +169,7 @@ export class GatewayClient extends EventEmitter {
         handshakeSettled = true;
         this.ws?.close();
         reject(new Error('Gateway connection timed out'));
-      }, 10000);
+      }, 30000);
 
       let challengeNonce: string | null = null;
 

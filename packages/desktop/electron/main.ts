@@ -7,6 +7,7 @@ import net from 'net';
 import http from 'http';
 import https from 'https';
 import crypto from 'crypto';
+import { execFileSync } from 'child_process';
 import { createDaemonWatchdog } from './daemon-watchdog';
 import { createDoctor } from './doctor';
 import { callMcp, callMcpStrict, setMemoryClientProjectDir } from './memory-client';
@@ -31,6 +32,7 @@ import {
 import { healMainAgentIfNeeded, healOrphanBindings } from './heal-main-agent';
 import { installWorkspaceInjectHook, readActiveWorkspace, writeActiveWorkspace } from './install-workspace-hook';
 import { createChannelLoginWithQR } from './ipc/channel-login-flow';
+import { ensureChannelManifestMetadata } from './ipc/channel-plugin-spec';
 import {
   registerAgentHandlers,
   applyAgentIdentityFallback,
@@ -84,7 +86,7 @@ import {
   stripLegacyWindowsOpenClawRiskyConfig,
   stripRedactedValues,
 } from './desktop-openclaw-config';
-import { readJsonFileWithBom, restoreConfigFromBackupIfNeeded, safeWriteJsonFile } from './json-file';
+import { readJsonFileWithBom, repairKnownInvalidOpenClawJsonText, restoreConfigFromBackupIfNeeded, restoreInvalidJsonFromBackupIfNeeded, safeWriteJsonFile } from './json-file';
 
 const DESKTOP_LEGACY_HOST_EXEC_MIGRATION_ID = 'desktop-legacy-host-exec-defaults-2026-04-04';
 
@@ -109,10 +111,32 @@ const GATEWAY_WARMUP_REPAIR_FAILURE_THRESHOLD = 3;
 const DAEMON_FOREGROUND_BOOTSTRAP_TIMEOUT_MS = 240000;
 const DAEMON_WAIT_AFTER_BOOTSTRAP_MS = 90000;
 
+function hasOtherOCTAgentProcess(): boolean {
+  if (process.platform !== 'win32') return true;
+  try {
+    const output = execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-Command',
+        `Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'OCT-Agent.exe' -and $_.ProcessId -ne ${process.pid} } | Select-Object -First 1 -ExpandProperty ProcessId`,
+      ],
+      { encoding: 'utf8', windowsHide: true, timeout: 5000 },
+    );
+    return output.trim().length > 0;
+  } catch {
+    return true;
+  }
+}
+
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
 if (!gotSingleInstanceLock) {
-  app.quit();
+  if (hasOtherOCTAgentProcess()) {
+    app.quit();
+  } else {
+    console.warn('[desktop] Single-instance lock was held but no other OCT-Agent.exe process was found; continuing startup.');
+  }
 }
 
 const isDev = !app.isPackaged;
@@ -300,6 +324,8 @@ function repairOpenClawConfigFile() {
 
   try {
     if (!fs.existsSync(configPath)) return;
+    repairKnownInvalidOpenClawJsonText(configPath);
+    restoreInvalidJsonFromBackupIfNeeded(configPath);
     const current = readJsonFileWithBom<Record<string, any>>(configPath);
     const runtimePreferences = readRuntimePreferences();
     let nextRuntimePreferences = runtimePreferences;
@@ -1489,12 +1515,14 @@ async function prepareGatewayForChat(): Promise<{ ok: boolean; error?: string }>
         message: 'Connecting to local Gateway...',
       });
 
-      // Retry WS connection up to 3 times with 3s delays. Gateway may need time
+      // Retry WS connection up to 3 times with 5s delays. Gateway may need time
       // to finish plugin loading after TCP listener is up (handshake timeout).
+      // Note: connect timeout in gateway-ws.ts is 30s to handle cases where
+      // gateway event loop is blocked by models.list (~17-28s on startup).
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           // getGatewayWs internally handles concurrent callers via gatewayWsConnectPromise
-          // mutex, has a 10s connect timeout, and pre-warms write scopes. Once this
+          // mutex, has a 30s connect timeout, and pre-warms write scopes. Once this
           // succeeds, gatewayWsClient.isConnected stays true for the lifetime of the
           // process — every subsequent chat hits the fast path above with no delay.
           await getGatewayWs();
@@ -1519,7 +1547,7 @@ async function prepareGatewayForChat(): Promise<{ ok: boolean; error?: string }>
               type: 'gateway',
               message: `Gateway is loading plugins... Retrying connection (${attempt + 2}/3)`,
             });
-            await sleep(3000);
+            await sleep(5000);
           }
         }
       }
@@ -2432,6 +2460,7 @@ app.whenReady().then(async () => {
 
   // Ensure config has required gateway defaults before anything tries to start
   repairOpenClawConfigFile();
+  ensureChannelManifestMetadata('openclaw-weixin', HOME);
 
   // Patch gateway.cmd to include --stack-size=8192 so that ANY gateway start
   // mechanism (scheduled task, `openclaw gateway start/restart`, manual) will
