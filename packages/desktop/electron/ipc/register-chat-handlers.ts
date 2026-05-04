@@ -1277,13 +1277,21 @@ ${message}`;
       if (agentLifecycleEventHandler) ws.removeListener('event:agent:lifecycle', agentLifecycleEventHandler);
       if (agentToolEventHandler) ws.removeListener('event:agent:tool', agentToolEventHandler);
 
-      let finalText = fullResponseText.trim() || finalAssistantText || '';
+      const deltaText = fullResponseText.trim();
+      const finalEventText = finalAssistantText.trim();
+      let finalText = deltaText || finalEventText || '';
 
       // Strip Gateway diagnostic noise from the final response. If the entire
       // response is just plugin warnings (e.g. "plugins.entries.openclaw-memory:
       // plugin disabled ..."), treat it as empty so the CLI fallback kicks in
       // and the user gets an actual LLM reply instead of a confusing diagnostic.
-      if (finalText && isGatewayDiagnosticNoise(finalText)) {
+      if (deltaText && isGatewayDiagnosticNoise(deltaText)) {
+        console.warn('[chat] Stripping Gateway diagnostic noise from delta response:', deltaText.slice(0, 200));
+        // Some Gateway builds emit only diagnostic lines in delta events while the
+        // real assistant text arrives in the final event payload. Prefer that text
+        // before declaring this run empty.
+        finalText = finalEventText && !isGatewayDiagnosticNoise(finalEventText) ? finalEventText : '';
+      } else if (finalText && isGatewayDiagnosticNoise(finalText)) {
         console.warn('[chat] Stripping Gateway diagnostic noise from final response:', finalText.slice(0, 200));
         finalText = '';
       }

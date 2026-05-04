@@ -1837,6 +1837,52 @@ describe('registerChatHandlers', () => {
     );
   });
 
+  it('uses final assistant text when gateway delta stream contains only diagnostic noise', async () => {
+    const ws = new FakeGatewayClient();
+    ws.chatSend = vi.fn(async () => {
+      setTimeout(() => {
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'delta',
+          message: {
+            role: 'assistant',
+            content: 'plugins.entries.openclaw-memory: plugin disabled (memory slot set to "awareness") but config is present',
+          },
+        });
+        ws.emit('event:chat', {
+          sessionKey: 'test-session',
+          state: 'final',
+          message: {
+            role: 'assistant',
+            content: 'Real assistant reply from final event.',
+          },
+        });
+      }, 0);
+      return { status: 'started' };
+    });
+
+    registerChatHandlers({
+      sendToRenderer: vi.fn(),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      getGatewayWs: vi.fn(async () => ws as any),
+      getConnectedGatewayWs: vi.fn(() => ws as any),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    const handlers = getRegisteredHandlers();
+    const result = await handlers['chat:send']({}, 'hello', 'test-session', {});
+
+    expect(result).toMatchObject({
+      success: true,
+      text: 'Real assistant reply from final event.',
+      sessionId: 'test-session',
+    });
+  });
+
   it('preserves structured thinking and tool blocks when loading chat history', async () => {
     const ws = new FakeGatewayClient();
     ws.chatHistory = vi.fn(async () => ([
