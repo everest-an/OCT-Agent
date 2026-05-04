@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="assets/OCT%2010S.gif" alt="OCT 10S demo" width="980" />
+</p>
+
+<p align="center">
       <img src="assets/github banner.png" alt="OCT AGENT" style="max-width: 100%; height: auto;" />
 </p>
 

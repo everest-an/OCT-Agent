@@ -49,6 +49,7 @@ import {
   buildWebCompatibilityRetryPrompt,
 } from './awareness-memory-utils';
 import { chatSendViaCli, chatSendViaCliWithWebCompatibilityRetry, prepareCliFallbackWithDaemonRetry } from './chat-cli-executor';
+import { extractAttachmentText } from '../attachment-text-extractor';
 
 // --- Helper functions extracted to ./chat-message-builders.ts, ./gateway-event-normalizer.ts,
 // --- ./chat-detection.ts, ./awareness-memory-utils.ts, ./chat-cli-executor.ts ---
@@ -611,6 +612,26 @@ export function registerChatHandlers(deps: {
       const parts: string[] = [];
       if (images.length > 0) parts.push(`[Images to analyze: ${images.join(', ')}] (use exec tool to read or describe these image files)`);
       if (others.length > 0) parts.push(`[Attached files: ${others.join(', ')}]`);
+
+      if (others.length > 0) {
+        const extractableFiles = others.filter((filePath) => {
+          const ext = path.extname(filePath).toLowerCase();
+          return ext === '.xlsx' || ext === '.xls' || ext === '.pptx';
+        });
+
+        if (extractableFiles.length > 0) {
+          const extractedParts = await Promise.all(extractableFiles.slice(0, 4).map(async (filePath) => {
+            const text = await extractAttachmentText(filePath, { maxChars: 3500 });
+            if (!text) return null;
+            return `- ${filePath}\n${text}`;
+          }));
+          const extractedContent = extractedParts.filter(Boolean) as string[];
+          if (extractedContent.length > 0) {
+            parts.push(`[Attached file extracted text — use this content directly for reasoning, and fall back to tools only if more detail is required]\n${extractedContent.join('\n\n')}`);
+          }
+        }
+      }
+
       fullMessage = `${parts.join('\n')}\n\n${fullMessage}`;
     }
 

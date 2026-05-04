@@ -12,6 +12,12 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useI18n } from '../../lib/i18n';
 import { memoryMarkdownComponents, getCategoryDisplay } from './memory-helpers';
+import {
+  getFileExtension,
+  resolveDocAbsolutePath,
+  shouldPreferNativeDocViewer,
+  shouldRenderMarkdown,
+} from './workspace-doc-utils';
 import type { KnowledgeCard } from './memory-helpers';
 import type {
   WikiSelectedItem, WorkspaceFileDetail, ScanStatus, WorkspaceStats, WikiPageItem,
@@ -412,13 +418,16 @@ export function WorkspaceFileView({ fileId, fileTitle, cards, onSelect }: Worksp
 interface WorkspaceDocViewProps {
   docId: string;
   docTitle: string;
+  workspaceRoot?: string | null;
   onSelect: (item: WikiSelectedItem) => void;
 }
 
-export function WorkspaceDocView({ docId, docTitle, onSelect }: WorkspaceDocViewProps) {
+export function WorkspaceDocView({ docId, docTitle, workspaceRoot, onSelect }: WorkspaceDocViewProps) {
   const { t } = useI18n();
   const [detail, setDetail] = useState<WorkspaceFileDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [openState, setOpenState] = useState<'idle' | 'opening' | 'error' | 'missing'>('idle');
+  const [revealState, setRevealState] = useState<'idle' | 'opening' | 'error' | 'missing'>('idle');
 
   useEffect(() => {
     let cancelled = false;
@@ -443,10 +452,62 @@ export function WorkspaceDocView({ docId, docTitle, onSelect }: WorkspaceDocView
   const content = detail?.content ?? '';
   const meta = detail?.metadata ?? {};
   const relPath = (meta.relativePath as string) ?? docTitle;
+  const extension = getFileExtension(relPath);
+  const absolutePath = resolveDocAbsolutePath(detail, docTitle, workspaceRoot);
+  const preferNativeViewer = shouldPreferNativeDocViewer(extension, content);
+  const markdownMode = shouldRenderMarkdown(extension);
   const docEdges = detail?.edges ?? [];
   const docSimilars = docEdges.filter((e) => e.type === 'similarity')
     .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
   const docRefs = docEdges.filter((e) => e.type === 'doc_reference');
+
+  const openWithDefaultApp = useCallback(async () => {
+    const api: any = (window as any).electronAPI;
+    if (!absolutePath || !api?.openPath) return;
+    setOpenState('opening');
+    try {
+      const result = await api.openPath(absolutePath);
+      if (result?.ok === false) {
+        setOpenState(result.error === 'file not found' ? 'missing' : 'error');
+        return;
+      }
+      setOpenState('idle');
+    } catch {
+      setOpenState('error');
+    }
+  }, [absolutePath]);
+
+  const showInFolder = useCallback(async () => {
+    const api: any = (window as any).electronAPI;
+    if (!absolutePath || !api?.showItemInFolder) return;
+    setRevealState('opening');
+    try {
+      const result = await api.showItemInFolder(absolutePath);
+      if (result?.ok === false) {
+        setRevealState(result.error === 'file not found' ? 'missing' : 'error');
+        return;
+      }
+      setRevealState('idle');
+    } catch {
+      setRevealState('error');
+    }
+  }, [absolutePath]);
+
+  const openStatus = openState === 'opening'
+    ? t('memory.wiki.openingFile', 'Opening...')
+    : openState === 'missing'
+      ? t('memory.wiki.fileMissing', 'File not found')
+      : openState === 'error'
+        ? t('memory.wiki.openFailed', 'Open failed')
+        : '';
+
+  const revealStatus = revealState === 'opening'
+    ? t('memory.wiki.locatingFile', 'Locating...')
+    : revealState === 'missing'
+      ? t('memory.wiki.fileMissing', 'File not found')
+      : revealState === 'error'
+        ? t('memory.wiki.openFailed', 'Open failed')
+        : '';
 
   return (
     <div className="flex-1 overflow-y-auto p-6 max-w-3xl mx-auto space-y-4">
@@ -460,12 +521,49 @@ export function WorkspaceDocView({ docId, docTitle, onSelect }: WorkspaceDocView
         <span className="text-xs text-slate-500 font-mono">{relPath}</span>
       </div>
 
+      {absolutePath && (
+        <div className="rounded-xl border border-slate-700/50 bg-slate-900/40 p-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => { void openWithDefaultApp(); }}
+            className="px-3 py-1.5 text-xs text-slate-200 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
+          >
+            {t('memory.wiki.openOriginal', 'Open original file')}
+          </button>
+          <button
+            type="button"
+            onClick={() => { void showInFolder(); }}
+            className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 border border-slate-700 hover:border-slate-600 rounded-lg transition-colors"
+          >
+            {t('memory.wiki.showInFolder', 'Show in folder')}
+          </button>
+          {(openStatus || revealStatus) && (
+            <span className="text-[11px] text-slate-500">{openStatus || revealStatus}</span>
+          )}
+        </div>
+      )}
+
+      {preferNativeViewer && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200 leading-5">
+          {t(
+            'memory.wiki.binaryDocHint',
+            'This document appears to be a binary Office/PDF file. Open the original file for the best human-readable view. The extracted text below is used for search and agent context.',
+          )}
+        </div>
+      )}
+
       {content ? (
-        <article className="prose prose-invert prose-sm max-w-none rounded-xl border border-slate-700/40 bg-slate-950/40 p-5">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={memoryMarkdownComponents}>
-            {content}
-          </ReactMarkdown>
-        </article>
+        markdownMode && !preferNativeViewer ? (
+          <article className="prose prose-invert prose-sm max-w-none rounded-xl border border-slate-700/40 bg-slate-950/40 p-5">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={memoryMarkdownComponents}>
+              {content}
+            </ReactMarkdown>
+          </article>
+        ) : (
+          <pre className="rounded-xl border border-slate-700/40 bg-slate-950/40 p-4 overflow-x-auto text-xs leading-relaxed text-slate-300 whitespace-pre-wrap break-all">
+            {content.length > 12000 ? `${content.slice(0, 12000)}\n\n... (truncated)` : content}
+          </pre>
+        )
       ) : (
         <p className="text-sm text-slate-500 italic">
           {t('memory.wiki.noDocContent', 'No content available for this document.')}

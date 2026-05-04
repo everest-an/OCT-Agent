@@ -49,6 +49,8 @@ export interface CronJobRecord {
 export interface ElectronAPI {
   getPlatform: () => Promise<string>;
   openExternal: (url: string) => Promise<void>;
+  showItemInFolder?: (targetPath: string) => Promise<{ ok: boolean; error?: string }>;
+  openPath?: (targetPath: string) => Promise<{ ok: boolean; error?: string }>;
   getDashboardUrl: () => Promise<{ url: string | null }>;
   appZoomGet?: () => Promise<{ success: boolean; factor: number; error?: string }>;
   appZoomIn?: () => Promise<{ success: boolean; factor: number; error?: string }>;

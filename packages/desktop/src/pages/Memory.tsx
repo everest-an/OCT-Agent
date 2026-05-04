@@ -636,6 +636,7 @@ export default function Memory() {
                     workspaceFiles={workspaceFiles}
                     workspaceDocs={workspaceDocs}
                     wikiPages={wikiPages}
+                    workspaceRoot={activeWorkspace.path || activeWorkspace.daemonProjectDir}
                   />
                 </main>
               </>

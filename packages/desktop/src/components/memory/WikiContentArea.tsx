@@ -28,6 +28,7 @@ interface WikiContentAreaProps {
   workspaceFiles?: WorkspaceFileItem[];
   workspaceDocs?: WorkspaceFileItem[];
   wikiPages?: WikiPageItem[];
+  workspaceRoot?: string | null;
 }
 
 export function WikiContentArea({
@@ -44,6 +45,7 @@ export function WikiContentArea({
   workspaceFiles = [],
   workspaceDocs = [],
   wikiPages = [],
+  workspaceRoot,
 }: WikiContentAreaProps) {
   const { t } = useI18n();
 
@@ -179,6 +181,7 @@ export function WikiContentArea({
       <WorkspaceDocView
         docId={selectedItem.id}
         docTitle={selectedItem.title}
+        workspaceRoot={workspaceRoot}
         onSelect={onSelect}
       />
     );
