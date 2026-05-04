@@ -1,4 +1,3 @@
-import fs from 'fs';
 import path from 'path';
 import { ipcMain } from 'electron';
 import {
@@ -68,20 +67,17 @@ export function registerOpenClawConfigHandlers(deps: {
 
   ipcMain.handle('plugins:list', async () => {
     try {
-      const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      const entries = config.plugins?.entries || [];
+      const config = readConfig(deps.home);
+      const entries = config.plugins?.entries || {};
       return { success: true, entries };
     } catch (err: any) {
-      return { success: false, error: err.message, entries: [] };
+      return { success: false, error: err.message, entries: {} };
     }
   });
 
   ipcMain.handle('plugins:toggle', async (_e, name: string, enabled: boolean) => {
     try {
-      const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
-      let config: any = {};
-      try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+      const config = readConfig(deps.home);
       if (!config.plugins) config.plugins = {};
       if (!config.plugins.entries) config.plugins.entries = {};
       if (config.plugins.entries[name]) {
@@ -89,7 +85,7 @@ export function registerOpenClawConfigHandlers(deps: {
       } else {
         config.plugins.entries[name] = { enabled };
       }
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+      writeConfig(deps.home, config);
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message };
@@ -98,8 +94,7 @@ export function registerOpenClawConfigHandlers(deps: {
 
   ipcMain.handle('hooks:list', async () => {
     try {
-      const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      const config = readConfig(deps.home);
       const hooks = config.hooks || {};
       return { success: true, hooks };
     } catch (err: any) {
@@ -109,16 +104,14 @@ export function registerOpenClawConfigHandlers(deps: {
 
   ipcMain.handle('hooks:toggle', async (_e, hookName: string, enabled: boolean) => {
     try {
-      const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
-      let config: any = {};
-      try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+      const config = readConfig(deps.home);
       if (!config.hooks) config.hooks = {};
       if (config.hooks[hookName]) {
         config.hooks[hookName].enabled = enabled;
       } else {
         config.hooks[hookName] = { enabled };
       }
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+      writeConfig(deps.home, config);
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message };
@@ -127,8 +120,7 @@ export function registerOpenClawConfigHandlers(deps: {
 
   ipcMain.handle('permissions:get', async () => {
     try {
-      const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      const config = readConfig(deps.home);
       const tools = config.tools || {};
       const execApprovals = getExecApprovalSettings(deps.home);
       return {

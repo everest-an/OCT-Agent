@@ -484,7 +484,7 @@ export function registerChannelSetupHandlers(deps: {
       changed = hardenWhatsAppDmPolicy(config) || changed;
       if (!changed) return false;
 
-      fs.writeFileSync(OPENCLAW_CONFIG_PATH, JSON.stringify(config, null, 2));
+      safeWriteJsonFile(OPENCLAW_CONFIG_PATH, config as Record<string, any>);
       return true;
     } catch {
       return false;
@@ -880,7 +880,7 @@ export function registerChannelSetupHandlers(deps: {
               if (!isPlainRecord(cfg.plugins.entries)) cfg.plugins.entries = {};
               if (!isPlainRecord(cfg.plugins.entries['openclaw-weixin'])) cfg.plugins.entries['openclaw-weixin'] = {};
               cfg.plugins.entries['openclaw-weixin'].allowUnsigned = true;
-              fs.writeFileSync(OPENCLAW_CONFIG_PATH, JSON.stringify(cfg, null, 2));
+              safeWriteJsonFile(OPENCLAW_CONFIG_PATH, cfg as Record<string, any>);
             }
           } catch {}
         } catch { /* fall through to plain retry */ }
@@ -921,7 +921,7 @@ export function registerChannelSetupHandlers(deps: {
           if (!cfg.channels[openclawId]) cfg.channels[openclawId] = {};
           if (!cfg.channels[openclawId].enabled) {
             cfg.channels[openclawId].enabled = true;
-            fs.writeFileSync(OPENCLAW_CONFIG_PATH, JSON.stringify(cfg, null, 2));
+            safeWriteJsonFile(OPENCLAW_CONFIG_PATH, cfg as Record<string, any>);
           }
         }
       } catch { /* non-fatal — channel list still works via CLI fallback */ }

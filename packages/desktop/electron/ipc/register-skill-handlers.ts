@@ -4,6 +4,7 @@ import https from 'https';
 import path from 'path';
 import { ipcMain, BrowserWindow } from 'electron';
 import { getAgentWorkspaceDir } from '../openclaw-config';
+import { readJsonFileWithBom, safeWriteJsonFile } from '../json-file';
 
 const ANSI_REGEX = new RegExp(String.raw`\u001b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])`, 'g');
 
@@ -188,7 +189,7 @@ function normalizeStringList(value: unknown): string[] {
 
 function readOpenclawConfig(home: string): Record<string, any> {
   try {
-    return JSON.parse(fs.readFileSync(path.join(home, '.openclaw', 'openclaw.json'), 'utf8'));
+    return readJsonFileWithBom<Record<string, any>>(path.join(home, '.openclaw', 'openclaw.json'));
   } catch {
     return {};
   }
@@ -1535,7 +1536,7 @@ export function registerSkillHandlers(deps: {
   ipcMain.handle('skill:save-config', async (_e, slug: string, newConfig: Record<string, unknown>) => {
     try {
       let config: any = {};
-      try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+      try { config = readJsonFileWithBom<Record<string, any>>(configPath); } catch {}
       // Ensure skills.entries path exists
       if (!config.skills) config.skills = {};
       if (!config.skills.entries) config.skills.entries = {};
@@ -1556,7 +1557,7 @@ export function registerSkillHandlers(deps: {
       }
       // Remaining keys go into config
       entry.config = { ...entry.config, ...newConfig };
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+      safeWriteJsonFile(configPath, config);
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message };

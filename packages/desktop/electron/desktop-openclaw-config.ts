@@ -159,6 +159,10 @@ function hasWeixinPluginInstalled(homedir: string) {
   return fs.existsSync(path.join(homedir, '.openclaw', 'extensions', 'openclaw-weixin', 'package.json'));
 }
 
+function hasWhatsappPluginInstalled(homedir: string) {
+  return fs.existsSync(path.join(homedir, '.openclaw', 'extensions', 'whatsapp', 'package.json'));
+}
+
 function stripDesktopOnlyConfigMarkers(config: Record<string, any>) {
   const containers = [
     config.channels,
@@ -362,6 +366,25 @@ export function sanitizeDesktopAwarenessPluginConfig(config: Record<string, any>
       config.plugins.allow = config.plugins.allow.filter((pluginId: string) => (
         pluginId !== 'openclaw-weixin' && pluginId !== '@tencent-weixin/openclaw-weixin'
       ));
+    }
+  }
+
+  // If WhatsApp plugin package is missing and the channel is not currently enabled,
+  // drop stale plugin references so OpenClaw doesn't spam "plugin not found" on every
+  // CLI command. Keep active WhatsApp channel config untouched.
+  if (!hasWhatsappPluginInstalled(homedir)) {
+    const whatsappActive = config.channels?.whatsapp?.enabled === true
+      || config.plugins?.entries?.whatsapp?.enabled === true;
+
+    if (!whatsappActive) {
+      if (config.plugins.entries?.whatsapp) {
+        delete config.plugins.entries.whatsapp;
+      }
+      if (Array.isArray(config.plugins.allow)) {
+        config.plugins.allow = config.plugins.allow.filter((pluginId: string) => (
+          pluginId !== 'whatsapp' && pluginId !== '@openclaw/whatsapp'
+        ));
+      }
     }
   }
 

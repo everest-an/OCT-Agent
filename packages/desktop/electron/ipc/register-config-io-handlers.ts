@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { dialog, ipcMain, shell } from 'electron';
+import { readJsonFileWithBom, safeWriteJsonFile } from '../json-file';
 
 export function registerConfigIoHandlers(deps: {
   home: string;
@@ -35,7 +36,7 @@ export function registerConfigIoHandlers(deps: {
     if (result.canceled || !result.filePath) return { success: false, error: 'Cancelled' };
 
     try {
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      const config = readJsonFileWithBom<Record<string, any>>(configPath);
       const exportData = {
         _exportVersion: 1,
         _exportDate: new Date().toISOString(),
@@ -69,12 +70,12 @@ export function registerConfigIoHandlers(deps: {
       const configPath = path.join(configDir, 'openclaw.json');
 
       let existing: Record<string, unknown> = {};
-      try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+      try { existing = readJsonFileWithBom<Record<string, unknown>>(configPath); } catch {}
 
       const sanitizedImport = deps.stripRedactedValues(data.openclawConfig || {});
       const merged = deps.mergeOpenClawConfig(existing as Record<string, any>, sanitizedImport as Record<string, any>);
 
-      fs.writeFileSync(configPath, JSON.stringify(merged, null, 2));
+      safeWriteJsonFile(configPath, merged as Record<string, any>);
       return { success: true, config: sanitizedImport, redactedImport: !!data._redacted };
     } catch (err: any) {
       return { success: false, error: err.message };

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { ipcMain } from 'electron';
+import { safeWriteJsonFile } from '../json-file';
 
 /** Well-known default baseUrls for built-in providers (used to auto-repair missing baseUrl in openclaw.json). */
 const PROVIDER_DEFAULT_BASE_URLS: Record<string, string> = {
@@ -153,7 +154,7 @@ export function registerRuntimeHealthHandlers(deps: {
         }
       }
       if (needsRepair) {
-        try { fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8'); } catch { /* best-effort */ }
+        try { safeWriteJsonFile(configPath, config); } catch { /* best-effort */ }
       }
 
       const result: Array<{

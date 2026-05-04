@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { ipcMain, shell } from 'electron';
 import { writeDesktopExecApprovalDefaults } from '../openclaw-config';
+import { readJsonFileWithBom, safeWriteJsonFile } from '../json-file';
 
 const OPENCLAW_INSTALL_TIMEOUT_MS = 300000;
 const OPENCLAW_STATUS_PULSE_MS = 15000;
@@ -631,7 +632,7 @@ export function registerSetupHandlers(deps: {
         fs.mkdirSync(configDir, { recursive: true });
 
         let config: any = {};
-        try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+        try { config = readJsonFileWithBom<Record<string, any>>(configPath); } catch {}
 
         if (config.plugins?.entries?.['openclaw-memory']) {
           delete config.plugins.entries['openclaw-memory'];
@@ -643,7 +644,7 @@ export function registerSetupHandlers(deps: {
           delete config.plugins.slots.memory;
         }
         deps.sanitizeAwarenessPluginConfig(config);
-        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+        safeWriteJsonFile(configPath, config);
         return {
           success: false,
           error: `Awareness Memory plugin could not be installed. OCT cleaned stale plugin state so Retry can self-repair. ${installErrors.slice(-3).join(' | ') || 'Please check npm/network access.'}`,
@@ -790,11 +791,11 @@ export function registerSetupHandlers(deps: {
 
     let existing: Record<string, any> = {};
     try {
-      existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      existing = readJsonFileWithBom<Record<string, any>>(configPath);
     } catch {}
 
     const merged = deps.mergeOpenClawConfig(existing, config as Record<string, any>);
-    fs.writeFileSync(configPath, JSON.stringify(merged, null, 2));
+    safeWriteJsonFile(configPath, merged);
     writeDesktopExecApprovalDefaults(deps.home);
     return { success: true };
   });

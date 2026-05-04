@@ -331,6 +331,34 @@ describe('desktop openclaw config merge', () => {
     expect(config.plugins.allow).toEqual(expect.arrayContaining(['whatsapp']));
   });
 
+  it('removes stale disabled WhatsApp plugin references when plugin package is missing', () => {
+    const config: Record<string, any> = {
+      channels: {
+        whatsapp: {
+          enabled: false,
+        },
+      },
+      plugins: {
+        allow: ['whatsapp', 'browser'],
+        entries: {
+          whatsapp: {
+            enabled: false,
+          },
+          browser: {
+            enabled: true,
+          },
+        },
+      },
+    };
+
+    sanitizeDesktopAwarenessPluginConfig(config, '/tmp/awareness-desktop-test');
+
+    expect(config.plugins.entries.whatsapp).toBeUndefined();
+    expect(config.plugins.entries.browser).toEqual({ enabled: true });
+    expect(config.plugins.allow).not.toContain('whatsapp');
+    expect(config.plugins.allow).toContain('browser');
+  });
+
   it('removes desktop-only quarantine markers left by older builds', () => {
     const config: Record<string, any> = {
       channels: {

@@ -4,7 +4,7 @@ import { ipcMain } from 'electron';
 import os from 'os';
 import { callMcp, checkMemoryHealth, fetchMemoryEvents, fetchKnowledgeCards, fetchCardEvolution, type MemoryEventQueryOptions } from '../memory-client';
 import { buildMemoryInitArgs, buildMemorySearchArgs, MEMORY_SEARCH_RESULT_LIMIT } from '../memory-protocol';
-import { readJsonFileWithBom } from '../json-file';
+import { readJsonFileWithBom, safeWriteJsonFile } from '../json-file';
 import {
   applyAllSelfImprovementPromotionProposals,
   appendSelfImprovementEntry,
@@ -226,7 +226,7 @@ export function registerMemoryHandlers() {
         }
       }
 
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+      safeWriteJsonFile(configPath, config);
       return { success: true, message: 'Removed stale memory slot override; Awareness Memory remains enabled through plugin config.' };
     } catch (err: any) {
       return { success: false, error: err?.message || String(err) };
