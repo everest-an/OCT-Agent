@@ -166,6 +166,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('gateway:status-update', handler);
     return () => ipcRenderer.removeListener('gateway:status-update', handler);
   },
+  onGatewayHealth: (cb: (data: {
+    state: 'healthy' | 'degraded' | 'manual_required';
+    previousState?: 'healthy' | 'degraded' | 'manual_required';
+    reason?: 'degraded-threshold' | 'manual-threshold' | 'recovered';
+    consecutiveFailures: number;
+    reachable: boolean;
+  }) => void) => {
+    const handler = (_e: any, data: any) => cb(data);
+    ipcRenderer.on('gateway:health', handler);
+    return () => ipcRenderer.removeListener('gateway:health', handler);
+  },
 
   // Log viewer
   getRecentLogs: () => ipcRenderer.invoke('logs:recent'),

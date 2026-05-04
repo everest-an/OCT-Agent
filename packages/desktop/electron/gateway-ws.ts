@@ -32,6 +32,8 @@ interface GatewayConfig {
 }
 
 const LOOPBACK_HOST = '127.0.0.1';
+const GATEWAY_CONNECT_TIMEOUT_MS = 60_000;
+const GATEWAY_CHALLENGE_WAIT_MS = 5_000;
 
 interface RpcResponse {
   type: 'res';
@@ -169,7 +171,7 @@ export class GatewayClient extends EventEmitter {
         handshakeSettled = true;
         this.ws?.close();
         reject(new Error('Gateway connection timed out'));
-      }, 30000);
+      }, GATEWAY_CONNECT_TIMEOUT_MS);
 
       let challengeNonce: string | null = null;
 
@@ -259,14 +261,14 @@ export class GatewayClient extends EventEmitter {
           }));
         };
 
-        // Challenge arrives as an event right after open — wait up to 3s for it.
+        // Challenge arrives as an event right after open — wait up to 5s for it.
         // Device identity auth REQUIRES the challenge nonce; without it, connect fails.
         const pollStart = Date.now();
         const poll = setInterval(() => {
           if (challengeNonce) {
             clearInterval(poll);
             sendConnect();
-          } else if (Date.now() - pollStart > 3000) {
+          } else if (Date.now() - pollStart > GATEWAY_CHALLENGE_WAIT_MS) {
             // No challenge received — send connect without device identity (will likely fail,
             // but lets the error propagate to the caller instead of hanging)
             clearInterval(poll);

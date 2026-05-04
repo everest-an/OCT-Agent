@@ -89,7 +89,7 @@ describe('GatewayClient', () => {
     });
 
     ws.emit('open');
-    await vi.advanceTimersByTimeAsync(3100);
+    await vi.advanceTimersByTimeAsync(5100);
 
     expect(ws.sent).toHaveLength(1);
     const request = JSON.parse(ws.sent[0]);

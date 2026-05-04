@@ -1058,6 +1058,38 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     return () => cleanup?.();
   }, []);
 
+  useEffect(() => {
+    const api = window.electronAPI as any;
+    const cleanup = api?.onGatewayHealth?.((data: {
+      state: 'healthy' | 'degraded' | 'manual_required';
+      previousState?: 'healthy' | 'degraded' | 'manual_required';
+      reason?: 'degraded-threshold' | 'manual-threshold' | 'recovered';
+      reachable: boolean;
+    }) => {
+      setGatewayRunning(data.reachable);
+
+      if (data.reason === 'manual-threshold') {
+        setLastGatewayStatusHint(t('chat.gatewayHealthManualRequired', 'Gateway is unstable. Please restart Gateway in Settings -> Gateway.'));
+        return;
+      }
+
+      if (data.reason === 'degraded-threshold') {
+        setLastGatewayStatusHint(t('chat.gatewayHealthDegraded', 'Gateway is unstable. Auto-repair is running in the background.'));
+        return;
+      }
+
+      if (data.reason === 'recovered') {
+        setLastGatewayStatusHint(t('chat.gatewayHealthRecovered', 'Gateway connection has recovered.'));
+        return;
+      }
+
+      if (data.state === 'healthy' && data.previousState && data.previousState !== 'healthy') {
+        setLastGatewayStatusHint(t('chat.gatewayHealthRecovered', 'Gateway connection has recovered.'));
+      }
+    });
+    return () => cleanup?.();
+  }, [t]);
+
   // When Channels page triggers "Open Chat" for a specific channel, open sidebar
   // and select the most recent session for that channel (or just show sidebar if none yet).
   useEffect(() => {

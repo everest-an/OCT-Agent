@@ -99,6 +99,13 @@ export interface ElectronAPI {
       lastError?: string;
     };
   }) => void) => (() => void);
+  onGatewayHealth?: (callback: (data: {
+    state: 'healthy' | 'degraded' | 'manual_required';
+    previousState?: 'healthy' | 'degraded' | 'manual_required';
+    reason?: 'degraded-threshold' | 'manual-threshold' | 'recovered';
+    consecutiveFailures: number;
+    reachable: boolean;
+  }) => void) => (() => void);
   onChatAgentInvalidated?: (callback: (info: { requestedAgentId: string; resolvedAgentId: string; reason?: string }) => void) => (() => void);
   onMemoryWarning?: (callback: (payload: { type: string; message: string }) => void) => (() => void);
   filePreview?: (filePath: string) => Promise<unknown>;
