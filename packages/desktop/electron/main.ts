@@ -24,6 +24,7 @@ import {
   windowsForceKillTree,
 } from './local-daemon';
 import { GatewayClient } from './gateway-ws';
+import { createGatewayHealthMonitor } from './gateway-health-monitor';
 import { findPrebindingGatewayPids } from './gateway-startup-guards';
 import {
   getChannelInboundAgent,
@@ -98,6 +99,9 @@ let daemonStartupLastKickoff = 0;
 let gatewayWsClient: GatewayClient | null = null;
 let gatewayWsConnectPromise: Promise<GatewayClient> | null = null;
 let gatewayRepairPromise: Promise<{ ok: boolean; error?: string }> | null = null;
+let gatewayHealthTimer: ReturnType<typeof setTimeout> | null = null;
+let gatewayHealthTickInFlight = false;
+let gatewayHealthMonitorRunning = false;
 let gatewayUserSessionLastLaunchAt = 0;
 let gatewayWarmupHandshakeFailures = 0;
 let gatewayLastRepairKickoffAt = 0;
@@ -108,8 +112,17 @@ let legacyWindowsOpenClawSafeMode = false;
 const GATEWAY_USER_SESSION_RELAUNCH_COOLDOWN_MS = 15000;
 const GATEWAY_REPAIR_KICKOFF_COOLDOWN_MS = 60000;
 const GATEWAY_WARMUP_REPAIR_FAILURE_THRESHOLD = 3;
+const GATEWAY_HEALTH_MONITOR_FAST_INTERVAL_MS = 30_000;
+const GATEWAY_HEALTH_MONITOR_BASE_INTERVAL_MS = 180_000;
 const DAEMON_FOREGROUND_BOOTSTRAP_TIMEOUT_MS = 240000;
 const DAEMON_WAIT_AFTER_BOOTSTRAP_MS = 90000;
+
+const gatewayHealthMonitor = createGatewayHealthMonitor({
+  degradedThreshold: 2,
+  manualThreshold: 6,
+  selfHealThreshold: 2,
+  selfHealCooldownMs: GATEWAY_REPAIR_KICKOFF_COOLDOWN_MS,
+});
 
 function hasOtherOCTAgentProcess(): boolean {
   if (process.platform !== 'win32') return true;
@@ -864,6 +877,101 @@ function startGatewayRepairInBackground(send?: (ch: string, data: any) => void) 
   return gatewayRepairPromise;
 }
 
+async function runGatewayHealthTick() {
+  if (!gatewayHealthMonitorRunning) return;
+  if (gatewayHealthTickInFlight) return;
+  gatewayHealthTickInFlight = true;
+  let nextDelayMs = GATEWAY_HEALTH_MONITOR_BASE_INTERVAL_MS;
+  try {
+    const reachable = await tcpProbeGatewayPort();
+    const result = gatewayHealthMonitor.tick({
+      gatewayReachable: reachable,
+      gatewayRepairActive: !!gatewayRepairPromise,
+      now: Date.now(),
+    });
+
+    nextDelayMs = result.state === 'healthy'
+      ? GATEWAY_HEALTH_MONITOR_BASE_INTERVAL_MS
+      : GATEWAY_HEALTH_MONITOR_FAST_INTERVAL_MS;
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('gateway:health', {
+        state: result.state,
+        previousState: result.previous,
+        reason: result.event?.reason,
+        consecutiveFailures: result.consecutiveFailures,
+        reachable,
+      });
+    }
+
+    if (result.event) {
+      if (result.event.reason === 'degraded-threshold') {
+        console.warn('[gateway-health] degraded: gateway probe failed repeatedly');
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('chat:status', {
+            type: 'gateway',
+            message: 'Local Gateway is unstable. Trying self-recovery now...',
+          });
+        }
+      } else if (result.event.reason === 'manual-threshold') {
+        console.warn('[gateway-health] manual intervention required: repeated probe failures');
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('chat:status', {
+            type: 'gateway',
+            message: 'Local Gateway still cannot recover automatically. Please check Settings -> Gateway.',
+          });
+        }
+      } else if (result.event.reason === 'recovered') {
+        console.log('[gateway-health] recovered');
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('chat:status', {
+            type: 'gateway',
+            message: 'Local Gateway recovered and is ready.',
+          });
+        }
+      }
+    }
+
+    if (result.shouldSelfHeal) {
+      startGatewayRepairInBackground((ch, data) => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(ch, data);
+      });
+    }
+  } catch (err: any) {
+    console.warn('[gateway-health] tick failed (non-fatal):', err?.message || err);
+    nextDelayMs = GATEWAY_HEALTH_MONITOR_FAST_INTERVAL_MS;
+  } finally {
+    gatewayHealthTickInFlight = false;
+    scheduleNextGatewayHealthTick(nextDelayMs);
+  }
+}
+
+function scheduleNextGatewayHealthTick(delayMs: number) {
+  if (!gatewayHealthMonitorRunning) return;
+  if (gatewayHealthTimer) {
+    clearTimeout(gatewayHealthTimer);
+    gatewayHealthTimer = null;
+  }
+  gatewayHealthTimer = setTimeout(() => {
+    void runGatewayHealthTick();
+  }, delayMs);
+}
+
+function startGatewayHealthMonitor() {
+  if (gatewayHealthMonitorRunning) return;
+  gatewayHealthMonitorRunning = true;
+  // Warm up shortly after startup so the UI can surface early degradation.
+  scheduleNextGatewayHealthTick(10_000);
+}
+
+function stopGatewayHealthMonitor() {
+  gatewayHealthMonitorRunning = false;
+  if (gatewayHealthTimer) {
+    clearTimeout(gatewayHealthTimer);
+    gatewayHealthTimer = null;
+  }
+}
+
 async function startGatewayInUserSession(send?: (ch: string, data: any) => void): Promise<{ ok: boolean; error?: string }> {
   send?.('chat:status', { type: 'gateway', message: 'Starting temporary Gateway...' });
 
@@ -1515,14 +1623,14 @@ async function prepareGatewayForChat(): Promise<{ ok: boolean; error?: string }>
         message: 'Connecting to local Gateway...',
       });
 
-      // Retry WS connection up to 3 times with 5s delays. Gateway may need time
+      // Retry WS connection up to 5 times with 6s delays. Gateway may need time
       // to finish plugin loading after TCP listener is up (handshake timeout).
-      // Note: connect timeout in gateway-ws.ts is 30s to handle cases where
+      // Note: connect timeout in gateway-ws.ts is 60s to handle cases where
       // gateway event loop is blocked by models.list (~17-28s on startup).
-      for (let attempt = 0; attempt < 3; attempt++) {
+      for (let attempt = 0; attempt < 5; attempt++) {
         try {
           // getGatewayWs internally handles concurrent callers via gatewayWsConnectPromise
-          // mutex, has a 30s connect timeout, and pre-warms write scopes. Once this
+          // mutex, has a 60s connect timeout, and pre-warms write scopes. Once this
           // succeeds, gatewayWsClient.isConnected stays true for the lifetime of the
           // process — every subsequent chat hits the fast path above with no delay.
           await getGatewayWs();
@@ -1541,13 +1649,13 @@ async function prepareGatewayForChat(): Promise<{ ok: boolean; error?: string }>
           // WS connect failed despite the port being open. This usually means
           // Gateway is mid-startup and not yet accepting protocol-level connects
           // (handshake races plugin loader — see openclaw#46256).
-          console.warn(`[chat] Gateway WS connect attempt ${attempt + 1}/3 failed:`, detail);
-          if (attempt < 2) {
+          console.warn(`[chat] Gateway WS connect attempt ${attempt + 1}/5 failed:`, detail);
+          if (attempt < 4) {
             send('chat:status', {
               type: 'gateway',
-              message: `Gateway is loading plugins... Retrying connection (${attempt + 2}/3)`,
+              message: `Gateway is loading plugins... Retrying connection (${attempt + 2}/5)`,
             });
-            await sleep(5000);
+            await sleep(6000);
           }
         }
       }
@@ -1882,10 +1990,18 @@ const doctor = {
 
 function createTray() {
   const trayIconFile = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
-  const iconPath = path.join(__dirname, isDev ? `../resources/${trayIconFile}` : `../../resources/${trayIconFile}`);
+  const trayIconCandidates = [
+    path.join(__dirname, '..', 'resources', trayIconFile),
+    path.join(process.resourcesPath, trayIconFile),
+    path.join(process.resourcesPath, 'resources', trayIconFile),
+  ];
+  const iconPath = trayIconCandidates.find((candidate) => fs.existsSync(candidate)) || trayIconCandidates[0];
   let trayIcon;
   try {
     trayIcon = nativeImage.createFromPath(iconPath);
+    if (!trayIcon || trayIcon.isEmpty()) {
+      return; // Skip tray if icon cannot be decoded
+    }
     if (process.platform === 'darwin') {
       trayIcon = trayIcon.resize({ width: 18, height: 18 });
       trayIcon.setTemplateImage(true); // macOS dark/light mode support
@@ -2601,6 +2717,10 @@ app.whenReady().then(async () => {
     if (!daemonWatchdog.isRunning()) daemonWatchdog.startDaemonWatchdog();
   }, 30_000);
 
+  // Run a lightweight gateway health monitor every 30s with staged self-healing.
+  // This is complementary to chat-triggered repair: it catches idle-time failures.
+  startGatewayHealthMonitor();
+
   // Warm up the OpenClaw config schema cache in the background.
   // Runs after a 60 s delay so it doesn't compete with gateway / daemon startup.
   // By the time the user opens Settings → Web & Browser, the schema is usually ready.
@@ -2683,6 +2803,7 @@ app.on('before-quit', (e: Event) => {
     return;
   }
   isQuitting = true;
+  stopGatewayHealthMonitor();
   daemonWatchdog.stopDaemonWatchdog();
   // Force-kill any shell children (e.g. hung `openclaw skills list --json`) that
   // were spawned with detached:true. Without this they survive as orphan processes.
