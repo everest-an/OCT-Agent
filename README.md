@@ -23,9 +23,22 @@
 
 > The AI agent that never forgets — and works with all its arms at once. Built by [Awareness](https://awareness.market).
 
+OCT is an **AI agent platform** with **long-term memory**, **CLI + desktop + messaging workflows**, **MCP tools and skills**, **automation**, and **OpenClaw-compatible migration**.
+
 **OCT** is named after the octopus — a creature with extraordinary memory and eight arms that act in parallel. That's exactly what OCT does: it remembers everything across your conversations, and coordinates multiple agents working simultaneously on complex tasks.
 
 Powered by **Awareness Memory**, which achieves **95.6% Recall@5 on [LongMemEval](https://arxiv.org/abs/2410.10813)** (ICLR 2025) — the industry benchmark for long-term conversational memory. Built on [OpenClaw](https://openclaw.ai) (247K+ stars), the open-source AI agent framework.
+
+---
+
+## Quick Navigation
+
+- **Quick Install**: Desktop app or CLI in under a minute
+- **Getting Started**: First memory-enabled chat in 3 minutes
+- **CLI vs Messaging**: Choose terminal mode or channel mode (Telegram/WhatsApp/Discord)
+- **MCP Tools & Skills**: Connect tool calls, workflows, and reusable skills
+- **Migrating from OpenClaw**: Keep your agent workflow and add memory
+- **Community**: Discord support and release updates
 
 ---
 
@@ -137,6 +150,60 @@ Double-click to install. No terminal required.
 ```bash
 npx @awareness-sdk/claw
 ```
+
+---
+
+## Getting Started (3 Minutes)
+
+1. Install OCT Desktop or run the CLI installer.
+2. Send your first message in chat.
+3. Ask a follow-up question that depends on prior context.
+4. Verify that memory recall is used automatically.
+
+This is the fastest way to validate OCT as an **AI agent with persistent memory** rather than a stateless assistant.
+
+---
+
+## CLI vs Messaging Channels
+
+OCT supports both **CLI workflows** and **messaging workflows**.
+
+- **CLI mode**: Best for developers, scripts, and terminal-first automation.
+- **Messaging mode**: Best for teams and non-technical users via Telegram, WhatsApp, WeChat, Slack, Signal, and Discord.
+
+Use CLI when you need deterministic command/control. Use messaging when you need always-on agent access from mobile and team chat.
+
+---
+
+## MCP Tools and Skills
+
+OCT works with **MCP tools** and reusable **skills** so agents can call external capabilities safely and repeatedly.
+
+- Use MCP tools for structured integrations and tool-calling workflows.
+- Use skills for repeatable playbooks and team-level automation.
+- Combine memory + tools + skills to reduce repeated prompt engineering.
+
+---
+
+## Migrating from OpenClaw
+
+Already using OpenClaw? OCT is designed for **OpenClaw-compatible migration**.
+
+- OCT wraps OpenClaw instead of forking/replacing it.
+- Keep existing agent workflows and channels.
+- Add long-term memory and desktop UX incrementally.
+
+Migration path: install OCT, validate first chat, then move your daily workflow gradually.
+
+---
+
+## Documentation and Community
+
+- Docs: [awareness.market](https://awareness.market)
+- Releases: [GitHub Releases](https://github.com/edwin-hao-ai/OCT-Agent/releases)
+- Discord: [Join Community](https://discord.com/invite/nMDrT538Qa)
+
+If OCT is useful to your team, please star the repo to help more builders discover it.
 
 ---
 
