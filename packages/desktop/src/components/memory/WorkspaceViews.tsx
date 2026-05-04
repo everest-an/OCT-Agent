@@ -461,7 +461,7 @@ export function WorkspaceDocView({ docId, docTitle, workspaceRoot, onSelect }: W
     .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
   const docRefs = docEdges.filter((e) => e.type === 'doc_reference');
 
-  const openWithDefaultApp = useCallback(async () => {
+  const openWithDefaultApp = async () => {
     const api: any = (window as any).electronAPI;
     if (!absolutePath || !api?.openPath) return;
     setOpenState('opening');
@@ -475,9 +475,9 @@ export function WorkspaceDocView({ docId, docTitle, workspaceRoot, onSelect }: W
     } catch {
       setOpenState('error');
     }
-  }, [absolutePath]);
+  };
 
-  const showInFolder = useCallback(async () => {
+  const showInFolder = async () => {
     const api: any = (window as any).electronAPI;
     if (!absolutePath || !api?.showItemInFolder) return;
     setRevealState('opening');
@@ -491,7 +491,7 @@ export function WorkspaceDocView({ docId, docTitle, workspaceRoot, onSelect }: W
     } catch {
       setRevealState('error');
     }
-  }, [absolutePath]);
+  };
 
   const openStatus = openState === 'opening'
     ? t('memory.wiki.openingFile', 'Opening...')
