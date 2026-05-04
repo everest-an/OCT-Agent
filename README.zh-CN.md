@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://awareness.market"><img src="https://img.shields.io/badge/Documentation-Awareness-3B82F6?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Documentation" /></a>
-  <a href="https://discord.gg/awareness"><img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord" /></a>
+      <a href="https://discord.com/invite/nMDrT538Qa"><img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-22C55E?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="Apache 2.0 License" /></a>
   <a href="https://awareness.market"><img src="https://img.shields.io/badge/Built%20by-Awareness-A855F7?style=for-the-badge&logo=sparkles&logoColor=white" alt="Built by Awareness" /></a>
 </p>
