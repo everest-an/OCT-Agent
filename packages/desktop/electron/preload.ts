@@ -63,7 +63,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('chat:stream-end', listener);
     return () => ipcRenderer.removeListener('chat:stream-end', listener);
   },
-  onChatStatus: (callback: (status: { type: string; tool?: string; toolStatus?: string; toolId?: string; detail?: string; approvalRequestId?: string; approvalCommand?: string }) => void) => {
+  onChatStreamReset: (callback: (payload: { reason?: string }) => void) => {
+    const listener = (_e: any, payload: { reason?: string }) => callback(payload || {});
+    ipcRenderer.on('chat:stream-reset', listener);
+    return () => ipcRenderer.removeListener('chat:stream-reset', listener);
+  },
+  onChatStatus: (callback: (status: {
+    type: string;
+    tool?: string;
+    toolStatus?: string;
+    toolId?: string;
+    message?: string;
+    detail?: string;
+    approvalRequestId?: string;
+    approvalCommand?: string;
+    gatewayCircuit?: {
+      active: boolean;
+      failureStreak: number;
+      cooldownRemainingSec: number;
+      lastError?: string;
+    };
+  }) => void) => {
     const listener = (_e: any, status: any) => callback(status);
     ipcRenderer.on('chat:status', listener);
     return () => ipcRenderer.removeListener('chat:status', listener);
@@ -106,13 +126,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   channelListSupported: () => ipcRenderer.invoke('channel:list-supported'),
   channelGetRegistry: () => ipcRenderer.invoke('channel:get-registry'),
   onChannelQR: (callback: (art: string) => void) => {
-    ipcRenderer.on('channel:qr-art', (_e: any, art: string) => callback(art));
+    const listener = (_e: any, art: string) => callback(art);
+    ipcRenderer.on('channel:qr-art', listener);
+    return () => ipcRenderer.removeListener('channel:qr-art', listener);
   },
   onChannelQrUrl: (callback: (url: string) => void) => {
-    ipcRenderer.on('channel:qr-url', (_e: any, url: string) => callback(url));
+    const listener = (_e: any, url: string) => callback(url);
+    ipcRenderer.on('channel:qr-url', listener);
+    return () => ipcRenderer.removeListener('channel:qr-url', listener);
   },
   onChannelStatus: (callback: (status: string) => void) => {
-    ipcRenderer.on('channel:status', (_e: any, status: string) => callback(status));
+    const listener = (_e: any, status: string) => callback(status);
+    ipcRenderer.on('channel:status', listener);
+    return () => ipcRenderer.removeListener('channel:status', listener);
   },
 
   // Channel conversations (unified inbox — view all channel chat history)
@@ -170,7 +196,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   skillInstallDeps: (installSpecs: Array<{ id: string; kind: string; label: string; bins: string[]; package?: string; formula?: string; module?: string }>, skillName?: string) => ipcRenderer.invoke('skill:install-deps', installSpecs, skillName),
   skillLocalInfo: (name: string) => ipcRenderer.invoke('skill:local-info', name),
   onSkillInstallProgress: (callback: (data: { stage: string; detail?: string }) => void) => {
-    ipcRenderer.on('skill:install-progress', (_e, data) => callback(data));
+    const listener = (_e: any, data: { stage: string; detail?: string }) => callback(data);
+    ipcRenderer.on('skill:install-progress', listener);
+    return () => ipcRenderer.removeListener('skill:install-progress', listener);
   },
   skillGetConfig: (slug: string) => ipcRenderer.invoke('skill:get-config', slug),
   skillSaveConfig: (slug: string, config: Record<string, unknown>) => ipcRenderer.invoke('skill:save-config', slug, config),

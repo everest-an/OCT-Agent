@@ -212,13 +212,14 @@ export default function Skills() {
       verifying: t('skills.progress.verifying', 'Verifying installation...'),
       error: t('skills.progress.error', 'Error'),
     };
-    api?.onSkillInstallProgress?.((data: { stage: string; detail?: string }) => {
+    const cleanup = api?.onSkillInstallProgress?.((data: { stage: string; detail?: string }) => {
       const label = progressLabels[data.stage] || data.stage;
       setInstallProgress(data.detail ? `${label} ${data.detail}` : label);
       if (data.stage === 'verifying' || data.stage === 'error') {
         setTimeout(() => setInstallProgress(null), 2000);
       }
     });
+    return () => cleanup?.();
   }, []);
 
   const handleSearch = async () => {

@@ -161,6 +161,12 @@ function deriveChannelIdFromSessionKey(sessionKey: string): string {
 }
 
 type AgentStatus = 'idle' | 'thinking' | 'generating' | 'error';
+type GatewayCircuitHint = {
+  active: boolean;
+  failureStreak: number;
+  cooldownRemainingSec: number;
+  lastError?: string;
+};
 type PermissionState = {
   alsoAllow: string[];
   denied: string[];
@@ -497,6 +503,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
   const [agentStatus, setAgentStatus] = useState<AgentStatus>('idle');
   const [lastErrorHint, setLastErrorHint] = useState<string | null>(null);
   const [lastGatewayStatusHint, setLastGatewayStatusHint] = useState<string | null>(null);
+  const [gatewayCircuitHint, setGatewayCircuitHint] = useState<GatewayCircuitHint | null>(null);
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
@@ -814,14 +821,28 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     });
     if (typeof cleanupChatStreamEnd === 'function') cleanups.push(cleanupChatStreamEnd);
 
+    const cleanupChatStreamReset = api.onChatStreamReset?.(() => {
+      streamingRef.current = '';
+      streamChunkCountRef.current = 0;
+      setStreamingContent('');
+      setStreamClosed(false);
+    });
+    if (typeof cleanupChatStreamReset === 'function') cleanups.push(cleanupChatStreamReset);
+
     // Status events (agent lifecycle + tool calls + gateway auto-start)
-    const cleanupChatStatus = api.onChatStatus?.((status: { type: string; tool?: string; toolStatus?: string; toolId?: string; message?: string; detail?: string; approvalRequestId?: string; approvalCommand?: string }) => {
+    const cleanupChatStatus = api.onChatStatus?.((status: { type: string; tool?: string; toolStatus?: string; toolId?: string; message?: string; detail?: string; approvalRequestId?: string; approvalCommand?: string; gatewayCircuit?: GatewayCircuitHint }) => {
       if (!activeRunRef.current) return;
       resetChatActivityTimeout();
       if (status.type === 'gateway') {
         // Gateway auto-start status — show as thinking with a message
         setAgentStatus('thinking');
         setLastGatewayStatusHint(status.message || null);
+        if (status.gatewayCircuit) {
+          const shouldShowCircuit = status.gatewayCircuit.active
+            || status.gatewayCircuit.failureStreak > 0
+            || Boolean(status.gatewayCircuit.lastError);
+          setGatewayCircuitHint(shouldShowCircuit ? status.gatewayCircuit : null);
+        }
         recordTraceEvent({
           kind: 'status',
           label: t('chat.trace.gatewayStatus', 'Gateway status'),
@@ -1438,6 +1459,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     setTraceEvents([]);
     setLiveThinkingExpanded(true);
     setLastGatewayStatusHint(null);
+    setGatewayCircuitHint(null);
     resetChatActivityTimeout();
     recordTraceEvent({
       kind: 'status',
@@ -1545,6 +1567,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
       setTraceEvents([]);
       setLiveThinkingExpanded(false);
       setLastGatewayStatusHint(null);
+      setGatewayCircuitHint(null);
       setAgentStatus('idle');
       } finally {
         activeRunRef.current = false;
@@ -1755,7 +1778,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
     }
   };
 
-  const renderStreamingContent = useCallback((content: string) => (
+  const StreamingMarkdownBlock = useCallback((props: { content: string; showCursor: boolean }) => (
     <div className="chat-markdown prose prose-sm max-w-none dark:prose-invert">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
         code({ children, className }) {
@@ -1769,11 +1792,15 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
         },
         p({ children }) { return <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>; },
       }}>
-        {content}
+        {props.content}
       </ReactMarkdown>
-      {!streamClosed && <span className="animate-pulse text-brand-400 ml-0.5">▊</span>}
+      {props.showCursor && <span className="animate-pulse text-brand-400 ml-0.5">▊</span>}
     </div>
-  ), [streamClosed]);
+  ), []);
+
+  const renderStreamingContent = useCallback((content: string) => (
+    <StreamingMarkdownBlock content={content} showCursor={!streamClosed} />
+  ), [StreamingMarkdownBlock, streamClosed]);
 
   return (
     <div className="h-full flex relative"
@@ -1942,6 +1969,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
           onStopRequest={handleStopActiveRequest}
           errorHint={lastErrorHint}
           gatewayHint={lastGatewayStatusHint}
+          gatewayCircuitHint={gatewayCircuitHint}
           onDismissError={() => {
             if (streamTimeoutRef.current) clearTimeout(streamTimeoutRef.current);
             streamingRef.current = '';
@@ -1953,6 +1981,7 @@ export default function Dashboard({ isActive = true, onNavigate, pendingChannelI
             setAgentStatus('idle');
             setLastErrorHint(null);
             setLastGatewayStatusHint(null);
+            setGatewayCircuitHint(null);
           }}
           renderStreamingContent={renderStreamingContent}
           TypewriterMessage={TypewriterMessage}

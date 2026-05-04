@@ -159,6 +159,22 @@ function hasWeixinPluginInstalled(homedir: string) {
   return fs.existsSync(path.join(homedir, '.openclaw', 'extensions', 'openclaw-weixin', 'package.json'));
 }
 
+function stripDesktopOnlyConfigMarkers(config: Record<string, any>) {
+  const containers = [
+    config.channels,
+    config.plugins?.entries,
+  ];
+
+  for (const container of containers) {
+    if (!container || typeof container !== 'object' || Array.isArray(container)) continue;
+    for (const value of Object.values(container)) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+      delete (value as Record<string, any>).disabledByDesktop;
+      delete (value as Record<string, any>).disabledReason;
+    }
+  }
+}
+
 export function ensureDesktopDefaultToolPermissions(config: Record<string, any>) {
   config.tools = {
     ...(config.tools || {}),
@@ -307,6 +323,7 @@ export function applyDesktopAwarenessPluginConfig(
 }
 
 export function sanitizeDesktopAwarenessPluginConfig(config: Record<string, any>, homedir: string) {
+  stripDesktopOnlyConfigMarkers(config);
   ensureDesktopDefaultToolPermissions(config);
   ensureDesktopBrowserAndWebDefaults(config);
   migrateLegacyChannelConfig(config);

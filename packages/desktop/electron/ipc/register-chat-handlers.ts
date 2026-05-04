@@ -151,6 +151,63 @@ function isGatewayAuthScopeError(message: string): boolean {
   );
 }
 
+const GATEWAY_PREFLIGHT_FAILURE_STREAK_THRESHOLD = 3;
+const GATEWAY_FORCE_CLI_COOLDOWN_MS = 180000;
+const DESKTOP_SESSION_JSONL_BLOAT_BYTES = 250_000;
+const DESKTOP_SESSION_TRAJECTORY_BLOAT_BYTES = 750_000;
+
+type GatewayCircuitStatus = {
+  active: boolean;
+  failureStreak: number;
+  cooldownRemainingSec: number;
+  lastError?: string;
+};
+
+function buildGatewayCircuitStatus(nowMs = Date.now()): GatewayCircuitStatus {
+  const remainingMs = Math.max(0, chatState.gatewayForceCliUntil - nowMs);
+  const remainingSec = remainingMs > 0 ? Math.max(1, Math.ceil(remainingMs / 1000)) : 0;
+  return {
+    active: remainingMs > 0,
+    failureStreak: chatState.gatewayPreflightFailureStreak,
+    cooldownRemainingSec: remainingSec,
+    lastError: chatState.lastGatewayPreflightError || undefined,
+  };
+}
+
+function isGatewayPreflightTransientError(message: string): boolean {
+  const lower = String(message || '').toLowerCase();
+  return (
+    lower.includes('timeout')
+    || lower.includes('timed out')
+    || lower.includes('handshake timeout')
+    || lower.includes('gateway request timeout for connect')
+    || lower.includes('econnrefused')
+    || lower.includes('gateway closed')
+    || lower.includes('unreachable')
+    || lower.includes('abnormal closure')
+    || lower.includes('econnreset')
+  );
+}
+
+function recordGatewayTransientFailure(message: string, send?: (channel: string, payload: any) => void) {
+  chatState.gatewayPreflightFailureStreak += 1;
+  chatState.lastGatewayPreflightError = message;
+  if (chatState.gatewayPreflightFailureStreak >= GATEWAY_PREFLIGHT_FAILURE_STREAK_THRESHOLD) {
+    chatState.gatewayForceCliUntil = Date.now() + GATEWAY_FORCE_CLI_COOLDOWN_MS;
+    send?.('chat:status', {
+      type: 'gateway',
+      message: 'Gateway is unstable. Temporarily forcing fallback mode for 3 minutes to keep replies available.',
+      gatewayCircuit: buildGatewayCircuitStatus(),
+    });
+  }
+}
+
+function clearGatewayTransientFailures() {
+  chatState.gatewayPreflightFailureStreak = 0;
+  chatState.gatewayForceCliUntil = 0;
+  chatState.lastGatewayPreflightError = '';
+}
+
 function isInvalidGatewaySessionError(message: string): boolean {
   const lower = String(message || '').toLowerCase();
   return (
@@ -178,6 +235,35 @@ function buildReplacementSessionId(sessionId: string): string {
   }
 
   return `${current}-${Date.now()}`;
+}
+
+function normalizeDesktopSessionLeaf(sessionId: string): string {
+  const raw = String(sessionId || '').trim();
+  const prefixed = raw.match(/^agent:[^:]+:webchat:(.+)$/i);
+  return prefixed?.[1] || raw;
+}
+
+function getDesktopSessionBloatReason(home: string, sessionId: string): string {
+  const leaf = normalizeDesktopSessionLeaf(sessionId);
+  if (!leaf || leaf.includes('..') || /[\\/]/.test(leaf)) return '';
+  const sessionsDir = path.join(home, '.openclaw', 'agents', 'main', 'sessions');
+  const candidates = [
+    { file: path.join(sessionsDir, `${leaf}.jsonl`), limit: DESKTOP_SESSION_JSONL_BLOAT_BYTES, label: 'history' },
+    { file: path.join(sessionsDir, `${leaf}.trajectory.jsonl`), limit: DESKTOP_SESSION_TRAJECTORY_BLOAT_BYTES, label: 'trajectory' },
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      const stat = fs.statSync(candidate.file);
+      if (stat.isFile() && stat.size > candidate.limit) {
+        return `${candidate.label} ${stat.size} bytes`;
+      }
+    } catch {
+      // Missing files are normal for fresh sessions.
+    }
+  }
+
+  return '';
 }
 
 function maybeSelfHealGateway1006(
@@ -251,7 +337,7 @@ function validateAgentIdAgainstConfig(home: string, agentId: string): {
   }
   try {
     const configPath = path.join(home, '.openclaw', 'openclaw.json');
-    const raw = fs.readFileSync(configPath, 'utf-8');
+    const raw = fs.readFileSync(configPath, 'utf-8').replace(/^\uFEFF/, '');
     const cfg = JSON.parse(raw);
     const list: any[] = Array.isArray(cfg?.agents?.list) ? cfg.agents.list : [];
     // Empty list is treated as "config is fresh / only main exists" — drop the stale id.
@@ -398,6 +484,26 @@ export function registerChatHandlers(deps: {
     const sid = agentId !== 'main'
       ? `agent:${agentId}:webchat:${rawSid}`
       : sidForMainAgent;
+    const bloatedSessionReason = getDesktopSessionBloatReason(os.homedir(), sid);
+    if (bloatedSessionReason) {
+      const replacementSessionId = buildReplacementSessionId(sid);
+      console.warn('[chat] Desktop session context is too large; creating a fresh session before sending', {
+        previousSessionId: sid,
+        replacementSessionId,
+        reason: bloatedSessionReason,
+      });
+      send('chat:status', {
+        type: 'gateway',
+        message: 'This chat session has too much accumulated context. Creating a fresh chat automatically...',
+      });
+      return {
+        success: false,
+        text: '',
+        error: `Desktop chat context too large (${bloatedSessionReason})`,
+        sessionId: replacementSessionId,
+        resetSession: true,
+      };
+    }
     let workspacePathInvalid = false;
     let workspacePathIssue: 'missing' | 'not-directory' | undefined;
     let workspacePathOriginal: string | undefined;
@@ -551,59 +657,22 @@ ${fullMessage}
 ${message}`;
     }
 
-    const gatewayReady = await (deps.prepareGatewayForChat
-      ? deps.prepareGatewayForChat()
-      : deps.ensureGatewayRunning());
-    if (!gatewayReady.ok) {
-      const gatewayErrorText = String(gatewayReady.error || '');
-      const authGated = isGatewayAuthScopeError(gatewayErrorText);
-      const now = Date.now();
-      const canAttemptAuthRepair = authGated && (now - chatState.lastGatewayAuthRepairAt > 60_000);
-
-      if (canAttemptAuthRepair) {
-        chatState.lastGatewayAuthRepairAt = now;
-        send('chat:status', {
-          type: 'gateway',
-          message: 'Local authorization required. Attempting automatic repair...',
-        });
-        try {
-          await deps.getGatewayWs({
-            onPairingRepairStart: () => send('chat:status', {
-              type: 'gateway',
-              message: 'Approving local Gateway access...',
-            }),
-            onPairingRepair: () => send('chat:status', {
-              type: 'gateway',
-              message: 'Local access approved. Reconnecting Gateway...',
-            }),
-          });
-          if (deps.getConnectedGatewayWs()?.isConnected) {
-            send('chat:status', {
-              type: 'gateway',
-              message: 'Gateway recovered. Sending this message through fast mode.',
-            });
-          } else {
-            throw new Error('Gateway connection not established after auth repair');
-          }
-        } catch (repairErr: any) {
-          console.warn('[chat] Gateway auth auto-repair did not recover connection:', repairErr?.message || repairErr);
-        }
-      }
-
-      if (deps.getConnectedGatewayWs()?.isConnected) {
-        // Recovery succeeded in the branch above; continue with normal Gateway path.
-      } else {
-      console.warn('[chat] Gateway preflight failed, falling back to CLI:', gatewayReady.error || 'unknown error');
+    const runCliFallback = async (gatewayMessage: string, authGated: boolean, streamResetReason: string) => {
+      console.warn('[chat] Gateway preflight failed, falling back to CLI:', gatewayMessage || 'unknown error');
+      const circuitStatus = buildGatewayCircuitStatus();
       send('chat:status', {
         type: 'gateway',
-        message: gatewayReady.error || 'Gateway unavailable. Falling back to direct OpenClaw chat...',
+        message: gatewayMessage || 'Gateway unavailable. Falling back to direct OpenClaw chat...',
+        gatewayCircuit: circuitStatus,
       });
       requestedOptions.forceLocal = true;
+      send('chat:stream-reset', { reason: streamResetReason });
       send('chat:status', {
         type: 'gateway',
         message: authGated
           ? 'Local authorization is pending. Sending this message through local fallback mode.'
           : 'Gateway is still warming up. Sending this message through local fallback mode.',
+        gatewayCircuit: circuitStatus,
       });
       const preparedCli = await prepareCliFallbackWithDaemonRetry(deps.prepareCliFallback, send);
       if (!preparedCli.ok) {
@@ -649,7 +718,75 @@ ${message}`;
       maybeSelfHealGateway1006(cliResult, send, deps.runSpawn, deps.getEnhancedPath(), deps.startGatewayInUserSession, deps.runAsync);
       saveMemoryForCliResult(cliResult);
       return withWorkspaceFallbackMeta(cliResult);
+    };
+
+    const nowForCircuit = Date.now();
+    if (!requestedOptions.forceLocal && chatState.gatewayForceCliUntil > nowForCircuit) {
+      const remainingSec = Math.max(1, Math.ceil((chatState.gatewayForceCliUntil - nowForCircuit) / 1000));
+      return runCliFallback(
+        `Gateway is temporarily unstable. Using local fallback mode (${remainingSec}s remaining) to keep replies available.`,
+        false,
+        'gateway-circuit-breaker-force-cli',
+      );
+    }
+
+    const gatewayReady = await (deps.prepareGatewayForChat
+      ? deps.prepareGatewayForChat()
+      : deps.ensureGatewayRunning());
+    if (!gatewayReady.ok) {
+      const gatewayErrorText = String(gatewayReady.error || '');
+      const authGated = isGatewayAuthScopeError(gatewayErrorText);
+      const now = Date.now();
+      const canAttemptAuthRepair = authGated && (now - chatState.lastGatewayAuthRepairAt > 60_000);
+
+      if (canAttemptAuthRepair) {
+        chatState.lastGatewayAuthRepairAt = now;
+        send('chat:status', {
+          type: 'gateway',
+          message: 'Local authorization required. Attempting automatic repair...',
+        });
+        try {
+          await deps.getGatewayWs({
+            onPairingRepairStart: () => send('chat:status', {
+              type: 'gateway',
+              message: 'Approving local Gateway access...',
+            }),
+            onPairingRepair: () => send('chat:status', {
+              type: 'gateway',
+              message: 'Local access approved. Reconnecting Gateway...',
+            }),
+          });
+          if (!deps.getConnectedGatewayWs()?.isConnected) {
+            throw new Error('Gateway connection not established after auth repair');
+          }
+        } catch (repairErr: any) {
+          console.warn('[chat] Gateway auth auto-repair did not recover connection:', repairErr?.message || repairErr);
+        }
       }
+
+      if (deps.getConnectedGatewayWs()?.isConnected) {
+        clearGatewayTransientFailures();
+        send('chat:status', {
+          type: 'gateway',
+          message: 'Gateway recovered. Sending this message through fast mode.',
+          gatewayCircuit: buildGatewayCircuitStatus(),
+        });
+        // Recovery succeeded in the branch above; continue with normal Gateway path.
+      } else {
+        if (!authGated && isGatewayPreflightTransientError(gatewayErrorText)) {
+          recordGatewayTransientFailure(gatewayErrorText, send);
+        } else {
+          chatState.gatewayPreflightFailureStreak = 0;
+          chatState.lastGatewayPreflightError = gatewayErrorText;
+        }
+        return runCliFallback(
+          gatewayReady.error || 'Gateway unavailable. Falling back to direct OpenClaw chat...',
+          authGated,
+          'gateway-preflight-fallback-cli',
+        );
+      }
+    } else {
+      clearGatewayTransientFailures();
     }
 
     let fullResponseText = '';
@@ -676,12 +813,14 @@ ${message}`;
       const resetChatIdleTimeout = () => {
         if (chatTimeout) clearTimeout(chatTimeout);
         chatTimeout = setTimeout(() => {
+          flushPendingStream();
           didTimeout = true;
           chatResolve();
         }, CHAT_IDLE_TIMEOUT_MS);
       };
       // Absolute safety cap to prevent infinite hangs
       const absoluteChatTimeout = setTimeout(() => {
+        flushPendingStream();
         didTimeout = true;
         chatResolve();
       }, CHAT_TIMEOUT_MS * 5); // 10 minutes absolute max
@@ -706,6 +845,33 @@ ${message}`;
       let finalAssistantContentTypes: string[] = [];
       let awarenessInitCompatibilityIssue = false;
       let awarenessInitFailureDetail = '';
+      let liveThinkingBuffer = '';
+      let pendingStreamChunk = '';
+      let streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const flushPendingStream = () => {
+        if (streamFlushTimer) {
+          clearTimeout(streamFlushTimer);
+          streamFlushTimer = null;
+        }
+        if (!pendingStreamChunk) return;
+        send('chat:stream', pendingStreamChunk);
+        pendingStreamChunk = '';
+      };
+
+      const sendStreamChunkThrottled = (chunk: string) => {
+        if (!chunk) return;
+        pendingStreamChunk += chunk;
+        if (streamFlushTimer) return;
+        streamFlushTimer = setTimeout(() => {
+          flushPendingStream();
+        }, 24);
+      };
+
+      const emitStreamReset = (reason: string) => {
+        flushPendingStream();
+        send('chat:stream-reset', { reason });
+      };
 
       const noteAwarenessInitCompatibilityIssue = (toolName: string | undefined, detail: string | undefined) => {
         if (toolName !== 'awareness_init') return;
@@ -881,6 +1047,7 @@ ${message}`;
           });
           if (normalizedAgentEvent.phase === 'thinking' && assistantText !== lastThinkingText) {
             lastThinkingText = assistantText;
+            liveThinkingBuffer = assistantText;
             send('chat:status', { type: 'thinking' });
             send('chat:thinking', assistantText);
           }
@@ -892,7 +1059,8 @@ ${message}`;
         if (normalizedAgentEvent.stream === 'thinking') {
           const thinkingText = normalizedAgentEvent.delta || normalizedAgentEvent.text || '';
           if (thinkingText) {
-            send('chat:thinking', thinkingText);
+            liveThinkingBuffer += thinkingText;
+            send('chat:thinking', liveThinkingBuffer);
             send('chat:status', { type: 'thinking' });
           }
           return;
@@ -982,7 +1150,7 @@ ${message}`;
             } else {
               fullResponseText = textContent;
               sawAssistantTextDelta = true;
-              send('chat:stream', newChunk);
+              sendStreamChunkThrottled(newChunk);
               send('chat:status', { type: 'generating' });
             }
           }
@@ -993,13 +1161,18 @@ ${message}`;
             const reasoningText = msg.content.replace(/^Reasoning:\s*/, '');
             if (reasoningText && reasoningText !== lastThinkingText) {
               lastThinkingText = reasoningText;
+              liveThinkingBuffer = reasoningText;
               fullResponseText = fullResponseText.replace(msg.content, '').trim();
               send('chat:thinking', reasoningText);
               send('chat:status', { type: 'thinking' });
             }
           }
         } else if (state === 'final') {
+          if (sawFinalState) {
+            return;
+          }
           sawFinalState = true;
+          flushPendingStream();
           if (msg && msg.role === 'assistant') {
             finalAssistantText = extractAssistantText(msg).trim();
             if (Array.isArray(msg.content)) {
@@ -1022,12 +1195,14 @@ ${message}`;
               agent: agentId,
               error: errorStr.substring(0, 150),
             });
+            flushPendingStream();
             if (chatTimeout) clearTimeout(chatTimeout);
             clearTimeout(absoluteChatTimeout);
             throw new Error(errorStr);
           }
           
           send('chat:status', { type: 'error', message: classifyProviderError(errorStr, state) });
+          flushPendingStream();
           if (chatTimeout) clearTimeout(chatTimeout);
           clearTimeout(absoluteChatTimeout);
           chatResolve();
@@ -1093,6 +1268,7 @@ ${message}`;
       }
 
       await chatDone;
+      flushPendingStream();
 
       ws.removeListener('event:chat', chatEventHandler);
       ws.removeListener('gateway-event', allEventsHandler);
@@ -1143,6 +1319,7 @@ ${message}`;
           responsePreview: finalText.slice(0, 200),
           detail: awarenessInitFailureDetail,
         });
+        emitStreamReset('awareness-init-compatibility-retry');
 
         send('chat:status', {
           type: 'gateway',
@@ -1192,6 +1369,7 @@ ${message}`;
         });
 
         if (!pendingApprovalRequestId) {
+          emitStreamReset('vpn-dns-compatibility-retry');
           send('chat:status', {
             type: 'gateway',
             message: 'Detected VPN/DNS compatibility mode. Retrying with exec-based web access...',
@@ -1242,6 +1420,7 @@ ${message}`;
       }
 
       if (!finalText && !pendingApprovalRequestId) {
+        send('chat:stream-reset', { reason: 'empty-gateway-reply-cli-fallback' });
         const diagnostic = {
           sessionId: sid,
           didTimeout,
@@ -1257,6 +1436,7 @@ ${message}`;
 
         if (didTimeout) {
           console.warn('[chat] No response before desktop timeout; likely OpenClaw/Gateway stalled upstream', diagnostic);
+          recordGatewayTransientFailure('Gateway chat response timed out after connect', send);
         } else if (!sawAssistantTextDelta && finalAssistantText) {
           console.warn('[chat] Desktop received assistant text only in the final event and would misclassify it as No response', diagnostic);
         } else if (sawFinalState && !sawAssistantDelta && !finalAssistantText) {
@@ -1434,6 +1614,7 @@ ${message}`;
       // Handle forceLocal flag set above for non-main agent with invalid session
       let authScopeGated = isGatewayAuthScopeError(errorMsg);
       if (requestedOptions.forceLocal || errorMsg.includes('WebSocket') || errorMsg.includes('connect') || errorMsg.includes('timed out') || authScopeGated) {
+        send('chat:stream-reset', { reason: 'gateway-fallback-cli' });
         if (requestedOptions.forceLocal) {
           console.log('[chat] 📍 CLI fallback triggered (forceLocal flag)', {
             agent: agentId,

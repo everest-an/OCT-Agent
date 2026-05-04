@@ -9,8 +9,101 @@ export function parseJsonWithBom<T = any>(input: string): T {
   return JSON.parse(stripUtf8Bom(input)) as T;
 }
 
-export function readJsonFileWithBom<T = any>(filePath: string): T {
+function parseJsonFileRaw<T = any>(filePath: string): T {
   return parseJsonWithBom<T>(fs.readFileSync(filePath, 'utf8'));
+}
+
+export function readJsonFileWithBom<T = any>(filePath: string): T {
+  try {
+    return parseJsonFileRaw<T>(filePath);
+  } catch (err) {
+    if (path.basename(filePath).toLowerCase() === 'openclaw.json' && repairKnownInvalidOpenClawJsonText(filePath)) {
+      return parseJsonFileRaw<T>(filePath);
+    }
+    throw err;
+  }
+}
+
+export function repairKnownInvalidOpenClawJsonText(filePath: string): boolean {
+  if (!fs.existsSync(filePath)) return false;
+
+  try {
+    parseJsonFileRaw(filePath);
+    return false;
+  } catch {
+    // Continue with narrow text repair below.
+  }
+
+  const knownAgentNames: Record<string, string> = {
+    'social-content-creator': 'social-content-creator',
+    'xiaohongshu-specialist': 'xiaohongshu-specialist',
+  };
+
+  const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+  let changed = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const idMatch = lines[i].match(/^\s+"id":\s+"([^"]+)"/);
+    if (!idMatch) continue;
+    const replacementName = knownAgentNames[idMatch[1]];
+    if (!replacementName) continue;
+
+    for (let j = i + 1; j < Math.min(i + 16, lines.length); j++) {
+      if (!/^\s+"name":/.test(lines[j])) continue;
+      if (lines[j].includes(`"name": "${replacementName}"`)) continue;
+      lines[j] = `          "name": "${replacementName}",`;
+      changed = true;
+    }
+  }
+
+  if (!changed) return false;
+
+  fs.copyFileSync(filePath, `${filePath}.corrupt-${Date.now()}`);
+  fs.writeFileSync(filePath, lines.join('\n'), 'utf8');
+  try {
+    parseJsonFileRaw(filePath);
+    console.warn(`[config-guard] Repaired known invalid agent identity JSON in ${path.basename(filePath)}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function restoreInvalidJsonFromBackupIfNeeded(filePath: string): Record<string, any> | null {
+  if (!fs.existsSync(filePath)) return null;
+
+  repairKnownInvalidOpenClawJsonText(filePath);
+  const bakPath = filePath + '.desktop-bak';
+  if (fs.existsSync(bakPath)) {
+    repairKnownInvalidOpenClawJsonText(bakPath);
+  }
+
+  try {
+    readJsonFileWithBom(filePath);
+    return null;
+  } catch {
+    // Continue to backup recovery below.
+  }
+
+  if (!fs.existsSync(bakPath)) return null;
+
+  try {
+    const backup = readJsonFileWithBom<Record<string, any>>(bakPath);
+    if (!backup || typeof backup !== 'object' || Array.isArray(backup)) return null;
+
+    const corruptPath = `${filePath}.corrupt-${Date.now()}`;
+    try {
+      fs.copyFileSync(filePath, corruptPath);
+    } catch {
+      // Best-effort forensic copy only.
+    }
+    fs.copyFileSync(bakPath, filePath);
+    console.warn(`[config-guard] Restored invalid JSON from backup: ${path.basename(filePath)}`);
+    return backup;
+  } catch (err) {
+    console.warn('[config-guard] Invalid JSON backup restore failed:', err);
+    return null;
+  }
 }
 
 /**

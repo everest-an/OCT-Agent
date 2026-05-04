@@ -37,6 +37,13 @@ type Message = {
 
 type CurrentAgent = { id: string; name: string; emoji?: string };
 
+type GatewayCircuitHint = {
+  active: boolean;
+  failureStreak: number;
+  cooldownRemainingSec: number;
+  lastError?: string;
+};
+
 /** Parse inline thinking / tool markers that providers like qwen/deepseek embed directly
  * in the text stream (Anthropic / Gateway won't always surface these as structured blocks).
  * Returns the cleaned text plus any extracted thinking and tool calls. */
@@ -152,6 +159,7 @@ export function ChatMessagesPane({
   onStopRequest,
   errorHint,
   gatewayHint,
+  gatewayCircuitHint,
   onDismissError,
   renderStreamingContent,
   TypewriterMessage,
@@ -183,6 +191,7 @@ export function ChatMessagesPane({
   onStopRequest: () => void | Promise<void>;
   errorHint?: string | null;
   gatewayHint?: string | null;
+  gatewayCircuitHint?: GatewayCircuitHint | null;
   onDismissError: () => void;
   renderStreamingContent: (content: string) => React.ReactNode;
   TypewriterMessage: ({ content, isNew }: { content: string; isNew: boolean }) => React.ReactNode;
@@ -379,6 +388,23 @@ export function ChatMessagesPane({
                     </div>
                     {gatewayHint ? (
                       <p className="ml-6 text-xs text-sky-300/90">{gatewayHint}</p>
+                    ) : null}
+                    {gatewayCircuitHint ? (
+                      <div className="ml-6 mt-1 space-y-1 text-[11px] text-sky-200/80">
+                        <p>
+                          {t('chat.gatewayCircuit.failureCount', 'Gateway preflight failures')}: {gatewayCircuitHint.failureStreak}
+                        </p>
+                        {gatewayCircuitHint.active && gatewayCircuitHint.cooldownRemainingSec > 0 ? (
+                          <p>
+                            {t('chat.gatewayCircuit.cooldown', 'Forced fallback cooldown')}: {gatewayCircuitHint.cooldownRemainingSec}s
+                          </p>
+                        ) : null}
+                        {gatewayCircuitHint.lastError ? (
+                          <p className="break-words text-sky-100/75">
+                            {t('chat.gatewayCircuit.lastError', 'Last preflight error')}: {gatewayCircuitHint.lastError}
+                          </p>
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
                 ) : null}

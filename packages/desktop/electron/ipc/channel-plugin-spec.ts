@@ -22,6 +22,7 @@ const INSPECT_TIMEOUT_MS = 12000;
 
 /** Cache: channelId → true once deps have been ensured this session */
 const _depsEnsuredThisSession = new Set<string>();
+const _manifestMetadataEnsuredThisSession = new Set<string>();
 
 function findOpenClawPackageDirQuick(): string | null {
   const home = os.homedir();
@@ -113,6 +114,68 @@ export function ensureChannelRuntimeDeps(channelId: string): boolean {
     return true;
   } catch (err) {
     console.warn(`${tag} ensureChannelRuntimeDeps failed:`, err);
+    return false;
+  }
+}
+
+export function ensureChannelManifestMetadata(channelId: string, homedir = os.homedir()): boolean {
+  const normalizedChannelId = sanitizePluginId(channelId);
+  if (!normalizedChannelId) return false;
+
+  const manifestPath = path.join(homedir, '.openclaw', 'extensions', normalizedChannelId, 'openclaw.plugin.json');
+  const cacheKey = `${normalizedChannelId}:${manifestPath}`;
+  if (_manifestMetadataEnsuredThisSession.has(cacheKey)) return true;
+  try {
+    if (!fs.existsSync(manifestPath)) {
+      return true;
+    }
+
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    if (!manifest || typeof manifest !== 'object') return false;
+
+    const declaredChannels = Array.isArray(manifest.channels)
+      ? manifest.channels.map((value: unknown) => String(value || '').trim()).filter(Boolean)
+      : [];
+    if (!declaredChannels.includes(normalizedChannelId)) {
+      _manifestMetadataEnsuredThisSession.add(cacheKey);
+      return true;
+    }
+
+    if (!manifest.channelConfigs || typeof manifest.channelConfigs !== 'object' || Array.isArray(manifest.channelConfigs)) {
+      manifest.channelConfigs = {};
+    }
+    if (manifest.channelConfigs[normalizedChannelId]) {
+      _manifestMetadataEnsuredThisSession.add(cacheKey);
+      return true;
+    }
+
+    const baseSchema =
+      manifest.configSchema && typeof manifest.configSchema === 'object' && !Array.isArray(manifest.configSchema)
+        ? manifest.configSchema
+        : { type: 'object', additionalProperties: false, properties: {} };
+    const baseProperties =
+      baseSchema.properties && typeof baseSchema.properties === 'object' && !Array.isArray(baseSchema.properties)
+        ? baseSchema.properties
+        : {};
+
+    manifest.channelConfigs[normalizedChannelId] = {
+      schema: {
+        $schema: 'http://json-schema.org/draft-07/schema#',
+        ...baseSchema,
+        type: 'object',
+        properties: {
+          enabled: { type: 'boolean' },
+          ...baseProperties,
+        },
+      },
+      label: normalizedChannelId === 'openclaw-weixin' ? 'WeChat' : normalizedChannelId,
+    };
+
+    fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+    _manifestMetadataEnsuredThisSession.add(cacheKey);
+    return true;
+  } catch (err) {
+    console.warn(`[${normalizedChannelId}-manifest] ensureChannelManifestMetadata failed:`, err);
     return false;
   }
 }

@@ -79,10 +79,26 @@ export interface ElectronAPI {
   chatApprove?: (sessionId: string, approvalRequestId: string) => Promise<{ success: boolean; command?: string; error?: string }>;
   onChatStream?: (callback: (chunk: string) => void) => (() => void);
   onChatStreamEnd?: (callback: () => void) => (() => void);
+  onChatStreamReset?: (callback: (payload: { reason?: string }) => void) => (() => void);
   onChatThinking?: (callback: (text: string) => void) => (() => void);
   onChatDebug?: (callback: (msg: string) => void) => (() => void);
   onChatEvent?: (callback: (event: unknown) => void) => (() => void);
-  onChatStatus?: (callback: (status: { type: string; tool?: string; toolStatus?: string; toolId?: string; message?: string; detail?: string; approvalRequestId?: string; approvalCommand?: string }) => void) => (() => void);
+  onChatStatus?: (callback: (status: {
+    type: string;
+    tool?: string;
+    toolStatus?: string;
+    toolId?: string;
+    message?: string;
+    detail?: string;
+    approvalRequestId?: string;
+    approvalCommand?: string;
+    gatewayCircuit?: {
+      active: boolean;
+      failureStreak: number;
+      cooldownRemainingSec: number;
+      lastError?: string;
+    };
+  }) => void) => (() => void);
   onChatAgentInvalidated?: (callback: (info: { requestedAgentId: string; resolvedAgentId: string; reason?: string }) => void) => (() => void);
   onMemoryWarning?: (callback: (payload: { type: string; message: string }) => void) => (() => void);
   filePreview?: (filePath: string) => Promise<unknown>;
@@ -138,6 +154,7 @@ export interface ElectronAPI {
   skillUninstall?: (slug: string) => Promise<{ success: boolean; error?: string }>;
   skillInstallDeps?: (installSpecs: Array<{ id: string; kind: string; label: string; bins: string[]; package?: string; formula?: string; module?: string }>, skillName?: string) => Promise<{ success: boolean; error?: string; verified?: string[]; unverified?: string[] }>;
   skillLocalInfo?: (name: string) => Promise<{ success: boolean; info?: { install?: Array<{ id: string; kind: string; label: string; bins: string[]; package?: string }>; homepage?: string }; error?: string }>;
+  onSkillInstallProgress?: (callback: (data: { stage: string; detail?: string }) => void) => (() => void);
   skillGetConfig?: (slug: string) => Promise<{ success: boolean; config?: Record<string, string>; enabled?: boolean; apiKey?: string; env?: Record<string, string>; error?: string }>;
   skillSaveConfig?: (slug: string, config: Record<string, unknown>) => Promise<{ success: boolean; error?: string }>;
   readExistingConfig?: () => Promise<{ exists: boolean; hasProviders: boolean; providers: string[]; primaryModel: string; hasApiKey: boolean }>;
@@ -292,9 +309,9 @@ export interface ElectronAPI {
   // Active project workspace (shared between desktop chat and channel inbound hook)
   workspaceGetActive?: () => Promise<{ success: boolean; path?: string | null; error?: string }>;
   workspaceSetActive?: (path: string | null) => Promise<{ success: boolean; error?: string }>;
-  onChannelQR?: (callback: (art: string) => void) => void;
-  onChannelQrUrl?: (callback: (url: string) => void) => void;
-  onChannelStatus?: (callback: (status: string) => void) => void;
+  onChannelQR?: (callback: (art: string) => void) => (() => void);
+  onChannelQrUrl?: (callback: (url: string) => void) => (() => void);
+  onChannelStatus?: (callback: (status: string) => void) => (() => void);
   // Channel-level inbound agent routing (simple default "which agent answers this channel")
   channelGetInboundAgent?: (channelId: string) => Promise<{ success: boolean; agentId?: string | null; error?: string }>;
   channelSetInboundAgent?: (channelId: string, agentId: string) => Promise<{ success: boolean; error?: string }>;

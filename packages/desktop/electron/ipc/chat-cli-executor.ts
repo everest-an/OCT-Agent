@@ -17,6 +17,25 @@ import { buildWebCompatibilityRetryPrompt } from './awareness-memory-utils';
 const LOCAL_DAEMON_RETRY_DELAY_MS = 8000;
 const CLI_FALLBACK_TIMEOUT_MESSAGE = 'Gateway is still warming up. This message was retried through local fallback mode, but the local agent still took too long to respond. Please wait a little longer and try again.';
 
+function buildCliExitError(code: number | null, signal: NodeJS.Signals | null, clean: string, rawCombined: string): string {
+  if (clean) return clean;
+
+  const raw = String(rawCombined || '');
+  if (/timed\s*out|timeout/i.test(raw)) {
+    return CLI_FALLBACK_TIMEOUT_MESSAGE;
+  }
+
+  if (signal) {
+    return `OpenClaw process was terminated unexpectedly (${signal}). Please retry.`;
+  }
+
+  if (typeof code === 'number') {
+    return `OpenClaw exited with code ${code}`;
+  }
+
+  return 'OpenClaw ended unexpectedly before returning a response. Please retry.';
+}
+
 function normalizeCliSessionId(sessionId: string): string {
   const raw = String(sessionId || '').trim();
   if (!raw) return raw;
@@ -181,7 +200,8 @@ export async function chatSendViaCli(
       rawOutputLines.push(trimmed);
     };
 
-    const flushChunk = (chunk: string, fromStderr: boolean) => {
+    const flushChunk = (chunk: string, fromStderr: boolean): boolean => {
+      let sawMeaningfulOutput = false;
       const normalized = deps.stripAnsi(chunk).replace(/\r/g, '');
       const current = fromStderr ? stderrRemainder : stdoutRemainder;
       const merged = `${current}${normalized}`;
@@ -203,8 +223,19 @@ export async function chatSendViaCli(
         if (!isNoiseLine(trimmed)) {
           collectedLines.push(trimmed);
           send('chat:stream', `${trimmed}\n`);
+          sawMeaningfulOutput = true;
         }
       }
+
+      // Some providers stream long paragraphs without newline boundaries. Treat a
+      // non-noise trailing fragment as activity so idle timeout does not kill a
+      // healthy response mid-generation.
+      const trailingTrimmed = trailing.trim();
+      if (trailingTrimmed && !isNoiseLine(trailingTrimmed)) {
+        sawMeaningfulOutput = true;
+      }
+
+      return sawMeaningfulOutput;
     };
 
     const flushRemainder = (fromStderr: boolean) => {
@@ -221,9 +252,10 @@ export async function chatSendViaCli(
 
     chatState.activeChatChild = child;
 
-    // Activity-based (idle) timeout: resets every time stdout/stderr emits data.
-    // This lets long responses (e.g. writing a 5000-word document) complete without
-    // hitting a fixed wall, while still catching truly stalled processes.
+    // Activity-based (idle) timeout: reset only for meaningful assistant output.
+    // OpenClaw can emit repeated plugin/Gateway noise on stderr while the local
+    // fallback is otherwise wedged; treating that as activity keeps the process
+    // alive and leaves the desktop chat waiting with no useful reply.
     const resetIdleTimeout = () => {
       if (timeoutHandle) clearTimeout(timeoutHandle);
       timeoutHandle = setTimeout(() => {
@@ -235,17 +267,19 @@ export async function chatSendViaCli(
     absoluteTimeoutHandle = setTimeout(() => {
       try { child.kill(); } catch {}
       finalize({ success: false, error: CLI_FALLBACK_TIMEOUT_MESSAGE, sessionId: sid });
-    }, CHAT_TIMEOUT_MS * 5); // 10 minutes absolute max
+    }, CHAT_TIMEOUT_MS * 2); // default 4 minutes absolute max
 
     child.stdout?.on('data', (data: Buffer) => {
-      resetIdleTimeout();
-      flushChunk(data.toString(), false);
+      if (flushChunk(data.toString(), false)) {
+        resetIdleTimeout();
+      }
     });
     child.stderr?.on('data', (data: Buffer) => {
-      resetIdleTimeout();
-      flushChunk(data.toString(), true);
+      if (flushChunk(data.toString(), true)) {
+        resetIdleTimeout();
+      }
     });
-    child.on('exit', (code: number | null) => {
+    child.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
       chatState.activeChatChild = null;
       flushRemainder(false);
       flushRemainder(true);
@@ -266,7 +300,7 @@ export async function chatSendViaCli(
 
         finalize({
           success: false,
-          error: clean || `OpenClaw exited with code ${code ?? 'unknown'}`,
+          error: buildCliExitError(code, signal, clean, rawCombined),
           sessionId: sid,
         });
         return;

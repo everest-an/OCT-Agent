@@ -346,14 +346,21 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
   // Listen for ASCII QR and progress status from backend
   useEffect(() => {
     if (!window.electronAPI) return;
-    (window.electronAPI as any).onChannelQR?.((art: string) => {
+    const api = window.electronAPI as any;
+    const cleanups: Array<() => void> = [];
+
+    const cleanupQr = api.onChannelQR?.((art: string) => {
       setAsciiQR(art);
       setChannelProgress(null);
     });
-    (window.electronAPI as any).onChannelQrUrl?.((url: string) => {
+    if (typeof cleanupQr === 'function') cleanups.push(cleanupQr);
+
+    const cleanupQrUrl = api.onChannelQrUrl?.((url: string) => {
       setQrUrl(url);
     });
-    (window.electronAPI as any).onChannelStatus?.((statusKey: string) => {
+    if (typeof cleanupQrUrl === 'function') cleanups.push(cleanupQrUrl);
+
+    const cleanupStatus = api.onChannelStatus?.((statusKey: string) => {
       setChannelProgress(statusKey);
       // QR scan done — backend is now binding/confirming; clear QR so status messages show
       if (
@@ -367,6 +374,12 @@ export default function Channels({ onNavigate, onOpenChannelChat }: {
         setAsciiQR(null);
       }
     });
+
+    if (typeof cleanupStatus === 'function') cleanups.push(cleanupStatus);
+
+    return () => {
+      cleanups.forEach((cleanup) => cleanup());
+    };
   }, []);
 
   // Silent prefill: if hints/errors contain a pairing code, auto-populate input.

@@ -307,6 +307,57 @@ describe('desktop openclaw config merge', () => {
     expect(config.plugins.slots?.memory).toBeUndefined();
   });
 
+  it('does not soft-disable WhatsApp during normal config sanitization', () => {
+    const config: Record<string, any> = {
+      channels: {
+        whatsapp: {
+          enabled: true,
+        },
+      },
+      plugins: {
+        allow: ['whatsapp'],
+        entries: {
+          whatsapp: {
+            enabled: true,
+          },
+        },
+      },
+    };
+
+    sanitizeDesktopAwarenessPluginConfig(config, '/tmp/awareness-desktop-test');
+
+    expect(config.channels.whatsapp.enabled).toBe(true);
+    expect(config.plugins.entries.whatsapp.enabled).toBe(true);
+    expect(config.plugins.allow).toEqual(expect.arrayContaining(['whatsapp']));
+  });
+
+  it('removes desktop-only quarantine markers left by older builds', () => {
+    const config: Record<string, any> = {
+      channels: {
+        whatsapp: {
+          enabled: true,
+          disabledByDesktop: true,
+          disabledReason: 'windows-gateway-esm-url-scheme',
+        },
+      },
+      plugins: {
+        allow: ['whatsapp'],
+        entries: {
+          whatsapp: {
+            enabled: true,
+            disabledByDesktop: true,
+            disabledReason: 'windows-gateway-esm-url-scheme',
+          },
+        },
+      },
+    };
+
+    sanitizeDesktopAwarenessPluginConfig(config, '/tmp/awareness-desktop-test');
+
+    expect(config.channels.whatsapp).toEqual({ enabled: true });
+    expect(config.plugins.entries.whatsapp).toEqual({ enabled: true });
+  });
+
   it('keeps openclaw-memory slot assignments when the plugin exists on disk', () => {
     const config: Record<string, any> = {
       plugins: {

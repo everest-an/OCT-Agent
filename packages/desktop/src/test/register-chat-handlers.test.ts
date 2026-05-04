@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { chatState } from '../../electron/ipc/chat-types';
+import { chatState, CHAT_IDLE_TIMEOUT_MS } from '../../electron/ipc/chat-types';
 
 const { ipcHandleMock } = vi.hoisted(() => ({
   ipcHandleMock: vi.fn(),
@@ -91,6 +91,9 @@ describe('registerChatHandlers', () => {
     chatState.activeChatChild = null;
     chatState.awarenessInitCompatibilityMode = false;
     chatState.lastAwarenessInitCompatibilityError = '';
+    chatState.gatewayPreflightFailureStreak = 0;
+    chatState.gatewayForceCliUntil = 0;
+    chatState.lastGatewayPreflightError = '';
   });
 
   it('falls back to CLI when gateway preflight fails before websocket connect', async () => {
@@ -126,6 +129,45 @@ describe('registerChatHandlers', () => {
       }),
     );
     expect(spawnMock).toHaveBeenCalled();
+  });
+
+  it('forces CLI fallback during active gateway circuit-breaker cooldown', async () => {
+    const fakeChild = createCliFallbackChild('CLI reply during cooldown');
+    spawnMock.mockReturnValue(fakeChild as any);
+
+    const sendToRenderer = vi.fn();
+    const prepareGatewayForChat = vi.fn(async () => ({ ok: true }));
+
+    registerChatHandlers({
+      sendToRenderer,
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      prepareGatewayForChat,
+      getGatewayWs: vi.fn(),
+      getConnectedGatewayWs: vi.fn(() => null),
+      callMcpStrict: vi.fn(async () => ({})),
+      getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+      wrapWindowsCommand: vi.fn((command: string) => command),
+      stripAnsi: vi.fn((output: string) => output),
+      spawnChatProcess: spawnMock as any,
+    });
+
+    chatState.gatewayForceCliUntil = Date.now() + 60_000;
+
+    const handlers = getRegisteredHandlers();
+    const pending = handlers['chat:send']({}, 'hello with cooldown', 'test-session', {});
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
+    fakeChild.emitOutput();
+    const result = await pending;
+
+    expect(result).toMatchObject({ success: true, text: 'CLI reply during cooldown', sessionId: 'test-session' });
+    expect(prepareGatewayForChat).not.toHaveBeenCalled();
+    expect(sendToRenderer).toHaveBeenCalledWith(
+      'chat:status',
+      expect.objectContaining({
+        type: 'gateway',
+        message: expect.stringContaining('temporarily unstable'),
+      }),
+    );
   });
 
   it('auto-repairs auth-gated gateway preflight and avoids CLI fallback when reconnect succeeds', async () => {
@@ -633,6 +675,51 @@ describe('registerChatHandlers', () => {
       sessionId: 'test-session',
     });
     expect(String(result.error || '')).toContain('CLI fallback failed after empty gateway reply');
+  });
+
+  it('records gateway chat timeout and recovers through CLI fallback', async () => {
+    vi.useFakeTimers();
+    try {
+      const ws = new FakeGatewayClient();
+      ws.chatSend = vi.fn(async () => ({ status: 'started' }));
+
+      const cliFallbackChild = createCliFallbackChild('CLI recovered after gateway timeout');
+      spawnMock.mockReturnValue(cliFallbackChild as any);
+
+      const sendToRenderer = vi.fn();
+      registerChatHandlers({
+        sendToRenderer,
+        ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+        getGatewayWs: vi.fn(async () => ws as any),
+        getConnectedGatewayWs: vi.fn(() => ws as any),
+        callMcpStrict: vi.fn(async () => ({})),
+        getEnhancedPath: vi.fn(() => process.env.PATH || ''),
+        wrapWindowsCommand: vi.fn((command: string) => command),
+        stripAnsi: vi.fn((output: string) => output),
+        spawnChatProcess: spawnMock as any,
+      });
+
+      const handlers = getRegisteredHandlers();
+      const pending = handlers['chat:send']({}, 'hello', 'test-session', {});
+      await vi.waitFor(() => expect(ws.chatSend).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(CHAT_IDLE_TIMEOUT_MS);
+      await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
+      cliFallbackChild.emitOutput();
+
+      await expect(pending).resolves.toMatchObject({
+        success: true,
+        text: 'CLI recovered after gateway timeout',
+        sessionId: 'test-session',
+      });
+      expect(chatState.gatewayPreflightFailureStreak).toBe(1);
+      expect(chatState.lastGatewayPreflightError).toContain('Gateway chat response timed out');
+      expect(sendToRenderer).toHaveBeenCalledWith(
+        'chat:stream-reset',
+        { reason: 'empty-gateway-reply-cli-fallback' },
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('uses assistant text from the final event when no delta text was streamed', async () => {

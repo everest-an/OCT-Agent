@@ -15,6 +15,7 @@ import {
   resolveChannelPluginInstallSpec,
   ensureTelegramRuntimeDeps,
   ensureChannelRuntimeDeps,
+  ensureChannelManifestMetadata,
 } from './channel-plugin-spec';
 import { clearChannelStatusCache } from './register-channel-list-handlers';
 import { dedupedChannelsAddHelp, dedupedChannelsList, killActiveLoginForChannel } from '../openclaw-process-guard';
@@ -775,6 +776,7 @@ export function registerChannelConfigHandlers(deps: {
       // @slack/bolt, silk-wasm, etc.) are accessible before any CLI command that
       // loads the channel plugin (see channel-plugin-spec.ts).
       ensureChannelRuntimeDeps(safeOpenclawId);
+      ensureChannelManifestMetadata(safeOpenclawId, deps.home);
 
       try {
         await deps.runAsync(`openclaw plugins install "${pluginPkg}" 2>&1`, 60000);
@@ -791,6 +793,7 @@ export function registerChannelConfigHandlers(deps: {
           pluginInstallError = installMessage;
         }
       }
+      ensureChannelManifestMetadata(safeOpenclawId, deps.home);
 
       if (saveStrategy === 'json-direct') {
         const configPath = path.join(deps.home, '.openclaw', 'openclaw.json');

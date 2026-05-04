@@ -711,6 +711,50 @@ describe('Dashboard (Chat)', () => {
     expect(assistantMsg?.toolCalls?.[0]?.status).toBe('completed');
   });
 
+  it('shows gateway circuit-breaker details while fallback mode is active', async () => {
+    let statusCallback: ((status: any) => void) | null = null;
+    let resolveChat: ((value: any) => void) | null = null;
+    const api = window.electronAPI as any;
+    api.onChatStatus = (cb: any) => { statusCallback = cb; };
+    api.chatSend = vi.fn(() => new Promise((resolve) => {
+      resolveChat = resolve;
+    }));
+
+    await act(async () => { render(<Dashboard />); });
+
+    const textarea = screen.getByPlaceholderText(/输入消息/) as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'fallback please' } });
+    });
+
+    const buttons = screen.getAllByRole('button');
+    const sendBtn = buttons[buttons.length - 1];
+    await act(async () => { fireEvent.click(sendBtn); });
+
+    await act(async () => {
+      statusCallback?.({
+        type: 'gateway',
+        message: 'Gateway is temporarily unstable. Using local fallback mode (42s remaining) to keep replies available.',
+        gatewayCircuit: {
+          active: true,
+          failureStreak: 3,
+          cooldownRemainingSec: 42,
+          lastError: 'Gateway request timeout for connect',
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Gateway preflight failures: 3/)).toBeInTheDocument();
+      expect(screen.getByText(/Forced fallback cooldown: 42s/)).toBeInTheDocument();
+      expect(screen.getByText(/Last preflight error: Gateway request timeout for connect/)).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      resolveChat?.({ success: true, text: 'done', sessionId: 'test-session' });
+    });
+  });
+
   it('shows approval and failure detail in active tool status', async () => {
     let statusCallback: ((status: any) => void) | null = null;
     const api = window.electronAPI as any;

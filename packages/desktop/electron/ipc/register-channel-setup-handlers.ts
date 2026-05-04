@@ -16,6 +16,7 @@ import {
   sanitizePluginId,
   ensureTelegramRuntimeDeps,
   ensureChannelRuntimeDeps,
+  ensureChannelManifestMetadata,
 } from './channel-plugin-spec';
 import { clearChannelStatusCache } from './register-channel-list-handlers';
 import { acquireChannelLoginLock, clearChannelsListCache, dedupedChannelsList, killStaleChannelLogins } from '../openclaw-process-guard';
@@ -65,6 +66,26 @@ export function registerChannelSetupHandlers(deps: {
   };
 
   const isNpxEnoentLike = (message: string) => /spawn\s+npx(?:\.cmd)?\s+enoent/i.test(message || '');
+
+  // OpenClaw can emit non-blocking plugin-manifest warnings that should not be shown
+  // to end users as the primary setup failure reason.
+  const stripNonBlockingChannelWarnings = (rawMessage: string) => {
+    const lines = String(rawMessage || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const filtered = lines.filter((line) => {
+      const lower = line.toLowerCase();
+      const isMissingChannelConfigs =
+        lower.includes('channel plugin manifest declares')
+        && lower.includes('without channelconfigs metadata');
+      const isChannelConfigsHint = lower.includes('add openclaw.plugin.json#channelconfigs');
+      return !isMissingChannelConfigs && !isChannelConfigsHint;
+    });
+
+    return filtered.join('\n').trim();
+  };
 
   // Transient OpenClaw failures that almost always succeed on a second attempt:
   // - timeout: first attempt absorbs the 15-30s plugin load tax, second hits warm cache
@@ -126,7 +147,8 @@ export function registerChannelSetupHandlers(deps: {
   };
 
   const formatSetupError = (openclawId: string, channelLabel: string, rawError: string) => {
-    const message = (rawError || '').trim();
+    const message = stripNonBlockingChannelWarnings(rawError || '');
+    const fallbackMessage = (rawError || '').trim();
     if (isTimeoutLike(message)) {
       if (openclawId === 'telegram') {
         return 'OpenClaw is still loading Telegram or waiting for pairing confirmation. Wait 20-60 seconds, approve any pending pairing code, then retry.';
@@ -159,7 +181,13 @@ export function registerChannelSetupHandlers(deps: {
         'OCT will retry with isolated channel loading automatically. ' +
         'If it still fails, disable unrelated channels/plugins in Settings and retry.';
     }
-    return message.slice(0, 300) || `Channel setup failed for "${openclawId}".`;
+    if (message) return message.slice(0, 300);
+
+    if (fallbackMessage) {
+      return `${channelLabel} setup failed, but OpenClaw only returned non-blocking plugin warnings. Please retry once.`;
+    }
+
+    return `Channel setup failed for "${openclawId}".`;
   };
 
   const extractPluginLoadFailures = (rawText: string) => {
@@ -609,6 +637,7 @@ export function registerChannelSetupHandlers(deps: {
     // can't find them via standard Node resolution. Copy once to openclaw's
     // own node_modules/ before any CLI command that would try to load the plugin.
     ensureChannelRuntimeDeps(openclawId);
+    ensureChannelManifestMetadata(openclawId);
 
     sendStatus(`channels.status.configuring::${channelLabel}`);
     if (pluginAlreadyInstalled) {
@@ -648,6 +677,8 @@ export function registerChannelSetupHandlers(deps: {
         return { success: false, error: formatSetupError(openclawId, channelLabel, pluginMsg) };
       }
     }
+
+    ensureChannelManifestMetadata(openclawId);
 
     if (setupFlow === 'add-only') {
       try {
