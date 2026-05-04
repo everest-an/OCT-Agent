@@ -4,18 +4,13 @@ import logoUrl from '../assets/svg.png';
 function isLikelyEmoji(value: string): boolean {
   const trimmed = value.trim();
   if (!trimmed || trimmed.length > 16) return false;
-
-  let hasNonAscii = false;
-  for (let i = 0; i < trimmed.length; i += 1) {
-    if (trimmed.charCodeAt(i) > 127) {
-      hasNonAscii = true;
-      break;
-    }
-  }
-
-  if (!hasNonAscii) return false;
   if (trimmed.includes('://') || trimmed.includes('/') || trimmed.includes('.')) return false;
-  return true;
+
+  const hasEmojiCore = /(?:\p{Extended_Pictographic}|[\u{1F1E6}-\u{1F1FF}])/u.test(trimmed);
+  if (!hasEmojiCore) return false;
+
+  // Allow only emoji-related code points inside the token.
+  return /^(?:\p{Extended_Pictographic}|\p{Emoji_Component}|\uFE0F|\u200D|[\u{1F1E6}-\u{1F1FF}])+$/u.test(trimmed);
 }
 
 function normalizeEmojiCandidate(value: string): string {

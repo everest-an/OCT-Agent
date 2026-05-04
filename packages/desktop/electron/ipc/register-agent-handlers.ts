@@ -64,20 +64,16 @@ function normalizeAgentEmoji(value: unknown) {
     if (!candidate || candidate.length > 16) {
       return false;
     }
-    let hasNonAscii = false;
-    for (let i = 0; i < candidate.length; i += 1) {
-      if (candidate.charCodeAt(i) > 127) {
-        hasNonAscii = true;
-        break;
-      }
-    }
-    if (!hasNonAscii) {
-      return false;
-    }
     if (candidate.includes('://') || candidate.includes('/') || candidate.includes('.')) {
       return false;
     }
-    return true;
+
+    const hasEmojiCore = /(?:\p{Extended_Pictographic}|[\u{1F1E6}-\u{1F1FF}])/u.test(candidate);
+    if (!hasEmojiCore) {
+      return false;
+    }
+
+    return /^(?:\p{Extended_Pictographic}|\p{Emoji_Component}|\uFE0F|\u200D|[\u{1F1E6}-\u{1F1FF}])+$/u.test(candidate);
   };
 
   if (looksLikeEmoji(trimmed)) {

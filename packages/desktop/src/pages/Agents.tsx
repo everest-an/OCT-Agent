@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Bot, Plus, Trash2, Link, Loader2, RefreshCw, Edit3, Check, X, AlertCircle, FileText, ChevronDown, ChevronUp, Save, ShoppingBag, Share2 } from 'lucide-react';
+import { Bot, Plus, Trash2, Link, Loader2, RefreshCw, Edit3, Check, X, AlertCircle, FileText, ChevronDown, ChevronUp, Save, ShoppingBag, Share2, Sparkles } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { useAppConfig } from '../lib/store';
 import AgentWizard from '../components/AgentWizard';

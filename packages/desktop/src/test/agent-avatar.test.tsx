@@ -19,6 +19,12 @@ describe('AgentAvatar', () => {
     expect(container.querySelector('.lucide-bot')).toBeTruthy();
   });
 
+  it('does not render non-emoji unicode tokens as avatar emoji', () => {
+    const { container } = render(<AgentAvatar name="Gavis" emoji="[禹]" size={20} />);
+    expect(screen.queryByText('[禹]')).not.toBeInTheDocument();
+    expect(container.querySelector('.lucide-bot')).toBeTruthy();
+  });
+
   // "default" 字符串应 fallback 到 logo 图片
   it('treats "default" string as fallback and renders logo image', () => {
     render(<AgentAvatar name="Agent" emoji="default" size={20} />);

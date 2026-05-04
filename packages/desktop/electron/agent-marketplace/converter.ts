@@ -54,6 +54,19 @@ const SOUL_KEYWORDS = [
   /\brules you must follow/,
 ];
 
+function normalizeMarketplaceEmoji(value: unknown): string {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (!trimmed) return '';
+  if (trimmed.includes('://') || trimmed.includes('/') || trimmed.includes('.')) return '';
+
+  const hasEmojiCore = /(?:\p{Extended_Pictographic}|[\u{1F1E6}-\u{1F1FF}])/u.test(trimmed);
+  if (!hasEmojiCore) return '';
+
+  return /^(?:\p{Extended_Pictographic}|\p{Emoji_Component}|\uFE0F|\u200D|[\u{1F1E6}-\u{1F1FF}])+$/u.test(trimmed)
+    ? trimmed
+    : '';
+}
+
 function normaliseHeader(line: string): string {
   return line.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").trim();
 }
@@ -177,7 +190,7 @@ export function convertAgentToWorkspace(markdown: string): ConvertedWorkspace {
 
   const name = String(fm.name).trim();
   const description = String(fm.description).trim();
-  const emoji = (typeof fm.emoji === "string" && fm.emoji.trim()) || "🤖";
+  const emoji = normalizeMarketplaceEmoji(fm.emoji) || "🤖";
   const color = (typeof fm.color === "string" && fm.color.trim()) || "slate";
   const vibe =
     (typeof fm.vibe === "string" && fm.vibe.trim()) || description;

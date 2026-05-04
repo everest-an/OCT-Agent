@@ -156,6 +156,12 @@ Stuff here.
     expect(out.identity.emoji).toBe('🤖');
   });
 
+  it('falls back to default emoji when frontmatter emoji is invalid unicode text', () => {
+    const src = '---\nname: x\ndescription: y\nemoji: [禹]\n---\n\nbody';
+    const out = convertAgentToWorkspace(src);
+    expect(out.identity.emoji).toBe('🤖');
+  });
+
   it('provides default tools when missing', () => {
     const src = '---\nname: x\ndescription: y\n---\n\nbody';
     const out = convertAgentToWorkspace(src);

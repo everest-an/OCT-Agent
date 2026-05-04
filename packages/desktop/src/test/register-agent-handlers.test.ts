@@ -245,6 +245,57 @@ describe('register-agent-handlers', () => {
     });
   });
 
+  it('drops non-emoji unicode identity values instead of exposing mojibake', async () => {
+    const home = '/mock/home';
+    const agentId = 'oc-emoji-noise';
+    const configPath = path.join(home, '.openclaw', 'openclaw.json');
+    const workspaceDir = path.join(home, '.openclaw', `workspace-${agentId}`);
+    const workspaceIdentity = path.join(workspaceDir, 'IDENTITY.md');
+
+    existsSyncMock.mockImplementation((target: string) => (
+      target === configPath
+      || target === workspaceDir
+      || target === workspaceIdentity
+    ));
+
+    readFileSyncMock.mockImplementation((target: string) => {
+      if (target === configPath) {
+        return JSON.stringify({
+          agents: {
+            list: [{ id: agentId }],
+          },
+        });
+      }
+      if (target === workspaceIdentity) {
+        return [
+          '# IDENTITY.md - Agent Identity',
+          '',
+          '- **Name:** Social Content Creator',
+          '- **Emoji:** [禹]',
+          '',
+        ].join('\n');
+      }
+      throw new Error(`Unexpected read: ${target}`);
+    });
+
+    registerAgentHandlers({
+      home,
+      safeShellExecAsync: vi.fn().mockResolvedValue(null),
+      readShellOutputAsync: vi.fn().mockResolvedValue(null),
+      ensureGatewayRunning: vi.fn(async () => ({ ok: true })),
+      runAsync: vi.fn().mockResolvedValue(''),
+      runSpawnAsync: vi.fn().mockResolvedValue(''),
+    });
+
+    const handlers = getHandlers();
+    const result = await handlers['agents:list']({} as any);
+
+    expect(result).toMatchObject({
+      success: true,
+      agents: [expect.objectContaining({ id: agentId, emoji: '' })],
+    });
+  });
+
   it('runs Doctor plugin-installed fix before agent operations when awareness plugin is missing', async () => {
     const home = '/mock/home';
     const runDoctorFix = vi.fn().mockResolvedValue({ success: true });
