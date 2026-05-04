@@ -189,32 +189,32 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
   }, [agents, search]);
 
   return (
-    <div className="h-full flex flex-col bg-white dark:bg-[#090912]">
-      <header className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-white/[0.06] bg-white/78 dark:bg-[#090912]/80 backdrop-blur">
+    <div className="h-full flex flex-col bg-slate-950 text-slate-100">
+      <header className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06] bg-slate-950/80 backdrop-blur">
         <div className="flex items-center gap-3">
           <button
             onClick={onClose}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-slate-300 hover:bg-slate-800 transition-colors"
             title="返回 Agent 列表"
           >
             <ArrowLeft className="h-4 w-4" />
             返回
           </button>
-          <div className="h-6 border-r border-slate-300 dark:border-slate-700" />
+          <div className="h-6 border-r border-white/[0.08]" />
           <Sparkles className="h-5 w-5 text-violet-500" />
           <div>
             <h1 className="text-base font-semibold">Agent 集市</h1>
-            <p className="text-xs text-slate-500">浏览精选 agent,一键安装到你的 OCT</p>
+            <p className="text-xs text-slate-400">浏览精选 agent,一键安装到你的 OCT</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-slate-400">
+          <span className="text-[11px] text-slate-500">
             想分享你创建的 agent?到"多 Agent"页面,点 agent 卡片上的"分享"按钮。
           </span>
         </div>
       </header>
 
-      <div className="px-6 py-3 flex items-center gap-4 flex-wrap border-b border-slate-200 dark:border-white/[0.06] bg-white/78 dark:bg-[#12121e]/58">
+      <div className="px-6 py-3 flex items-center gap-4 flex-wrap border-b border-white/[0.06] bg-slate-900/55">
         <div className="flex gap-1.5 flex-wrap">
           {TABS.map((t) => (
             <button
@@ -223,7 +223,7 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
               className={`text-xs px-3 py-1.5 rounded-full transition-colors ${
                 tab === t.key
                   ? 'bg-violet-600 text-white'
-                  : 'bg-slate-100 dark:bg-white/[0.06] text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/[0.1]'
+                  : 'bg-white/[0.06] text-slate-300 hover:bg-white/[0.1]'
               }`}
             >
               {t.label}
@@ -235,13 +235,13 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
           placeholder="搜索 agent 名称 / 标签..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 min-w-[200px] max-w-md text-sm px-3 py-1.5 rounded-md border border-slate-300 dark:border-white/[0.08] bg-white dark:bg-[#12121e] focus:outline-none focus:ring-2 focus:ring-violet-400"
+          className="flex-1 min-w-[200px] max-w-md text-sm px-3 py-1.5 rounded-md border border-white/[0.08] bg-slate-900/70 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-400"
         />
       </div>
 
       <main className="flex-1 overflow-y-auto p-6">
         {error && (
-          <div className="mb-4 p-3 rounded-md bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-sm text-red-700 dark:text-red-300 flex items-start gap-2">
+            <div className="mb-4 p-3 rounded-md bg-red-950/40 border border-red-900 text-sm text-red-300 flex items-start gap-2">
             <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
             <div className="flex-1">{error}</div>
             <button onClick={fetchAgents} className="text-xs underline">
@@ -251,12 +251,12 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
         )}
 
         {loading ? (
-          <div className="flex items-center justify-center py-16 text-slate-500 text-sm">
+          <div className="flex items-center justify-center py-16 text-slate-400 text-sm">
             <Loader2 className="h-5 w-5 animate-spin mr-2" />
             加载中...
           </div>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-16 text-sm text-slate-500">
+          <div className="text-center py-16 text-sm text-slate-400">
             {search ? `没找到 "${search}" 相关的 agent` : '这个分类下暂无 agent'}
           </div>
         ) : (
@@ -268,7 +268,7 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
               return (
                 <div
                   key={agent.slug}
-                  className="group rounded-xl border border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#12121e]/72 p-4 hover:shadow-md hover:border-violet-300 dark:hover:border-violet-500/40 transition-all cursor-pointer flex flex-col"
+                  className="group rounded-xl border border-white/[0.06] bg-slate-900/70 p-4 hover:shadow-md hover:border-violet-500/40 transition-all cursor-pointer flex flex-col"
                   onClick={() => handleOpenDetail(agent.slug)}
                 >
                   <div className="flex items-start gap-3 mb-3">
@@ -282,12 +282,12 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
                           <Star className="h-3.5 w-3.5 text-amber-500 flex-shrink-0 fill-current" />
                         )}
                       </div>
-                      <p className="text-xs text-slate-500 truncate">
+                      <p className="text-xs text-slate-400 truncate">
                         {agent.category}
                       </p>
                     </div>
                   </div>
-                  <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-3 mb-3 flex-1">
+                  <p className="text-xs text-slate-400 line-clamp-3 mb-3 flex-1">
                     {agent.description_zh || agent.description}
                   </p>
 
@@ -299,7 +299,7 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
                   )}
 
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs text-slate-400">
+                    <span className="text-xs text-slate-500">
                       📥 {agent.install_count}
                     </span>
                     <button
@@ -310,9 +310,9 @@ export default function AgentMarketplace({ onClose, onInstalled }: Props) {
                       disabled={installed || isInstalling}
                       className={`text-xs px-3 py-1.5 rounded-md transition-colors ${
                         installed
-                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 cursor-default'
+                          ? 'bg-emerald-900/30 text-emerald-400 cursor-default'
                           : isInstalling
-                          ? 'bg-slate-200 dark:bg-white/[0.06] text-slate-600 dark:text-slate-400 cursor-wait'
+                          ? 'bg-white/[0.06] text-slate-400 cursor-wait'
                           : 'bg-violet-600 hover:bg-violet-700 text-white'
                       }`}
                     >
@@ -374,24 +374,29 @@ function DetailDrawer({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md bg-white dark:bg-[#12121e]/92 dark:backdrop-blur-3xl shadow-[0_0_40px_rgba(0,0,0,0.5)] dark:border-l dark:border-white/[0.08] overflow-y-auto"
+        className="w-full max-w-md bg-slate-900/95 backdrop-blur-3xl shadow-[0_0_40px_rgba(0,0,0,0.5)] border-l border-white/[0.08] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 bg-white/80 dark:bg-[#12121e]/72 backdrop-blur-md border-b border-slate-200 dark:border-white/[0.08] p-4 flex items-center justify-between">
+        <div className="sticky top-0 bg-slate-900/80 backdrop-blur-md border-b border-white/[0.08] p-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-2xl">{detail.emoji}</span>
             <div>
               <h2 className="font-semibold">{detail.name_zh || detail.name}</h2>
-              <p className="text-xs text-slate-500">{detail.category}</p>
+              <p className="text-xs text-slate-400">{detail.category}</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100 dark:hover:bg-white/[0.08]">
+          <button
+            onClick={onClose}
+            title="关闭"
+            aria-label="关闭"
+            className="p-1 rounded hover:bg-white/[0.08]"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
 
         <div className="p-4 space-y-4">
-          <p className="text-sm text-slate-700 dark:text-slate-300">
+          <p className="text-sm text-slate-300">
             {detail.description_zh || detail.description}
           </p>
 
@@ -402,7 +407,7 @@ function DetailDrawer({
                 {detail.tools.map((t) => (
                   <span
                     key={t}
-                    className="text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-white/[0.06]"
+                    className="text-xs px-2 py-0.5 rounded bg-white/[0.06]"
                   >
                     {t}
                   </span>
@@ -427,15 +432,15 @@ function DetailDrawer({
             </div>
           )}
 
-          <div className="text-xs text-slate-500">
+          <div className="text-xs text-slate-400">
             📥 {detail.install_count} 人已安装
           </div>
 
-          <details className="border-t pt-3" open>
-            <summary className="text-xs font-semibold text-slate-500 cursor-pointer">
+          <details className="border-t border-white/[0.08] pt-3" open>
+            <summary className="text-xs font-semibold text-slate-400 cursor-pointer">
               查看完整 system prompt
             </summary>
-            <pre className="mt-2 text-[10px] leading-relaxed whitespace-pre-wrap bg-slate-50 dark:bg-[#090912] border border-slate-200 dark:border-white/[0.06] rounded p-3 font-mono overflow-x-auto max-h-96 overflow-y-auto">
+            <pre className="mt-2 text-[10px] leading-relaxed whitespace-pre-wrap bg-slate-950 border border-white/[0.06] rounded p-3 font-mono overflow-x-auto max-h-96 overflow-y-auto">
               {detail.markdown}
             </pre>
           </details>
@@ -452,9 +457,9 @@ function DetailDrawer({
             disabled={installed || installing}
             className={`w-full py-2.5 rounded-md font-medium text-sm transition-colors ${
               installed
-                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                ? 'bg-emerald-900/30 text-emerald-400'
                 : installing
-                ? 'bg-slate-200 text-slate-600 dark:bg-white/[0.06] dark:text-slate-400'
+                ? 'bg-white/[0.06] text-slate-400'
                 : 'bg-violet-600 hover:bg-violet-700 text-white'
             }`}
           >

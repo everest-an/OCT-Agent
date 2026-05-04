@@ -193,7 +193,7 @@ export function ScanSettingsDialog({
         className="flex min-h-full items-center justify-center p-4"
         onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       >
-      <div className="w-full max-w-xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl">
+      <div className="flex w-full max-w-xl max-h-[calc(100dvh-2rem)] flex-col overflow-hidden bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl">
         <header className="flex items-start justify-between gap-4 px-5 py-4 border-b border-slate-800">
           <div className="min-w-0">
             <h2 id="scan-settings-title" className="text-base font-semibold text-slate-100">
@@ -215,11 +215,11 @@ export function ScanSettingsDialog({
         </header>
 
         {loading ? (
-          <div className="flex items-center justify-center py-16 text-slate-500">
+          <div className="flex flex-1 items-center justify-center py-16 text-slate-500">
             <Loader2 size={18} className="animate-spin" />
           </div>
         ) : (
-          <div className="px-5 py-4 space-y-5">
+          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
             {loadError && (
               <p className="text-xs text-amber-400" role="alert">
                 {t('scanSettings.loadError')}: {loadError}
@@ -406,6 +406,7 @@ function NumberInput({ label, value, onChange, error }: NumberInputProps) {
       <div className="flex flex-col items-end">
         <input
           type="number"
+          aria-label={label}
           value={value}
           onChange={(e) => {
             const n = Number(e.target.value);
