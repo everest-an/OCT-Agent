@@ -6,7 +6,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
-    "dev:electron": "npx -p typescript tsc -p tsconfig.electron.json && concurrently \"vite\" \"wait-on http://localhost:5173 && node scripts/run-electron-dev.mjs\"",
+    "dev:electron": "npx -p typescript tsc -p tsconfig.electron.json && concurrently \"vite --strictPort\" \"wait-on http://localhost:5173 && node scripts/run-electron-dev.mjs\"",
     "build": "npx -p typescript tsc -p tsconfig.electron.json && vite build",
     "build:package": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --dir",
     "test": "vitest run",

@@ -10,7 +10,7 @@ describe('Automation Page', () => {
 
   it('renders heartbeat section', () => {
     render(<Automation />);
-    expect(screen.getByText('Heartbeat Check')).toBeInTheDocument();
+    expect(screen.getByText('Heartbeat / Long Task Frequency')).toBeInTheDocument();
   });
 
   it('renders add task button', () => {

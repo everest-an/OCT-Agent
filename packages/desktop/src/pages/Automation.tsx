@@ -54,6 +54,8 @@ const ACTIVE_SESSION_STORAGE_KEY = 'awareness-claw-active-session';
 const HEARTBEAT_JOB_NAME = 'OCT Heartbeat';
 const HEARTBEAT_EVENT_TEXT = 'OCT heartbeat check';
 const HEARTBEAT_JOB_DESCRIPTION = 'Managed by OCT heartbeat toggle';
+const HEARTBEAT_DOC_MANAGED_START = '<!-- OCT_HEARTBEAT_MANAGED_START -->';
+const HEARTBEAT_DOC_MANAGED_END = '<!-- OCT_HEARTBEAT_MANAGED_END -->';
 
 const WEEKDAYS = [
   { value: 1, key: 'auto.day.mon', fallback: 'Mon' },
@@ -218,6 +220,36 @@ function getManagedHeartbeatInterval(job: CronJob): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function buildHeartbeatManagedBlock(enabled: boolean, intervalMinutes: number): string {
+  const statusText = enabled ? 'enabled' : 'disabled';
+  const cadenceText = enabled ? `every ${intervalMinutes} minutes` : 'not scheduled';
+  return [
+    HEARTBEAT_DOC_MANAGED_START,
+    `Desktop heartbeat status: ${statusText}.`,
+    `Desktop heartbeat cadence: ${cadenceText}.`,
+    HEARTBEAT_DOC_MANAGED_END,
+  ].join('\n');
+}
+
+function upsertHeartbeatManagedBlock(content: string, enabled: boolean, intervalMinutes: number): string {
+  const managedBlock = buildHeartbeatManagedBlock(enabled, intervalMinutes);
+  const blockPattern = new RegExp(
+    `${HEARTBEAT_DOC_MANAGED_START}[\\s\\S]*?${HEARTBEAT_DOC_MANAGED_END}`,
+    'm',
+  );
+
+  if (blockPattern.test(content)) {
+    return content.replace(blockPattern, managedBlock);
+  }
+
+  const trimmed = content.trimEnd();
+  if (!trimmed) {
+    return ['# Heartbeat', '', managedBlock, ''].join('\n');
+  }
+
+  return `${trimmed}\n\n${managedBlock}\n`;
+}
+
 function isValidCron(expr: string): boolean {
   const parts = expr.trim().split(/\s+/);
   return parts.length === 5 && parts.every((part) => part.length > 0);
@@ -328,6 +360,24 @@ export default function Automation() {
   const syncHeartbeatJob = async () => {
     if (!window.electronAPI?.cronAdd || !window.electronAPI?.cronRemove) return;
 
+    const syncHeartbeatDoc = async () => {
+      if (!window.electronAPI?.agentsWriteFile) return;
+
+      try {
+        const readResult = window.electronAPI?.agentsReadFile
+          ? await window.electronAPI.agentsReadFile('main', 'HEARTBEAT.md')
+          : null;
+        const currentContent = typeof readResult?.content === 'string' ? readResult.content : '';
+        const nextContent = upsertHeartbeatManagedBlock(currentContent, heartbeatEnabled, heartbeatInterval);
+
+        if (nextContent !== currentContent) {
+          await window.electronAPI.agentsWriteFile('main', 'HEARTBEAT.md', nextContent);
+        }
+      } catch {
+        // Best effort only: heartbeat cron should still work even when file sync fails.
+      }
+    };
+
     const desiredExpression = `*/${heartbeatInterval} * * * *`;
     const heartbeatJobs = jobsRef.current.filter(isManagedHeartbeatJob);
     const jobsToRemove = heartbeatJobs.filter(
@@ -363,6 +413,8 @@ export default function Automation() {
     if (changed) {
       await loadJobs();
     }
+
+    await syncHeartbeatDoc();
   };
 
   useEffect(() => {

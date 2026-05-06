@@ -19,14 +19,14 @@ describe('Automation - heartbeat persistence', () => {
     await act(async () => { render(<Automation />); });
 
     // Find the heartbeat toggle
-    const heartbeatSection = screen.getByText('Heartbeat Check');
+    const heartbeatSection = screen.getByText('Heartbeat / Long Task Frequency');
     expect(heartbeatSection).toBeInTheDocument();
 
-    // Toggle is in the same row as "Heartbeat Check"
+    // Toggle is in the same row as the heartbeat label.
     const toggles = screen.getAllByRole('button');
     const heartbeatToggle = toggles.find(btn => {
       const parent = btn.closest('.flex.items-center.justify-between');
-      return parent?.textContent?.includes('Heartbeat Check');
+      return parent?.textContent?.includes('Heartbeat / Long Task Frequency');
     });
 
     if (heartbeatToggle) {
@@ -61,7 +61,7 @@ describe('Automation - heartbeat persistence', () => {
     const toggles = screen.getAllByRole('button');
     const heartbeatToggle = toggles.find((btn) => {
       const parent = btn.closest('.flex.items-center.justify-between');
-      return parent?.textContent?.includes('Heartbeat Check');
+      return parent?.textContent?.includes('Heartbeat / Long Task Frequency');
     });
 
     if (heartbeatToggle) {

@@ -226,14 +226,23 @@ function createWindow() {
   });
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173').then(() => {
-      mainWindow?.webContents.openDevTools({ mode: 'detach' });
-    }).catch(async (err: any) => {
-      console.warn('[desktop] Dev server unavailable, falling back to built frontend:', err?.message || err);
+    const devUrls = ['http://localhost:5173', 'http://localhost:5174'];
+    (async () => {
+      for (const url of devUrls) {
+        try {
+          await mainWindow?.loadURL(url);
+          mainWindow?.webContents.openDevTools({ mode: 'detach' });
+          return;
+        } catch (err: any) {
+          console.warn(`[desktop] Dev URL unavailable (${url}):`, err?.message || err);
+        }
+      }
+
+      console.warn('[desktop] Dev server unavailable, falling back to built frontend.');
       if (fs.existsSync(builtIndexPath) && mainWindow && !mainWindow.isDestroyed()) {
         await mainWindow.loadFile(builtIndexPath);
       }
-    });
+    })();
   } else {
     mainWindow.loadFile(builtIndexPath);
   }

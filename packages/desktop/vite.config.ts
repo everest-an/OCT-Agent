@@ -18,6 +18,7 @@ export default defineConfig({
     globals: true,
     setupFiles: ['src/test/setup.ts'],
     fileParallelism: false,
-    exclude: ['test/e2e/**', 'node_modules/**'],
+    include: ['src/test/**/*.test.{ts,tsx}'],
+    exclude: ['test/e2e/**', 'node_modules/**', 'release/**', 'dist/**', 'dist-electron/**'],
   },
 });

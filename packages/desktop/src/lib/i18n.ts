@@ -360,11 +360,11 @@ const en: Record<string, string> = {
 
   // Automation
   'auto.title': 'Automation',
-  'auto.subtitle': 'Scheduled tasks and heartbeat',
-  'auto.heartbeat': 'Heartbeat',
-  'auto.heartbeat.title': 'Heartbeat Check',
-  'auto.heartbeat.desc': 'AI periodically checks status and notifies you when needed',
-  'auto.heartbeat.interval': 'Interval',
+  'auto.subtitle': 'Scheduled tasks and long-task frequency',
+  'auto.heartbeat': 'Long Task Frequency',
+  'auto.heartbeat.title': 'Heartbeat / Long Task Frequency',
+  'auto.heartbeat.desc': 'AI re-checks and continues long-running work at this interval',
+  'auto.heartbeat.interval': 'Frequency',
   'auto.tasks': 'Scheduled Tasks',
   'auto.addTask': 'Add Task',
   'auto.newTask': 'New Scheduled Task',
@@ -1775,11 +1775,11 @@ const zh: Record<string, string> = {
 
   // Automation
   'auto.title': '自动化',
-  'auto.subtitle': '定时任务和心跳检查',
-  'auto.heartbeat': '心跳',
-  'auto.heartbeat.title': '心跳检查',
-  'auto.heartbeat.desc': 'AI 定期检查状态，有需要时主动通知你',
-  'auto.heartbeat.interval': '检查间隔',
+  'auto.subtitle': '定时任务和长任务频率',
+  'auto.heartbeat': '长任务频率',
+  'auto.heartbeat.title': '心跳 / 长任务频率',
+  'auto.heartbeat.desc': 'AI 会按此频率重新检查并继续推进长任务',
+  'auto.heartbeat.interval': '频率',
   'auto.tasks': '定时任务',
   'auto.addTask': '添加任务',
   'auto.newTask': '添加定时任务',
