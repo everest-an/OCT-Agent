@@ -248,7 +248,7 @@ export function registerAppRuntimeHandlers(deps: {
       const health = await deps.getLocalDaemonHealth(2000);
       const daemonCurrent = health?.version;
       if (daemonCurrent) {
-        const latestDaemon = await deps.safeShellExecAsync('npm view @awareness-sdk/local version', 10000);
+        const latestDaemon = await deps.safeShellExecAsync('npm view @awareness.market/local version', 10000);
         if (latestDaemon && latestDaemon.trim() !== daemonCurrent) {
           // Try to find daemon CHANGELOG in npx cache
           let daemonChangelog = '';
@@ -644,7 +644,7 @@ export function registerAppRuntimeHandlers(deps: {
         const DAEMON_START_TIMEOUT_MS = 300_000;
         try {
           await deps.runAsyncWithProgress(
-            `npx -y${npxArgs} @awareness-sdk/local@latest start --port 37800 --project "${path.join(deps.home, '.openclaw')}" --background`,
+            `npx -y${npxArgs} @awareness.market/local@latest start --port 37800 --project "${path.join(deps.home, '.openclaw')}" --background`,
             DAEMON_START_TIMEOUT_MS,
             (line) => { progress('daemon:start', 'running', line.slice(0, 120)); },
           );
@@ -656,7 +656,7 @@ export function registerAppRuntimeHandlers(deps: {
           if ((msg.includes('EBUSY') || msg.includes('rename') || msg.includes('errno -4082')) && deps.freshNpxCacheArg) {
             progress('daemon:start', 'running', 'cache locked — retrying with fresh cache...');
             await deps.runAsyncWithProgress(
-              `npx -y ${deps.freshNpxCacheArg()} @awareness-sdk/local@latest start --port 37800 --project "${path.join(deps.home, '.openclaw')}" --background`,
+              `npx -y ${deps.freshNpxCacheArg()} @awareness.market/local@latest start --port 37800 --project "${path.join(deps.home, '.openclaw')}" --background`,
               DAEMON_START_TIMEOUT_MS,
               (line) => { progress('daemon:start', 'running', line.slice(0, 120)); },
             );

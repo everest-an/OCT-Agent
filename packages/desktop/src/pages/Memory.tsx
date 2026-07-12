@@ -559,7 +559,7 @@ export default function Memory() {
               {daemonStarting ? t('memory.startingDaemon') : t('memory.startDaemon')}
             </button>
             <p className="text-[11px] text-slate-600 font-mono select-all">
-              npx @awareness-sdk/local start
+              npx @awareness.market/local start
             </p>
           </div>
         )}

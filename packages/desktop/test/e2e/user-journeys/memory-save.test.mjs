@@ -59,7 +59,7 @@ describe('L4 E2E: Memory save via daemon', () => {
       const health = await httpJson('GET', '/healthz', null, 5000);
       assert.equal(health.status, 200, 'Daemon should be healthy');
     } catch (err) {
-      throw new Error(`Awareness daemon not running on port ${DAEMON_PORT}: ${err.message}. Start it with: npx @awareness-sdk/local start`);
+      throw new Error(`Awareness daemon not running on port ${DAEMON_PORT}: ${err.message}. Start it with: npx @awareness.market/local start`);
     }
   });
 

@@ -662,7 +662,7 @@ export function registerSetupHandlers(deps: {
     const startupPromise = (async () => {
       const normalizedHomeDir = normalizeHomePath(deps.home);
       const daemonProjectDir = path.join(normalizedHomeDir, '.openclaw');
-      const daemonSpec = stripWrappingQuotes(deps.resolveBundledCache('awareness-sdk-local.tgz') || '@awareness-sdk/local@latest');
+      const daemonSpec = stripWrappingQuotes(deps.resolveBundledCache('awareness-sdk-local.tgz') || '@awareness.market/local@latest');
       const bundledNpxCli = stripWrappingQuotes(deps.getBundledNpmBin('npx') || '');
 
       const bootstrapDaemonInForeground = async (statusKey: string) => {

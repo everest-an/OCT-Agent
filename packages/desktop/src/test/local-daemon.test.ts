@@ -45,7 +45,7 @@ describe('startLocalDaemonDetached', () => {
       expect(calls).toHaveLength(1);
       expect(calls[0]?.cmd).toBe('node');
       expect(calls[0]?.args[0]).toBe('C:/npm/bin/npx-cli.js');
-      expect(calls[0]?.args).toContain('@awareness-sdk/local@latest');
+      expect(calls[0]?.args).toContain('@awareness.market/local@latest');
       expect(calls[0]?.opts?.windowsHide).toBe(true);
       return;
     }

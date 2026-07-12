@@ -16,7 +16,7 @@
     "category": "daemon"
   },
   {
-    "task": "发布新版本 @awareness-sdk/local 到 npm，直接 npm publish 报 ENEEDAUTH，怎么回事",
+    "task": "发布新版本 @awareness.market/local 到 npm，直接 npm publish 报 ENEEDAUTH，怎么回事",
     "category": "npm-publish"
   }
 ]

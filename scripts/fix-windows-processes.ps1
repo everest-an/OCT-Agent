@@ -234,7 +234,7 @@ if (-not $daemonRunning -or $Force) {
     Write-Host "  正在启动 Daemon..." -ForegroundColor Yellow
     try {
         $projectDir = $OPENCLAW_DIR
-        $startCmd = "npx -y @awareness-sdk/local@latest start --port $daemonPort --project `"$projectDir`" --background"
+        $startCmd = "npx -y @awareness.market/local@latest start --port $daemonPort --project `"$projectDir`" --background"
         
         Start-Process -WindowStyle Hidden -FilePath "cmd.exe" -ArgumentList "/d","/c",$startCmd -ErrorAction Stop
         Write-Host "  ✅ Daemon 启动命令已执行，等待就绪..." -ForegroundColor Green

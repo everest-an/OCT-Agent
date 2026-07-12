@@ -48,7 +48,7 @@ async function rmSyncWithRetry(target: string, retries = 5): Promise<boolean> {
 }
 
 /**
- * Clear cached `@awareness-sdk/local` npx entries.
+ * Clear cached `@awareness.market/local` npx entries.
  *
  * Windows tricky bit: if the daemon was running from this cache when we
  * try to clear, native DLL handles (better-sqlite3.node) may still be
@@ -238,7 +238,7 @@ export async function startLocalDaemonDetached(options: {
   const homedir = normalizeHomeDir(options.homedir);
   const projectDir = resolveInitialProjectDir(homedir);
   const offlineTarball = options.resolveBundledCache('awareness-sdk-local.tgz');
-  const npxArgs = ['-y', offlineTarball || '@awareness-sdk/local@latest', 'start', '--port', '37800', '--project', projectDir, '--background'];
+  const npxArgs = ['-y', offlineTarball || '@awareness.market/local@latest', 'start', '--port', '37800', '--project', projectDir, '--background'];
 
   const launchDetached = (command: string, args: string[]) => new Promise<void>((resolve, reject) => {
     const env = process.platform === 'win32'
@@ -282,7 +282,7 @@ export async function startLocalDaemonDetached(options: {
 
     const execArgs = offlineTarball
       ? ['exec', '--yes', offlineTarball, 'start', '--port', '37800', '--project', projectDir, '--background']
-      : ['exec', '--yes', '@awareness-sdk/local@latest', 'start', '--port', '37800', '--project', projectDir, '--background'];
+      : ['exec', '--yes', '@awareness.market/local@latest', 'start', '--port', '37800', '--project', projectDir, '--background'];
 
     await launchDetached('node', [npmCli, ...execArgs]);
   };

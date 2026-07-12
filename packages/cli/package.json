@@ -1,5 +1,5 @@
 {
-  "name": "@awareness-sdk/claw",
+  "name": "@awareness.market/claw",
   "version": "0.1.0",
   "description": "OCT-Agent CLI — One-click setup for OpenClaw with Awareness memory",
   "type": "module",

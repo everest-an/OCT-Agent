@@ -772,7 +772,7 @@ async function ensureLocalDaemonReadyForRuntime(send?: (ch: string, data: any) =
   };
 
   const bootstrapDaemonInForeground = async () => {
-    const daemonSpec = resolveBundledCache('awareness-sdk-local.tgz') || '@awareness-sdk/local@latest';
+    const daemonSpec = resolveBundledCache('awareness-sdk-local.tgz') || '@awareness.market/local@latest';
     const daemonArgs = ['-y', daemonSpec, 'start', '--port', '37800', '--project', daemonProjectDir, '--background'];
     const bundledNpxCli = getBundledNpmBin('npx');
 
@@ -2823,7 +2823,7 @@ app.on('before-quit', (e: Event) => {
   // with the new app's CLI calls. Fire-and-forget — Electron won't wait on it.
   void killAllActiveLogins().catch(() => { /* best-effort */ });
   // Last-resort sweep: kill any orphan node/npx processes related to
-  // @awareness-sdk/local or openclaw.mjs that escaped tracked-child cleanup
+  // @awareness.market/local or openclaw.mjs that escaped tracked-child cleanup
   // (e.g. from a prior crashed session or detached daemon spawn).
   void killAllOrphanProcesses(process.pid).catch(() => { /* best-effort */ });
 });

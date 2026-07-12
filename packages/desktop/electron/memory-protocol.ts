@@ -13,7 +13,7 @@ export const MEMORY_CONTEXT_TASK_LIMIT = 5;
 //
 // Legacy multi-parameter form (semantic_query/keyword_query/scope/...) still
 // works against pre-F-053 daemons via the deprecation path — but the desktop
-// ships pinned to @awareness-sdk/local 0.8.0+, so we always use single-param.
+// ships pinned to @awareness.market/local 0.8.0+, so we always use single-param.
 export function buildMemorySearchArgs(query: string, opts?: { limit?: number; tokenBudget?: number }) {
   const trimmedQuery = query.trim();
   if (!trimmedQuery) {

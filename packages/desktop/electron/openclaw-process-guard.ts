@@ -428,7 +428,7 @@ export function killAllStaleChannelOps(): Promise<void> {
  * a last-resort sweep after tracked children have already been killed.
  *
  * Targets: node.exe / npx.exe processes whose command line contains
- * `@awareness-sdk/local` or `openclaw.mjs`. NEVER matches the current
+ * `@awareness.market/local` or `openclaw.mjs`. NEVER matches the current
  * Electron main process itself (filtered by PID).
  */
 export function killAllOrphanProcesses(currentPid: number): Promise<void> {
@@ -437,13 +437,13 @@ export function killAllOrphanProcesses(currentPid: number): Promise<void> {
       '-NoProfile', '-Command',
       `Get-CimInstance Win32_Process | Where-Object { ` +
       `($_.Name -eq 'node.exe' -or $_.Name -eq 'npx.exe') -and ` +
-      `($_.CommandLine -like '*@awareness-sdk/local*' -or $_.CommandLine -like '*openclaw.mjs*') -and ` +
+      `($_.CommandLine -like '*@awareness.market/local*' -or $_.CommandLine -like '*openclaw.mjs*') -and ` +
       `$_.ProcessId -ne ${currentPid} } | ` +
       `ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`,
     ]);
   }
   return runKillCommand('bash', ['-c',
-    `ps -eo pid,args | grep -E '(@awareness-sdk/local|openclaw\\.mjs)' | grep -v grep | awk '{print $1}' | grep -v '^${currentPid}$' | xargs -r kill -9 2>/dev/null`,
+    `ps -eo pid,args | grep -E '(@awareness.market/local|openclaw\\.mjs)' | grep -v grep | awk '{print $1}' | grep -v '^${currentPid}$' | xargs -r kill -9 2>/dev/null`,
   ]);
 }
 

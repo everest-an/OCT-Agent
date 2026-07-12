@@ -10,7 +10,7 @@
  *     tools.alsoAllow, never used to REPLACE the underlying OpenClaw tool profile.
  *   - The openclaw-memory plugin must be force-enabled with localUrl pointing at
  *     the local daemon (127.0.0.1:37800).
- *   - The local daemon must be launched via the `@awareness-sdk/local` package
+ *   - The local daemon must be launched via the `@awareness.market/local` package
  *     (not OpenClaw's own memory backend), and must have a watchdog + project-dir
  *     isolation header.
  *   - Both workspace hooks (awareness-memory-backup, awareness-workspace-inject)
@@ -112,7 +112,7 @@ if (client) {
 const daemon = readOrFail('local-daemon.ts');
 if (daemon) {
   if (!/@awareness-sdk\/local/.test(daemon.src)) {
-    fail(daemon.path, 'local daemon must be launched via @awareness-sdk/local');
+    fail(daemon.path, 'local daemon must be launched via @awareness.market/local');
   }
   if (!/--port\s+37800|port[=\s]+37800|'37800'/.test(daemon.src)) {
     fail(daemon.path, 'local daemon must run on port 37800 (matches memory-client)');
@@ -157,7 +157,7 @@ if (errors === 0) {
   console.log('[L1 OK] memory-architecture invariants hold');
   console.log('  - awareness_* tools APPENDED to alsoAllow (not replacing)');
   console.log('  - openclaw-memory plugin force-enabled with localUrl=127.0.0.1:37800');
-  console.log('  - local daemon via @awareness-sdk/local with watchdog');
+  console.log('  - local daemon via @awareness.market/local with watchdog');
   console.log('  - project-dir isolation header in memory-client');
   console.log('  - both workspace hooks (backup + inject) referenced');
   console.log('  - tools.profile=coding preserved (OpenClaw native memory stays on)');

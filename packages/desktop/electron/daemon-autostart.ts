@@ -30,7 +30,7 @@ function buildWindowsTaskCommand(daemonArgs: string[]): string {
 
 function getDaemonArgs(homedir: string): string[] {
   const projectDir = path.join(homedir, '.openclaw');
-  return ['-y', '@awareness-sdk/local@latest', 'start', '--port', '37800', '--project', projectDir, '--background'];
+  return ['-y', '@awareness.market/local@latest', 'start', '--port', '37800', '--project', projectDir, '--background'];
 }
 
 // ── macOS LaunchAgent ──────────────────────────────────────────────────────

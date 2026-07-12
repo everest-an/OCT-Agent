@@ -2,7 +2,7 @@
   "name": "oct-agent-desktop",
   "version": "0.4.9",
   "description": "OCT Desktop — Visual AI agent manager with persistent memory",
-  "author": "edwin-hao-ai",
+  "author": "everest-an",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -143,7 +143,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "edwin-hao-ai",
+      "owner": "everest-an",
       "repo": "OCT-Agent"
     }
   },

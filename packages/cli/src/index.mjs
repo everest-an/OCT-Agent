@@ -75,8 +75,8 @@ function printHelp() {
 OCT-Agent — One-click AI agent with persistent memory
 
 Usage:
-  npx @awareness-sdk/claw              Interactive setup wizard
-  npx @awareness-sdk/claw --help       Show this help
+  npx @awareness.market/claw              Interactive setup wizard
+  npx @awareness.market/claw --help       Show this help
 
 Options:
   --api-key <key>       Awareness API key (skip browser auth)
@@ -88,8 +88,8 @@ Options:
   --help                Show this help message
 
 Examples:
-  npx @awareness-sdk/claw
-  npx @awareness-sdk/claw --api-key aw_xxx --memory-id mem_xxx
-  npx @awareness-sdk/claw --model deepseek-chat --skip-auth
+  npx @awareness.market/claw
+  npx @awareness.market/claw --api-key aw_xxx --memory-id mem_xxx
+  npx @awareness.market/claw --model deepseek-chat --skip-auth
 `);
 }

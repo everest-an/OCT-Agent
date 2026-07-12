@@ -507,7 +507,7 @@ OpenClaw 的 chat 质量依赖 `~/.openclaw/workspace/` 下的 MD 文档：
 #### 记忆页面
 - [x] **搜索无结果区分原因**：有搜索词 → "No results for '...'"；有分类筛选 → "No cards in this category" + 清除筛选；无 → "No memory data yet"（2026-03-30）
 - [x] **分类筛选无结果时提供 "清除筛选" 按钮**：clearFilter 按钮点击恢复 selectedCategory='all'（2026-03-30）
-- [x] **Mock 数据提示加操作指引**：mockHint 下方增加 `npx @awareness-sdk/local start` 命令框（2026-03-30）
+- [x] **Mock 数据提示加操作指引**：mockHint 下方增加 `npx @awareness.market/local start` 命令框（2026-03-30）
 
 #### 聊天页面
 - [x] **"No response" 用 i18n**：已用 t('chat.noResponse')（2026-03-30）

@@ -157,7 +157,7 @@ npx --version
 
 # 启动 Daemon
 $projectDir = "$env:USERPROFILE\.openclaw"
-npx -y @awareness-sdk/local@latest start --port 37800 --project "$projectDir" --background
+npx -y @awareness.market/local@latest start --port 37800 --project "$projectDir" --background
 ```
 
 #### 问题：端口被僵尸进程占用
@@ -171,7 +171,7 @@ $pid = $conn.OwningProcess
 Stop-Process -Id $pid -Force
 
 # 重新启动 Daemon
-npx -y @awareness-sdk/local@latest start --port 37800 --project "$env:USERPROFILE\.openclaw" --background
+npx -y @awareness.market/local@latest start --port 37800 --project "$env:USERPROFILE\.openclaw" --background
 ```
 
 #### 问题：npx 缓存损坏
@@ -194,7 +194,7 @@ if (Test-Path $localCache) {
 }
 
 # 重新启动 Daemon
-npx -y @awareness-sdk/local@latest start --port 37800 --project "$env:USERPROFILE\.openclaw" --background
+npx -y @awareness.market/local@latest start --port 37800 --project "$env:USERPROFILE\.openclaw" --background
 ```
 
 ### 清理僵尸进程
@@ -387,8 +387,8 @@ Start-Process -WindowStyle Hidden -FilePath "openclaw" `
 ### Daemon 启动流程
 
 ```
-npx @awareness-sdk/local start --port 37800 --background
-→ 下载/使用缓存的 @awareness-sdk/local
+npx @awareness.market/local start --port 37800 --background
+→ 下载/使用缓存的 @awareness.market/local
 → 启动 HTTP 服务器监听 37800
 → 初始化 SQLite 数据库
 → 后台运行（detached 模式）

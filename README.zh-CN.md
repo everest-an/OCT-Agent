@@ -107,7 +107,7 @@ Hardware:   M1 8GB, 14 min
 ### 方式 2：CLI（高级）
 
 ```bash
-npx @awareness-sdk/claw
+npx @awareness.market/claw
 ```
 
 ---

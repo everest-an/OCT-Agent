@@ -148,7 +148,7 @@ Double-click to install. No terminal required.
 ### Option 2: CLI (Advanced)
 
 ```bash
-npx @awareness-sdk/claw
+npx @awareness.market/claw
 ```
 
 ---

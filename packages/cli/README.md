@@ -1,4 +1,4 @@
-# @awareness-sdk/claw
+# @awareness.market/claw
 
 **OCT-Agent CLI** — one-click setup for [OpenClaw](https://openclaw.ai) with persistent [Awareness](https://awareness.market) memory.
 
@@ -7,7 +7,7 @@ Installs OpenClaw, wires in the Awareness memory plugin, starts the local daemon
 ## Quick Start
 
 ```bash
-npx @awareness-sdk/claw
+npx @awareness.market/claw
 ```
 
 That's it. The interactive wizard will:
@@ -21,20 +21,20 @@ That's it. The interactive wizard will:
 ### Non-interactive mode
 
 ```bash
-npx @awareness-sdk/claw --api-key aw_xxx --memory-id <your-memory-id>
+npx @awareness.market/claw --api-key aw_xxx --memory-id <your-memory-id>
 ```
 
 ### Help
 
 ```bash
-npx @awareness-sdk/claw --help
+npx @awareness.market/claw --help
 ```
 
 ## What you get
 
 - **OpenClaw** — open-source AI agent framework, running locally.
 - **Awareness memory** — cross-session, cross-project persistent memory with knowledge cards, task tracking, and conflict detection.
-- **One command to update everything** — run `npx @awareness-sdk/claw` again any time to reinstall / upgrade.
+- **One command to update everything** — run `npx @awareness.market/claw` again any time to reinstall / upgrade.
 
 ## Prefer a GUI?
 

@@ -26,5 +26,5 @@
   ExecWait `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "$$ErrorActionPreference = 'SilentlyContinue'; if (Get-Command openclaw -ErrorAction SilentlyContinue) { & openclaw gateway stop 2>$$null | Out-Null }; try { Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:37800/shutdown' -Method POST -TimeoutSec 3 | Out-Null } catch {}"`
 
   ; Final sweep for leftover runtime processes that can keep .openclaw locked.
-  ExecWait `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "$$ErrorActionPreference = 'SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { ($$_.Name -eq 'node.exe' -or $$_.Name -eq 'npx.exe') -and ($$_.CommandLine -match '@awareness-sdk/local' -or $$_.CommandLine -match 'openclaw\\.mjs') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }"`
+  ExecWait `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "$$ErrorActionPreference = 'SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { ($$_.Name -eq 'node.exe' -or $$_.Name -eq 'npx.exe') -and ($$_.CommandLine -match '@awareness.market/local' -or $$_.CommandLine -match 'openclaw\\.mjs') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }"`
 !macroend

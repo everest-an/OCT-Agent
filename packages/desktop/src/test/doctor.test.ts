@@ -1035,7 +1035,7 @@ describe('doctor — plugin-spawn-handler', () => {
       fs.mkdirSync(pluginDir, { recursive: true });
       // Simulate vulnerable plugin code
       fs.writeFileSync(path.join(pluginDir, 'index.js'), `
-        const child = spawn("npx", ["-y", "@awareness-sdk/local", "start"]);
+        const child = spawn("npx", ["-y", "@awareness.market/local", "start"]);
         child.unref();
       `);
 
@@ -1057,7 +1057,7 @@ describe('doctor — plugin-spawn-handler', () => {
       fs.mkdirSync(pluginDir, { recursive: true });
       // Simulate fixed plugin code
       fs.writeFileSync(path.join(pluginDir, 'index.js'), `
-        const child = spawn("npx", ["-y", "@awareness-sdk/local", "start"]);
+        const child = spawn("npx", ["-y", "@awareness.market/local", "start"]);
         child.on("error", () => {});
         child.unref();
       `);
@@ -1079,7 +1079,7 @@ describe('doctor — plugin-spawn-handler', () => {
       const pluginPath = path.join(pluginDir, 'index.js');
       // Simulate vulnerable plugin code
       fs.writeFileSync(pluginPath, `
-        const child = spawn("npx", ["-y", "@awareness-sdk/local", "start"]);
+        const child = spawn("npx", ["-y", "@awareness.market/local", "start"]);
         child.unref();
       `);
 
@@ -1101,7 +1101,7 @@ describe('doctor — plugin-spawn-handler', () => {
       fs.mkdirSync(pluginDir, { recursive: true });
       // Already fixed
       fs.writeFileSync(path.join(pluginDir, 'index.js'), `
-        const child = spawn("npx", ["-y", "@awareness-sdk/local", "start"]);
+        const child = spawn("npx", ["-y", "@awareness.market/local", "start"]);
         child.on("error", () => {});
         child.unref();
       `);

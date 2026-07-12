@@ -204,7 +204,7 @@ async function main() {
 
   if (!health) {
     console.error(`daemon not reachable at ${DAEMON_URL}`);
-    console.error('start with: npx @awareness-sdk/local start --port 37800');
+    console.error('start with: npx @awareness.market/local start --port 37800');
     process.exit(3);
   }
   console.log(`daemon v${health.version}, mode=${health.mode}, project=${health.project_dir}`);

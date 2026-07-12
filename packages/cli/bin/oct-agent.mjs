@@ -4,9 +4,9 @@
  * OCT-Agent CLI — One-click setup for OpenClaw with Awareness memory
  *
  * Usage:
- *   npx @awareness-sdk/claw           # Interactive setup wizard
- *   npx @awareness-sdk/claw --help    # Show help
- *   npx @awareness-sdk/claw --api-key aw_xxx --memory-id xxx  # Non-interactive
+ *   npx @awareness.market/claw           # Interactive setup wizard
+ *   npx @awareness.market/claw --help    # Show help
+ *   npx @awareness.market/claw --api-key aw_xxx --memory-id xxx  # Non-interactive
  */
 
 import { main } from '../src/index.mjs';

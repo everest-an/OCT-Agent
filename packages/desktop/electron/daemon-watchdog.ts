@@ -10,7 +10,7 @@ const FAIL_THRESHOLD_FOR_BACKOFF = 3;
  * Synchronously find PIDs bound to the given port.
  * Returns empty array if nothing found or the lookup is unavailable.
  *
- * Why: Pre-0.7.2 the watchdog would respawn `npx @awareness-sdk/local start`
+ * Why: Pre-0.7.2 the watchdog would respawn `npx @awareness.market/local start`
  * whenever /healthz failed, without checking whether a prior daemon had left
  * the socket half-held. That produced the EADDRINUSE loop seen in daemon.log.
  * We now kill orphans before spawning a replacement.
@@ -104,7 +104,7 @@ export function createDaemonWatchdog(options: {
       }
 
       const projectDir = `"${path.join(options.homedir, '.openclaw')}"`;
-      const startCmd = `npx -y @awareness-sdk/local start --port ${DAEMON_PORT} --project ${projectDir} --background`;
+      const startCmd = `npx -y @awareness.market/local start --port ${DAEMON_PORT} --project ${projectDir} --background`;
       if (process.platform === 'win32') {
         spawn('cmd.exe', ['/d', '/c', startCmd], {
           detached: true,

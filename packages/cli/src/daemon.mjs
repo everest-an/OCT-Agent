@@ -24,7 +24,7 @@ export async function startDaemon() {
 
   const daemonArgs = [
     '-y',
-    '@awareness-sdk/local@latest',
+    '@awareness.market/local@latest',
     'start',
     '--port',
     String(DAEMON_PORT),

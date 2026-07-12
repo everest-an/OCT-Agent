@@ -869,7 +869,7 @@ export default function Settings() {
           packageVersion={pkg.version}
           versionInfo={versionInfo}
           t={t}
-          onOpenGithub={() => { void openExternal('https://github.com/edwin-hao-ai/OCT', 'settings-github'); }}
+          onOpenGithub={() => { void openExternal('https://github.com/everest-an/OCT-Agent', 'settings-github'); }}
           githubOpening={isOpening('settings-github')}
         />
 

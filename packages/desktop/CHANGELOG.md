@@ -44,7 +44,7 @@
 
 ### Changed — 跟随云端最新 daemon
 
-- 启动时自动拉取的 `@awareness-sdk/local@latest` 现在解析到 0.11.4，新增 `submit_insights` 防御性 `content=<json>` fallback，向后兼容旧客户端的提示词
+- 启动时自动拉取的 `@awareness.market/local@latest` 现在解析到 0.11.4，新增 `submit_insights` 防御性 `content=<json>` fallback，向后兼容旧客户端的提示词
 
 ## [0.4.6] - 2026-04-21 (Windows)
 
