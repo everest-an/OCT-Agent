@@ -3,6 +3,7 @@ import path from 'path';
 import { ipcMain } from 'electron';
 import { parseJsonShellOutput } from '../openclaw-shell-output';
 import { redirectOrphanBindings } from '../bindings-manager';
+import { readAgentList, removeAgentEntry, upsertAgentEntry, mutateAgentsInPlace } from '../openclaw-config';
 import { safeWriteJsonFile } from '../json-file';
 
 const DEFAULT_AGENT_IDS = new Set(['main', 'default']);
@@ -426,10 +427,12 @@ export function registerAgentHandlers(deps: {
       try {
         const cfgPath = path.join(deps.home, '.openclaw', 'openclaw.json');
         const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
-        const list: any[] = Array.isArray(cfg?.agents?.list) ? cfg.agents.list : [];
+        const list: any[] = readAgentList(cfg);
         const entry = list.find((a) => a?.id === slug);
         if (entry && entry.workspace === wsDir) {
-          delete entry.workspace;
+          mutateAgentsInPlace(cfg, (agent) => {
+            if (agent.workspace === wsDir) delete agent.workspace;
+          });
           safeWriteJsonFile(cfgPath, cfg);
         }
       } catch {
@@ -627,13 +630,12 @@ function removeAgentFromConfigAndHealBindings(home: string, deletedAgentId: stri
     const configPath = path.join(home, '.openclaw', 'openclaw.json');
     const raw = fs.readFileSync(configPath, 'utf-8');
     const cfg = JSON.parse(raw);
-    const list: any[] = Array.isArray(cfg?.agents?.list) ? cfg.agents.list : [];
+    const list: any[] = readAgentList(cfg);
     const nextList = list.filter((a) => String(a?.id || '') !== deletedAgentId);
     const removed = nextList.length !== list.length;
 
     if (removed) {
-      cfg.agents = cfg.agents || {};
-      cfg.agents.list = nextList;
+      removeAgentEntry(cfg, deletedAgentId);
       safeWriteJsonFile(configPath, cfg);
     }
 
@@ -659,7 +661,7 @@ export function addAgentToConfigFallback(
     }
 
     cfg.agents = cfg.agents || {};
-    const list: any[] = Array.isArray(cfg.agents.list) ? cfg.agents.list : [];
+    const list: any[] = readAgentList(cfg);
     if (list.some((entry) => String(entry?.id || '') === agentId)) {
       return { success: false, alreadyExists: true, error: 'Agent already exists' };
     }
@@ -670,8 +672,7 @@ export function addAgentToConfigFallback(
       nextEntry.model = safeModel;
     }
 
-    list.push(nextEntry);
-    cfg.agents.list = list;
+    upsertAgentEntry(cfg, nextEntry);
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
     safeWriteJsonFile(configPath, cfg);
     return { success: true };
@@ -692,7 +693,7 @@ export function applyAgentIdentityFallback(
     }
 
     const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    const list: any[] = Array.isArray(cfg?.agents?.list) ? cfg.agents.list : [];
+    const list: any[] = readAgentList(cfg);
     const entry = list.find((item) => String(item?.id || '') === agentId);
     if (!entry) {
       return { success: false, error: 'Agent not found in config' };

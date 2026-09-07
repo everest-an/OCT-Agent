@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { ipcMain, shell } from 'electron';
-import { writeDesktopExecApprovalDefaults } from '../openclaw-config';
+import { writeDesktopExecApprovalDefaults, isNodeVersionCompatibleWithOpenclaw } from '../openclaw-config';
 import { readJsonFileWithBom, safeWriteJsonFile } from '../json-file';
 
 const OPENCLAW_INSTALL_TIMEOUT_MS = 300000;
@@ -223,10 +223,14 @@ export function registerSetupHandlers(deps: {
     if (nodeVersion) {
       result.systemNodeInstalled = true;
       result.systemNodeVersion = nodeVersion;
-      // Flag if version is too old for daemon (requires v20+)
+      // Flags if the system Node is too old for the daemon (v20+) or for the
+      // OpenClaw 2026.9+ line (which requires Node >=22.22.3 / >=24.15.0 / >=25.9.0).
+      // We compute both: a daemon minimum and an OpenClaw 2026.9+ gate.
+      const nodeCompatibleOpenclaw = isNodeVersionCompatibleWithOpenclaw(nodeVersion);
       const majorMatch = nodeVersion.match(/v(\d+)/);
       const major = majorMatch ? parseInt(majorMatch[1], 10) : 0;
       result.nodeVersionTooOld = major > 0 && major < 20;
+      result.nodeVersionOpenclawIncompatible = !nodeCompatibleOpenclaw;
     }
 
     result.npmInstalled = await deps.safeShellExecAsync('npm --version', 5000) !== null;
@@ -265,10 +269,12 @@ export function registerSetupHandlers(deps: {
   ipcMain.handle('setup:install-nodejs', async () => {
     const currentVersion = deps.getNodeVersion();
     if (currentVersion) {
-      // Check minimum version — daemon requires Node.js v20+ (ES2022+ features)
+      // Check minimum version — daemon requires Node.js v20+, but OpenClaw 2026.9+
+      // tightened the engine to Node >=22.22.3 / >=24.15.0 / >=25.9.0. We install the
+      // Node 24 LTS so latest OpenClaw works out of the box.
       const majorMatch = currentVersion.match(/v(\d+)/);
       const major = majorMatch ? parseInt(majorMatch[1], 10) : 0;
-      if (major >= 20) {
+      if (major >= 24) {
         return { success: true, alreadyInstalled: true, version: currentVersion };
       }
       // Old Node.js detected — proceed to install newer version
@@ -286,9 +292,9 @@ export function registerSetupHandlers(deps: {
           } catch { /* fall through to MSI */ }
         }
 
-        // Tier 2: MSI download + install
+        // Tier 2: MSI download + install (Node 24 LTS — satisfies OpenClaw 2026.9+ engine)
         try {
-          const msiUrl = 'https://nodejs.org/dist/v22.12.0/node-v22.12.0-x64.msi';
+          const msiUrl = 'https://nodejs.org/dist/v24.20.0/node-v24.20.0-x64.msi';
           const msiPath = path.join(os.tmpdir(), `node-installer-${Date.now()}.msi`);
           await deps.downloadFile(msiUrl, msiPath);
           if (!fs.existsSync(msiPath)) {

@@ -2,10 +2,10 @@
  * Lightweight i18n system — zero dependencies.
  * Usage: const { t } = useI18n(); t('chat.title')
  */
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useAppConfig } from './store';
 
-export type Locale = 'en' | 'zh' | 'ja' | 'ko';
+export type Locale = 'en' | 'zh' | 'ja' | 'ko' | 'ar';
 
 const en: Record<string, string> = {
   // Sidebar
@@ -2836,14 +2836,213 @@ const zh: Record<string, string> = {
   'share.error.validation': '提交被拒绝,请检查表单字段并修复标红的错误。',
 };
 
+// Arabic: RTL language. Kept as a partial dictionary keyed to the most
+// user-visible strings (nav, settings, chat, memory, setup, common errors).
+// Any key missing from `ar` falls back to `en` (same pattern as ja/ko).
+const ar: Record<string, string> = {
+  // Sidebar navigation
+  'nav.chat': 'الدردشة',
+  'nav.memory': 'الذاكرة',
+  'nav.channels': 'القنوات',
+  'nav.models': 'النماذج',
+  'nav.skills': 'المهارات',
+  'nav.automation': 'الأتمتة',
+  'nav.agents': 'الوكلاء',
+  'nav.settings': 'الإعدادات',
+
+  // Common / generic
+  'common.cancel': 'إلغاء',
+  'common.confirm': 'تأكيد',
+  'common.close': 'إغلاق',
+  'common.save': 'حفظ',
+  'common.delete': 'حذف',
+  'common.edit': 'تعديل',
+  'common.copy': 'نسخ',
+  'common.copied': 'تم النسخ',
+  'common.retry': 'إعادة المحاولة',
+  'common.loading': 'جارٍ التحميل...',
+  'common.search': 'بحث',
+  'common.add': 'إضافة',
+  'common.remove': 'إزالة',
+  'common.back': 'رجوع',
+  'common.next': 'متابعة',
+  'common.done': 'تم',
+  'common.error': 'خطأ',
+  'common.warning': 'تحذير',
+  'common.success': 'نجاح',
+  'common.enabled': 'مفعّل',
+  'common.disabled': 'معطّل',
+  'common.optional': 'اختياري',
+  'common.none': 'لا شيء',
+
+  // Agents
+  'agents.title': 'الوكلاء',
+  'agents.subtitle': 'إدارة وكلاء معزولين بمساحات عمل وتوجيه قنوات منفصلة',
+  'agents.create': 'إنشاء',
+  'agents.save': 'حفظ',
+  'agents.saved': 'تم الحفظ',
+  'agents.empty': 'لا يوجد وكلاء مكوّنون. أنشئ واحدًا للبدء.',
+  'agents.systemPrompt': 'موجه النظام (SOUL.md)',
+  'agents.toolsConfig': 'إعدادات الأدوات (TOOLS.md)',
+
+  // Chat
+  'chat.newSession': 'دردشة جديدة',
+  'chat.empty.title': 'تحدث مع مساعدك الذكي',
+  'chat.empty.subtitle': 'الذكاء الاصطناعي له ذاكرة دائمة ويتذكر كل محادثة',
+  'chat.input.placeholder': 'اكتب رسالة... (Shift+Enter لسطر جديد، اسحب الملفات للإرفاق)',
+  'chat.copy': 'نسخ',
+  'chat.copied': 'تم النسخ',
+  'chat.attachFile': 'إرفاق ملف',
+  'chat.dropFiles': 'أفلت الملفات هنا',
+  'chat.noResponse': 'لا توجد استجابة من الوكيل',
+  'chat.status.thinking': 'جارٍ التفكير...',
+  'chat.status.generating': 'جارٍ الإنشاء...',
+  'chat.status.error': 'خطأ',
+
+  // Chat error hints
+  'chat.errorHint.provider_internal': 'خدمة الذكاء الاصطناعي غير متاحة مؤقتًا',
+  'chat.errorHint.rate_limit': 'طلبات كثيرة جدًا — يرجى التباطؤ',
+  'chat.errorHint.auth_error': 'مشكلة في مفتاح API — تحقق من الإعدادات',
+  'chat.errorHint.timeout': 'استغرق الطلب وقتًا طويلًا',
+  'chat.errorHint.network': 'مشكلة في الاتصال بالشبكة',
+  'chat.errorHint.model_not_found': 'النموذج المحدد غير متوفر',
+  'chat.errorHint.context_length': 'الرسالة طويلة جدًا لهذا النموذج',
+  'chat.errorHint.aborted': 'تم إلغاء الاستجابة',
+  'chat.errorHint.unknown': 'حدث خطأ ما',
+
+  // Memory
+  'memory.title': 'الذاكرة',
+  'memory.clearFilter': 'مسح الفلاتر',
+  'memory.empty': 'لا توجد بطاقات معرفة بعد',
+  'memory.search': 'بحث في الذاكرة',
+  'memory.knowledgeCards': 'بطاقات المعرفة',
+  'memory.timeline': 'الخط الزمني',
+  'memory.graph': 'الرسم البياني',
+
+  // Settings
+  'settings.title': 'الإعدادات',
+  'settings.appearance': 'المظهر',
+  'settings.language': 'اللغة',
+  'settings.theme': 'السمة',
+  'settings.theme.light': 'فاتح',
+  'settings.theme.dark': 'داكن',
+  'settings.theme.system': 'النظام',
+  'settings.general': 'عام',
+  'settings.models': 'النماذج',
+  'settings.providers': 'المزوّدون',
+  'settings.memory': 'الذاكرة',
+  'settings.tokens': 'الرموز',
+  'settings.permissions': 'الصلاحيات',
+  'settings.securityAudit': 'تدقيق الأمان',
+  'settings.about': 'حول',
+
+  // Setup
+  'setup.welcome': 'مرحبًا بك في OCT',
+  'setup.intro': 'يجب عليك إعداد OCT خطوة بخطوة',
+  'setup.skip': 'تخطّي',
+  'setup.back': 'رجوع',
+  'setup.next': 'متابعة',
+  'setup.finish': 'إنهاء',
+  'setup.install.title': 'تثبيت OCT',
+  'setup.install.detect': 'فحص البيئة',
+  'setup.install.nodejs': 'تثبيت Node.js',
+  'setup.install.openclaw': 'تثبيت OpenClaw',
+  'setup.install.plugin': 'تثبيت المكون الإضافي للذاكرة',
+  'setup.install.daemon': 'بدء الخدمة المحلية',
+  'setup.install.complete': 'اكتمل الإعداد',
+  'setup.install.done': 'تم التثبيت بنجاح',
+  'setup.install.failed': 'فشل التثبيت',
+  'setup.install.starting': 'جارٍ البدء...',
+  'setup.install.installing': 'جارٍ التثبيت...',
+  'setup.model.title': 'اختيار النموذج',
+  'setup.model.provider': 'المزوّد',
+  'setup.model.model': 'النموذج',
+  'setup.model.apiKey': 'مفتاح API',
+  'setup.model.baseUrl': 'عنوان URL الأساسي',
+  'setup.model.skip': 'تخطّي الخطوة',
+  'setup.memory.title': 'تكوين الذاكرة',
+  'setup.memory.local': 'ذاكرة محلية',
+  'setup.memory.cloud': 'ذاكرة سحابية',
+  'setup.workspace.title': 'مساحة العمل',
+
+  // Dashboard
+  'dashboard.title': 'لوحة التحكم',
+  'dashboard.welcome': 'مرحبًا',
+  'dashboard.newChat': 'دردشة جديدة',
+  'dashboard.online': 'متصل',
+  'dashboard.offline': 'غير متصل',
+  'dashboard.gateway': 'البوابة',
+  'dashboard.daemon': 'الخدمة المحلية',
+  'dashboard.agents': 'الوكلاء',
+  'dashboard.messages': 'الرسائل',
+  'dashboard.usage': 'الاستخدام',
+
+  // Channels
+  'channels.title': 'القنوات',
+  'channels.connect': 'اتصال',
+  'channels.disconnect': 'قطع الاتصال',
+  'channels.status.connected': 'متصل',
+  'channels.status.disconnected': 'غير متصل',
+  'channels.status.connecting': 'جارٍ الاتصال...',
+
+  // Skills
+  'skills.title': 'المهارات',
+  'skills.search.placeholder': 'ابحث عن المهارات في ClawHub...',
+  'skills.install': 'تثبيت',
+  'skills.uninstall': 'إزالة التثبيت',
+  'skills.empty': 'لا توجد مهارات',
+  'skills.local': 'المهارات المحلية',
+  'skills.popular': 'شائعة على ClawHub',
+
+  // Automation
+  'auto.title': 'الأتمتة',
+  'auto.newJob': 'مهمة جديدة',
+  'auto.jobs': 'المهام',
+  'auto.cron': 'جدولة',
+  'auto.empty': 'لا توجد وظائف مجدولة',
+
+  // Models
+  'models.title': 'النماذج',
+  'models.provider': 'المزوّد',
+  'models.model': 'النموذج',
+  'models.addProvider': 'إضافة مزوّد',
+  'models.test': 'اختبار',
+
+  // Upgrade
+  'upgrade.available': 'تحديث متاح',
+  'upgrade.upToDate': 'الأحدث',
+  'upgrade.checking': 'جارٍ فحص التحديثات...',
+  'upgrade.btn': 'ترقية الآن',
+  'upgrade.later': 'لاحقًا',
+  'upgrade.never': 'أبدًا',
+
+  // App / status
+  'app.status.ready': 'جاهز',
+  'app.status.busy': 'مشغول',
+  'app.status.offline': 'غير متصل',
+  'app.quit': 'إنهاء',
+  'app.restart': 'إعادة التشغيل',
+};
+
 // Japanese and Korean use English as fallback for now
-const locales: Record<Locale, Record<string, string>> = { en, zh, ja: en, ko: en };
+const locales: Record<Locale, Record<string, string>> = { en, zh, ja: en, ko: en, ar };
 
 export type TranslateFunc = (key: string, fallback?: string) => string;
 
 export function useI18n() {
   const { config } = useAppConfig();
   const locale = (config.language || 'en') as Locale;
+
+  // Arabic is right-to-left. Sync the document direction so layout flips
+  // (vs. the older mustache/renderer that only translated text).
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      const nextDir = locale === 'ar' ? 'rtl' : 'ltr';
+      if (document.documentElement.dir !== nextDir) {
+        document.documentElement.dir = nextDir;
+      }
+    }
+  }, [locale]);
 
   const t: TranslateFunc = useMemo(() => {
     const dict = locales[locale] || en;

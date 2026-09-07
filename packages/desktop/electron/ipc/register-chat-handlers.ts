@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { ipcMain } from 'electron';
 import type { GatewayClient } from '../gateway-ws';
-import { getExecApprovalSettings } from '../openclaw-config';
+import { getExecApprovalSettings, readAgentList } from '../openclaw-config';
 
 // Extracted modules — pure copy/paste, no logic changes
 import type { ChatSendOptions, MemoryCapturePolicy } from './chat-types';
@@ -340,7 +340,7 @@ function validateAgentIdAgainstConfig(home: string, agentId: string): {
     const configPath = path.join(home, '.openclaw', 'openclaw.json');
     const raw = fs.readFileSync(configPath, 'utf-8').replace(/^\uFEFF/, '');
     const cfg = JSON.parse(raw);
-    const list: any[] = Array.isArray(cfg?.agents?.list) ? cfg.agents.list : [];
+    const list: any[] = readAgentList(cfg);
     // Empty list is treated as "config is fresh / only main exists" — drop the stale id.
     if (list.length === 0) {
       return { resolvedAgentId: 'main', wasStale: true };

@@ -18,6 +18,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { convertAgentToWorkspace } from "./converter";
+import { readAgentList, mutateAgentsInPlace } from "../openclaw-config";
 
 export type InstallStage =
   | "converting"
@@ -190,10 +191,12 @@ export async function installMarketplaceAgent(
     const cfgPath = path.join(deps.home, ".openclaw", "openclaw.json");
     if (fs.existsSync(cfgPath)) {
       const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
-      const list: any[] = Array.isArray(cfg?.agents?.list) ? cfg.agents.list : [];
+      const list: any[] = readAgentList(cfg);
       const entry = list.find((a) => a?.id === slug);
       if (entry && entry.workspace === wsDir) {
-        delete entry.workspace;
+        mutateAgentsInPlace(cfg, (agent) => {
+          if (agent.workspace === wsDir) delete agent.workspace;
+        });
         fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), "utf-8");
       }
     }

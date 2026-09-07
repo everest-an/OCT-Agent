@@ -41,7 +41,7 @@ export default function SetupWizard({ onComplete }: SetupProps) {
   const { config, updateConfig, syncConfig, saveProviderConfig } = useAppConfig();
   const { t, locale } = useI18n();
   const [step, setStep] = useState<Step>('welcome');
-  const [lang, setLang] = useState<'zh' | 'en'>(locale === 'zh' ? 'zh' : 'en');
+  const [lang, setLang] = useState<'zh' | 'en' | 'ar'>(locale === 'zh' ? 'zh' : locale === 'ar' ? 'ar' : 'en');
   const [existingConfig, setExistingConfig] = useState<{ hasProviders: boolean; primaryModel: string } | null>(null);
 
   // Install progress
@@ -355,14 +355,16 @@ export default function SetupWizard({ onComplete }: SetupProps) {
       <div className="absolute top-10 right-4 titlebar-no-drag">
         <button
           onClick={() => {
-            const next = lang === 'zh' ? 'en' : 'zh';
+            const order: ('zh' | 'en' | 'ar')[] = ['zh', 'en', 'ar'];
+            const idx = order.indexOf(lang);
+            const next = order[(idx + 1) % order.length];
             setLang(next);
             updateConfig({ language: next });
           }}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
         >
           <Globe size={14} />
-          {lang === 'zh' ? 'EN' : '中文'}
+          {lang === 'zh' ? 'EN' : lang === 'en' ? 'العربية' : '中文'}
         </button>
       </div>
 

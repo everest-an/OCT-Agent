@@ -42,7 +42,7 @@ Download the full **OCT-Agent Desktop** app (Electron, macOS / Windows / Linux) 
 
 ## Requirements
 
-- Node.js 18 or newer
+- Node.js 24 (LTS) or newer — OpenClaw 2026.9+ requires Node ≥22.22.3 / ≥24.15.0 / ≥25.9.0
 - macOS / Linux / Windows
 - Internet connection for the initial install
 

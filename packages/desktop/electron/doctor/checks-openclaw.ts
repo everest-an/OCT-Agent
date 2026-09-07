@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import type { CheckResult, FixResult, Ctx } from './types';
 import { getNpmInstallCommand, getNullDevice, OPENCLAW_INSTALL_TIMEOUT_MS } from './utils';
+import { isNodeVersionCompatibleWithOpenclaw } from '../openclaw-config';
 
 export async function checkNodeInstalled(ctx: Ctx): Promise<CheckResult> {
   if (ctx.nodePath && ctx.nodeVersion) {
@@ -110,6 +111,22 @@ export async function checkOpenclawVersion(ctx: Ctx): Promise<CheckResult> {
     const latest = await ctx.deps.shellExec(`npm view openclaw version 2>${getNullDevice(ctx.deps.platform)}`, 10000);
     const current = ctx.openclawVersion.match(/(\d+\.\d+\.\d+)/)?.[1];
     const latestVer = latest?.trim();
+
+    // The installed OpenClaw may be the 2026.9+ line that tightened the Node
+    // engine. If the user's Node is too old, surface a concrete reason instead
+    // of a generic "update available" that would fail on install.
+    const currentVer = current ? `2026.${current.split('.')[1]}.${current.split('.')[2]}` : current;
+    if (!isNodeVersionCompatibleWithOpenclaw(ctx.nodeVersion, currentVer)) {
+      return {
+        id: 'openclaw-version',
+        label: 'OpenClaw version',
+        status: 'warn',
+        message: `Node.js is too old to run OpenClaw ${current}. This OpenClaw requires Node >=22.22.3 / >=24.15.0 / >=25.9.0 (current ${ctx.nodeVersion}).`,
+        fixable: 'manual',
+        fixDescription: 'Upgrade Node.js, then update OpenClaw',
+      };
+    }
+
     if (current && latestVer && current !== latestVer) {
       return { id: 'openclaw-version', label: 'OpenClaw version', status: 'warn', message: `Update available: ${current} → ${latestVer}`, fixable: 'auto', fixDescription: `Update to ${latestVer}` };
     }

@@ -5,6 +5,8 @@ import {
   GATEWAY_DEFAULTS,
   migrateLegacyChannelConfig,
   normalizePluginAllow,
+  readAgentList,
+  upsertAgentEntry,
   writeDesktopExecApprovalDefaults,
 } from './openclaw-config';
 import { readJsonFileWithBom, safeWriteJsonFile } from './json-file';
@@ -123,13 +125,18 @@ export function stripLegacyWindowsOpenClawRiskyConfig(config: Record<string, any
     delete config.agents.defaults.subagents;
   }
 
+  const stripAgentRisky = (agent: any) => {
+    if (!agent || typeof agent !== 'object') return;
+    if (agent.agentDir !== undefined) delete agent.agentDir;
+    if (agent.workspace !== undefined) delete agent.workspace;
+    if (agent.subagents !== undefined) delete agent.subagents;
+  };
+  // Apply to both the legacy `agents.list` array and OpenClaw 2026.9+ `agents.entries` map.
+  if (config.agents?.entries && typeof config.agents.entries === 'object') {
+    for (const agent of Object.values(config.agents.entries as any[])) stripAgentRisky(agent);
+  }
   if (Array.isArray(config.agents?.list)) {
-    for (const agent of config.agents.list) {
-      if (!agent || typeof agent !== 'object') continue;
-      if (agent.agentDir !== undefined) delete agent.agentDir;
-      if (agent.workspace !== undefined) delete agent.workspace;
-      if (agent.subagents !== undefined) delete agent.subagents;
-    }
+    for (const agent of config.agents.list) stripAgentRisky(agent);
   }
 }
 
@@ -411,13 +418,20 @@ export function sanitizeDesktopAwarenessPluginConfig(config: Record<string, any>
   // a real path (e.g. their actual project folder) we leave it alone.
   // Compatible with all OpenClaw versions because `workspace` is an optional
   // field — main agent has been running without it forever.
-  const agentList: any[] = Array.isArray(config.agents?.list) ? config.agents.list : [];
   const autoWorkspacePrefix = path.join(homedir, '.openclaw', 'workspace-');
-  for (const a of agentList) {
-    const ws = a?.workspace;
-    if (typeof ws === 'string' && ws.startsWith(autoWorkspacePrefix)) {
-      delete a.workspace;
+  const stripAutoWorkspace = (agent: any) => {
+    if (!agent || typeof agent !== 'object') return;
+    if (typeof agent.workspace === 'string' && agent.workspace.startsWith(autoWorkspacePrefix)) {
+      delete agent.workspace;
     }
+  };
+  // OpenClaw 2026.9+ uses `agents.entries` (keyed); older uses `agents.list`.
+  // Mutate in place so we don't re-introduce the legacy shape.
+  if (config.agents?.entries && typeof config.agents.entries === 'object') {
+    for (const agent of Object.values(config.agents.entries as any[])) stripAutoWorkspace(agent);
+  }
+  if (Array.isArray(config.agents?.list)) {
+    for (const agent of config.agents.list as any[]) stripAutoWorkspace(agent);
   }
 
   const awarenessConfig = config.plugins.entries?.['openclaw-memory']?.config;
@@ -512,16 +526,16 @@ export function mergeDesktopOpenClawConfig(
         if (!merged.agents.defaults) merged.agents.defaults = {};
         merged.agents.defaults.thinkingDefault = incomingAgents.defaults.thinkingDefault;
       }
-      // Merge per-agent settings (reasoningDefault is per-agent, not in defaults)
-      if (Array.isArray(incomingAgents?.list)) {
-        if (!merged.agents.list) merged.agents.list = [];
-        for (const incomingAgent of incomingAgents.list) {
-          const existing = merged.agents.list.find((a: any) => a.id === incomingAgent.id);
-          if (existing) {
-            Object.assign(existing, incomingAgent);
-          } else {
-            merged.agents.list.push(incomingAgent);
-          }
+      // Merge per-agent settings (reasoningDefault is per-agent, not in defaults).
+      // OpenClaw 2026.9+ uses `agents.entries` (keyed) but older releases and the
+      // renderer still emit `agents.list`. Accept both shapes.
+      const incomingAgentList = Array.isArray(incomingAgents?.list)
+        ? incomingAgents.list
+        : readAgentList(incomingAgents || {});
+      if (incomingAgentList.length > 0) {
+        if (!merged.agents) merged.agents = {};
+        for (const incomingAgent of incomingAgentList) {
+          upsertAgentEntry(merged, incomingAgent);
         }
       }
     } else if (key === 'plugins') {

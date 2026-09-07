@@ -13,6 +13,54 @@ import { readJsonFileWithBom } from './json-file';
 
 export const GATEWAY_DEFAULT_PORT = 18789;
 
+// OpenClaw 2026.9.x hardened its Node engine requirement. From the
+// `preinstall-package-manager-warning.mjs` guard (observed on 2026.9.2):
+//   "requires Node >=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0"
+// We mirror that gate so the app can tell the user WHY an upgrade fails
+// instead of surfacing a bare preinstall EPERM. Older OpenClaw (≤2026.4.x)
+// only needed Node >=18 / >=20, so we keep this as a best-effort advisory
+// rather than a hard block.
+export const OPENCLAW_MIN_NODE_RANGES = [
+  { min: '22.22.3', maxExclusive: '23.0.0' },
+  { min: '24.15.0', maxExclusive: '25.0.0' },
+  { min: '25.9.0', maxExclusive: '26.0.0' },
+] as const;
+
+function parseSemver(value: string): { major: number; minor: number; patch: number } | null {
+  const match = value.trim().replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return null;
+  return {
+    major: parseInt(match[1], 10),
+    minor: parseInt(match[2], 10),
+    patch: parseInt(match[3], 10),
+  };
+}
+
+function compareSemverNumeric(a: { major: number; minor: number; patch: number }, b: { major: number; minor: number; patch: number }): number {
+  if (a.major !== b.major) return a.major - b.major;
+  if (a.minor !== b.minor) return a.minor - b.minor;
+  return a.patch - b.patch;
+}
+
+export function isNodeVersionCompatibleWithOpenclaw(nodeVersion: string | null | undefined, openclawVersion?: string | null | undefined): boolean {
+  // Older OpenClaw (≤2026.4.x) accepted Node 18/20; only the 2026.9+ line
+  // tightened the engine. If the installed OpenClaw predates the gate we
+  // don't want to block it retroactively.
+  const openclawSemver = parseSemver(openclawVersion || '');
+  if (openclawSemver && openclawSemver.major === 2026 && openclawSemver.minor < 9) {
+    return true;
+  }
+  const nodeSemver = parseSemver(nodeVersion || '');
+  if (!nodeSemver) return true; // unknown version → don't block
+
+  return OPENCLAW_MIN_NODE_RANGES.some(({ min, maxExclusive }) => {
+    const minSemver = parseSemver(min)!;
+    const maxSemver = parseSemver(maxExclusive)!;
+    return compareSemverNumeric(nodeSemver, minSemver) >= 0 && compareSemverNumeric(nodeSemver, maxSemver) < 0;
+  });
+}
+
+
 export const GATEWAY_DEFAULTS = {
   mode: 'local' as const,
   bind: 'loopback' as const,
@@ -574,5 +622,154 @@ export function patchGatewayCmdStackSize(homedir: string): void {
   } catch (err: any) {
     console.warn('[gateway] Failed to patch gateway.cmd:', err?.message || err);
   }
+}
+
+// --- Agents list compatibility (OpenClaw 2026.9+ changed `agents.list` → `agents.entries`) ---
+//
+// OpenClaw ≤2026.4.x stored agents as `agents.list: Array<{ id, ... }>`.
+// OpenClaw 2026.9+ moved to `agents.entries: Record<agentId, { name, model, ..., default }>`
+// (the config schema exposes `agents.entries` but not `agents.list`), and `openclaw doctor`
+// auto-migrates legacy `list` → `entries` on startup.
+//
+// OCT writes config in several places. If we keep writing `agents.list`, every app start
+// re-creates the legacy shape and OpenClaw re-migrates it forever. These accessors read
+// whichever shape is present and write back to the shape OpenClaw expects (preferring
+// `entries`), so OCT and OpenClaw stay in sync regardless of the installed version.
+
+export interface DesktopAgentEntry {
+  id: string;
+  name?: string;
+  model?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Run `fn` against every agent entry's live reference so mutations (e.g.
+ * deleting a `workspace`/`agentDir`/`subagents` field) persist to the config
+ * regardless of whether the config uses legacy `agents.list` or 2026.9+
+ * `agents.entries`. Any change made inside `fn` is written in-place.
+ */
+export function mutateAgentsInPlace(config: Record<string, any>, fn: (agent: Record<string, any>) => void): void {
+  const agents = config?.agents;
+  if (!agents || typeof agents !== 'object') return;
+
+  if (agents.entries && typeof agents.entries === 'object') {
+    for (const entry of Object.values(agents.entries as Record<string, any>)) {
+      if (entry && typeof entry === 'object') fn(entry);
+    }
+  }
+  if (Array.isArray(agents.list)) {
+    for (const entry of agents.list as any[]) {
+      if (entry && typeof entry === 'object') fn(entry);
+    }
+  }
+}
+
+/**
+ * Normalize agents into a stable array regardless of whether the config uses
+ * the legacy `agents.list` array or the 2026.9+ `agents.entries` keyed object.
+ */
+export function readAgentList(config: Record<string, any>): DesktopAgentEntry[] {
+  const agents = config?.agents;
+  if (!agents || typeof agents !== 'object') return [];
+
+  // 2026.9+ format: `agents.entries` is a keyed object { [agentId]: entry }.
+  // We surface the id on each entry so callers can look up by `entry.id` just
+  // like with the legacy `agents.list` array.
+  if (agents.entries && typeof agents.entries === 'object') {
+    return Object.entries(agents.entries as Record<string, any>).map(([id, entry]) => ({
+      id,
+      ...((entry && typeof entry === 'object') ? entry : {}),
+    }));
+  }
+
+  // Legacy format: `agents.list` is an array of { id, ... }.
+  if (Array.isArray(agents.list)) {
+    return agents.list as DesktopAgentEntry[];
+  }
+
+  return [];
+}
+
+/**
+ * True if the config already uses the OpenClaw 2026.9+ `agents.entries` shape.
+ */
+export function agentsUseEntriesShape(config: Record<string, any>): boolean {
+  return !!(config?.agents?.entries && typeof config.agents.entries === 'object');
+}
+
+/**
+ * Upsert a single agent entry. Writes to `agents.entries` when the config
+ * already uses it (2026.9+); otherwise appends to the legacy `agents.list`
+ * so pre-2026.9 installs keep working unchanged. Returns a mutated config
+ * (copy for `agents` only — the caller owns the original object).
+ */
+export function upsertAgentEntry(config: Record<string, any>, entry: DesktopAgentEntry): boolean {
+  const agents = (config.agents && typeof config.agents === 'object') ? config.agents : {};
+
+  if (agentsUseEntriesShape(config)) {
+    const entries = (agents.entries && typeof agents.entries === 'object') ? { ...agents.entries } : {};
+    const existing = (entries[entry.id] && typeof entries[entry.id] === 'object') ? entries[entry.id] : {};
+    entries[entry.id] = { ...existing, ...entry };
+    delete (entries[entry.id] as any).id; // key is the id in entries shape
+    config.agents = { ...agents, entries };
+    return true;
+  }
+
+  const list: DesktopAgentEntry[] = Array.isArray(agents.list) ? (agents.list as DesktopAgentEntry[]) : [];
+  const idx = list.findIndex((a) => String(a?.id || '') === String(entry.id || ''));
+  if (idx >= 0) {
+    list[idx] = { ...list[idx], ...entry };
+  } else {
+    list.push(entry);
+  }
+  config.agents = { ...agents, list };
+  return true;
+}
+
+/**
+ * Remove an agent entry by id from whichever shape the config uses.
+ */
+export function removeAgentEntry(config: Record<string, any>, agentId: string): boolean {
+  const agents = config?.agents;
+  if (!agents || typeof agents !== 'object') return false;
+
+  if (agentsUseEntriesShape(config)) {
+    const entries = (agents.entries && typeof agents.entries === 'object') ? { ...agents.entries } : {};
+    if (!(agentId in entries)) return false;
+    delete entries[agentId];
+    config.agents = { ...agents, entries };
+    return true;
+  }
+
+  const list: DesktopAgentEntry[] = Array.isArray(agents.list) ? (agents.list as DesktopAgentEntry[]) : [];
+  const nextList = list.filter((a) => String(a?.id || '') !== String(agentId || ''));
+  if (nextList.length === list.length) return false;
+  config.agents = { ...agents, list: nextList };
+  return true;
+}
+
+/**
+ * Given a config that may hold legacy `agents.defaults.models` (a map of
+ * model overrides), migrate it to the 2026.9+ `agents.defaults.modelPolicy.allow`
+ * shape that OpenClaw doctor now expects. No-op when the new shape exists or
+ * there is no legacy map.
+ */
+export function migrateLegacyAgentDefaultModels(config: Record<string, any>): boolean {
+  const defaults = config?.agents?.defaults;
+  if (!defaults || typeof defaults !== 'object') return false;
+  if (!defaults.models || typeof defaults.models !== 'object') return false;
+  if (defaults.modelPolicy?.allow) return false; // already migrated
+
+  const allow = Object.keys(defaults.models as Record<string, any>);
+  config.agents.defaults = {
+    ...defaults,
+    modelPolicy: {
+      ...(defaults.modelPolicy || {}),
+      allow,
+    },
+  };
+  delete config.agents.defaults.models;
+  return true;
 }
 

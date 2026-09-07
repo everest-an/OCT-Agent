@@ -70,7 +70,7 @@ import {
   writeRuntimePreferences,
 } from './runtime-preferences';
 import { createShellUtils } from './shell-utils';
-import { isGatewayRunningOutput, getAgentWorkspaceDir, hasExplicitExecApprovalConfig, writeDesktopExecApprovalDefaults, patchGatewayCmdStackSize } from './openclaw-config';
+import { isGatewayRunningOutput, getAgentWorkspaceDir, hasExplicitExecApprovalConfig, writeDesktopExecApprovalDefaults, patchGatewayCmdStackSize, migrateLegacyAgentDefaultModels } from './openclaw-config';
 import { dedupedChannelsList, killAllActiveLogins, killAllOrphanProcesses, killAllStaleChannelOps, detectRunningChannelLoginWorkers, getTrackedLoginPid, killOrphanWorkerForChannel } from './openclaw-process-guard';
 import { resolveDashboardUrl } from './openclaw-dashboard';
 import {
@@ -412,13 +412,29 @@ function repairOpenClawConfigFile() {
     if ((current.agents.defaults.subagents.maxSpawnDepth ?? 1) < 2) {
       current.agents.defaults.subagents.maxSpawnDepth = 2;
     }
-    // Per-agent allowAgents must be on each agent entry (schema rejects agents.defaults)
-    if (Array.isArray(current.agents?.list)) {
-      for (const agent of current.agents.list) {
+    // Per-agent allowAgents must be on each agent entry (schema rejects agents.defaults).
+    // OpenClaw 2026.9+ uses `agents.entries` (keyed object); older releases use
+    // `agents.list` (array). Patch both in place so we never re-create legacy shape.
+    const agents = current.agents;
+    if (agents?.entries && typeof agents.entries === 'object') {
+      for (const agent of Object.values(agents.entries) as any[]) {
+        if (!agent || typeof agent !== 'object') continue;
         if (!agent.subagents) agent.subagents = {};
         if (!agent.subagents.allowAgents) agent.subagents.allowAgents = ['*'];
       }
     }
+    if (Array.isArray(agents?.list)) {
+      for (const agent of agents.list as any[]) {
+        if (!agent.subagents) agent.subagents = {};
+        if (!agent.subagents.allowAgents) agent.subagents.allowAgents = ['*'];
+      }
+    }
+
+    // OpenClaw 2026.9+ moved legacy `agents.defaults.models` (a map of model
+    // overrides) to `agents.defaults.modelPolicy.allow`; its doctor auto-migrates
+    // it on startup. We apply the same migration proactively so OCT config repair
+    // never re-introduces the legacy shape that would trigger repeated migration.
+    migrateLegacyAgentDefaultModels(current);
 
     safeWriteJsonFile(configPath, current);
 

@@ -13,9 +13,10 @@ console.log('🔧 OCT-Agent OpenClaw 插件修复工具');
 console.log('');
 
 try {
-  // 检查 openclaw 命令是否存在
+  // 检查 openclaw 命令是否存在（Windows 用 where，Unix 用 which）
   console.log('🔍 检查 OpenClaw 安装...');
-  execSync('which openclaw', { stdio: 'pipe' });
+  const whichCmd = process.platform === 'win32' ? 'where openclaw' : 'which openclaw';
+  execSync(whichCmd, { stdio: 'pipe' });
   console.log('✅ OpenClaw 已安装');
   
   // 检查当前插件状态

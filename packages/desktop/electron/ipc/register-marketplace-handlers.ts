@@ -33,6 +33,7 @@ import {
   convertWorkspaceToMarkdown,
   WorkspaceFiles,
 } from "../agent-marketplace/reverse-converter";
+import { readAgentList } from "../openclaw-config";
 
 export interface MarketplaceHandlerDeps {
   home: string;
@@ -55,7 +56,7 @@ function readInstalledSlugs(home: string): string[] {
     const cfgPath = path.join(home, ".openclaw", "openclaw.json");
     if (!fs.existsSync(cfgPath)) return [];
     const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
-    const list: any[] = Array.isArray(cfg?.agents?.list) ? cfg.agents.list : [];
+    const list: any[] = readAgentList(cfg);
     return list.map((a) => String(a?.id || "")).filter(Boolean);
   } catch {
     return [];
@@ -75,7 +76,7 @@ function readShareableAgents(home: string): LocalAgentShareable[] {
     const cfgPath = path.join(home, ".openclaw", "openclaw.json");
     if (!fs.existsSync(cfgPath)) return [];
     const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
-    const list: any[] = Array.isArray(cfg?.agents?.list) ? cfg.agents.list : [];
+    const list: any[] = readAgentList(cfg);
     return list
       .filter((a) => a?.id && a.id !== "main")
       .map((a) => {
