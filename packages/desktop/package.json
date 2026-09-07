@@ -1,6 +1,6 @@
 {
   "name": "oct-agent-desktop",
-  "version": "0.4.9",
+  "version": "0.5.0",
   "description": "OCT Desktop — Visual AI agent manager with persistent memory",
   "author": "everest-an",
   "main": "dist-electron/main.js",

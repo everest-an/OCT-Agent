@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.0] - 2026-09-07
+
+### Added / 新增
+
+- **OpenClaw 2026.9.x compatibility.** OpenClaw moved `agents.list` (array) to `agents.entries` (keyed object) and tightened its Node engine to `>=22.22.3 / >=24.15.0 / >=25.9.0`. OCT now reads and writes both config shapes so upgrades never re-introduce the legacy list that triggers repeated migration. Setup also installs Node 24 LTS and the doctor reports a clear reason when the installed Node is too old to run the latest OpenClaw.
+- **OpenClaw 2026.9.x 兼容。** OpenClaw 将 `agents.list`（数组）改为 `agents.entries`（键值对象），并将 Node 引擎要求收紧到 `>=22.22.3 / >=24.15.0 / >=25.9.0`。OCT 现在能读写两种配置结构，升级时不再重复生成旧格式、避免反复迁移。安装向导改用 Node 24 LTS，Doctor 在 Node 版本过旧时给出明确的原因提示。
+
+- **Arabic (العربية) UI — now EN / 中文 / العربية.** Added a full Arabic locale with right-to-left direction support, plus the language picker in Settings and the install wizard.
+- **阿拉伯语（العربية）界面 — 现在支持 EN / 中文 / العربية。** 新增完整阿拉伯语界面，支持从右向左（RTL）布局，并在设置页和安装向导中加入语言选择。
+
+- **Windows fix.** `scripts/fix-openclaw-plugin.js` now uses `where` instead of `which` so the one-click plugin repair no longer crashes on Windows.
+- **Windows 修复。** `scripts/fix-openclaw-plugin.js` 改用 `where` 替代 `which`，一键修复插件在 Windows 上不再崩溃。
+
+### Verified / 验证
+
+- Electron main-process TS compile clean; 877 Vitest tests pass (4 pre-existing failures unrelated to this change).
+- Electron 主进程编译通过；Vitest 877 个测试通过（4 个为既有问题，与本改动无关）。
+- Real end-to-end on OpenClaw 2026.9.2: gateway + local memory daemon up, live agent chat returned a real reply, and `awareness_recall` fetched memories through the local daemon.
+- 在 OpenClaw 2026.9.2 上实机验证：Gateway 与本地记忆守护进程均正常，真实 agent 对话能返回回复，`awareness_recall` 能通过本地守护进程召回记忆。
+
 ## [0.4.9] - 2026-05-01
 
 ### Changed — Brand rename to OCT-Agent / 品牌更名为 OCT-Agent
