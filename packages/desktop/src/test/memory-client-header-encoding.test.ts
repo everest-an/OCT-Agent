@@ -18,8 +18,8 @@ import { applyProjectDirHeader } from '../../electron/memory-client';
 describe('memory-client applyProjectDirHeader', () => {
   it('ASCII path → plain X-Awareness-Project-Dir header', () => {
     const headers: Record<string, string> = {};
-    applyProjectDirHeader(headers, '/Users/edwinhao/Awareness');
-    expect(headers['X-Awareness-Project-Dir']).toBe('/Users/edwinhao/Awareness');
+    applyProjectDirHeader(headers, '/Users/everestan/Awareness');
+    expect(headers['X-Awareness-Project-Dir']).toBe('/Users/everestan/Awareness');
     expect(headers['X-Awareness-Project-Dir-B64']).toBeUndefined();
   });
 
@@ -31,7 +31,7 @@ describe('memory-client applyProjectDirHeader', () => {
 
   it('CJK path → B64 header, plain header absent', () => {
     const headers: Record<string, string> = {};
-    const cjk = '/Users/edwinhao/Documents/Awareness 文件夹';
+    const cjk = '/Users/everestan/Documents/Awareness 文件夹';
     applyProjectDirHeader(headers, cjk);
     expect(headers['X-Awareness-Project-Dir']).toBeUndefined();
     expect(headers['X-Awareness-Project-Dir-B64']).toBe(Buffer.from(cjk, 'utf8').toString('base64'));
@@ -46,7 +46,7 @@ describe('memory-client applyProjectDirHeader', () => {
 
   it('Emoji path → B64 header', () => {
     const headers: Record<string, string> = {};
-    const dir = '/Users/edwinhao/Desktop/Project 🚀';
+    const dir = '/Users/everestan/Desktop/Project 🚀';
     applyProjectDirHeader(headers, dir);
     expect(headers['X-Awareness-Project-Dir-B64']).toBe(Buffer.from(dir, 'utf8').toString('base64'));
   });
@@ -74,7 +74,7 @@ describe('memory-client applyProjectDirHeader', () => {
 
   it('CJK decodes back to original on server side (round-trip)', () => {
     const headers: Record<string, string> = {};
-    const dir = '/Users/edwinhao/Documents/Awareness 文件夹';
+    const dir = '/Users/everestan/Documents/Awareness 文件夹';
     applyProjectDirHeader(headers, dir);
     const decoded = Buffer.from(headers['X-Awareness-Project-Dir-B64'], 'base64').toString('utf8');
     expect(decoded).toBe(dir);

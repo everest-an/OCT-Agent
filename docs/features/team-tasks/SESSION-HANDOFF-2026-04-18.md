@@ -145,7 +145,7 @@ b884cab feat: Mission Flow Phase 4 + L1-L5 pyramid · +130 tests
 4. **不造新轮子** — 自己实现前先确认上游没做过
 
 **验证 preview.5 代码还活着（新会话第一步）**：
-cd /Users/edwinhao/Awareness/OCT-Agent/packages/desktop
+cd /Users/everestan/Awareness/OCT-Agent/packages/desktop
 npx vitest run src/test/mission-*.test.ts src/test/mission-*.test.tsx
 # 预期 375 tests pass
 npm run verify:mission-all

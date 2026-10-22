@@ -723,7 +723,7 @@ OCT-Agent/
 
 **为什么要有**：v0.3.0 前后连续几次"测试全绿但用户打开就崩"的事故。根因：测试验证的是代码路径，不是用户路径。
 
-本文件与 `/Users/edwinhao/Awareness/CLAUDE.md` 的方法论保持同步，OCT-Agent 桌面端（Electron + React）也必须按同一标准。
+本文件与 `/Users/everestan/Awareness/CLAUDE.md` 的方法论保持同步，OCT-Agent 桌面端（Electron + React）也必须按同一标准。
 
 ### Layer 1 · Static + Contract Guards
 - **IPC 契约**：每条 `ipcRenderer.invoke(...)` 必须有后端 handler。加 `scripts/verify-ipc.mjs`（扫 `window.api.*` 调用 vs `ipcMain.handle` 注册表）

@@ -196,10 +196,10 @@
 
 - CLI 深测：
   - `openclaw agent --session-id cx-cli-workspace-test --message "Use the exec tool to run pwd and answer with the working directory only." --thinking low --timeout 60 --json`
-  - 返回的 `systemPromptReport.workspaceDir` 是 `/Users/edwinhao/.openclaw/workspace`
+  - 返回的 `systemPromptReport.workspaceDir` 是 `/Users/everestan/.openclaw/workspace`
 - Gateway 深测：
   - `test-gateway-event-stream.mjs` 捕获到 `exec.approval.requested`
-  - 其中 `request.cwd` 明确是 `/Users/edwinhao/.openclaw/workspace`
+  - 其中 `request.cwd` 明确是 `/Users/everestan/.openclaw/workspace`
 
 结论：
 
@@ -284,7 +284,7 @@
   - `security: "allowlist"`
   - `ask: "on-miss"`
   - `request.command: "pwd"`
-  - `request.cwd: "/Users/edwinhao/.openclaw/workspace"`
+  - `request.cwd: "/Users/everestan/.openclaw/workspace"`
 
 结论：
 

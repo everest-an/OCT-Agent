@@ -4,7 +4,7 @@ import { FilePathChip, looksLikeAbsolutePath } from '../components/dashboard/Fil
 
 describe('looksLikeAbsolutePath', () => {
   it('recognizes Unix / macOS absolute paths (with and without spaces)', () => {
-    expect(looksLikeAbsolutePath('/Users/edwinhao/Documents/New project/snake-game.html')).toBe(true);
+    expect(looksLikeAbsolutePath('/Users/everestan/Documents/New project/snake-game.html')).toBe(true);
     expect(looksLikeAbsolutePath('/tmp/x.log')).toBe(true);
     expect(looksLikeAbsolutePath('/opt/homebrew/bin/node')).toBe(true);
   });
@@ -43,7 +43,7 @@ describe('looksLikeAbsolutePath', () => {
 });
 
 describe('<FilePathChip />', () => {
-  const samplePath = '/Users/edwinhao/Documents/New project/snake-game.html';
+  const samplePath = '/Users/everestan/Documents/New project/snake-game.html';
   let showItemInFolder: ReturnType<typeof vi.fn>;
   let openPath: ReturnType<typeof vi.fn>;
 
